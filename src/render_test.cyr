@@ -25,13 +25,17 @@ fn main(): i64 {
     var b2 = "readme.md";   rt_entry(rbuf, 2, b2, 0);
     var lp = "/bin"; var rp = "/";
 
-    # mock sizes (parallel to the entries): files get a byte size, dirs get -1
+    # mock sizes + mtimes (parallel to the entries): files get a byte size, dirs -1.
+    # mtimes are unix epochs (2026-07-10 ~= 1783900800) so the status line has a date.
     var lsizes = alloc(16 * 8); var rsizes = alloc(16 * 8);
     store64(lsizes + 0, 14995144); store64(lsizes + 8, 80784); store64(lsizes + 16, 301896);
-    store64(rsizes + 0, 0 - 1);    store64(rsizes + 8, 0 - 1); store64(rsizes + 16, 4096);
+    store64(rsizes + 0, 4096);     store64(rsizes + 8, 4096);  store64(rsizes + 16, 512);
+    var lmtimes = alloc(16 * 8); var rmtimes = alloc(16 * 8);
+    store64(lmtimes + 0, 1783900800); store64(lmtimes + 8, 1783900800); store64(lmtimes + 16, 1783900800);
+    store64(rmtimes + 0, 1783900800); store64(rmtimes + 8, 1783900800); store64(rmtimes + 16, 1783900800);
 
     var w = 380; var h = 220;
-    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rbuf, 3, rp, rsizes);   # left active, sel_l=1
+    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes);   # left active, sel_l=1
 
     var pix = sd_surface_pixels(sds);
     var path = "/tmp/claude-1000/-home-macro-Repos-agnosticos/47a0fc83-d217-4059-a644-5fc638dfee33/scratchpad/crab.bin";

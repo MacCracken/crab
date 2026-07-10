@@ -34,6 +34,52 @@ fn crab_size_str(dst, size): i64 {
     return w;
 }
 
+# Write n as exactly 2 zero-padded digits at dst (n in [0,99]). No NUL.
+fn crab_pad2(dst, n): i64 {
+    var t = n / 10;
+    store8(dst, 48 + t); store8(dst + 1, 48 + (n - t * 10));
+    return 2;
+}
+
+# Write n as exactly 4 zero-padded digits at dst (a year). No NUL.
+fn crab_pad4(dst, n): i64 {
+    var a = n / 1000;
+    var b = (n / 100) - a * 10;
+    var c = (n / 10) - (n / 100) * 10;
+    store8(dst, 48 + a); store8(dst + 1, 48 + b);
+    store8(dst + 2, 48 + c); store8(dst + 3, 48 + (n - (n / 10) * 10));
+    return 4;
+}
+
+# Format a unix epoch (seconds) into dst as "YYYY-MM-DD HH:MM". epoch <= 0 yields
+# "-" (unknown). Civil date via Howard Hinnant's days->(y,m,d) algorithm (z>=0).
+fn crab_mtime_str(dst, epoch): i64 {
+    if (epoch <= 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }   # "-"
+    var days = epoch / 86400;
+    var sod = epoch - days * 86400;
+    var hh = sod / 3600;
+    var mm = (sod - hh * 3600) / 60;
+    var z = days + 719468;
+    var era = z / 146097;
+    var doe = z - era * 146097;
+    var yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    var y = yoe + era * 400;
+    var doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    var mp = (5 * doy + 2) / 153;
+    var d = doy - (153 * mp + 2) / 5 + 1;
+    var mo = mp + 3;
+    if (mp >= 10) { mo = mp - 9; }
+    if (mo <= 2) { y = y + 1; }
+    var w = 0;
+    w = w + crab_pad4(dst + w, y);  store8(dst + w, 45); w = w + 1;   # '-'
+    w = w + crab_pad2(dst + w, mo); store8(dst + w, 45); w = w + 1;   # '-'
+    w = w + crab_pad2(dst + w, d);  store8(dst + w, 32); w = w + 1;   # ' '
+    w = w + crab_pad2(dst + w, hh); store8(dst + w, 58); w = w + 1;   # ':'
+    w = w + crab_pad2(dst + w, mm);
+    store8(dst + w, 0);
+    return w;
+}
+
 # One entry row: a 13-char name column, then "/" for a directory or a right-gapped
 # human size for a file. Highlighted when selected: BRIGHT in the active pane, DIM
 # in the inactive one.
@@ -103,16 +149,55 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     return 0;
 }
 
-# Build + render the dual-pane window from two readdir buffers.
-fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes): i64 {
+# Build the status-line text (returned as a cstring) for the active pane's selected
+# entry: "<name>   <size|<dir>>   <mtime>". Empty pane -> a single space.
+fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
+    var out = alloc(96);
+    if (count <= 0) { store8(out, 32); store8(out + 1, 0); return out; }
+    var rec = buf + sel * 64;
+    var w = 0;
+    var k = 0; var ch = load8(rec + k);                 # name (<= 40)
+    while ((ch != 0) && (k < 40)) { store8(out + w, ch); w = w + 1; k = k + 1; ch = load8(rec + k); }
+    store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;
+    if (load8(rec + 63) == 1) {                         # directory -> "<dir>"
+        var dtag = "<dir>"; var t = 0;
+        while (load8(dtag + t) != 0) { store8(out + w, load8(dtag + t)); w = w + 1; t = t + 1; }
+    } else {                                            # file -> human size
+        var ss = alloc(24); var sl = crab_size_str(ss, load64(sizes + sel * 8));
+        if (sl == 0) { store8(out + w, 45); w = w + 1; }
+        var m = 0; while (m < sl) { store8(out + w, load8(ss + m)); w = w + 1; m = m + 1; }
+    }
+    store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;
+    var ds = alloc(24); var dl = crab_mtime_str(ds, load64(mtimes + sel * 8));   # mtime date
+    var q = 0; while (q < dl) { store8(out + w, load8(ds + q)); w = w + 1; q = q + 1; }
+    store8(out + w, 0);
+    return out;
+}
+
+# Build + render the dual-pane window: two readdir panes on top, a status line
+# (the active selection's size + mtime) along the bottom.
+fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes): i64 {
     var root = dh_widget_new(WINDOW);
-    dh_widget_set_layout(root, BOX_H);          # two columns side by side
+    dh_widget_set_layout(root, BOX_V);          # panes row on top, status line below
     dh_widget_set_bg(root, sd_rgb(16, 16, 22));
+
+    var panes = dh_widget_new(BOX);
+    dh_widget_set_layout(panes, BOX_H);         # two columns side by side
+    dh_widget_set_pref(panes, 0, h - 24);       # reserve 24px for the status line
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    crab_pane(root, panew, lpath, lbuf, ln, lsizes, sel_l, la);
-    crab_pane(root, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
+    crab_pane(panes, panew, lpath, lbuf, ln, lsizes, sel_l, la);
+    crab_pane(panes, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
+    dh_widget_add_child(root, panes);
+
+    var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
+    if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
+    var status = dh_widget_new(LABEL);
+    dh_widget_set_bg(status, sd_rgb(30, 34, 44));
+    dh_widget_set_pref(status, 0, 22);
+    dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt));
+    dh_widget_add_child(root, status);
 
     var surf = dh_surface_new(w, h);
     dh_surface_set_root(surf, root);

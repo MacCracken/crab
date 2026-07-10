@@ -62,36 +62,37 @@ fn crab_readdir_into(path, buf): i64 {
     return n;
 }
 
-# stat every file entry in `buf` (count records) and store its byte size in
-# sizes[i] (i64 each); directories and stat failures store -1. On agnos each
-# file is stat'd (#33, size @ +16 of the §4.1 struct) via its full path; on the
-# host all sizes stay -1 (the render_test harness mocks them).
-fn crab_stat_all(path, buf, count, sizes, pathscr, statbuf): i64 {
+# stat every entry in `buf` (count records) and store its byte size in sizes[i]
+# and mtime (unix seconds) in mtimes[i]; a stat failure stores -1 in both. On
+# agnos each entry (files AND dirs) is stat'd (#33 — size @ +16, mtime @ +40 of
+# the §4.1 struct) via its full path; on the host both stay -1 (mock render_test).
+fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
     var i = 0;
     while (i < count) {
         var rec = buf + i * 64;
-        var sz = 0 - 1;                              # dir / unknown default
-        if (load8(rec + 63) != 1) {                 # a file -> stat it for the size
-            crab_join(pathscr, path, rec);
-            #ifdef CYRIUS_TARGET_AGNOS
-            if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) {
-                sz = load64(statbuf + 16);           # st_size @ +16 (agnos stat struct §4.1)
-                var sdig = alloc(24);                # serial gate: "crab: stat <name> <size>"
-                crab_u2s(sdig, sz);
-                crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(sdig); crab_say("\n");
-            }
-            #endif
+        var sz = 0 - 1;                              # stat-failure default
+        var mt = 0 - 1;
+        crab_join(pathscr, path, rec);
+        #ifdef CYRIUS_TARGET_AGNOS
+        if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) {
+            sz = load64(statbuf + 16);               # st_size  @ +16 (agnos stat struct §4.1)
+            mt = load64(statbuf + 40);               # st_mtime @ +40 (unix seconds)
+            var sdig = alloc(24);                    # serial gate: "crab: stat <name> <size>"
+            crab_u2s(sdig, sz);
+            crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(sdig); crab_say("\n");
         }
+        #endif
         store64(sizes + i * 8, sz);
+        store64(mtimes + i * 8, mt);
         i = i + 1;
     }
     return 0;
 }
 
 # Descend: if the selected entry (buf[sel], sel < count) is a directory, rewrite
-# `path` in place to path/name, re-readdir into `buf`, and re-stat sizes. Returns
-# the new entry count (>= 0), or -1 when the selection is not a directory / empty.
-fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, statbuf): i64 {
+# `path` in place to path/name, re-readdir into `buf`, and re-stat size+mtime.
+# Returns the new entry count (>= 0), or -1 when the selection is not a dir / empty.
+fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf): i64 {
     if (count <= 0) { return -1; }
     var rec = buf + sel * 64;
     if (load8(rec + 63) != 1) { return -1; }        # type byte: 1 = dir
@@ -99,13 +100,13 @@ fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, statbuf): i64 {
     crab_join(pathscr, path, namescr);
     crab_strcpy(path, pathscr);
     var n = crab_readdir_into(path, buf);
-    crab_stat_all(path, buf, n, sizes, pathscr, statbuf);
+    crab_stat_all(path, buf, n, sizes, mtimes, pathscr, statbuf);
     return n;
 }
 
 # Ascend: truncate `path` in place to its parent directory, re-readdir into `buf`,
-# and re-stat sizes. Returns the new entry count (>= 0), or -1 when already at "/".
-fn crab_ascend(path, buf, sizes, pathscr, statbuf): i64 {
+# and re-stat size+mtime. Returns the new entry count (>= 0), or -1 at the root "/".
+fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     var n = strlen(path);
     if (n <= 1) { return -1; }                       # already at "/"
     var last = 0;
@@ -113,7 +114,7 @@ fn crab_ascend(path, buf, sizes, pathscr, statbuf): i64 {
     while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
     if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
     var cnt = crab_readdir_into(path, buf);
-    crab_stat_all(path, buf, cnt, sizes, pathscr, statbuf);
+    crab_stat_all(path, buf, cnt, sizes, mtimes, pathscr, statbuf);
     return cnt;
 }
 
@@ -133,13 +134,15 @@ fn main(): i64 {
     var rbuf = alloc(32 * 64);
     var lsizes = alloc(32 * 8);             # per-entry byte sizes (parallel to lbuf)
     var rsizes = alloc(32 * 8);
+    var lmtimes = alloc(32 * 8);            # per-entry mtime (unix seconds)
+    var rmtimes = alloc(32 * 8);
     var namescr = alloc(64);                # scratch: selected entry name (descend)
     var pathscr = alloc(256);               # scratch: joined child path (descend / stat)
     var statbuf = alloc(48);                # scratch: agnos stat struct (§4.1)
     var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, 32) -> entry count (0 on host)
-    crab_stat_all(lpath, lbuf, ln, lsizes, pathscr, statbuf);
+    crab_stat_all(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf);
     var rn = crab_readdir_into(rpath, rbuf);
-    crab_stat_all(rpath, rbuf, rn, rsizes, pathscr, statbuf);
+    crab_stat_all(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf);
 
     var path = "/tmp/aethersafha-setu.sock";              # advisory; transport is loopback:7700
     var c = setu_client_connect(path);
@@ -153,7 +156,7 @@ fn main(): i64 {
     var sel_l = 0;
     var sel_r = 0;
 
-    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes);
+    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
     var reply = setu_msg_new();
@@ -190,15 +193,15 @@ fn main(): i64 {
                     if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                 }
                 if (u == 0x28) {                                       # Enter — descend into the selected dir
-                    if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
-                    if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
+                    if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
+                    if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
                 }
                 if (u == 0x2A) {                                       # Backspace — ascend to the parent
-                    if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
-                    if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
+                    if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
+                    if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
                 }
             }
-            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes);
+            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();

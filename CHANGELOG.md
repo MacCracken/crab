@@ -4,6 +4,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-10 — file mtime (status line)
+
+Each entry's modification time joins its size: a Midnight-Commander-style status bar along
+the bottom shows the active pane's selected entry — name, size, and mtime date.
+
+### Added
+
+- **mtime status line** — a `BOX_V` root now wraps the panes row plus a bottom status
+  `LABEL` (`crab_status_str`) rendering the active selection's `<name>  <size|<dir>>
+  <YYYY-MM-DD HH:MM>`. The date comes from the same `stat` syscall (#33 — `st_mtime` @ +40,
+  unix seconds), formatted via the civil days→(y,m,d) algorithm (verified against the host
+  `datetime` across leap-year boundaries). crab now stats **every** entry (files AND dirs)
+  into parallel `sizes[]` + `mtimes[]` per pane. Proven on agnos: the status bar shows
+  `aethersafha  14M  2026-07-10 19:18` from the real inode mtime, composited by aethersafha.
+
 ## [0.3.1] - 2026-07-10 — directory navigation + per-entry size
 
 The read-only listing from 0.3.0 becomes a navigable, informative browser: keyboard
