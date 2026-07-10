@@ -20,6 +20,14 @@ attitude:
   Naming the replacement after the replaced language's mascot is not a port —
   it's a trophy. *psst… what you gonna do.*
 
+## Mascot
+
+The crab has a name: **Bueller** 🦀 — Ferris (Rust's crab) → Ferris Bueller →
+"Bueller." It implies Ferris without ever saying it, and hands the crab a deadpan
+voice. The full rationale (don't flatten the layers) + the planned easter egg —
+an idle-pane / `crab --about` deadpan roll-call, *"Bueller?… Bueller?…"* — live in
+[`docs/development/mascot.md`](docs/development/mascot.md).
+
 ## Architecture (design target)
 
 crab is another **view onto the sovereign memory layer**, not app-with-its-own-AI:
