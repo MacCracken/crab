@@ -1,12 +1,33 @@
-# crab render_test — HOST harness: bake the font, render the dual-pane UI, dump the
-# BGRA surface to a file for a python→PNG eyeball. Fast layout iteration (no agnos).
+# crab render_test — HOST harness: build two mock readdir buffers, render the
+# dual-pane UI (kashi text), and dump the BGRA surface for a python→PNG eyeball.
+# Fast layout iteration (no agnos / no real readdir).
 
 include "src/ui.cyr"
 
+# Write one 64-byte readdir record: name (NUL-terminated) at +0, type at +63.
+fn rt_entry(buf, i, name, is_dir): i64 {
+    var rec = buf + i * 64;
+    var k = 0;
+    while (load8(name + k) != 0) { store8(rec + k, load8(name + k)); k = k + 1; }
+    store8(rec + k, 0);
+    store8(rec + 63, is_dir);
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
+    var lbuf = alloc(16 * 64); var rbuf = alloc(16 * 64);
+    var a0 = "aethersafha"; rt_entry(lbuf, 0, a0, 0);
+    var a1 = "puka";        rt_entry(lbuf, 1, a1, 0);
+    var a2 = "crab";        rt_entry(lbuf, 2, a2, 0);
+    var b0 = "bin";         rt_entry(rbuf, 0, b0, 1);
+    var b1 = "boot";        rt_entry(rbuf, 1, b1, 1);
+    var b2 = "readme.md";   rt_entry(rbuf, 2, b2, 0);
+    var lp = "/bin"; var rp = "/";
+
     var w = 380; var h = 220;
-    var sds = crab_render(w, h, 0, 0, 1, 2);           # font=0 → kashi; left active; sel_l=1, sel_r=2
+    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, rbuf, 3, rp);   # left active, sel_l=1
+
     var pix = sd_surface_pixels(sds);
     var path = "/tmp/claude-1000/-home-macro-Repos-agnosticos/47a0fc83-d217-4059-a644-5fc638dfee33/scratchpad/crab.bin";
     var fd = syscall(2, path, 577, 420);

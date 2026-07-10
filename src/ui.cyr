@@ -1,71 +1,89 @@
-# crab UI — the dual-pane file-manager widget tree, built with the dhancha toolkit
-# and drawn via sadish + rekha. Kept separate from the setu transport (main.cyr) so
-# it's host-testable (render_test.cyr) — the fast iteration loop for layout.
+# crab UI — the dual-pane file-manager widget tree, built with the dhancha toolkit,
+# drawn via sadish + the kashi system font. Each pane renders from a readdir buffer:
+# fixed 64-byte records (name NUL-terminated at +0, type at +63; 1 = dir). Kept
+# separate from the transport (main.cyr) so it's host-testable (render_test.cyr).
 #
-# Include AFTER src/blockfont.cyr (the font) and with the dhancha/sadish/rekha deps.
+# Include with the dhancha/sadish/rekha/kashi deps.
 
-# One file-list row. Highlighted when selected: BRIGHT in the active pane, DIM in
-# the inactive one — so you can see the selection in both panes but which pane has
-# the keyboard is unambiguous.
-fn crab_row(col, name, selected, active): i64 {
+enum CrabUi { CRAB_ROWS_CAP = 7; }        # max rows shown per pane (no scrolling yet)
+
+# One entry row. Directories get a trailing "/" (a scratch copy). Highlighted when
+# selected: BRIGHT in the active pane, DIM in the inactive one.
+fn crab_row(col, name, is_dir, selected, active): i64 {
     var row = dh_widget_new(LABEL);
-    var bg = sd_rgb(22, 22, 28);                       # idle row
+    var bg = sd_rgb(22, 22, 28);
     if (selected != 0) {
-        if (active != 0) { bg = sd_rgb(50, 95, 165); }    # active pane: bright blue
-        else            { bg = sd_rgb(44, 52, 68); }      # inactive pane: dim
+        if (active != 0) { bg = sd_rgb(50, 95, 165); } else { bg = sd_rgb(44, 52, 68); }
     }
     dh_widget_set_bg(row, bg);
-    dh_widget_set_pref(row, 0, 30);
-    dh_widget_set_text(row, name);
+    dh_widget_set_pref(row, 0, 26);
+    var disp = name;
+    if (is_dir != 0) {
+        var b = alloc(72);
+        var ln = 0; var d2 = 0;
+        while ((ln < 62) && (d2 == 0)) {
+            var ch = load8(name + ln);
+            if (ch == 0) { d2 = 1; } else { store8(b + ln, ch); ln = ln + 1; }
+        }
+        store8(b + ln, 47);         # '/'
+        store8(b + ln + 1, 0);
+        disp = b;
+    }
+    dh_widget_set_text(row, disp);
     dh_widget_add_child(col, row);
     return 0;
 }
 
-# One pane: a column (fixed width `panew`) with a header + four entry rows.
-fn crab_pane(root, panew, title, n0, n1, n2, n3, sel, active): i64 {
+# One pane: a fixed-width column with a path header + up to CRAB_ROWS_CAP entry rows
+# read from `buf` (a readdir buffer of `count` 64-byte records).
+fn crab_pane(root, panew, path, buf, count, sel, active): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
     dh_widget_set_bg(col, sd_rgb(24, 24, 30));
     var hdr = dh_widget_new(LABEL);
-    var hc = sd_rgb(55, 60, 75);                       # inactive header
-    if (active != 0) { hc = sd_rgb(80, 130, 200); }    # active pane header: bright
+    var hc = sd_rgb(55, 60, 75);
+    if (active != 0) { hc = sd_rgb(80, 130, 200); }
     dh_widget_set_bg(hdr, hc);
-    dh_widget_set_pref(hdr, 0, 32);
-    dh_widget_set_text(hdr, title);
+    dh_widget_set_pref(hdr, 0, 28);
+    dh_widget_set_text(hdr, path);
     dh_widget_add_child(col, hdr);
-    var s0 = 0; if (sel == 0) { s0 = 1; }
-    var s1 = 0; if (sel == 1) { s1 = 1; }
-    var s2 = 0; if (sel == 2) { s2 = 1; }
-    var s3 = 0; if (sel == 3) { s3 = 1; }
-    crab_row(col, n0, s0, active);
-    crab_row(col, n1, s1, active);
-    crab_row(col, n2, s2, active);
-    crab_row(col, n3, s3, active);
+
+    var cap = count;
+    if (cap > CRAB_ROWS_CAP) { cap = CRAB_ROWS_CAP; }
+    var i = 0;
+    while (i < cap) {
+        var rec = buf + i * 64;                 # name (NUL-terminated) at +0
+        var is_dir = load8(rec + 63);           # type byte: 1 = dir
+        var s = 0; if (sel == i) { s = 1; }
+        crab_row(col, rec, is_dir, s, active);
+        i = i + 1;
+    }
     dh_widget_add_child(root, col);
     return 0;
 }
 
-# Build + render the whole dual-pane window. `active_pane` (0=left, 1=right) has the
-# keyboard; `sel_l` / `sel_r` are each pane's highlighted row.
-fn crab_render(w, h, font, active_pane, sel_l, sel_r): i64 {
+# Build + render the dual-pane window from two readdir buffers.
+fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath): i64 {
     var root = dh_widget_new(WINDOW);
-    dh_widget_set_layout(root, BOX_H);                 # two columns side by side
+    dh_widget_set_layout(root, BOX_H);          # two columns side by side
     dh_widget_set_bg(root, sd_rgb(16, 16, 22));
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-
-    var lt = "~/home";
-    var l0 = "documents"; var l1 = "photos"; var l2 = "music"; var l3 = "code";
-    crab_pane(root, panew, lt, l0, l1, l2, l3, sel_l, la);
-
-    var rt = "code";
-    var r0 = "main.cyr"; var r1 = "ui.cyr"; var r2 = "crab.md"; var r3 = "build.sh";
-    crab_pane(root, panew, rt, r0, r1, r2, r3, sel_r, ra);
+    crab_pane(root, panew, lpath, lbuf, ln, sel_l, la);
+    crab_pane(root, panew, rpath, rbuf, rn, sel_r, ra);
 
     var surf = dh_surface_new(w, h);
     dh_surface_set_root(surf, root);
     dh_layout_apply(root, w, h);
     return dh_surface_render(surf, font);
+}
+
+# Clamp a selection index to the visible row count (count capped at CRAB_ROWS_CAP).
+fn crab_maxsel(count): i64 {
+    var c = count;
+    if (c > CRAB_ROWS_CAP) { c = CRAB_ROWS_CAP; }
+    if (c <= 0) { return 0; }
+    return c - 1;
 }

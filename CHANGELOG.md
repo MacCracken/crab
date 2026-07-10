@@ -4,6 +4,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-10 — real filesystem listing (the `readdir` syscall)
+
+crab's panes now show the **actual on-disk contents** of a directory on agnos rather than a
+hardcoded name list. Each pane calls the ring-3 `readdir` syscall (#81) — landed in **agnos
+1.53.13** and exposed as the named, agnos-gated `sys_readdir(path, buf, max)` stdlib wrapper in
+**cyrius 6.4.43** — and renders the live entries in the kashi system font, directories suffixed
+`/`. Left pane lists `/bin` (`aethersafha` / `crab` / `puka`), right pane lists `/` (`bin/` /
+`lost+found/`). QEMU-proven end-to-end: the compositor spawns crab, both panes list their real
+directories, and Up/Down selection + Left/Right pane-switch navigate the live entries.
+
+### Added
+
+- **Real directory listing via `sys_readdir`** (`src/main.cyr`, `src/ui.cyr`) — each pane
+  `readdir`'s its path into a buffer of fixed 64-byte records (name at `+0`, type at `+63`:
+  `1` = dir, `0` = file) and renders the live entries; directories get a trailing `/`. The
+  selection clamps to the real entry count. Replaces the 0.2.0 hardcoded name list.
+
+### Changed
+
+- **cyrius pin 6.4.34 → 6.4.43** — picks up the agnos-gated `sys_readdir` wrapper; crab now
+  calls `sys_readdir(path, buf, max)` instead of the raw `syscall(81, …)` under its own
+  `#ifdef CYRIUS_TARGET_AGNOS`.
+
+### Dependencies
+
+- (unchanged) sadish 0.4.1 + rekha 0.3.1 + kashi 1.0.2 + dhancha 0.8.0 + setu 0.4.0.
+
 ## [0.2.0] - 2026-07-10 — a real dual-pane file manager on the sovereign desktop
 
 crab graduates from scaffold to a working file manager: a **dhancha widget client** that

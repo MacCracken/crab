@@ -1,19 +1,16 @@
 # crab 🦀 — sovereign Cyrius-native file manager for AGNOS.
 #
 # A dhancha widget client on the native desktop stack: builds a DUAL-PANE file UI
-# with the toolkit (widgets + flexbox layout), draws it via sadish (2D vector) +
-# rekha (text, from an in-memory blocky font), and presents it over setu to the
-# aethersafha compositor — "another resident, not new plumbing," the seam the puka
-# terminal and the setu widget probe proved. On agnos it stays live: it re-renders
-# when the compositor forwards focus / key input.
+# with the toolkit (widgets + flexbox layout), drawn via sadish (2D vector) + the
+# kashi system font, and presented over setu to the aethersafha compositor — the
+# seam the puka terminal and the setu widget probe proved.
 #
-# Navigation (Norton-Commander / Dolphin style): Left/Right (or h/l) switch the
-# ACTIVE pane; Up/Down (or j/k) move the selection within it. The active pane's
-# selection is bright, the inactive pane's is dim.
+# It lists REAL directories via the readdir syscall (#81): each pane readdir's a
+# path into a buffer of fixed 64-byte records (name NUL-terminated at +0, type at
+# +63; 1 = dir) and renders the entries. Navigation (Norton-Commander / Dolphin):
+# Left/Right (or h/l) switch the active pane; Up/Down (or j/k) move the selection.
 #
-# Entries are mock (real directory listing needs a kernel readdir/getdents) and
-# limited to the authored font glyphs for now. Deps (cyrius.cyml): sadish + rekha +
-# dhancha (toolkit/draw) + setu (transport). Font baked in memory by blockfont.cyr.
+# Deps (cyrius.cyml): sadish + rekha + kashi (system font) + dhancha + setu.
 
 include "src/ui.cyr"
 
@@ -25,8 +22,20 @@ fn main(): i64 {
     var h = 220;
     var nbytes = w * h * 4;
 
-    # Text renders via dh_draw_text's default: the kashi CP437 8x16 system font
-    # (font = 0). No font baking — full mixed-case names for free.
+    # Two panes, each listing a real directory. On agnos, readdir(#81) fills a buffer
+    # of fixed 64-byte records; on the host the panes stay empty (render_test mocks them).
+    var lpath = "/bin";
+    var rpath = "/";
+    var lbuf = alloc(32 * 64);
+    var rbuf = alloc(32 * 64);
+    var ln = 0;
+    var rn = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    ln = sys_readdir(lpath, lbuf, 32);      # readdir(path, buf, max) -> entry count
+    rn = sys_readdir(rpath, rbuf, 32);
+    if (ln < 0) { ln = 0; }
+    if (rn < 0) { rn = 0; }
+    #endif
 
     var path = "/tmp/aethersafha-setu.sock";              # advisory; transport is loopback:7700
     var c = setu_client_connect(path);
@@ -40,7 +49,7 @@ fn main(): i64 {
     var sel_l = 0;
     var sel_r = 0;
 
-    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r);
+    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
     var reply = setu_msg_new();
@@ -53,8 +62,8 @@ fn main(): i64 {
     crab_say("crab: dual-pane file-manager UI presented over setu\n");
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
-    # (0x0B/0x0F) switch the active pane; Up/Down (0x52/0x51) or k/j (0x0E/0x0D)
-    # move the selection within it. The client logs each key to serial (input gate).
+    # switch the active pane; Up/Down (0x52/0x51) or k/j move its selection (clamped
+    # to the entry count). The client logs each key to serial (input gate).
     #ifdef CYRIUS_TARGET_AGNOS
     var inmsg = setu_msg_new();
     var frame = 0;
@@ -71,11 +80,11 @@ fn main(): i64 {
                     if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
                 }
                 if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                    if (active_pane == 0) { if (sel_l < 3) { sel_l = sel_l + 1; } }
-                    if (active_pane == 1) { if (sel_r < 3) { sel_r = sel_r + 1; } }
+                    if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                    if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                 }
             }
-            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r);
+            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();
