@@ -1,0 +1,27 @@
+# crab render_test — HOST harness: bake the font, render the dual-pane UI, dump the
+# BGRA surface to a file for a python→PNG eyeball. Fast layout iteration (no agnos).
+
+include "src/blockfont.cyr"
+include "src/ui.cyr"
+
+fn main(): i64 {
+    alloc_init();
+    var fset = "FILESNOTVAUPHC";
+    var nset = strlen(fset);
+    var fch = alloc(nset * 8);
+    var fi = 0;
+    while (fi < nset) { store64(fch + fi * 8, load8(fset + fi)); fi = fi + 1; }
+    var font = bf_build_font(fch, nset);
+
+    var w = 380; var h = 220;
+    var sds = crab_render(w, h, font, 0, 1, 2);        # left pane active; sel_l=1, sel_r=2
+    var pix = sd_surface_pixels(sds);
+    var path = "/tmp/claude-1000/-home-macro-Repos-agnosticos/47a0fc83-d217-4059-a644-5fc638dfee33/scratchpad/crab.bin";
+    var fd = syscall(2, path, 577, 420);
+    if (fd >= 0) { syscall(1, fd, pix, w * h * 4); syscall(3, fd); }
+    var ok = "crab render_test: dumped 380x220 BGRA\n"; syscall(1, 1, ok, strlen(ok));
+    return 0;
+}
+
+fn _entry(): i64 { var r = main(); syscall(60, r); return 0; }
+_entry();

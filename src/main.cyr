@@ -1,73 +1,33 @@
 # crab 🦀 — sovereign Cyrius-native file manager for AGNOS.
 #
-# A dhancha widget client on the native desktop stack: builds a file-list UI with
-# the toolkit (widgets + flexbox layout), draws it via sadish (2D vector) + rekha
-# (text, from an in-memory blocky font), and presents it over setu to the
-# aethersafha compositor — "another resident, not new plumbing," the same seam the
-# puka terminal and the setu widget probe proved. On agnos it stays live: it
-# re-renders when the compositor forwards focus / key input, and the arrow keys
-# move the selection through the list.
+# A dhancha widget client on the native desktop stack: builds a DUAL-PANE file UI
+# with the toolkit (widgets + flexbox layout), draws it via sadish (2D vector) +
+# rekha (text, from an in-memory blocky font), and presents it over setu to the
+# aethersafha compositor — "another resident, not new plumbing," the seam the puka
+# terminal and the setu widget probe proved. On agnos it stays live: it re-renders
+# when the compositor forwards focus / key input.
 #
-# This is the first-present milestone: a single navigable pane with mock entries
-# (real directory listing + a second pane + AI find land next). Entries use only
-# the authored font glyphs for now.
+# Navigation (Norton-Commander / Dolphin style): Left/Right (or h/l) switch the
+# ACTIVE pane; Up/Down (or j/k) move the selection within it. The active pane's
+# selection is bright, the inactive pane's is dim.
 #
-# Deps (cyrius.cyml): sadish + rekha + dhancha (toolkit/draw) + setu (transport).
-# The font is baked in memory by src/blockfont.cyr (no font files on disk).
+# Entries are mock (real directory listing needs a kernel readdir/getdents) and
+# limited to the authored font glyphs for now. Deps (cyrius.cyml): sadish + rekha +
+# dhancha (toolkit/draw) + setu (transport). Font baked in memory by blockfont.cyr.
 
 include "src/blockfont.cyr"
+include "src/ui.cyr"
 
 fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 
-# One file-list row: a LABEL with the entry name, highlighted (blue) when selected.
-fn crab_row(root, name, selected): i64 {
-    var row = dh_widget_new(LABEL);
-    var bg = sd_rgb(22, 22, 28);                       # idle row
-    if (selected != 0) { bg = sd_rgb(50, 95, 165); }   # selection highlight
-    dh_widget_set_bg(row, bg);
-    dh_widget_set_pref(row, 0, 32);
-    dh_widget_set_text(row, name);
-    dh_widget_add_child(root, row);
-    return 0;
-}
-
-# Build + render the file-manager window. `sel` = the highlighted row index.
-fn crab_render(w, h, focused, font, sel): i64 {
-    var title_col = sd_rgb(60, 70, 90);                    # dim title (unfocused)
-    if (focused != 0) { title_col = sd_rgb(80, 130, 200); }   # bright when focused
-
-    var root = dh_widget_new(WINDOW);
-    dh_widget_set_layout(root, BOX_V);                     # stack: title over the file list
-    dh_widget_set_bg(root, sd_rgb(28, 28, 34));
-    var title = dh_widget_new(LABEL);
-    dh_widget_set_bg(title, title_col);
-    dh_widget_set_pref(title, 0, 34);
-    var t = "FILES"; dh_widget_set_text(title, t);
-    dh_widget_add_child(root, title);
-
-    var e0 = 0; if (sel == 0) { e0 = 1; }
-    var e1 = 0; if (sel == 1) { e1 = 1; }
-    var e2 = 0; if (sel == 2) { e2 = 1; }
-    var e3 = 0; if (sel == 3) { e3 = 1; }
-    var n0 = "NOTES";  crab_row(root, n0, e0);
-    var n1 = "VAULT";  crab_row(root, n1, e1);
-    var n2 = "PLANS";  crab_row(root, n2, e2);
-    var n3 = "PHOTOS"; crab_row(root, n3, e3);
-
-    var surf = dh_surface_new(w, h);
-    dh_surface_set_root(surf, root);
-    dh_layout_apply(root, w, h);
-    return dh_surface_render(surf, font);
-}
-
 fn main(): i64 {
     alloc_init();
-    var w = 300;
-    var h = 210;
+    var w = 380;
+    var h = 220;
     var nbytes = w * h * 4;
 
-    # Bake the font ONCE (letters used by the title + entries).
-    var fset = "FILESNOTVAUPH";
+    # Bake the font ONCE (letters used by the pane headers + entries).
+    var fset = "FILESNOTVAUPHC";
     var nset = strlen(fset);
     var fch = alloc(nset * 8);
     var fi = 0;
@@ -82,8 +42,11 @@ fn main(): i64 {
     var buf_id = setu_buf_create(nbytes);
     if (buf_id < 0) { crab_say("crab: buf_create failed\n"); return 1; }
 
-    var sel = 0;
-    var sds = crab_render(w, h, 0, font, sel);
+    var active_pane = 0;   # 0 = left, 1 = right
+    var sel_l = 0;
+    var sel_r = 0;
+
+    var sds = crab_render(w, h, font, active_pane, sel_l, sel_r);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
     var reply = setu_msg_new();
@@ -93,12 +56,12 @@ fn main(): i64 {
     var stride = w * 4;
     if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { return 1; }
     if (setu_send(fd, setu_commit(sid)) < 0) { return 1; }
-    crab_say("crab: file-manager UI presented over setu\n");
+    crab_say("crab: dual-pane file-manager UI presented over setu\n");
 
-    # LIVE (agnos): re-render on forwarded focus/key input. Arrow keys move the
-    # selection (HID Up=0x52, Down=0x51); the client logs each key to serial.
+    # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
+    # (0x0B/0x0F) switch the active pane; Up/Down (0x52/0x51) or k/j (0x0E/0x0D)
+    # move the selection within it. The client logs each key to serial (input gate).
     #ifdef CYRIUS_TARGET_AGNOS
-    var focused = 0;
     var inmsg = setu_msg_new();
     var frame = 0;
     while (frame < 2000000) {
@@ -107,16 +70,18 @@ fn main(): i64 {
             if (k == SETU_INPUT_KEY) {
                 var u = setu_msg_arg(inmsg, 1);
                 crab_say("crab: key received\n");
-                # Up: 'k' (vim, HID 0x0E) or the Up arrow (0x52). Down: 'j' (0x0D) or Down (0x51).
-                # j/k work today; arrows land once the kernel's USB-HID driver emits the
-                # E0-extended arrow scancodes (bhumi already maps them to 0x51/0x52).
-                if (u == 0x0E) { if (sel > 0) { sel = sel - 1; } }
-                if (u == 0x52) { if (sel > 0) { sel = sel - 1; } }
-                if (u == 0x0D) { if (sel < 3) { sel = sel + 1; } }
-                if (u == 0x51) { if (sel < 3) { sel = sel + 1; } }
+                if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
+                if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
+                if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                    if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                    if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                }
+                if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                    if (active_pane == 0) { if (sel_l < 3) { sel_l = sel_l + 1; } }
+                    if (active_pane == 1) { if (sel_r < 3) { sel_r = sel_r + 1; } }
+                }
             }
-            if (k == SETU_INPUT_FOCUS) { focused = setu_msg_arg(inmsg, 1); }
-            var s2 = crab_render(w, h, focused, font, sel);
+            var s2 = crab_render(w, h, font, active_pane, sel_l, sel_r);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();
