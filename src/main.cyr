@@ -8,13 +8,114 @@
 # It lists REAL directories via the readdir syscall (#81): each pane readdir's a
 # path into a buffer of fixed 64-byte records (name NUL-terminated at +0, type at
 # +63; 1 = dir) and renders the entries. Navigation (Norton-Commander / Dolphin):
-# Left/Right (or h/l) switch the active pane; Up/Down (or j/k) move the selection.
+# Left/Right (or h/l) switch the active pane; Up/Down (or j/k) move the selection;
+# Enter descends into the selected directory; Backspace ascends to the parent.
 #
 # Deps (cyrius.cyml): sadish + rekha + kashi (system font) + dhancha + setu.
 
 include "src/ui.cyr"
 
 fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
+
+# Log a navigation to serial (the smoke's dispositive gate — like "key received").
+fn crab_log_cd(path): i64 {
+    crab_say("crab: cd ");
+    crab_say(path);
+    crab_say("\n");
+    return 0;
+}
+
+# --- path helpers for directory navigation (Enter descends, Backspace ascends) ---
+
+# Copy a NUL-terminated cstring src -> dst (incl. the NUL). Returns the length.
+fn crab_strcpy(dst, src): i64 {
+    var i = 0;
+    var ch = load8(src);
+    while (ch != 0) { store8(dst + i, ch); i = i + 1; ch = load8(src + i); }
+    store8(dst + i, 0);
+    return i;
+}
+
+# Join a directory path + an entry name into dst as "path/name" (NUL-terminated),
+# collapsing the separator when path already ends in '/' (i.e. the root "/").
+fn crab_join(dst, path, name): i64 {
+    var w = 0;
+    var i = 0;
+    var ch = load8(path + i);
+    while (ch != 0) { store8(dst + w, ch); w = w + 1; i = i + 1; ch = load8(path + i); }
+    if (w > 0) { if (load8(dst + w - 1) != 47) { store8(dst + w, 47); w = w + 1; } }
+    var j = 0;
+    var c2 = load8(name + j);
+    while (c2 != 0) { store8(dst + w, c2); w = w + 1; j = j + 1; c2 = load8(name + j); }
+    store8(dst + w, 0);
+    return w;
+}
+
+# readdir `path` into `buf` (up to 32 records); returns the entry count (>= 0).
+# agnos-only (sys_readdir is the #81 wrapper); on the host it yields 0 (mock panes).
+fn crab_readdir_into(path, buf): i64 {
+    var n = -1;
+    #ifdef CYRIUS_TARGET_AGNOS
+    n = sys_readdir(path, buf, 32);
+    #endif
+    if (n < 0) { n = 0; }
+    return n;
+}
+
+# stat every file entry in `buf` (count records) and store its byte size in
+# sizes[i] (i64 each); directories and stat failures store -1. On agnos each
+# file is stat'd (#33, size @ +16 of the §4.1 struct) via its full path; on the
+# host all sizes stay -1 (the render_test harness mocks them).
+fn crab_stat_all(path, buf, count, sizes, pathscr, statbuf): i64 {
+    var i = 0;
+    while (i < count) {
+        var rec = buf + i * 64;
+        var sz = 0 - 1;                              # dir / unknown default
+        if (load8(rec + 63) != 1) {                 # a file -> stat it for the size
+            crab_join(pathscr, path, rec);
+            #ifdef CYRIUS_TARGET_AGNOS
+            if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) {
+                sz = load64(statbuf + 16);           # st_size @ +16 (agnos stat struct §4.1)
+                var sdig = alloc(24);                # serial gate: "crab: stat <name> <size>"
+                crab_u2s(sdig, sz);
+                crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(sdig); crab_say("\n");
+            }
+            #endif
+        }
+        store64(sizes + i * 8, sz);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Descend: if the selected entry (buf[sel], sel < count) is a directory, rewrite
+# `path` in place to path/name, re-readdir into `buf`, and re-stat sizes. Returns
+# the new entry count (>= 0), or -1 when the selection is not a directory / empty.
+fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, statbuf): i64 {
+    if (count <= 0) { return -1; }
+    var rec = buf + sel * 64;
+    if (load8(rec + 63) != 1) { return -1; }        # type byte: 1 = dir
+    crab_strcpy(namescr, rec);                       # copy name out before readdir overwrites buf
+    crab_join(pathscr, path, namescr);
+    crab_strcpy(path, pathscr);
+    var n = crab_readdir_into(path, buf);
+    crab_stat_all(path, buf, n, sizes, pathscr, statbuf);
+    return n;
+}
+
+# Ascend: truncate `path` in place to its parent directory, re-readdir into `buf`,
+# and re-stat sizes. Returns the new entry count (>= 0), or -1 when already at "/".
+fn crab_ascend(path, buf, sizes, pathscr, statbuf): i64 {
+    var n = strlen(path);
+    if (n <= 1) { return -1; }                       # already at "/"
+    var last = 0;
+    var j = 0;
+    while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
+    if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
+    var cnt = crab_readdir_into(path, buf);
+    crab_stat_all(path, buf, cnt, sizes, pathscr, statbuf);
+    return cnt;
+}
 
 fn main(): i64 {
     alloc_init();
@@ -24,18 +125,21 @@ fn main(): i64 {
 
     # Two panes, each listing a real directory. On agnos, readdir(#81) fills a buffer
     # of fixed 64-byte records; on the host the panes stay empty (render_test mocks them).
-    var lpath = "/bin";
-    var rpath = "/";
+    var lpath = alloc(256);
+    var rpath = alloc(256);
+    crab_strcpy(lpath, "/bin");             # mutable pane paths — Enter/Backspace rewrite them
+    crab_strcpy(rpath, "/");
     var lbuf = alloc(32 * 64);
     var rbuf = alloc(32 * 64);
-    var ln = 0;
-    var rn = 0;
-    #ifdef CYRIUS_TARGET_AGNOS
-    ln = sys_readdir(lpath, lbuf, 32);      # readdir(path, buf, max) -> entry count
-    rn = sys_readdir(rpath, rbuf, 32);
-    if (ln < 0) { ln = 0; }
-    if (rn < 0) { rn = 0; }
-    #endif
+    var lsizes = alloc(32 * 8);             # per-entry byte sizes (parallel to lbuf)
+    var rsizes = alloc(32 * 8);
+    var namescr = alloc(64);                # scratch: selected entry name (descend)
+    var pathscr = alloc(256);               # scratch: joined child path (descend / stat)
+    var statbuf = alloc(48);                # scratch: agnos stat struct (§4.1)
+    var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, 32) -> entry count (0 on host)
+    crab_stat_all(lpath, lbuf, ln, lsizes, pathscr, statbuf);
+    var rn = crab_readdir_into(rpath, rbuf);
+    crab_stat_all(rpath, rbuf, rn, rsizes, pathscr, statbuf);
 
     var path = "/tmp/aethersafha-setu.sock";              # advisory; transport is loopback:7700
     var c = setu_client_connect(path);
@@ -49,7 +153,7 @@ fn main(): i64 {
     var sel_l = 0;
     var sel_r = 0;
 
-    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath);
+    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
     var reply = setu_msg_new();
@@ -63,7 +167,9 @@ fn main(): i64 {
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
     # switch the active pane; Up/Down (0x52/0x51) or k/j move its selection (clamped
-    # to the entry count). The client logs each key to serial (input gate).
+    # to the entry count); Enter (0x28) descends into the selected directory and
+    # Backspace (0x2A) ascends to the parent (each re-readdirs + resets the selection).
+    # The client logs each key to serial (input gate).
     #ifdef CYRIUS_TARGET_AGNOS
     var inmsg = setu_msg_new();
     var frame = 0;
@@ -83,8 +189,16 @@ fn main(): i64 {
                     if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
                     if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                 }
+                if (u == 0x28) {                                       # Enter — descend into the selected dir
+                    if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
+                    if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
+                }
+                if (u == 0x2A) {                                       # Backspace — ascend to the parent
+                    if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
+                    if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
+                }
             }
-            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath);
+            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();

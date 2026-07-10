@@ -4,6 +4,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-10 — directory navigation + per-entry size
+
+The read-only listing from 0.3.0 becomes a navigable, informative browser: keyboard
+directory traversal (Enter/Backspace) and each file's size shown alongside its name.
+
+### Added
+
+- **Directory navigation** — Enter descends into the selected directory (re-`readdir`s the
+  child and resets the selection to the top); Backspace ascends to the parent. Pane paths
+  are now mutable buffers, so each pane's header tracks the current directory. Path helpers
+  (`crab_strcpy`/`crab_join`/`crab_descend`/`crab_ascend`) are host-safe — `sys_readdir` stays
+  behind `#ifdef CYRIUS_TARGET_AGNOS`. Proven on agnos via the setu-descend smoke: focus the
+  right pane, descend into `/lost+found`, ascend back to `/` (Up/Down + Left/Right unregressed).
+- **Navigation serial log** — a successful descend/ascend emits `crab: cd <path>` to serial
+  (the smoke's dispositive gate, alongside `key received`).
+- **Per-entry file size (richer listing)** — each file's byte size renders right-gapped after
+  a 13-char name column, human-readable (`14M` / `299K` / `512`); directories keep the `/`
+  marker. Sizes come from the agnos `stat` syscall (#33 — `sys_stat`, `st_size` @ +16 of the
+  §4.1 struct): crab stats each listed entry on listing/navigation into a parallel `sizes[]`
+  per pane. No new kernel/cyrius work — stat #33 shipped in agnos 1.41.3 and `sys_stat` is in
+  cyrius 6.4.43. Proven on agnos (setu-stat smoke): `/bin` lists `aethersafha 14M` / `crab 299K`
+  / `puka 79K` from real `stat` sizes, composited by aethersafha. `st_mtime` (@ +40) is
+  available from the same syscall but not yet rendered — the ~187px panes don't fit both cleanly.
+
 ## [0.3.0] - 2026-07-10 — real filesystem listing (the `readdir` syscall)
 
 crab's panes now show the **actual on-disk contents** of a directory on agnos rather than a

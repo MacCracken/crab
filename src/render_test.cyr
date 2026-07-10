@@ -25,8 +25,13 @@ fn main(): i64 {
     var b2 = "readme.md";   rt_entry(rbuf, 2, b2, 0);
     var lp = "/bin"; var rp = "/";
 
+    # mock sizes (parallel to the entries): files get a byte size, dirs get -1
+    var lsizes = alloc(16 * 8); var rsizes = alloc(16 * 8);
+    store64(lsizes + 0, 14995144); store64(lsizes + 8, 80784); store64(lsizes + 16, 301896);
+    store64(rsizes + 0, 0 - 1);    store64(rsizes + 8, 0 - 1); store64(rsizes + 16, 4096);
+
     var w = 380; var h = 220;
-    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, rbuf, 3, rp);   # left active, sel_l=1
+    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rbuf, 3, rp, rsizes);   # left active, sel_l=1
 
     var pix = sd_surface_pixels(sds);
     var path = "/tmp/claude-1000/-home-macro-Repos-agnosticos/47a0fc83-d217-4059-a644-5fc638dfee33/scratchpad/crab.bin";

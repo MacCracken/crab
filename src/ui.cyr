@@ -7,9 +7,37 @@
 
 enum CrabUi { CRAB_ROWS_CAP = 7; }        # max rows shown per pane (no scrolling yet)
 
-# One entry row. Directories get a trailing "/" (a scratch copy). Highlighted when
-# selected: BRIGHT in the active pane, DIM in the inactive one.
-fn crab_row(col, name, is_dir, selected, active): i64 {
+# Unsigned int -> decimal string in dst (NUL-terminated). Returns the length.
+fn crab_u2s(dst, n): i64 {
+    if (n == 0) { store8(dst, 48); store8(dst + 1, 0); return 1; }
+    var tmp = alloc(24);
+    var i = 0;
+    var v = n;
+    while (v > 0) { store8(tmp + i, 48 + (v - (v / 10) * 10)); i = i + 1; v = v / 10; }
+    var j = 0;
+    while (j < i) { store8(dst + j, load8(tmp + (i - 1 - j))); j = j + 1; }
+    store8(dst + i, 0);
+    return i;
+}
+
+# Format a byte size into dst as a short human string ("512", "4K", "15M").
+# A negative size (directory / stat failure) yields the empty string.
+fn crab_size_str(dst, size): i64 {
+    if (size < 0) { store8(dst, 0); return 0; }
+    var val = size;
+    var unit = 0;                                     # 0 = bytes, 1 = K, 2 = M
+    if (val >= 1048576) { val = (val + 524288) / 1048576; unit = 2; }
+    else { if (val >= 1024) { val = (val + 512) / 1024; unit = 1; } }
+    var w = crab_u2s(dst, val);
+    if (unit == 1) { store8(dst + w, 75); w = w + 1; store8(dst + w, 0); }   # 'K'
+    if (unit == 2) { store8(dst + w, 77); w = w + 1; store8(dst + w, 0); }   # 'M'
+    return w;
+}
+
+# One entry row: a 13-char name column, then "/" for a directory or a right-gapped
+# human size for a file. Highlighted when selected: BRIGHT in the active pane, DIM
+# in the inactive one.
+fn crab_row(col, name, is_dir, size, selected, active): i64 {
     var row = dh_widget_new(LABEL);
     var bg = sd_rgb(22, 22, 28);
     if (selected != 0) {
@@ -17,17 +45,28 @@ fn crab_row(col, name, is_dir, selected, active): i64 {
     }
     dh_widget_set_bg(row, bg);
     dh_widget_set_pref(row, 0, 26);
-    var disp = name;
-    if (is_dir != 0) {
-        var b = alloc(72);
-        var ln = 0; var d2 = 0;
-        while ((ln < 62) && (d2 == 0)) {
-            var ch = load8(name + ln);
-            if (ch == 0) { d2 = 1; } else { store8(b + ln, ch); ln = ln + 1; }
+    var disp = alloc(48);
+    var k = 0; var done = 0;                          # name column: 13 chars, space-padded
+    while (k < 13) {
+        var ch = 32;
+        if (done == 0) {
+            ch = load8(name + k);
+            if (ch == 0) { ch = 32; done = 1; }
         }
-        store8(b + ln, 47);         # '/'
-        store8(b + ln + 1, 0);
-        disp = b;
+        store8(disp + k, ch);
+        k = k + 1;
+    }
+    var w = 13;
+    if (is_dir != 0) {
+        store8(disp + w, 47); w = w + 1;              # '/' marks a directory
+        store8(disp + w, 0);
+    } else {
+        store8(disp + w, 32); w = w + 1;              # gap before the size
+        var ss = alloc(24);
+        var sl = crab_size_str(ss, size);
+        var m = 0;
+        while (m < sl) { store8(disp + w, load8(ss + m)); w = w + 1; m = m + 1; }
+        store8(disp + w, 0);
     }
     dh_widget_set_text(row, disp);
     dh_widget_add_child(col, row);
@@ -36,7 +75,7 @@ fn crab_row(col, name, is_dir, selected, active): i64 {
 
 # One pane: a fixed-width column with a path header + up to CRAB_ROWS_CAP entry rows
 # read from `buf` (a readdir buffer of `count` 64-byte records).
-fn crab_pane(root, panew, path, buf, count, sel, active): i64 {
+fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -55,8 +94,9 @@ fn crab_pane(root, panew, path, buf, count, sel, active): i64 {
     while (i < cap) {
         var rec = buf + i * 64;                 # name (NUL-terminated) at +0
         var is_dir = load8(rec + 63);           # type byte: 1 = dir
+        var sz = load64(sizes + i * 8);         # per-entry byte size (-1 = dir/unknown)
         var s = 0; if (sel == i) { s = 1; }
-        crab_row(col, rec, is_dir, s, active);
+        crab_row(col, rec, is_dir, sz, s, active);
         i = i + 1;
     }
     dh_widget_add_child(root, col);
@@ -64,15 +104,15 @@ fn crab_pane(root, panew, path, buf, count, sel, active): i64 {
 }
 
 # Build + render the dual-pane window from two readdir buffers.
-fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, rbuf, rn, rpath): i64 {
+fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, rbuf, rn, rpath, rsizes): i64 {
     var root = dh_widget_new(WINDOW);
     dh_widget_set_layout(root, BOX_H);          # two columns side by side
     dh_widget_set_bg(root, sd_rgb(16, 16, 22));
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    crab_pane(root, panew, lpath, lbuf, ln, sel_l, la);
-    crab_pane(root, panew, rpath, rbuf, rn, sel_r, ra);
+    crab_pane(root, panew, lpath, lbuf, ln, lsizes, sel_l, la);
+    crab_pane(root, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
 
     var surf = dh_surface_new(w, h);
     dh_surface_set_root(surf, root);
