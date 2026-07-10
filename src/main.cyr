@@ -15,7 +15,6 @@
 # limited to the authored font glyphs for now. Deps (cyrius.cyml): sadish + rekha +
 # dhancha (toolkit/draw) + setu (transport). Font baked in memory by blockfont.cyr.
 
-include "src/blockfont.cyr"
 include "src/ui.cyr"
 
 fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
@@ -26,13 +25,8 @@ fn main(): i64 {
     var h = 220;
     var nbytes = w * h * 4;
 
-    # Bake the font ONCE (letters used by the pane headers + entries).
-    var fset = "FILESNOTVAUPHC";
-    var nset = strlen(fset);
-    var fch = alloc(nset * 8);
-    var fi = 0;
-    while (fi < nset) { store64(fch + fi * 8, load8(fset + fi)); fi = fi + 1; }
-    var font = bf_build_font(fch, nset);
+    # Text renders via dh_draw_text's default: the kashi CP437 8x16 system font
+    # (font = 0). No font baking — full mixed-case names for free.
 
     var path = "/tmp/aethersafha-setu.sock";              # advisory; transport is loopback:7700
     var c = setu_client_connect(path);
@@ -46,7 +40,7 @@ fn main(): i64 {
     var sel_l = 0;
     var sel_r = 0;
 
-    var sds = crab_render(w, h, font, active_pane, sel_l, sel_r);
+    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
     var reply = setu_msg_new();
@@ -81,7 +75,7 @@ fn main(): i64 {
                     if (active_pane == 1) { if (sel_r < 3) { sel_r = sel_r + 1; } }
                 }
             }
-            var s2 = crab_render(w, h, font, active_pane, sel_l, sel_r);
+            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();

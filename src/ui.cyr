@@ -56,12 +56,12 @@ fn crab_render(w, h, font, active_pane, sel_l, sel_r): i64 {
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
 
-    var lt = "FILES";
-    var l0 = "NOTES"; var l1 = "VAULT"; var l2 = "PLANS"; var l3 = "PHOTOS";
+    var lt = "~/home";
+    var l0 = "documents"; var l1 = "photos"; var l2 = "music"; var l3 = "code";
     crab_pane(root, panew, lt, l0, l1, l2, l3, sel_l, la);
 
-    var rt = "HOST";
-    var r0 = "SCAN"; var r1 = "UNIT"; var r2 = "PLAN"; var r3 = "FILE";
+    var rt = "code";
+    var r0 = "main.cyr"; var r1 = "ui.cyr"; var r2 = "crab.md"; var r3 = "build.sh";
     crab_pane(root, panew, rt, r0, r1, r2, r3, sel_r, ra);
 
     var surf = dh_surface_new(w, h);
