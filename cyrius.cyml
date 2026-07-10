@@ -12,12 +12,31 @@ test = "src/test.cyr"
 output = "crab"
 
 [deps]
-# Buildable baseline (stdlib only) for the scaffold. The desktop stack lands with
-# the implementation arc, modeled on puka's setu client:
-#   [deps.setu]     — display-protocol client transport to aethersafha
-#   [deps.dhancha]  — toolkit: widgets, flexbox layout, event model (dual-pane)
-#   [deps.sadish] / [deps.rekha]  — 2D vector + TrueType text (via dhancha)
-#   [deps.mabda]    — GPU present (framebuffer blit), as puka does
-#   + the daimon vector-store seam for AI (semantic find / auto-tag / dedup) —
-#     the same sovereign memory substrate mneme rides.
-stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "syscalls", "assert", "bench"]
+# The desktop stack (modeled on puka's setu client, minus mabda — on agnos the
+# present goes over setu's shared buffer, not a GPU ioctl blit). daimon's vector
+# store lands with the AI arc (semantic find / auto-tag / dedup).
+# net = setu's TCP client transport; result = net's return type.
+stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "net"]
+
+# sadish (2D vector) THEN rekha (text; references sd_*) THEN dhancha (widgets;
+# references both). setu is the client transport. dhancha's dist references
+# sd_*/rekha_* rather than bundling them, so crab deps them directly.
+[deps.sadish]
+git = "https://github.com/MacCracken/sadish.git"
+tag = "0.4.1"
+modules = ["dist/sadish.cyr"]
+
+[deps.rekha]
+git = "https://github.com/MacCracken/rekha.git"
+tag = "0.3.1"
+modules = ["dist/rekha.cyr"]
+
+[deps.dhancha]
+git = "https://github.com/MacCracken/dhancha.git"
+tag = "0.7.0"
+modules = ["dist/dhancha.cyr"]
+
+[deps.setu]
+git = "https://github.com/MacCracken/setu.git"
+tag = "0.4.0"
+modules = ["dist/setu.cyr"]
