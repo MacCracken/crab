@@ -26,6 +26,14 @@ git = "https://github.com/MacCracken/sadish.git"
 tag = "0.4.1"
 modules = ["dist/sadish.cyr"]
 
+# rupa (रूप — form / appearance) — the shared desktop theme-token core. crab colours
+# its panes/rows/status with the active MUDRA / SHANTA theme via dhancha's dh_theme_*,
+# which reference rupa's tokens — so crab supplies rupa too. path=../rupa until tagged.
+[deps.rupa]
+git = "https://github.com/MacCracken/rupa.git"
+tag = "0.1.0"
+modules = ["dist/rupa.cyr"]
+
 [deps.rekha]
 git = "https://github.com/MacCracken/rekha.git"
 tag = "0.3.1"
@@ -40,7 +48,8 @@ modules = ["src/font_data.cyr"]
 
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
-tag = "0.8.0"
+path = "../dhancha"
+tag = "0.9.0"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

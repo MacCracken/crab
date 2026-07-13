@@ -85,9 +85,10 @@ fn crab_mtime_str(dst, epoch): i64 {
 # in the inactive one.
 fn crab_row(col, name, is_dir, size, selected, active): i64 {
     var row = dh_widget_new(LABEL);
-    var bg = sd_rgb(22, 22, 28);
+    var bg = dh_theme_widget();                # unselected row (the list-item surface)
     if (selected != 0) {
-        if (active != 0) { bg = sd_rgb(50, 95, 165); } else { bg = sd_rgb(44, 52, 68); }
+        # selected: accent when this pane is focused, a muted line-tint when it isn't
+        if (active != 0) { bg = dh_theme_accent(); } else { bg = dh_theme_line(); }
     }
     dh_widget_set_bg(row, bg);
     dh_widget_set_pref(row, 0, 26);
@@ -125,10 +126,10 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
-    dh_widget_set_bg(col, sd_rgb(24, 24, 30));
+    dh_widget_set_bg(col, dh_theme_panel());   # pane column surface
     var hdr = dh_widget_new(LABEL);
-    var hc = sd_rgb(55, 60, 75);
-    if (active != 0) { hc = sd_rgb(80, 130, 200); }
+    var hc = dh_theme_panel();                 # pane header bar
+    if (active != 0) { hc = dh_theme_accent(); }   # accent when this pane is focused
     dh_widget_set_bg(hdr, hc);
     dh_widget_set_pref(hdr, 0, 28);
     dh_widget_set_text(hdr, path);
@@ -179,7 +180,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes): i64 {
     var root = dh_widget_new(WINDOW);
     dh_widget_set_layout(root, BOX_V);          # panes row on top, status line below
-    dh_widget_set_bg(root, sd_rgb(16, 16, 22));
+    dh_widget_set_bg(root, dh_theme_bg());     # the desktop void
 
     var panes = dh_widget_new(BOX);
     dh_widget_set_layout(panes, BOX_H);         # two columns side by side
@@ -194,7 +195,7 @@ fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
     if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
     var status = dh_widget_new(LABEL);
-    dh_widget_set_bg(status, sd_rgb(30, 34, 44));
+    dh_widget_set_bg(status, dh_theme_panel());   # status line
     dh_widget_set_pref(status, 0, 22);
     dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt));
     dh_widget_add_child(root, status);

@@ -4,6 +4,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-12 — follows the shared desktop theme (rupa)
+
+crab now colours itself from the active desktop theme instead of a hardcoded dark
+palette, so the file manager matches the compositor chrome and every other dhancha app.
+Switch the whole desktop's look with `rupa_theme_set_active_name("shanta-dark")` and crab
+re-colours with it — two themes, each dark + light: MUDRA (the seal, default) and SHANTA
+(stillness).
+
+### Changed
+
+- **Panes, rows, headers, and the status line draw with `dh_theme_*`** (dhancha's theme
+  helpers over the shared **rupa** token core), replacing the hardcoded `sd_rgb(...)`
+  literals in `src/ui.cyr`: root → `dh_theme_bg`, pane column → `dh_theme_panel`, list rows
+  → `dh_theme_widget`, header + status → `dh_theme_panel`. The **selected** row / active
+  header is now the theme **accent** when its pane is focused, and a muted `dh_theme_line`
+  tint when it isn't (was a fixed blue). This makes crab legible under the light themes.
+- **`[deps.dhancha]` 0.8.0 → 0.9.0** (the `dh_theme_*` API) + new **`[deps.rupa]` 0.1.0**
+  (the shared theme tokens). Builds green against published rupa@0.1.0; `test` + `render_test`
+  unaffected.
+
 ## [0.3.2] - 2026-07-10 — file mtime (status line)
 
 Each entry's modification time joins its size: a Midnight-Commander-style status bar along
