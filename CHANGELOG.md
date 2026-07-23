@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.2] - 2026-07-23
+
+### Changed — setu 0.7.0 (`SETU_SURF_PREMULTIPLIED`) + dep refresh
+
+No behaviour change: the flag is opt-in and this client does not set it, so its surface is still composited
+with the opaque `gpu_blit_shm` #87 path.
+
 ## [0.4.1] - 2026-07-23
 
 ### Changed — setu 0.6.0: client buffers are GPU-visible on agnos
