@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack; AI (semantic find / auto-tag / dedup) via daimon's vector store — files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.4.43"
+cyrius = "6.4.71"
 
 [build]
 entry = "src/main.cyr"
@@ -54,5 +54,5 @@ modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.4.0"
+tag = "0.6.0"
 modules = ["dist/setu.cyr"]
