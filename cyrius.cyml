@@ -48,7 +48,6 @@ modules = ["src/font_data.cyr"]
 
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
-path = "../dhancha"
 tag = "0.9.3"
 modules = ["dist/dhancha.cyr"]
 
