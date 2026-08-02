@@ -2,6 +2,35 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.4] - 2026-08-02
+
+### Changed — setu 0.7.2: crab can actually connect to the compositor on agnos
+
+Picks up setu **0.7.2**, whose `setu_connect` dials `sys_net_ip()` instead of `127.0.0.1`.
+
+⛔ **Before this, crab could never present on a real agnos boot.** agnos puts `net_ip` in an outbound
+SYN's source field, so a connect to 127.0.0.1 produced a SYN-ACK the client's own conn could not
+match on the 4-tuple; `sock_connect` #47 returned -1 instantly and crab printed
+`crab: setu connect failed`. It looked like a crab fault and was not — the identical failure hit
+setu's own `present_probe`. The `AETHERSAFHA_SETU_SELFTEST` kernel hook had been masking it by
+assigning `net_ip = 0x7F000001`, which is why the desktop smoke passed while no ordinary boot worked.
+
+No source change here — this is a dependency bump and a rebuild.
+
+⚠ **crab consumes setu's `dist/` bundle**, not its `src/`, so a setu fix only reaches this client
+after `cyrius distlib` runs in setu. A local `path` override alone is not enough.
+
+### Verified
+
+Composited as a live window on agnos in QEMU, launched **in the foreground** (`aethersafha`, no `&`)
+from the agnsh prompt: the dual-pane file manager rendering real `/bin` contents — checked on the
+**framebuffer**, not just the serial log.
+
+### Note — 0.4.3 was never released
+
+`VERSION` read 0.4.3 with no CHANGELOG section and no published tag (upstream stops at 0.4.2), so
+whatever it carried is folded in here. Recorded rather than silently renumbered.
+
 ## [0.4.2] - 2026-07-23
 
 ### Changed — setu 0.7.0 (`SETU_SURF_PREMULTIPLIED`) + dep refresh
@@ -29,6 +58,21 @@ No API change and no call-site change here — the buffer id behaves identically
 ### Changed — cyrius pin → 6.4.71
 
 ## [Unreleased]
+
+## [0.4.3] - 2026-08-02
+
+### Changed — cyrius pin 6.4.71 -> 6.5.5; dhancha 0.9.3, sadish 0.5.1, rupa 0.1.2, rekha 0.3.4, kashi 1.0.4, setu 0.7.1
+
+Part of the whole-desktop-stack toolchain catch-up cut on this date.
+
+⭐ crab picks up **setu 0.7.1** and is, as of today, the only setu client in the stack whose surface
+is already alpha-255 clean throughout — which makes it the natural first candidate when the
+compositor's premultiplied `#92` blend path gets a real consumer.
+
+### Verification
+
+Host + `--agnos` builds green; 1 suite passes.
+
 
 ## [0.4.0] - 2026-07-12 — follows the shared desktop theme (rupa)
 
