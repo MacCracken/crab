@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — the setu handshake fails out loud
+## [0.4.5] - 2026-08-07 — the setu handshake fails out loud
 
 ### Changed — setu > 0.8.1: crab presents on the agnos channel band
 
@@ -10,8 +10,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 one end, and spawns crab already connected — crab dials nothing and `setu_connect` reads `AGNOS_CHAN`.
 Proven under QEMU `-smp 4` alongside `present_probe`: both present, framebuffer-confirmed.
 
-⚠ Carries a TEMP `path = "../setu"` override in `cyrius.cyml` — setu's record-framing fix for
-`setu_read_msg` is not in the 0.8.1 tag. **Revert to the tag once setu is cut.**
+Pinned to **setu 0.8.4**, no override. That tag also removes TCP from setu's Linux arm (AF_UNIX /
+SOCK_SEQPACKET), so crab speaks a record transport on both targets and its handshake cannot be correct
+on one and broken on the other for a framing reason.
+
+⚠ **`chrono` added to `[deps] stdlib`.** crab was missing it and building clean anyway: setu's
+`dist/setu.deps` under-reported 8 of 12 leaves, which switched OFF `cyrius deps`' own validation. setu
+0.8.4 corrects its sidecar, the check fires again, and this gap became a hard error. Requires
+**agnos >= 1.56.40**.
 
 ### Added — the three silent `return 1`s in the handshake now say what failed
 
