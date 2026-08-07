@@ -144,7 +144,17 @@ fn main(): i64 {
     var rn = crab_readdir_into(rpath, rbuf);
     crab_stat_all(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf);
 
-    var path = "/tmp/aethersafha-setu.sock";              # advisory; transport is loopback:7700
+    # ⛔ The path is advisory and always was — setu ignores it. The transport behind this call is
+    # TCP on loopback:7700, RETIRED as the desktop transport (2026-08-03) because it is the WRONG
+    # PRIMITIVE for local display IPC (nothing to route, checksum, or negotiate; no business owning
+    # a port) — NOT because it never worked. Scope the history: before `net_src_for` (agnos 1.56.34)
+    # it could not close a handshake on an ordinary boot, and the one smoke that passed in that era
+    # did so only because the `AETHERSAFHA_SETU_SELFTEST` kernel hook assigned `net_ip = 0x7F000001`.
+    # After `net_src_for` it did work un-rigged: 2026-08-02, the hook-scanning harness
+    # `aethersafha-clients-test.py` reached "connected: 2, presented: 2" with crab as one of the two
+    # clients (QEMU, `-smp 1`; never on iron, `-smp 4` fault-kills).
+    # Replacement is the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9/§10.
+    var path = "/tmp/aethersafha-setu.sock";
     var c = setu_client_connect(path);
     if (c == 0) { crab_say("crab: setu connect failed\n"); return 1; }
     var fd = setu_client_fd(c);
@@ -158,10 +168,10 @@ fn main(): i64 {
 
     var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
-    if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { return 1; }
+    if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
     var reply = setu_msg_new();
-    if (setu_read_msg(fd, reply) < 0) { return 1; }
-    if (setu_msg_kind(reply) != SETU_SURFACE_CREATED) { return 1; }
+    if (setu_read_msg(fd, reply) < 0) { crab_say("crab: no surface_created reply\n"); return 1; }
+    if (setu_msg_kind(reply) != SETU_SURFACE_CREATED) { crab_say("crab: reply was not surface_created\n"); return 1; }
     var sid = setu_msg_arg(reply, 0);
     var stride = w * 4;
     if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { return 1; }

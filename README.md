@@ -35,7 +35,24 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
 - **Dual-pane GUI** on the native desktop stack — `dhancha` (toolkit: widgets,
   flexbox layout, events) drawing via `sadish` (2D vector) + `rekha` (TrueType
   text), presented through `setu` to the `aethersafha` compositor. Same seam
-  `puka` (the terminal) proved — crab is another resident, not new plumbing.
+  `puka` (the terminal) uses — crab is another resident, not new plumbing.
+  > ⛔ **Corrected 2026-08-03 — "the seam puka PROVED" is withdrawn, and the TCP transport is
+  > RETIRED.** Two separate things, kept separate:
+  > - **The withdrawal.** setu's transport was TCP on loopback:7700. **Before `net_src_for`
+  >   (agnos 1.56.34)** it could not complete a compositor↔client handshake on an ordinary boot —
+  >   agnos stamped `net_ip` as the source of outbound segments, so the SYN-ACK returned on a
+  >   4-tuple the client's own conn could not match. The only test that passed in that era ran
+  >   under the since-deleted `AETHERSAFHA_SETU_SELFTEST` kernel hook (`net_ip = 0x7F000001`),
+  >   which made src and dst agree by accident. Claims resting on that smoke are FALSE GREENS.
+  > - **What DID happen, un-rigged.** After `net_src_for`, on 2026-08-02, the honest harness
+  >   `agnos/scripts/harness/aethersafha-clients-test.py` — which byte-scans the kernel and
+  >   hard-exits if it carries any selftest hook — reached **`connected: 2, presented: 2`**:
+  >   **crab itself** and setu's `present_probe` (staged as `/bin/puka`) both connected and
+  >   presented. ⚠ Scope: QEMU at `-smp 1` only; never shown on iron, and `-smp 4` fault-kills.
+  >
+  > The retirement is **architectural, not a failure verdict**: a local display protocol has
+  > nothing to route, nothing to checksum, no window to negotiate, and no business owning a port.
+  > Replacement is the agnos socket (`anu`), agnos `docs/development/planning/ipc.md` §9/§10.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to

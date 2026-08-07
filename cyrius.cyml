@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack; AI (semantic find / auto-tag / dedup) via daimon's vector store — files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.5"
+cyrius = "6.5.9"
 
 [build]
 entry = "src/main.cyr"
@@ -16,7 +16,15 @@ output = "crab"
 # present goes over setu's shared buffer, not a GPU ioctl blit). daimon's vector
 # store lands with the AI arc (semantic find / auto-tag / dedup).
 # net = setu's TCP client transport; result = net's return type.
-stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "net"]
+# ⛔ That TCP transport is RETIRED (2026-08-03) as the WRONG PRIMITIVE for local display IPC — not
+# because it failed: post-`net_src_for` (agnos 1.56.34) crab connected and presented un-rigged
+# (QEMU `-smp 1`, 2026-08-02). Replacement: the agnos socket (`anu`) — agnos
+# `docs/development/planning/ipc.md` §9/§10. `net` stays until setu moves off TCP.
+# ⛔ `chrono` added 2026-08-07 — setu's agnos read path needs it, and crab was missing it while
+# building clean: `dist/setu.deps` under-reported 8 of setu's 12 leaves, which switched OFF
+# `cyrius deps`' own validation. setu 0.8.2 corrects its sidecar, so the check fires again and this
+# gap became a hard error. See setu docs/development/issues/2026-08-07-distlib-deps-sidecar-under-reports.md
+stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "net", "chrono"]
 
 # sadish (2D vector) THEN rekha (text; references sd_*) THEN dhancha (widgets;
 # references both). setu is the client transport. dhancha's dist references
@@ -53,5 +61,5 @@ modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.7.2"
+tag = "0.8.3"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
 modules = ["dist/setu.cyr"]
