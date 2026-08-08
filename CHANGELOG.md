@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — `AE-6`: crab's surface is PREMULTIPLIED, so the desktop composites it on the shader
+## [Unreleased] — `AE-6`: crab's surface is PREMULTIPLIED, and crab EXITS when its window is closed
 
 ⭐⭐ **crab now declares `SETU_SURF_PREMULTIPLIED`, unconditionally.** That routes it through agnos
 `gpu_shader_op #92` op 0x01 — a real per-pixel `out = src + dst * (1 - src_a)` on the compute units —
@@ -31,6 +31,26 @@ correctly found nothing. Without them the suite would have read green while test
 
 ⚠ `src/test.cyr` is now deliberately empty with a warning in it: bare `cyrius test` auto-discovers
 `tests/*.tcyr` and does **not** run the `[build].test` hook, so a gate written there never executes.
+
+### Fixed — crab EXITS when the compositor closes its window
+
+⛔⛔ **crab used to ignore being closed, and stayed running for the rest of the boot.** aethersafha's F4
+removed the window from its own vector and told nobody, so on the 2026-08-08 iron burn the process was
+left **orphaned alive** — still holding its `#97` channel end and its `#86` GPU-visible shm slot. There
+are only **16 of those slots system-wide**, so a handful of closes would starve hardware compositing for
+everything on the system. The operator saw it as *"not closing properly"*.
+
+⭐ **`SETU_CLOSE` (kind 7) has been in the protocol from the start** (`lib/setu.cyr:140`) — it was simply
+never sent by any compositor and never handled by any client. crab now handles it in the same dispatch
+that already reads `SETU_INPUT_KEY`, leaves the frame loop, and falls into the existing
+`setu_client_close` teardown.
+
+⚠ **crab's EXIT is the release mechanism, not a courtesy.** The kernel reclaims the channel end and the
+shm slot when the process dies, so a client that acknowledges the message and keeps running still leaks.
+
+⭐ Verified in QEMU: the compositor sent `SETU_CLOSE`, crab printed
+`crab: compositor closed the window -- exiting`, and the screendump shows the window gone with clean
+background where it stood — no ghost, no doubling.
 
 ## [0.4.5] - 2026-08-07 — the setu handshake fails out loud
 

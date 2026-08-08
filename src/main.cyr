@@ -210,6 +210,19 @@ fn main(): i64 {
     while (frame < 2000000) {
         if (setu_poll_input(fd, inmsg) == 1) {
             var k = setu_msg_kind(inmsg);
+            # ⛔⛔ THE COMPOSITOR CLOSED OUR WINDOW — EXIT, do not keep drawing into a surface nobody
+            # composites. Before this, aethersafha's F4 removed the window from its own list and said
+            # nothing, so crab carried on forever: on the 2026-08-08 iron burn the process was left
+            # **orphaned alive**, holding its `#97` channel end and its `#86` GPU-visible shm slot for
+            # the rest of the boot. There are only 16 of those slots system-wide.
+            # ⭐ Our EXIT is what releases them — the kernel reclaims the channel end and the slot when
+            # the process dies. So honouring this message is not politeness, it is the release path.
+            # ⚠ `SETU_CLOSE` has been in the protocol since it was written (lib/setu.cyr:140); it was
+            # simply never sent and never handled. Nothing here is a protocol extension.
+            if (k == SETU_CLOSE) {
+                crab_say("crab: compositor closed the window -- exiting\n");
+                frame = 2000000;                 # fall out of the loop, then run the normal teardown
+            }
             if (k == SETU_INPUT_KEY) {
                 var u = setu_msg_arg(inmsg, 1);
                 crab_say("crab: key received\n");
