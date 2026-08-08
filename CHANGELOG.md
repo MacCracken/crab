@@ -2,6 +2,36 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — `AE-6`: crab's surface is PREMULTIPLIED, so the desktop composites it on the shader
+
+⭐⭐ **crab now declares `SETU_SURF_PREMULTIPLIED`, unconditionally.** That routes it through agnos
+`gpu_shader_op #92` op 0x01 — a real per-pixel `out = src + dst * (1 - src_a)` on the compute units —
+instead of `#87`, a byte mover with no ALU that can only copy. The blend is the one operation CP-DMA
+structurally cannot do, and until now it had **no client at all**.
+
+**crab satisfies the op's precondition by construction.** sadish's `sd_alpha_of()` maps a bare `sd_rgb`
+value's 0 byte to 255 and `draw.cyr` stores that, so every pixel crab produces is **alpha 255** — trivially
+premultiplied, since at a == 255 premultiplied and straight alpha are the same bytes.
+
+⚠ **No flag, no arm, no env var.** The client states what its pixels ARE; the compositor decides how to draw
+them. A boot whose GPU has no shader envelope falls back to `#87` **per window** in
+`ae_gpu_present_frame` — exact at alpha 255 — instead of costing the frame its hardware compositing.
+
+### Added — `tests/crab.tcyr`: the premultiplied contract, per pixel, on the production render
+
+crab's entire test coverage was `assert(1, "true is true")` and `1 + 1 == 2`, while the arc's docs carried
+"crab is alpha-255 clean throughout" as a load-bearing fact. It was true by inheritance from sadish, with
+nothing pinning it. The suite now renders the **production `crab_render`** and asserts `a == 255` **and**
+`c <= a` — the op's actual contract, not a proxy — on all 83,600 pixels, so if crab ever gains a translucent
+element the gate fails and names `sd_premul()` as the fix. **11/11**, with negative controls for each check.
+
+⛔ **The negative controls caught a bug in themselves first.** They seeded `pix + 4*3` for "pixel 4, byte 3"
+— a pixel is **4 bytes**, so that wrote pixel 3's blue channel, left every alpha at 255, and the scan
+correctly found nothing. Without them the suite would have read green while testing nothing.
+
+⚠ `src/test.cyr` is now deliberately empty with a warning in it: bare `cyrius test` auto-discovers
+`tests/*.tcyr` and does **not** run the `[build].test` hook, so a gate written there never executes.
+
 ## [0.4.5] - 2026-08-07 — the setu handshake fails out loud
 
 ### Changed — setu > 0.8.1: crab presents on the agnos channel band

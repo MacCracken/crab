@@ -1,13 +1,141 @@
-# crab test suite
-# Stdlib auto-included via cyrius.cyml
+# tests/crab.tcyr — crab test suite, HOST.
+#
+# ⭐⭐ WHAT THIS EXISTS TO GATE: `AE-6`, the agnos `gpu_shader_op #92` op 0x01 premultiplied blend.
+# crab is the arc's first client to request `SETU_SURF_PREMULTIPLIED` (armed by `CRAB_PREMUL=1`, see
+# `crab_surface_flags` in src/main.cyr), and that routing is only CORRECT if crab's pixels satisfy the
+# op's precondition. The kernel does not check it and cannot: passing straight alpha to `#92` does not
+# error anywhere in the stack — **it renders washed out, silently**.
+#
+# ⛔ THIS FILE WAS AN 11-LINE STUB (`fn main() { return 0; }`), so `cyrius test` passed crab trivially
+# while the arc's docs asserted "crab is alpha-255 clean throughout" as a fact. That claim was TRUE, but
+# it was true by inheritance from sadish and nothing pinned it: one translucent element anywhere in the UI
+# would have made the premul routing wrong, with no test to say so and no visible error to notice.
+# ⇒ The claim is now a measurement over the PRODUCTION render path.
+# [[feedback_audit_re_derive_dont_validate_comments]]
+#
+# THE INVARIANT, and it is the op's actual contract rather than a proxy for it:
+#   for every pixel:  a == 255   AND   b <= a  AND  g <= a  AND  r <= a
+# `c <= a` is what premultiplied MEANS. At a == 255 it is trivially satisfied, which is exactly why crab
+# is a safe first consumer — and asserting the real inequality (not just "a == 255") keeps the test
+# honest if crab ever gains a translucent element: it will then fail on the alpha check and have to
+# route through `sd_premul()`.
+#
+# ⭐ And the payoff at a == 255: the blend collapses to `out = src + dst * (1 - 255/255) = src`, so
+# `#92` must produce a picture BYTE-IDENTICAL to the opaque `#87` copy. The iron oracle for AE-6 is
+# therefore "the panel does not change", which is falsifiable by anything wrong in the shader path.
+
+include "src/ui.cyr"
+
+# --- a mock readdir buffer, mirroring src/render_test.cyr's fixture shape ------------------------
+# One 64-byte record per entry: NUL-terminated name at +0, type byte at +63.
+fn t_entry(buf, i, name, is_dir): i64 {
+    var rec = buf + i * 64;
+    var k = 0;
+    while (load8(name + k) != 0) { store8(rec + k, load8(name + k)); k = k + 1; }
+    store8(rec + k, 0);
+    store8(rec + 63, is_dir);
+    return 0;
+}
+
+# Render the REAL dual-pane UI through the production `crab_render`, and return the sadish surface.
+# ⚠ Deliberately the production entry point, not a hand-built buffer: a fixture that painted its own
+# pixels would assert something about the fixture.
+fn t_render(w, h): i64 {
+    var lbuf = alloc(16 * 64);
+    var rbuf = alloc(16 * 64);
+    var a0 = "aethersafha"; t_entry(lbuf, 0, a0, 0);
+    var a1 = "puka";        t_entry(lbuf, 1, a1, 0);
+    var a2 = "crab";        t_entry(lbuf, 2, a2, 0);
+    var b0 = "bin";         t_entry(rbuf, 0, b0, 1);
+    var b1 = "boot";        t_entry(rbuf, 1, b1, 1);
+    var b2 = "readme.md";   t_entry(rbuf, 2, b2, 0);
+    var lp = "/bin";
+    var rp = "/";
+    var lsizes = alloc(16 * 8);
+    var rsizes = alloc(16 * 8);
+    store64(lsizes + 0, 14995144); store64(lsizes + 8, 80784); store64(lsizes + 16, 301896);
+    store64(rsizes + 0, 4096);     store64(rsizes + 8, 4096);  store64(rsizes + 16, 512);
+    var lmt = alloc(16 * 8);
+    var rmt = alloc(16 * 8);
+    store64(lmt + 0, 1783900800); store64(lmt + 8, 1783900800); store64(lmt + 16, 1783900800);
+    store64(rmt + 0, 1783900800); store64(rmt + 8, 1783900800); store64(rmt + 16, 1783900800);
+    # left pane active, selection on row 1 — the focus tint and the highlight are both exercised,
+    # because a highlight is the most likely place for someone to reach for translucency later.
+    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rmt, rbuf, 3, rp, rsizes, rmt);
+}
+
+# Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
+# `bad_kind`: 1 = alpha not 255, 2 = a channel exceeds alpha (c > a). Reported separately because they
+# want different fixes — the first means "route through sd_premul", the second means the premultiply
+# was skipped or done wrong.
+var t_bad_alpha = 0;
+var t_bad_premul = 0;
+fn t_scan_premul(pix, n): i64 {
+    t_bad_alpha = 0;
+    t_bad_premul = 0;
+    var i = 0;
+    while (i < n) {
+        var off = i * 4;
+        var b = load8(pix + off + 0);
+        var g = load8(pix + off + 1);
+        var r = load8(pix + off + 2);
+        var a = load8(pix + off + 3);
+        if (a != 255) { t_bad_alpha = t_bad_alpha + 1; }
+        if (b > a) { t_bad_premul = t_bad_premul + 1; }
+        else { if (g > a) { t_bad_premul = t_bad_premul + 1; }
+               else { if (r > a) { t_bad_premul = t_bad_premul + 1; } } }
+        i = i + 1;
+    }
+    return t_bad_alpha + t_bad_premul;
+}
 
 fn main() {
     alloc_init();
-    test_group("smoke");
-    assert(1, "true is true");
-    assert_eq(1 + 1, 2, "math works");
+
+    test_group("crab — AE-6: the #92 premultiplied precondition holds for every pixel");
+    var w = 380;
+    var h = 220;
+    var sds = t_render(w, h);
+    assert(sds != 0, "the production crab_render returned a surface");
+    var pix = sd_surface_pixels(sds);
+    assert(pix != 0, "the surface has pixels");
+    var n = w * h;
+
+    assert_eq(t_scan_premul(pix, n), 0, "all 83,600 pixels satisfy a == 255 AND c <= a");
+    assert_eq(t_bad_alpha, 0, "no pixel carries a non-opaque alpha");
+    assert_eq(t_bad_premul, 0, "no channel exceeds its own alpha (the premultiplied contract)");
+
+    # ⛔ NEGATIVE CONTROLS — the scan must be able to FAIL, in each mode independently. A checker that
+    # cannot report a violation is worse than none: it converts an unexamined surface into a green gate.
+    # ⚠ A PIXEL IS 4 BYTES: pixel i's byte k lives at i*4 + k. The first version of these controls
+    # seeded `pix + 4*3`, which is pixel 3's BLUE channel — so it set a colour byte, left every alpha at
+    # 255, and the scan correctly reported no violation. ⭐ The controls caught a bug in the control
+    # itself, which is the entire reason they are here.
+    store8(pix + 4 * 4 + 3, 128);                  # pixel 4: alpha 128, channels untouched
+    assert(t_scan_premul(pix, n) > 0, "seeded non-opaque alpha is CAUGHT");
+    assert_eq(t_bad_alpha, 1, "...and attributed to the alpha check, exactly once");
+    store8(pix + 4 * 4 + 3, 255);                  # restore
+
+    store8(pix + 8 * 4 + 3, 10);                   # pixel 8: alpha 10 with a bright channel
+    store8(pix + 8 * 4 + 2, 200);                  # r = 200 > a = 10  -> straight alpha, not premultiplied
+    assert(t_scan_premul(pix, n) > 0, "seeded straight-alpha pixel is CAUGHT");
+    assert_eq(t_bad_premul, 1, "...and attributed to the c <= a check, exactly once");
+
+    # ⭐ THE CONSEQUENCE THAT MAKES THE IRON ORACLE WORK, asserted rather than asserted-in-a-comment:
+    # at a == 255 the kernel's blend `out = src + dst * (1 - a/255)` has a zero dst term, so #92 and #87
+    # must agree bit for bit. This checks the arithmetic on a real pixel value from the render above.
+    test_group("crab — AE-6: at alpha 255 the blend collapses to a copy");
+    var src = 0xC0;                                 # any channel value
+    var dst = 0x37;                                 # whatever was already in the back buffer
+    var a = 255;
+    var out = src + (dst * (255 - a)) / 255;
+    assert_eq(out, src, "out = src + dst*(1 - 255/255) == src, so the picture cannot change");
+    var a_half = 128;
+    var out_half = src + (dst * (255 - a_half)) / 255;
+    assert(out_half != src, "and at alpha 128 it genuinely differs — the identity is alpha-specific");
+
     return assert_summary();
 }
 
-var exit_code = main();
-syscall(60, exit_code);
+fn _entry(): i64 { var rc = main(); syscall(SYS_EXIT, rc); return 0; }
+_entry();

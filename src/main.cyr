@@ -17,6 +17,27 @@ include "src/ui.cyr"
 
 fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 
+# ⭐⭐ `AE-6` — crab's surface is PREMULTIPLIED, unconditionally.
+#
+# This is what routes crab through agnos `gpu_shader_op #92` op 0x01 — a real per-pixel
+# `out = src + dst * (1 - src_a)` on the shader cores — instead of `#87`, a byte mover with no ALU that can
+# only copy. The blend is the one operation CP-DMA structurally cannot do, and it had no client at all.
+#
+# ⭐ crab satisfies the op's precondition by construction: sadish's `sd_alpha_of()` maps a bare `sd_rgb`
+# value's 0 byte to 255 and `draw.cyr` stores that, so every pixel crab produces is **alpha 255**. At
+# a == 255 premultiplied and straight alpha are the same bytes, so the surface is trivially premultiplied
+# and the blend collapses to `out = src + dst*0 = src`. `tests/crab.tcyr` asserts `a == 255 && c <= a` on
+# every pixel of the production render, with negative controls, so the precondition is a gate and not a
+# hope. [[feedback_audit_re_derive_dont_validate_comments]]
+#
+# ⚠ A boot whose GPU cannot run the shader is handled in the COMPOSITOR, per window: `ae_gpu_present_frame`
+# falls back to `#87` for a premultiplied surface when the envelope is absent, which is exact at alpha 255.
+# Nothing is conditional here, and there is no arm — the client states what its pixels ARE and the
+# compositor decides how to draw them.
+fn crab_surface_flags(): i64 {
+    return SETU_SURF_PREMULTIPLIED;
+}
+
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").
 fn crab_log_cd(path): i64 {
     crab_say("crab: cd ");
@@ -168,7 +189,7 @@ fn main(): i64 {
 
     var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
-    if (setu_send(fd, setu_create_surface(w, h, 0)) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
+    if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
     var reply = setu_msg_new();
     if (setu_read_msg(fd, reply) < 0) { crab_say("crab: no surface_created reply\n"); return 1; }
     if (setu_msg_kind(reply) != SETU_SURFACE_CREATED) { crab_say("crab: reply was not surface_created\n"); return 1; }
