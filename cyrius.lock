@@ -3,7 +3,6 @@ commit	16aa349f0f70455096032860337b785bd71f7530	rupa	https://github.com/MacCrack
 commit	c14135b8fd73c5f797ea5e1bb413c8b9287b6953	rekha	https://github.com/MacCracken/rekha.git	0.3.4
 commit	b81c14da002e601b72c1f8e053a8da1d452ef302	kashi	https://github.com/MacCracken/kashi.git	1.0.4
 commit	04f0491dba59a9bdbba5436704b21b9c5dd426fd	dhancha	https://github.com/MacCracken/dhancha.git	0.9.3
-commit	91e91a1eebc8bb76fb890aa01521d75385c6dd51	setu	https://github.com/MacCracken/setu.git	0.8.4
 d9f3b17ddbbe1bba48917c3a679807b01c39c4a1ce776efdbdfbb7a1680e86e4  lib/tagged.cyr
 b96a50f8df3b533649d09cd239578811a22097434e09d89b113ce8b7f56801db  lib/net.cyr
 8ac4c97920a8e743acd08fbfe90a5e67d572eae1d31d7cf83bf4fa014c0857e0  lib/syscalls_macos.cyr
@@ -29,7 +28,7 @@ f7b9d52f29de6d3d633962ccc765a76637091a7256eebc1da5547530eed2c44b  lib/args_win.c
 8af62caaa9cdd96bca338a5587526a275a0e36dbfc33066febf81498321f9bb1  lib/bench.cyr
 e46a35925484d3afbfaaac02676f51adaab953608879158d52f1b997fb5920a8  lib/vec.cyr
 92fe6f0e5ffbd6e275e49cdf02e611b522562a2ba5f5ac7e6cf47704542e3dff  lib/io.cyr
-dfb0d5b70199614ff8800b80aca42c3b7c4f1ce96fe28d3488ceaf7c2026364d  lib/setu.cyr
+05cc906f012eb9ce41125139207b58289fea0ed11acf0e7e0a8a6f2ac563468a  lib/setu.cyr
 5c60803482e41924217c1dcd38e86d966f4ee75e9c15cba8bf698a56b8ed794d  lib/rupa.cyr
 9fd6444e8cfcf7950837e955473adc5bab6d7bf4fa2c15f8ce2578360c4100eb  lib/hashmap.cyr
 f39294af5dc32bec02ec7d2204ca82033abe4f4bafc78e9be792eb178132e244  lib/fnptr.cyr

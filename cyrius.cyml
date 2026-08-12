@@ -61,5 +61,8 @@ modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-tag = "0.8.4"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
+# ⚠ `path` added 2026-08-12 — setu 0.8.5 centralises the rendezvous ($SETU_SOCKET) and a
+# tag-only dep could not be built against it locally. Every other dep here carries both.
+path = "../setu"
+tag = "0.8.5"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
 modules = ["dist/setu.cyr"]
