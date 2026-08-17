@@ -2,6 +2,40 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.9] - 2026-08-17 — desktop-stack catch-up: dhancha 0.9.5, setu 0.8.6, one language version
+
+### Changed — `[deps.dhancha]` 0.9.4 -> **0.9.5**
+
+Picks up two toolkit fixes crab is a direct consumer of: `dh_hit_test` now CLIPS to the parent, so a
+widget can no longer answer clicks at coordinates where it is not drawn, and `dh_surface_present`
+refuses (`DHANCHA_ERR_UNSUPPORTED`) instead of returning `DHANCHA_OK` without presenting.
+⚠ The clipping change is behaviour crab inherits in its dual-pane UI (30 dhancha calls in `src/ui.cyr`);
+its own 11 + 1 assertions stay green.
+
+### Changed — `[deps.setu]` 0.8.5 -> **0.8.6**
+
+`present_probe` honours `SETU_CLOSE`. Not crab's own defect — crab has always exited on close — but it
+shared the 16-slot `#86` budget with the probe, which leaked one slot per desktop launch (measured on
+iron: 16 → 15 → 14 → 13).
+
+### Changed — cyrius pin 6.5.9 -> **6.5.21**, matching agnos, aethersafha and dhancha
+
+One language version across the desktop stack.
+
+### Fixed — `[deps.kashi]` gains a `path` override
+
+Every other dep in this stack carries `git` + `path`; kashi did not, so a local kashi change could not
+be built against. ⛔ `path` WINS over `tag`, so a green build here is not evidence the declared graph
+resolves — re-verify the tag against kashi's `VERSION` at each cut.
+
+⚠ **Unblocked a hard resolution failure, whose cause was NOT here.** `cyrius deps` was failing with
+*"dep dhancha requires 'kashi_font_data' but it is not in the cyrius stdlib"*. kashi is VENDORED, so it
+belongs to neither list; dhancha's `dist/dhancha.deps` sidecar wrongly declared it a stdlib leaf.
+Fixed in dhancha 0.9.5 (a generator script + CI gate, ported from setu's, for the same open cyrius
+defect: `setu docs/development/issues/2026-08-07-distlib-deps-sidecar-under-reports.md`).
+
+**Verified**: `--agnos` build OK, 356,360 B; host suites **11 + 1** green.
+
 ## [0.4.8] - 2026-08-16 — the connection goes through dhancha, not around it
 
 ### Changed — `dh_client_connect` / `dh_client_fd`, and `[deps.dhancha]` 0.9.3 -> 0.9.4 with a `path`
