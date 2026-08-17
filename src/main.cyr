@@ -170,10 +170,21 @@ fn main(): i64 {
     # all now wrong: setu honours the path (0.8.4) and resolves `$SETU_SOCKET` (0.8.5), and the
     # transport is AF_UNIX/SOCK_SEQPACKET on Linux and the `#97` channel band on agnos. The TCP
     # history it recounted is real but belongs in setu's own CHANGELOG, not at a live call site.
+    # ⭐⭐ THROUGH THE TOOLKIT, NOT AROUND IT (2026-08-16). This called `setu_client_connect` directly
+    # while crab already builds its UI on dhancha (30 API calls in `src/ui.cyr`) — so the app depended on
+    # the toolkit for pixels and bypassed it for the connection. `dh_client_connect` is a one-line
+    # delegation to the same setu entry point, so this changes no behaviour; what it changes is WHERE the
+    # seam is. When the transport moves again — and it has twice, TCP -> AF_UNIX -> the agnos `#97`
+    # channel band — a consumer routed through dhancha follows for free, and one that is not gets left
+    # behind silently. dhancha itself was left behind exactly that way: it pinned setu 0.7.4 across the
+    # channel-band cutover and had NO agnos arm until 0.9.4.
+    # ⚠ The PRESENT path deliberately stays hand-rolled below: crab uses a LIVE shared buffer
+    # (`setu_buf_create` once, `setu_buf_write` per frame, no re-present), while `dh_client_present`
+    # re-sends pixels every call. Those are different models and swapping them is not a rename.
     var path = 0;
-    var c = setu_client_connect(path);
+    var c = dh_client_connect(path);
     if (c == 0) { crab_say("crab: setu connect failed\n"); return 1; }
-    var fd = setu_client_fd(c);
+    var fd = dh_client_fd(c);
 
     var buf_id = setu_buf_create(nbytes);
     if (buf_id < 0) { crab_say("crab: buf_create failed\n"); return 1; }

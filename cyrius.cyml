@@ -56,7 +56,12 @@ modules = ["src/font_data.cyr"]
 
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
-tag = "0.9.3"
+# ⚠ `path` added 2026-08-16, matching every other dep in this stack: without it crab could only build
+# against a PUBLISHED tag, so a local dhancha fix could not be exercised until it was pushed — which is
+# how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
+# evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
+path = "../dhancha"
+tag = "0.9.4"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

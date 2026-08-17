@@ -2,6 +2,29 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.8] - 2026-08-16 — the connection goes through dhancha, not around it
+
+### Changed — `dh_client_connect` / `dh_client_fd`, and `[deps.dhancha]` 0.9.3 -> 0.9.4 with a `path`
+
+crab already built its UI on dhancha (30 API calls in `src/ui.cyr`) while opening its own setu
+connection — depending on the toolkit for pixels and bypassing it for the transport.
+
+⛔ **THE BYPASS WAS FORCED, NOT CHOSEN.** dhancha's dist bundle shipped only
+`error / widget / layout / event / theme / surface`; its client layer was never published, so
+`dh_client_connect` did not exist downstream. Fixed in dhancha 0.9.4; this is the consumer half.
+
+⚠ The PRESENT path stays hand-rolled: crab uses a LIVE shared buffer (`setu_buf_create` once,
+`setu_buf_write` per frame, no re-present) while `dh_client_present` re-sends pixels every call. Swapping
+those is not a rename.
+
+⚠ `path = "../dhancha"` added, matching every other dep in this stack — without it crab could only build
+against a PUBLISHED tag, so a local toolkit fix could not be exercised until pushed, which is how a burn
+ends up testing last week's library. ⛔ `path` WINS over `tag`: a green build here is not evidence the
+declared graph resolves.
+
+**Verified**: 352,176 B, host suites 11 + 1 green, and in QEMU alongside puka —
+`presented: 2`, `exit 95` (`agnos/scripts/harness/puka-terminal-test.py`).
+
 ## [0.4.7] - 2026-08-12 — one rendezvous, named by setu
 
 ⭐ Passes **0** to setu instead of hardcoding `"/tmp/aethersafha-setu.sock"`, so the socket is named in
