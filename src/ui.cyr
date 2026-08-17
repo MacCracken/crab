@@ -5,7 +5,9 @@
 #
 # Include with the dhancha/sadish/rekha/kashi deps.
 
-enum CrabUi { CRAB_ROWS_CAP = 7; }        # max rows shown per pane (no scrolling yet)
+# ⛔ `CRAB_ROWS_CAP = 7` LIVED HERE UNTIL 0.4.10 and it is deliberately not replaced by a bigger
+# number. A pane now holds a dhancha LIST, which scrolls and clips, so there is no row count to cap:
+# the viewport is however tall the window is and the content is however long the directory is.
 
 # Unsigned int -> decimal string in dst (NUL-terminated). Returns the length.
 fn crab_u2s(dst, n): i64 {
@@ -83,14 +85,14 @@ fn crab_mtime_str(dst, epoch): i64 {
 # One entry row: a 13-char name column, then "/" for a directory or a right-gapped
 # human size for a file. Highlighted when selected: BRIGHT in the active pane, DIM
 # in the inactive one.
-fn crab_row(col, name, is_dir, size, selected, active): i64 {
+fn crab_row(col, name, is_dir, size): i64 {
     var row = dh_widget_new(LABEL);
-    var bg = dh_theme_widget();                # unselected row (the list-item surface)
-    if (selected != 0) {
-        # selected: accent when this pane is focused, a muted line-tint when it isn't
-        if (active != 0) { bg = dh_theme_accent(); } else { bg = dh_theme_line(); }
-    }
-    dh_widget_set_bg(row, bg);
+    # ⭐ NO BACKGROUND (0.4.10). Rows used to paint their own selection — accent when the pane was
+    # active, a muted line-tint when it was not — and dhancha 0.9.8 does exactly that from the LIST's
+    # own `DH_W_SEL` and focus. ⛔ A row that keeps a background here paints OVER the highlight and
+    # the selection silently stops showing; leaving it unset is what lets the toolkit's highlight
+    # through. This deletion is the point of the port: the rule lived in three apps, now it lives once.
+    dh_widget_set_bg(row, 0 - 1);
     dh_widget_set_pref(row, 0, 26);
     var disp = alloc(48);
     var k = 0; var done = 0;                          # name column: 13 chars, space-padded
@@ -116,12 +118,19 @@ fn crab_row(col, name, is_dir, size, selected, active): i64 {
         store8(disp + w, 0);
     }
     dh_widget_set_text(row, disp);
-    dh_widget_add_child(col, row);
+    # ⚠ `dh_list_add`, not `dh_widget_add_child` — it stamps the row height and pins flex to 0.
+    dh_list_add(col, row);
     return 0;
 }
 
-# One pane: a fixed-width column with a path header + up to CRAB_ROWS_CAP entry rows
-# read from `buf` (a readdir buffer of `count` 64-byte records).
+# One pane: a fixed-width column with a path header above a dhancha LIST holding EVERY entry read
+# from `buf` (a readdir buffer of `count` 64-byte records). -> the pane's LIST widget.
+#
+# ⭐⭐ THE PORT (0.4.10): this used to be a `BOX_V` of at most `CRAB_ROWS_CAP` rows, and the entries
+# past row 7 were simply NOT DRAWN — a directory's 8th file did not exist as far as the operator
+# could tell. Every row is now added and the LIST scrolls, so the cap and the truncation are gone.
+# ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
+# overflowing it, and a list whose content exactly fills the viewport never scrolls.
 fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
@@ -135,19 +144,23 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     dh_widget_set_text(hdr, path);
     dh_widget_add_child(col, hdr);
 
-    var cap = count;
-    if (cap > CRAB_ROWS_CAP) { cap = CRAB_ROWS_CAP; }
+    var lst = dh_list_new(26);                 # row height matches crab_row's pref
+    dh_widget_set_flex(lst, 1);                # the list takes the column's remaining height
     var i = 0;
-    while (i < cap) {
+    while (i < count) {
         var rec = buf + i * 64;                 # name (NUL-terminated) at +0
         var is_dir = load8(rec + 63);           # type byte: 1 = dir
         var sz = load64(sizes + i * 8);         # per-entry byte size (-1 = dir/unknown)
-        var s = 0; if (sel == i) { s = 1; }
-        crab_row(col, rec, is_dir, sz, s, active);
+        crab_row(lst, rec, is_dir, sz);
         i = i + 1;
     }
+    # ⛔ THE SELECTION IS SET, NOT PAINTED. dhancha draws it — accented when this list holds focus,
+    # muted when it does not — which is why `active` no longer reaches the rows at all.
+    if (count > 0) { dh_list_select(lst, sel); }
+    if (active != 0) { dh_focus_set(lst); }
+    dh_widget_add_child(col, lst);
     dh_widget_add_child(root, col);
-    return 0;
+    return lst;
 }
 
 # Build the status-line text (returned as a cstring) for the active pane's selected
@@ -177,7 +190,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 
 # Build + render the dual-pane window: two readdir panes on top, a status line
 # (the active selection's size + mtime) along the bottom.
-fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes): i64 {
+fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
     var root = dh_widget_new(WINDOW);
     dh_widget_set_layout(root, BOX_V);          # panes row on top, status line below
     dh_widget_set_bg(root, dh_theme_bg());     # the desktop void
@@ -188,8 +201,8 @@ fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    crab_pane(panes, panew, lpath, lbuf, ln, lsizes, sel_l, la);
-    crab_pane(panes, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
+    var llst = crab_pane(panes, panew, lpath, lbuf, ln, lsizes, sel_l, la);
+    var rlst = crab_pane(panes, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
     dh_widget_add_child(root, panes);
 
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
@@ -203,13 +216,33 @@ fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var surf = dh_surface_new(w, h);
     dh_surface_set_root(surf, root);
     dh_layout_apply(root, w, h);
+
+    # ⭐⭐ SCROLL ROUND-TRIPS THROUGH THE APP, and it has to. crab rebuilds the whole widget tree
+    # every frame, so a LIST's scroll offset — which lives on the widget — is destroyed and recreated
+    # each time. Restoring the previous offset before asking the list to follow the selection is what
+    # preserves `dh_list_scroll_to_sel`'s MINIMUM-MOVE rule: with the offset reset to 0 each frame it
+    # would still be correct, but every downward step past the viewport would snap the selection to
+    # the top edge instead of scrolling by one row.
+    # ⚠ THE ORDER IS LOAD-BEARING: `scroll_to_sel` needs the list's laid-out HEIGHT to know what
+    # "visible" means, so it must run after the first layout — and the offset it produces moves the
+    # rows, so a second layout is required before anything is drawn.
+    dh_list_scroll_to(llst, load64(scroll_l));
+    dh_list_scroll_to(rlst, load64(scroll_r));
+    dh_list_scroll_to_sel(llst);
+    dh_list_scroll_to_sel(rlst);
+    store64(scroll_l, dh_widget_scroll_y(llst));
+    store64(scroll_r, dh_widget_scroll_y(rlst));
+    dh_layout_apply(root, w, h);
+
     return dh_surface_render(surf, font);
 }
 
-# Clamp a selection index to the visible row count (count capped at CRAB_ROWS_CAP).
+# Highest selectable index in a pane of `count` entries.
+# ⛔ THIS USED TO CLAMP AT `CRAB_ROWS_CAP`, AND THAT WAS NOT A DISPLAY LIMIT — IT WAS A REACHABILITY
+# ONE. Down-arrow stopped at row 7, so in a directory of 40 files the other 33 could not be selected,
+# entered, or acted on at all. They were not "off screen pending a scrollbar"; they were unreachable.
+# With the pane on a scrolling LIST the whole directory is navigable and the cap is gone.
 fn crab_maxsel(count): i64 {
-    var c = count;
-    if (c > CRAB_ROWS_CAP) { c = CRAB_ROWS_CAP; }
-    if (c <= 0) { return 0; }
-    return c - 1;
+    if (count <= 0) { return 0; }
+    return count - 1;
 }

@@ -1,8 +1,26 @@
-# crab render_test — HOST harness: build two mock readdir buffers, render the
-# dual-pane UI (kashi text), and dump the BGRA surface for a python→PNG eyeball.
-# Fast layout iteration (no agnos / no real readdir).
+# crab render_test — HOST harness + SELF-CHECKING pixel proof for the dhancha LIST port (0.4.10).
+# Exit code = failed checks. Also dumps the BGRA surface for a python→PNG eyeball.
+#
+# ⭐⭐ WHAT THIS EXISTS TO PROVE. Before 0.4.10 a pane was a `BOX_V` of at most 7 rows: entry 8 and
+# beyond were not drawn AND could not be selected — `crab_maxsel` clamped the down-arrow at 7, so in
+# a 40-file directory 33 files were unreachable. The checks below use a 12-entry pane in a viewport
+# that fits ~6, which is exactly the case the old code could not represent.
+#
+# ⚠ These are PIXEL checks, not state checks. "crab stopped hand-rolling its list" is a claim about
+# what reaches the screen; asserting that `dh_list_select` stored an integer would prove nothing
+# about whether the operator can see which file is selected.
 
 include "src/ui.cyr"
+
+var g_fails = 0;
+var g_n = 0;
+
+fn check(got, want): i64 {
+    g_n = g_n + 1;
+    if (got == want) { return 0; }
+    g_fails = g_fails + 1;
+    return 1;
+}
 
 # Write one 64-byte readdir record: name (NUL-terminated) at +0, type at +63.
 fn rt_entry(buf, i, name, is_dir): i64 {
@@ -11,6 +29,16 @@ fn rt_entry(buf, i, name, is_dir): i64 {
     while (load8(name + k) != 0) { store8(rec + k, load8(name + k)); k = k + 1; }
     store8(rec + k, 0);
     store8(rec + 63, is_dir);
+    return 0;
+}
+
+# Is any pixel on screen row `y`, scanning x in [x0, x1), equal to `col`?
+fn rt_row_has(sds, y, x0, x1, col): i64 {
+    var x = x0;
+    while (x < x1) {
+        if (sd_surface_pixel_at(sds, x, y) == col) { return 1; }
+        x = x + 1;
+    }
     return 0;
 }
 
@@ -35,14 +63,71 @@ fn main(): i64 {
     store64(rmtimes + 0, 1783900800); store64(rmtimes + 8, 1783900800); store64(rmtimes + 16, 1783900800);
 
     var w = 380; var h = 220;
-    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes);   # left active, sel_l=1
+    var sl = alloc(8); store64(sl, 0);
+    var sr = alloc(8); store64(sr, 0);
+    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr);
+
+    # ---- the ACTIVE pane's selection is accented, the inactive pane's is muted --------------
+    # ⛔ THE ONE QUESTION A TWO-PANE FILE MANAGER MUST ANSWER ON SCREEN: which pane do my arrow keys
+    # drive. Two accented rows cannot answer it. crab used to decide this itself; dhancha 0.9.8 now
+    # decides it from focus, and this pair of checks is what proves the app did not keep a second,
+    # disagreeing copy of the rule.
+    var accent = dh_theme_accent();
+    var line = dh_theme_line();
+    var midl = (w - 6) / 4;                  # a column inside the left pane
+    var midr = w - midl;                     # ...and inside the right one
+    # left pane, sel_l = 1 -> the second row (header 28px + row 26px, so y ~= 28+26+13 = 67)
+    check(rt_row_has(sds, 67, 4, midl + 40, accent), 1);
+    # right pane, sel_r = 0 and NOT active -> muted, and NOT accented
+    check(rt_row_has(sds, 41, midr - 40, w - 4, line), 1);
+    check(rt_row_has(sds, 41, midr - 40, w - 4, accent), 0);
+
+    # ---- ⛔ THE CASE THE OLD CODE COULD NOT REPRESENT: 12 entries, ~6 visible ---------------
+    var big = alloc(16 * 64);
+    var bsz = alloc(16 * 8);
+    var bmt = alloc(16 * 8);
+    var i = 0;
+    while (i < 12) {
+        var nm = "entry";
+        rt_entry(big, i, nm, 0);
+        store64(bsz + i * 8, 100 + i);
+        store64(bmt + i * 8, 1783900800);
+        i = i + 1;
+    }
+    # `crab_maxsel` must reach the LAST entry, not row 7. This is the reachability half.
+    check(crab_maxsel(12), 11);
+    check(crab_maxsel(40), 39);
+    check(crab_maxsel(0), 0);
+
+    # Select the last entry. The pane must SCROLL to it — with the old cap this index could not be
+    # selected at all, and with a non-scrolling box it would be laid out below the viewport.
+    var s2 = alloc(8); store64(s2, 0);
+    var s3 = alloc(8); store64(s3, 0);
+    var sds2 = crab_render(w, h, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3);
+    # ⚠ THE SCROLL OFFSET IS NONZERO — the proof that the list moved rather than silently truncating.
+    check(load64(s2) > 0, 1);
+    # ...and the accented selection is visible SOMEWHERE inside the pane's viewport.
+    var seen = 0;
+    var y = 28;
+    while (y < h - 24) {
+        if (rt_row_has(sds2, y, 4, midl + 40, accent) == 1) { seen = 1; }
+        y = y + 1;
+    }
+    check(seen, 1);
+    # ⛔ AND NOTHING PAINTS BELOW THE PANE. The status line owns the bottom 24px; a row escaping the
+    # list's viewport would land on it. This is the clip half of dhancha 0.9.7 seen from the app.
+    check(rt_row_has(sds2, h - 6, 4, midl + 40, accent), 0);
+
+    # A pane scrolled to the last entry must NOT still be at offset 0 while claiming to show it.
+    check(load64(s2) >= 26, 1);              # at least one row's worth of scroll
 
     var pix = sd_surface_pixels(sds);
-    var path = "/tmp/claude-1000/-home-macro-Repos-agnosticos/47a0fc83-d217-4059-a644-5fc638dfee33/scratchpad/crab.bin";
+    var path = "build/crab-render.bin";
     var fd = syscall(2, path, 577, 420);
     if (fd >= 0) { syscall(1, fd, pix, w * h * 4); syscall(3, fd); }
-    var ok = "crab render_test: dumped 380x220 BGRA\n"; syscall(1, 1, ok, strlen(ok));
-    return 0;
+    var ok = "crab render_test: dumped 380x220 BGRA to build/crab-render.bin\n";
+    syscall(1, 1, ok, strlen(ok));
+    return g_fails;
 }
 
 fn _entry(): i64 { var r = main(); syscall(60, r); return 0; }

@@ -2,6 +2,70 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.10] - 2026-08-17 — the panes stop being hand-rolled: onto dhancha's LIST
+
+### Fixed — ⛔ ENTRIES PAST THE 7th WERE UNREACHABLE, NOT MERELY UNDRAWN
+
+`CRAB_ROWS_CAP = 7` capped the rows a pane BUILT, and `crab_maxsel` clamped the down-arrow to the same
+number. Those two together were not a display limitation: in a directory of 40 files, **33 could not be
+selected, entered, or acted on at all**. A scrollbar was not missing — reachability was.
+
+A pane is now a **`dh_list`** (dhancha 0.9.8) holding every entry, and the cap is deleted rather than
+raised. `crab_maxsel` returns `count - 1`.
+
+### Changed — the selection is dhancha's to paint now
+
+`crab_row` used to set its own background: accent when the pane was active, a muted line-tint when it
+was not. dhancha 0.9.8 draws exactly that from the LIST's own selection and focus, so the row now sets
+**no background at all** and `active` no longer reaches rows.
+
+⚠ **A row that keeps a background paints OVER the toolkit's highlight** and the selection silently
+stops showing. That is the trap in this port, and it is covered by a mutation check.
+
+⛔ This is the deletion that makes the port worth doing. The rule *"accent when focused, muted
+otherwise"* — which is the only thing telling the operator which pane the arrow keys drive — existed in
+crab, in puka, and in aethersafha's launcher, three times, separately. It now exists once.
+
+### Changed — scroll offsets are app state, deliberately
+
+crab rebuilds its whole widget tree every frame, so the LIST that owns a scroll offset is destroyed and
+recreated each time. Two heap cells carry the offsets across frames and `crab_render` writes back the
+values the toolkit settled on.
+
+⚠ **Without them the app would still be correct but would feel wrong**: `dh_list_scroll_to_sel` moves
+by the MINIMUM distance that makes the selection visible, and with the offset reset to 0 every frame
+that minimum is always "put it at the top", so each downward step past the viewport snaps instead of
+scrolling by one row.
+
+⚠ The order in `crab_render` is load-bearing: layout, then follow the selection (it needs the list's
+laid-out height to know what "visible" means), then layout again (the new offset moves the rows).
+
+### Changed — `[deps.rupa]` 0.1.2 -> **0.1.3** (a hard requirement, not a freshness bump)
+
+⛔ **crab did not build against 0.1.2 at all.** dhancha 0.9.6 added per-widget motion, so
+`dist/dhancha.cyr` references `RupaMotion` / `RupaEase` / `rupa_motion_duration`, all of which arrived
+in rupa 0.1.3. The failure is `undefined variable 'RupaMotion'` from a file crab does not own, and it
+had gone unnoticed because crab had not been rebuilt since dhancha 0.9.6 shipped.
+
+⚠ `path = "../rupa"` added to match every other dep in this stack — without it a local rupa change
+cannot be exercised until it is pushed.
+
+### Testing — `src/render_test.cyr` is now a self-checking pixel proof
+
+It used to render a frame, dump BGRA, and assert nothing — and it dumped to a **hardcoded scratchpad
+path from an unrelated session**, so on any other machine the write silently failed. It now returns a
+failure count, writes to `build/crab-render.bin`, and checks on pixels:
+
+- the ACTIVE pane's selection is accented and the inactive pane's is muted (⛔ two accented rows cannot
+  answer "which pane do my arrows drive" — the one question a two-pane manager must answer on screen)
+- a 12-entry pane in a ~6-row viewport scrolls to reveal the last entry, with a nonzero offset
+- nothing paints below the pane onto the status line (dhancha 0.9.7's clip, seen from the app)
+- `crab_maxsel` reaches the last entry at 12 and at 40
+
+Mutation-tested: restoring the 7-row cap, restoring the row background, dropping `dh_focus_set` on the
+active pane, and dropping `scroll_to_sel` are each caught. `cyrius test` still passes 11/11, including
+the `#92` premultiplied-alpha contract — which matters here because the highlight is a new painted rect.
+
 ## [0.4.9] - 2026-08-17 — desktop-stack catch-up: dhancha 0.9.5, setu 0.8.6, one language version
 
 ### Changed — `[deps.dhancha]` 0.9.4 -> **0.9.5**

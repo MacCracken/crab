@@ -192,8 +192,14 @@ fn main(): i64 {
     var active_pane = 0;   # 0 = left, 1 = right
     var sel_l = 0;
     var sel_r = 0;
+    # ⭐ Scroll offsets are APP state (0.4.10). The widget tree is rebuilt every frame, so the LIST
+    # that owns the offset is destroyed and recreated each time; these two cells are what carry it
+    # across, and without them every downward step past the viewport would snap to the top edge
+    # instead of scrolling by a row. Heap cells rather than locals because `crab_render` writes back.
+    var scroll_l = alloc(8); store64(scroll_l, 0);
+    var scroll_r = alloc(8); store64(scroll_r, 0);
 
-    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
+    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
     var reply = setu_msg_new();
@@ -251,7 +257,7 @@ fn main(): i64 {
                     if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
                 }
             }
-            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes);
+            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
             setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
         }
         sys_sched_yield();

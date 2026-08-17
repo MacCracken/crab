@@ -61,7 +61,11 @@ fn t_render(w, h): i64 {
     store64(rmt + 0, 1783900800); store64(rmt + 8, 1783900800); store64(rmt + 16, 1783900800);
     # left pane active, selection on row 1 — the focus tint and the highlight are both exercised,
     # because a highlight is the most likely place for someone to reach for translucency later.
-    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rmt, rbuf, 3, rp, rsizes, rmt);
+    # ⚠ Scroll cells (0.4.10): the pane is a dhancha LIST now, and its scroll offset is app state
+    # because the tree is rebuilt every frame. Fresh cells here — this harness renders one frame.
+    var sl = alloc(8); store64(sl, 0);
+    var sr = alloc(8); store64(sr, 0);
+    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
