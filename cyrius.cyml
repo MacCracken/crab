@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack; AI (semantic find / auto-tag / dedup) via daimon's vector store — files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.9"
+cyrius = "6.5.21"
 
 [build]
 entry = "src/main.cyr"
@@ -51,6 +51,8 @@ modules = ["dist/rekha.cyr"]
 # glyphs for default (font=0) text, so crab provides the glyph data.
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
+# ⚠ `path` — kashi is VENDORED (lib/kashi_font_data.cyr); every other dep in this stack carries both.
+path = "../kashi"
 tag = "1.0.4"
 modules = ["src/font_data.cyr"]
 
@@ -61,7 +63,7 @@ git = "https://github.com/MacCracken/dhancha.git"
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-tag = "0.9.4"
+tag    = "0.9.5"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
@@ -69,5 +71,5 @@ git = "https://github.com/MacCracken/setu.git"
 # ⚠ `path` added 2026-08-12 — setu 0.8.5 centralises the rendezvous ($SETU_SOCKET) and a
 # tag-only dep could not be built against it locally. Every other dep here carries both.
 path = "../setu"
-tag = "0.8.5"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
+tag = "0.8.6"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
 modules = ["dist/setu.cyr"]
