@@ -81,7 +81,7 @@ git = "https://github.com/MacCracken/dhancha.git"
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-tag    = "0.9.10"
+tag    = "0.9.11"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

@@ -180,7 +180,10 @@ fn main(): i64 {
     # channel-band cutover and had NO agnos arm until 0.9.4.
     # ⚠ The PRESENT path deliberately stays hand-rolled below: crab uses a LIVE shared buffer
     # (`setu_buf_create` once, `setu_buf_write` per frame, no re-present), while `dh_client_present`
-    # re-sends pixels every call. Those are different models and swapping them is not a rename.
+    # sends ATTACH + COMMIT every frame. Those are different models and swapping them is not a rename.
+    # ⚠ CORRECTED 2026-08-17: this used to say `dh_client_present` "re-sends pixels every call". That
+    # is no longer true — `setu_client_present` caches a shared buffer (create once, rewrite in place,
+    # recreate on resize). The reason to stay put is the per-frame commit, not a pixel copy.
     var path = 0;
     var c = dh_client_connect(path);
     if (c == 0) { crab_say("crab: setu connect failed\n"); return 1; }
@@ -217,11 +220,27 @@ fn main(): i64 {
     # Backspace (0x2A) ascends to the parent (each re-readdirs + resets the selection).
     # The client logs each key to serial (input gate).
     #ifdef CYRIUS_TARGET_AGNOS
-    var inmsg = setu_msg_new();
+    # ⭐⭐ INPUT THROUGH THE TOOLKIT (0.4.12). This was a hand-rolled `setu_poll_input` loop switching
+    # on raw setu message kinds, while crab already used dhancha for pixels. It is now
+    # `dh_client_poll_event` — the NON-BLOCKING half dhancha grew in 0.9.11 precisely because a file
+    # manager redraws on its own and cannot sit in a blocking read waiting for a keystroke.
+    # ⭐ ADOPTING IT FIXES A LATENT BUG crab could not see. `setu_poll_input` is documented by setu as
+    # "decodes only the FIRST frame of each recv; coalesced or split frames are dropped ... kept for
+    # API compat" — and a dropped tail LOSES KEY-RELEASE EVENTS. dhancha wraps
+    # `setu_client_poll_input`, which reassembles the stream. crab never noticed because it only
+    # reads presses; the next consumer to want held keys would have.
+    # ⚠ The PRESENT path below is deliberately unchanged — see the note at the connect site.
     var frame = 0;
     while (frame < 2000000) {
-        if (setu_poll_input(fd, inmsg) == 1) {
-            var k = setu_msg_kind(inmsg);
+        var ev = dh_client_poll_event(c);
+        # ⛔ EOF IS NOT "no input". -6 means the connection is gone; carrying on would spin 2M frames
+        # rendering into a surface nobody reads, holding the `#86` slot the whole time.
+        if (ev == (0 - 6)) {
+            crab_say("crab: connection closed -- exiting\n");
+            frame = 2000000;
+        }
+        if (ev > 0) {
+            var k = dh_event_kind(ev);
             # ⛔⛔ THE COMPOSITOR CLOSED OUR WINDOW — EXIT, do not keep drawing into a surface nobody
             # composites. Before this, aethersafha's F4 removed the window from its own list and said
             # nothing, so crab carried on forever: on the 2026-08-08 iron burn the process was left
@@ -231,12 +250,12 @@ fn main(): i64 {
             # the process dies. So honouring this message is not politeness, it is the release path.
             # ⚠ `SETU_CLOSE` has been in the protocol since it was written (lib/setu.cyr:140); it was
             # simply never sent and never handled. Nothing here is a protocol extension.
-            if (k == SETU_CLOSE) {
+            if (k == WINDOW_CLOSE) {
                 crab_say("crab: compositor closed the window -- exiting\n");
                 frame = 2000000;                 # fall out of the loop, then run the normal teardown
             }
-            if (k == SETU_INPUT_KEY) {
-                var u = setu_msg_arg(inmsg, 1);
+            if (k == KEY) {
+                var u = dh_event_a(ev);
                 crab_say("crab: key received\n");
                 if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
                 if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
@@ -264,7 +283,7 @@ fn main(): i64 {
         frame = frame + 1;
     }
     #endif
-    setu_client_close(c);
+    dh_client_close(c);          # symmetry: connected through the toolkit, close through it too
     return 0;
 }
 

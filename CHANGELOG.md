@@ -2,6 +2,42 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.12] - 2026-08-17 — input goes through the toolkit
+
+### Changed — the hand-rolled input loop is gone
+
+crab polled `setu_poll_input` and switched on raw setu message kinds while using dhancha for pixels —
+the same split M7-D closed for its panes. Input now runs on **`dh_client_poll_event`** (dhancha
+0.9.11), and `setu_client_close` became `dh_client_close` for symmetry with the existing
+`dh_client_connect`.
+
+⭐ **Adopting it fixes a latent bug crab could not see.** setu documents `setu_poll_input` as
+"decodes only the FIRST frame of each recv; coalesced or split frames are dropped ... kept for API
+compat" — and a dropped tail **loses key-RELEASE events**. dhancha wraps `setu_client_poll_input`,
+which reassembles the stream. crab never noticed because it only reads presses; the next consumer
+wanting held keys would have.
+
+⚠ **Non-blocking was the requirement, not a preference.** A file manager repaints on its own —
+selection moves, panes scroll — so a blocking read would stall the render loop on an idle connection.
+That is why dhancha grew both shapes rather than crab keeping its own loop.
+
+### Added — EOF now exits
+
+`dh_client_poll_event` returns -6 when the connection is gone. crab treats that as terminal instead
+of spinning 2M frames rendering into a surface nobody reads while holding its `#86` shm slot — the
+same class of leak `SETU_CLOSE` handling already guarded against, on the other failure path.
+
+### Unchanged — the present path, deliberately
+
+crab writes a LIVE shared buffer with no per-frame protocol traffic; `dh_client_present` sends
+ATTACH + COMMIT every frame. Different models, and swapping them is not a rename.
+
+⚠ The old note here claimed `dh_client_present` "re-sends pixels every call" — that is **stale**.
+`setu_client_present` has used a cached shared buffer (create once, rewrite in place, recreate on
+resize) for some time. The reason to stay put is the per-frame commit, not the pixel copy.
+
+### Changed — `[deps.dhancha]` 0.9.10 -> **0.9.11**
+
 ## [0.4.11] - 2026-08-17 — toolchain pin to 6.5.27
 
 ### Changed — `cyrius = "6.5.21"` -> **6.5.27**
