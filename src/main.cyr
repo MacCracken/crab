@@ -101,6 +101,13 @@ fn crab_readdir_into(path, buf): i64 {
         crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
         crab_say(" has more entries than are shown\n");
     }
+    # ⭐ ONE LINE PER LISTING, ALWAYS. This is the honest oracle for "did the pane see everything":
+    # a COUNT, stated once. Inferring it by counting per-entry lines made the diagnostic itself the
+    # cost being measured, and 114 console writes per navigation is what made crab feel slow.
+    if (crab_sdig != 0) {
+        crab_u2s(crab_sdig, n);
+        crab_say("crab: listed "); crab_say(crab_sdig); crab_say(" entries in "); crab_say(path); crab_say("\n");
+    }
     return n;
 }
 
@@ -108,6 +115,19 @@ fn crab_readdir_into(path, buf): i64 {
 # and mtime (unix seconds) in mtimes[i]; a stat failure stores -1 in both. On
 # agnos each entry (files AND dirs) is stat'd (#33 — size @ +16, mtime @ +40 of
 # the §4.1 struct) via its full path; on the host both stay -1 (mock render_test).
+# Per-entry stat tracing: OFF unless CRAB_STAT_TRACE=1. `crab_sdig` is allocated ONCE — the old code
+# called alloc(24) per entry with no free, so a session of navigating leaked 24 B per file listed.
+var crab_stat_trace = 0;
+var crab_sdig       = 0;
+
+fn crab_stat_trace_init(): i64 {
+    crab_sdig = alloc(24);
+    var v = getenv("CRAB_STAT_TRACE");
+    if (v == 0) { return 0; }
+    if (load8(v) == 49) { crab_stat_trace = 1; }     # '1'
+    return 0;
+}
+
 fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
     var i = 0;
     while (i < count) {
@@ -119,9 +139,19 @@ fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
         if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) {
             sz = load64(statbuf + 16);               # st_size  @ +16 (agnos stat struct §4.1)
             mt = load64(statbuf + 40);               # st_mtime @ +40 (unix seconds)
-            var sdig = alloc(24);                    # serial gate: "crab: stat <name> <size>"
-            crab_u2s(sdig, sz);
-            crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(sdig); crab_say("\n");
+            # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
+            # This printed unconditionally for every entry and allocated 24 B for every entry — with
+            # the old 32-entry cap that was 32 lines; at 256 on a real `/` (114 entries on iron) it
+            # is 114 writes to a console THREE PROCESSES SHARE UNSERIALISED, on every readdir, i.e.
+            # every descend and every ascend. Iron 2026-08-19: "crab shows way more entries than
+            # before but is responding slower from inputs." The listing was not the cost; narrating
+            # it was.
+            # ⇒ Bounded, and off by default. `CRAB_STAT_TRACE=1` in the environment brings it back
+            # for a burn that actually needs the per-entry readout.
+            if (crab_stat_trace == 1) {
+                crab_u2s(crab_sdig, sz);
+                crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(crab_sdig); crab_say("\n");
+            }
         }
         #endif
         store64(sizes + i * 8, sz);
@@ -162,6 +192,7 @@ fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
 
 fn main(): i64 {
     alloc_init();
+    crab_stat_trace_init();
     var w = 380;
     var h = 220;
     var nbytes = w * h * 4;

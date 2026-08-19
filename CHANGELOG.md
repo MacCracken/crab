@@ -2,6 +2,28 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.14] - 2026-08-19 — narrating the listing WAS the cost
+
+### Fixed — crab got slower the moment its entry cap grew
+
+Iron 2026-08-19: "crab shows way more entries than before but is responding slower from inputs."
+`crab_stat_all` printed `crab: stat <name> <size>` for **every entry** and called `alloc(24)` for
+every entry — on every readdir, i.e. every descend and every ascend. At the old 32-entry cap that
+was 32 console writes; at 256 on a real `/` (114 entries on iron) it is 114 writes to a console
+**three processes share unserialised**, plus 114 leaked scratch allocations (this allocator has no
+free). The listing was not the cost. Narrating it was.
+
+Per-entry tracing is now **off by default** behind `CRAB_STAT_TRACE=1`, and its scratch buffer is
+allocated once.
+
+### Added — one summary line per listing
+
+`crab: listed <n> entries in <path>`, always on. ⛔ This is the honest oracle for "did the pane see
+everything": a COUNT, stated once. `crab-listing-cap-test.py` previously inferred it by counting
+per-entry lines — which made the diagnostic the thing being measured, and is why the fix for the cap
+shipped with a performance regression attached to its own instrumentation.
+
+
 ## [0.4.13] - 2026-08-19 — the pane showed 32 of 114
 
 ### Fixed — a directory with more than 32 entries was silently truncated
