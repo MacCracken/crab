@@ -2,6 +2,44 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.13] - 2026-08-19 — the pane showed 32 of 114
+
+### Fixed — a directory with more than 32 entries was silently truncated
+
+`crab_readdir_into` called `sys_readdir(path, buf, 32)`. Iron 2026-08-19: `/` held **114** entries
+(burn outputs land at the root), so the pane listed 32 and dropped 82 with no indication. A file the
+shell's `ls` showed was simply absent from crab — which reads as a filesystem or staging fault, not
+a cap. The cap is now **`CRAB_MAX_ENTRIES` = 256** (records are 64 B, so a 16 KB pane buffer).
+
+⛔ The `32` was a literal in **seven** places — the call plus six `alloc` sites (`lbuf`/`rbuf`,
+`lsizes`/`rsizes`, `lmtimes`/`rmtimes`). Raising the call without every allocation writes past the
+buffer; raising an allocation without the call changes nothing. Both now derive from the constant.
+
+### Added — the pane reports its own truncation
+
+`sys_readdir` returns what fit, so `n == max` is indistinguishable from "there were more" — it is
+the only truncation signal available. Hitting the cap now prints
+`crab: WARNING listing truncated at the entry cap`. A pane that stops silently makes missing files
+look nonexistent.
+
+⚠ Display was never the limit: `CRAB_ROWS_CAP` was removed in 0.4.10 for a scrolling `dh_list`, so
+256 entries scroll.
+
+### Changed — dhancha tag 0.9.11 -> **0.9.12**, matching the vendored bundle
+
+`cyrius build` re-vendored `lib/dhancha.cyr` from `path = "../dhancha"` (0.9.12, adding
+`WINDOW_CONFIGURE`), which moved the file and its `cyrius.lock` hash while the manifest still
+declared `tag = "0.9.11"`. ⛔ **The path WINS over the tag**, so the build was green against a
+library the declared graph did not name — CI clones by tag and would have built 0.9.11. crab uses
+no 0.9.12 API; the tag is corrected so the declaration matches what was actually compiled and
+staged. Verified released: `0.9.12` is tagged in dhancha.
+
+### Changed — cyrius pin 6.5.27 -> 6.5.28
+
+⚠ `cyrius test` stayed **11/0 while `src/main.cyr` did not compile** — the suite does not build the
+binary, so a green run here is not evidence the program links. Build both targets explicitly.
+
+
 ## [0.4.12] - 2026-08-17 — input goes through the toolkit
 
 ### Changed — the hand-rolled input loop is gone

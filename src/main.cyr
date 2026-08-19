@@ -17,6 +17,19 @@ include "src/ui.cyr"
 
 fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 
+# ⛔ ONE cap for the readdir buffer AND the readdir call. It was the literal `32` in seven places —
+# the call plus six allocations — so raising the cap without finding every allocation writes past
+# the buffer, and raising an allocation without the call changes nothing. Keep them derived.
+#
+# ⚠ 32 was not enough for a REAL root. Iron 2026-08-19: `/` held **114** entries after a few burns
+# (run outputs land there), so crab showed 32 and silently dropped 82 — a file the shell's `ls`
+# listed was simply absent from the pane, which reads as a filesystem fault rather than a cap.
+# Records are 64 B, so 256 entries is a 16 KB pane buffer.
+enum CrabDir {
+    CRAB_MAX_ENTRIES = 256;
+    CRAB_REC_SZ      = 64;
+}
+
 # ⭐⭐ `AE-6` — crab's surface is PREMULTIPLIED, unconditionally.
 #
 # This is what routes crab through agnos `gpu_shader_op #92` op 0x01 — a real per-pixel
@@ -72,14 +85,22 @@ fn crab_join(dst, path, name): i64 {
     return w;
 }
 
-# readdir `path` into `buf` (up to 32 records); returns the entry count (>= 0).
+# readdir `path` into `buf` (up to CRAB_MAX_ENTRIES records); returns the entry count (>= 0).
 # agnos-only (sys_readdir is the #81 wrapper); on the host it yields 0 (mock panes).
+#
+# ⚠ A FULL BUFFER IS NOT A COMPLETE LISTING. `sys_readdir` returns what fit, so `n == max` cannot be
+# told apart from "there were more" — it is the only truncation signal there is. SAY SO: a pane that
+# quietly stops at the cap looks like the missing files do not exist.
 fn crab_readdir_into(path, buf): i64 {
     var n = -1;
     #ifdef CYRIUS_TARGET_AGNOS
-    n = sys_readdir(path, buf, 32);
+    n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
     #endif
     if (n < 0) { n = 0; }
+    if (n >= CRAB_MAX_ENTRIES) {
+        crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
+        crab_say(" has more entries than are shown\n");
+    }
     return n;
 }
 
@@ -151,16 +172,16 @@ fn main(): i64 {
     var rpath = alloc(256);
     crab_strcpy(lpath, "/bin");             # mutable pane paths — Enter/Backspace rewrite them
     crab_strcpy(rpath, "/");
-    var lbuf = alloc(32 * 64);
-    var rbuf = alloc(32 * 64);
-    var lsizes = alloc(32 * 8);             # per-entry byte sizes (parallel to lbuf)
-    var rsizes = alloc(32 * 8);
-    var lmtimes = alloc(32 * 8);            # per-entry mtime (unix seconds)
-    var rmtimes = alloc(32 * 8);
+    var lbuf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ);
+    var rbuf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ);
+    var lsizes = alloc(CRAB_MAX_ENTRIES * 8);             # per-entry byte sizes (parallel to lbuf)
+    var rsizes = alloc(CRAB_MAX_ENTRIES * 8);
+    var lmtimes = alloc(CRAB_MAX_ENTRIES * 8);            # per-entry mtime (unix seconds)
+    var rmtimes = alloc(CRAB_MAX_ENTRIES * 8);
     var namescr = alloc(64);                # scratch: selected entry name (descend)
     var pathscr = alloc(256);               # scratch: joined child path (descend / stat)
     var statbuf = alloc(48);                # scratch: agnos stat struct (§4.1)
-    var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, 32) -> entry count (0 on host)
+    var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, CRAB_MAX_ENTRIES) -> count (0 on host)
     crab_stat_all(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf);
     var rn = crab_readdir_into(rpath, rbuf);
     crab_stat_all(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf);
