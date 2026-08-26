@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"><style>body{margin:0;background:#e9ece9;font-family:Barlow,system-ui,sans-serif}a{color:#c25a3c}a:hover{color:#9c4530}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,'JetBrains Mono',monospace;padding:3px 7px;background:#1a201c;color:#fff;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 Barlow,sans-serif;color:#1a201c}.dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px ui-monospace,'JetBrains Mono',monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a201c;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 Barlow,sans-serif;color:rgba(0,0,0,.55)}.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.10);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.07);overflow:hidden}.dv-opt:target .dv-oid{background:#c25a3c;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 Barlow,sans-serif;color:rgba(0,0,0,.5)}.dv-sub{font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:rgba(0,0,0,.4);margin-bottom:7px}</style></helmet>
+
+<section class="dv-turn" id="t0">
+<div class="dv-thd"><a class="dv-tid" href="#t0">0</a><span class="dv-tname">Brief, assumptions &amp; the system</span></div>
+<div style="max-width:1580px;display:grid;grid-template-columns:repeat(4,1fr);gap:28px;font:400 13px/1.6 Barlow,sans-serif;color:#2a332e">
+<div><div class="dv-sub">What I read</div><p style="margin:0 0 8px">crab is a dual-pane, local-first file manager for AGNOS. It is a <em>view onto a shared memory substrate</em> — semantic find, duplicate detection, auto-tagging — not an app with a bolted-on assistant. The repo is a docs scaffold: no UI source, so nothing here is a recreation.</p><p style="margin:0">Mascot <strong>Bueller</strong> 🦀 gets one quiet home: the status bar. Deadpan, rare, never loud.</p></div>
+<div><div class="dv-sub">Assumptions</div><p style="margin:0 0 8px">Platform-neutral chrome — no OS-specific traffic lights or ribbon. Small window collapses the sidebar into a drawer overlay.</p><p style="margin:0 0 8px"><strong>The compositor owns theming.</strong> crab ships no theme switcher and no palette of its own; it reads surface, text and accent from <em>aethersafha</em> and declares only which parts of the UI accent is permitted to tint. Light and dark shells here are two compositor states, not two crab settings.</p><p style="margin:0">Fidelity: wireframe-plus. Real structure, real density, real copy; placeholder icons and striped image slots. Static — nothing is wired.</p></div>
+<div><div class="dv-sub">The system</div><p style="margin:0 0 6px">Type: Barlow for UI, JetBrains Mono for paths, sizes and anything a filesystem literally owns.</p><p style="margin:0 0 6px">Surface: green-grey neutrals, hairline 1px seams, no shadows inside the app. Density: 28px rows full-screen, 34px touch rows small.</p><p style="margin:0">Icons: geometric chips with mono extension labels; images are striped placeholders. Real icon set to be dropped in.</p></div>
+<div><div class="dv-sub">Open questions</div><p style="margin:0 0 8px">Does the second pane ever leave? A dual-pane app in a 420px window is one pane with a switcher — worth confirming that's acceptable rather than blocking the small size.</p><p style="margin:0 0 8px">Which accent roles does the compositor actually hand over — one accent, or accent + on-accent + a hover step? That decides whether selected rows can carry white text.</p><p style="margin:0">Is semantic search a view (<a class="dv-oid" href="#1b">1b</a>) or a mode over any view? Cheapest to build as a view; better to use as a mode.</p></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname"><a class="dv-oid" href="#1a">1a</a> + <a class="dv-oid" href="#1b">1b</a> shell, <a class="dv-oid" href="#1c">1c</a> columns &amp; preview — and the crab is the menu button</span></div>
+<p style="margin:-8px 0 20px;font:400 12.5px/1.6 Barlow;color:rgba(0,0,0,.55);max-width:900px">Same layout twice, once per compositor palette. Pane A is columns, pane B is the preview; the dual pane survives as a tab pair so a 420px window can drop to one. Clicking 🦀 toggles the File / Edit / Go menu row — shown collapsed in <a class="dv-oid" href="#2a">2a</a>, revealed in <a class="dv-oid" href="#2b">2b</a>. Collapsed is the default: the menu is a power surface, and the crab earns its place in the chrome by being the door to it.</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Light palette · menu collapsed — 🦀 idle, chevron down</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+<div><div class="dv-sub">Full screen · 1280×768</div><div class="dv-card">
+<div style="width:1280px;height:768px;background:#f2f4f2;display:flex;flex-direction:column;color:#1a201c;overflow:hidden">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;background:#e9ede9;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;gap:7px"><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 9px 0 8px;border-radius:6px;border:1px solid transparent"><span style="font-size:13px">🦀</span><span style="font:700 12px/1 Barlow;letter-spacing:.04em">crab</span><span style="font:400 8px/1 'JetBrains Mono',monospace;color:#96a09a;margin-left:1px">▾</span></div>
+    <div style="flex:1"></div>
+    <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">columns + preview · panes linked</div>
+  </div>
+
+  <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:#f7f9f7;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;gap:2px">
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#5c665f">‹</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#b3bcb6">›</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#5c665f">↑</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px;font:400 12px/1 'JetBrains Mono',monospace;color:#5c665f"><span>~</span><span style="color:#b3bcb6">/</span><span>projects</span><span style="color:#b3bcb6">/</span><span style="color:#1a201c;font-weight:500">cyrius</span><span style="color:#b3bcb6">/</span><span>src</span></div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:260px;height:28px;padding:0 10px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px"><span style="width:9px;height:9px;border:1.5px solid #9aa49d;border-radius:50%"></span><span style="font:400 12px/1 Barlow;color:#9aa49d">Find by name or meaning…</span><span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#b3bcb6">⌘K</span></div>
+    <div style="display:flex;padding:2px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px;gap:2px">
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">List</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">Grid</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;background:#fff;box-shadow:0 1px 1px rgba(30,45,35,.09);font:500 11px/1 Barlow">Columns</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">Gallery</div>
+    </div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center"><span style="width:11px;height:11px;border-radius:2px;border:1.4px solid #5c665f;border-right-width:5px"></span></div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:210px;flex:none;background:#eef1ee;border-right:1px solid rgba(30,45,35,.10);display:flex;flex-direction:column;padding:12px 0">
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:0 14px 8px">PLACES</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Home</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;background:#dfe6e0;font:500 12.5px/1 Barlow"><span style="width:13px;height:11px;border-radius:2px;background:#c25a3c"></span>projects</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Documents</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Downloads</div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:18px 14px 8px">SMART FOLDERS</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Recent<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">64</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Duplicates<span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#c25a3c">12</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Untagged<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">318</span></div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:18px 14px 8px">TAGS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;padding:0 14px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#c25a3c"></span>toolchain</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#4d8f7a"></span>specs</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#6f7bbd"></span>archive</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="margin:0 14px;padding:9px 10px;background:#e5eae6;border:1px solid rgba(30,45,35,.08);border-radius:6px">
+        <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#96a09a;margin-bottom:5px">INDEX</div>
+        <div style="font:400 11.5px/1.4 Barlow;color:#3a443e">Local · 41,208 files</div>
+        <div style="height:3px;border-radius:2px;background:#d3dad4;margin-top:6px;overflow:hidden"><div style="width:86%;height:100%;background:#c25a3c"></div></div>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f7f9f7">
+      <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid rgba(30,45,35,.10);background:#eef1ee">
+        <div style="display:flex;align-items:center;gap:8px;padding:0 14px;background:#f7f9f7;border-right:1px solid rgba(30,45,35,.10);box-shadow:inset 0 2px 0 #c25a3c;font:500 11.5px/1 'JetBrains Mono',monospace">~/projects/cyrius<span style="color:#96a09a;font-weight:400">9</span></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:0 14px;border-right:1px solid rgba(30,45,35,.10);font:400 11.5px/1 'JetBrains Mono',monospace;color:#7c867f">~/media/2026<span style="color:#a8b2ab">812</span></div>
+        <div style="width:30px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#96a09a">+</div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;padding:0 12px;font:400 10.5px/1 'JetBrains Mono',monospace;color:#96a09a">A ⇄ B · linked</div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="width:172px;flex:none;border-right:1px solid rgba(30,45,35,.09);display:flex;flex-direction:column;padding:5px 0">
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;background:#dfe6e0;font:500 12px/1 Barlow"><span style="width:12px;height:10px;border-radius:2px;background:#c25a3c"></span>src<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">›</span></div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:12px;height:10px;border-radius:2px;background:#b9c2bb"></span>tests</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:12px;height:10px;border-radius:2px;background:#b9c2bb"></span>docs</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>cyrius.cyml</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>README.md</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>VERSION</div>
+        </div>
+        <div style="width:196px;flex:none;border-right:1px solid rgba(30,45,35,.09);display:flex;flex-direction:column;padding:5px 0">
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;background:#c25a3c;color:#fff"><span style="width:11px;height:13px;border-radius:2px;background:rgba(255,255,255,.85)"></span><span style="font:500 12px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ui.cyr</span><span style="width:6px;height:6px;border-radius:50%;background:#fff"></span></div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>main.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>render_test.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:13px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span>test.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:12px;height:10px;border-radius:2px;background:#b9c2bb"></span>panes</div>
+          <div style="flex:1"></div>
+          <div style="height:22px;display:flex;align-items:center;padding:0 11px;border-top:1px solid rgba(30,45,35,.08);font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">5 items · 1 selected</div>
+        </div>
+        <div style="flex:1;min-width:0;background:#f2f4f2;display:flex;flex-direction:column;padding:16px;gap:14px">
+          <div style="flex:none;height:200px;border-radius:6px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#e4e8e4 0 8px,#eef1ee 8px 16px);display:grid;place-items:center"><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#8b948d;letter-spacing:.06em">source preview · ui.cyr</span></div>
+          <div style="flex:none"><div style="font:600 15px/1.3 Barlow">ui.cyr</div><div style="font:400 10.5px/1.6 'JetBrains Mono',monospace;color:#7c867f;margin-top:4px">Cyrius source · 8.4 KB · 215 lines<br>modified 2026-08-02 14:11</div></div>
+          <div style="height:1px;background:rgba(30,45,35,.10)"></div>
+          <div style="flex:none;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#5c665f">
+            <span style="color:#96a09a">owner</span><span>you · rw-r--r--</span>
+            <span style="color:#96a09a">volume</span><span>system · ext2</span>
+            <span style="color:#96a09a">tags</span><span style="color:#a4442b">toolchain</span>
+          </div>
+          <div style="flex:none"><div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#96a09a;margin-bottom:7px">RELATED BY MEANING</div><div style="display:flex;flex-direction:column;gap:5px;font:400 12px/1.4 Barlow;color:#3a443e"><span>render_test.cyr</span><span>docs/development/state.md</span><span>panes/layout.cyr</span></div></div>
+          <div style="flex:1"></div>
+          <div style="flex:none;display:flex;gap:6px"><div style="height:26px;padding:0 11px;border-radius:13px;background:#c25a3c;color:#fff;font:600 11.5px/26px Barlow">Copy to B</div><div style="height:26px;padding:0 11px;border-radius:13px;border:1px solid rgba(30,45,35,.14);font:400 11.5px/24px Barlow;color:#48524b">Rename…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;background:#e9ede9;border-top:1px solid rgba(30,45,35,.10);font:400 11px/1 'JetBrains Mono',monospace;color:#6c766f">
+    <span>5 items · 1 selected · 8.4 KB</span><span style="color:#c0c8c2">|</span><span>ext2 · 41.2 GB free</span>
+    <span style="flex:1"></span><span style="color:#a8b2ab">Bueller…</span><span style="font-size:11px">🦀</span>
+  </div>
+</div>
+</div></div>
+
+<div><div class="dv-sub">Small window · 420×560 · menu collapsed</div><div class="dv-card">
+<div style="width:420px;height:560px;background:#f2f4f2;display:flex;flex-direction:column;color:#1a201c;overflow:hidden">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:#e9ede9;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px"><span style="font-size:14px">🦀</span><span style="font:400 8px/1 'JetBrains Mono',monospace;color:#96a09a">▾</span></div>
+    <div style="width:1px;height:16px;background:rgba(30,45,35,.12)"></div>
+    <div style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#5c665f">…/<span style="color:#1a201c;font-weight:500">src</span></div>
+    <div style="flex:1"></div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center"><span style="width:9px;height:9px;border:1.5px solid #5c665f;border-radius:50%"></span></div>
+  </div>
+  <div style="height:30px;flex:none;display:flex;align-items:stretch;background:#eef1ee;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;align-items:center;padding:0 12px;background:#f7f9f7;box-shadow:inset 0 2px 0 #c25a3c;font:500 11px/1 'JetBrains Mono',monospace">A · src</div>
+    <div style="display:flex;align-items:center;padding:0 12px;font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">B · media</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;padding:0 12px;font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">5</div>
+  </div>
+  <div style="flex:none;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:#c25a3c;color:#fff"><span style="width:14px;height:16px;border-radius:2px;background:rgba(255,255,255,.85)"></span><span style="font:500 13.5px/1 Barlow;flex:1">ui.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;opacity:.85">8.4 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span><span style="font:400 13.5px/1 Barlow;flex:1">main.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">3.2 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(30,45,35,.025)"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span><span style="font:400 13.5px/1 Barlow;flex:1">render_test.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">1.1 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14)"></span><span style="font:400 13.5px/1 Barlow;flex:1">test.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">840 B</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(30,45,35,.025)"><span style="width:16px;height:13px;border-radius:2px;background:#b9c2bb"></span><span style="font:400 13.5px/1 Barlow;flex:1">panes</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#a8b2ab">›</span></div>
+  </div>
+  <div style="flex:1;min-height:0;margin:12px;border:1px solid rgba(30,45,35,.12);border-radius:6px;background:#f7f9f7;display:flex;flex-direction:column;overflow:hidden">
+    <div style="flex:none;height:108px;background:repeating-linear-gradient(135deg,#e4e8e4 0 8px,#eef1ee 8px 16px);display:grid;place-items:center;border-bottom:1px solid rgba(30,45,35,.10)"><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#8b948d;letter-spacing:.06em">source preview</span></div>
+    <div style="padding:10px 12px;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#5c665f">
+      <span style="color:#96a09a">name</span><span>ui.cyr · 215 lines</span>
+      <span style="color:#96a09a">mod</span><span>2026-08-02 14:11</span>
+      <span style="color:#96a09a">tags</span><span style="color:#a4442b">toolchain</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:0 12px 11px;display:flex;gap:6px"><div style="flex:1;height:30px;border-radius:15px;background:#c25a3c;color:#fff;font:600 12px/30px Barlow;text-align:center">Copy to B</div><div style="height:30px;padding:0 13px;border-radius:15px;border:1px solid rgba(30,45,35,.14);font:400 12px/28px Barlow;color:#48524b">Rename</div></div>
+  </div>
+  <div style="height:26px;flex:none;display:flex;align-items:center;padding:0 12px;background:#e9ede9;border-top:1px solid rgba(30,45,35,.10);font:400 10.5px/1 'JetBrains Mono',monospace;color:#6c766f"><span>1 selected</span><span style="flex:1"></span><span style="color:#a8b2ab">Bueller…</span><span style="font-size:10px;margin-left:5px">🦀</span></div>
+</div>
+</div></div>
+</div>
+</div>
+
+<div class="dv-opt" id="2b">
+<div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Dark palette · menu revealed — 🦀 held down, row slid in above the toolbar</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+<div><div class="dv-sub">Full screen · 1280×768</div><div class="dv-card" style="border-color:rgba(0,0,0,.3)">
+<div style="width:1280px;height:768px;background:#14100e;display:flex;flex-direction:column;color:#ece7e3;overflow:hidden">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="display:flex;gap:7px"><span style="width:10px;height:10px;border-radius:50%;background:#2c2521"></span><span style="width:10px;height:10px;border-radius:50%;background:#2c2521"></span><span style="width:10px;height:10px;border-radius:50%;background:#2c2521"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 9px 0 8px;border-radius:6px;background:rgba(226,105,74,.18);border:1px solid rgba(226,105,74,.45)"><span style="font-size:13px">🦀</span><span style="font:700 12px/1 Barlow;letter-spacing:.04em;color:#f0b7a4">crab</span><span style="font:400 8px/1 'JetBrains Mono',monospace;color:#e2694a;margin-left:1px">▴</span></div>
+    <div style="flex:1"></div>
+    <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7a706a">columns + preview · panes linked</div>
+  </div>
+
+  <div style="height:30px;flex:none;display:flex;align-items:center;gap:2px;padding:0 12px;background:#1c1613;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="height:22px;padding:0 9px;border-radius:5px;background:rgba(255,255,255,.07);display:grid;place-items:center;font:500 11.5px/1 Barlow">File</div>
+    <div style="height:22px;padding:0 9px;border-radius:5px;display:grid;place-items:center;font:400 11.5px/1 Barlow;color:#c3bab4">Edit</div>
+    <div style="height:22px;padding:0 9px;border-radius:5px;display:grid;place-items:center;font:400 11.5px/1 Barlow;color:#c3bab4">Go</div>
+    <div style="height:22px;padding:0 9px;border-radius:5px;display:grid;place-items:center;font:400 11.5px/1 Barlow;color:#c3bab4">Tags</div>
+    <div style="height:22px;padding:0 9px;border-radius:5px;display:grid;place-items:center;font:400 11.5px/1 Barlow;color:#c3bab4">Index</div>
+    <div style="height:22px;padding:0 9px;border-radius:5px;display:grid;place-items:center;font:400 11.5px/1 Barlow;color:#c3bab4">Window</div>
+    <div style="flex:1"></div>
+    <div style="font:400 10px/1 'JetBrains Mono',monospace;color:#635b56">click 🦀 to hide</div>
+  </div>
+  <div style="flex:none;position:relative;height:0"><div style="position:absolute;left:12px;top:2px;width:238px;background:#221b17;border:1px solid rgba(255,255,255,.10);border-radius:7px;box-shadow:0 14px 34px rgba(0,0,0,.5);padding:5px;z-index:5;display:flex;flex-direction:column;gap:1px">
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;background:rgba(226,105,74,.16);font:400 12px/1 Barlow">New folder<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#8a8079">⌘N</span></div>
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;font:400 12px/1 Barlow;color:#c3bab4">Duplicate<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">⌘D</span></div>
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;font:400 12px/1 Barlow;color:#c3bab4">Batch rename…<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">⌘R</span></div>
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 6px"></div>
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;font:400 12px/1 Barlow;color:#c3bab4">Re-index selection</div>
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;font:400 12px/1 Barlow;color:#c3bab4">Find duplicates here</div>
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 6px"></div>
+    <div style="display:flex;align-items:center;height:26px;padding:0 9px;border-radius:5px;font:400 12px/1 Barlow;color:#c3bab4">Move to trash<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">Del</span></div>
+  </div></div>
+
+  <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="display:flex;gap:2px">
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#c3bab4">‹</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#4d453f">›</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#c3bab4">↑</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:#1e1917;border:1px solid rgba(255,255,255,.09);border-radius:6px;font:400 12px/1 'JetBrains Mono',monospace;color:#a8998f"><span>~</span><span style="color:#5d554f">/</span><span>projects</span><span style="color:#5d554f">/</span><span style="color:#f2ece8;font-weight:500">cyrius</span><span style="color:#5d554f">/</span><span>src</span></div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:260px;height:28px;padding:0 10px;background:#1e1917;border:1px solid rgba(255,255,255,.09);border-radius:6px"><span style="width:9px;height:9px;border:1.5px solid #6d635c;border-radius:50%"></span><span style="font:400 12px/1 Barlow;color:#6d635c">Find by name or meaning…</span><span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#4d453f">⌘K</span></div>
+    <div style="display:flex;padding:2px;background:#1e1917;border:1px solid rgba(255,255,255,.09);border-radius:6px;gap:2px">
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#8a8079">List</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#8a8079">Grid</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;background:rgba(255,255,255,.10);font:500 11px/1 Barlow;color:#f2ece8">Columns</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#8a8079">Gallery</div>
+    </div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#1e1917;border:1px solid rgba(255,255,255,.09);display:grid;place-items:center"><span style="width:11px;height:11px;border-radius:2px;border:1.4px solid #a8998f;border-right-width:5px"></span></div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:210px;flex:none;border-right:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;padding:12px 0">
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:0 14px 8px">PLACES</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;background:#4d453f"></span>Home</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;background:rgba(255,255,255,.06);font:500 12.5px/1 Barlow"><span style="width:13px;height:11px;border-radius:2px;background:#e2694a"></span>projects</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;background:#4d453f"></span>Documents</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;background:#4d453f"></span>Downloads</div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:18px 14px 8px">SMART FOLDERS</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #5d554f"></span>Recent<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7a706a">64</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #5d554f"></span>Duplicates<span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#e2694a">12</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#c3bab4"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #5d554f"></span>Untagged<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7a706a">318</span></div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:18px 14px 8px">TAGS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;padding:0 14px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:rgba(255,255,255,.06);font:400 11.5px/1 Barlow;color:#c3bab4"><span style="width:7px;height:7px;border-radius:50%;background:#e2694a"></span>toolchain</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:rgba(255,255,255,.06);font:400 11.5px/1 Barlow;color:#c3bab4"><span style="width:7px;height:7px;border-radius:50%;background:#4d8f7a"></span>specs</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:rgba(255,255,255,.06);font:400 11.5px/1 Barlow;color:#c3bab4"><span style="width:7px;height:7px;border-radius:50%;background:#6f7bbd"></span>archive</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="margin:0 14px;padding:9px 10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:6px">
+        <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#7a706a;margin-bottom:5px">INDEX</div>
+        <div style="font:400 11.5px/1.4 Barlow;color:#c3bab4">Local · 41,208 files</div>
+        <div style="height:3px;border-radius:2px;background:rgba(255,255,255,.10);margin-top:6px;overflow:hidden"><div style="width:86%;height:100%;background:#e2694a"></div></div>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid rgba(255,255,255,.07);background:#1a1512">
+        <div style="display:flex;align-items:center;gap:8px;padding:0 14px;background:#14100e;border-right:1px solid rgba(255,255,255,.07);box-shadow:inset 0 2px 0 #e2694a;font:500 11.5px/1 'JetBrains Mono',monospace;color:#f2ece8">~/projects/cyrius<span style="color:#7a706a;font-weight:400">9</span></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:0 14px;border-right:1px solid rgba(255,255,255,.07);font:400 11.5px/1 'JetBrains Mono',monospace;color:#8a8079">~/media/2026<span style="color:#5d554f">812</span></div>
+        <div style="width:30px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#7a706a">+</div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;padding:0 12px;font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">A ⇄ B · linked</div>
+      </div>
+      <div style="flex:1;display:flex;min-height:0">
+        <div style="width:172px;flex:none;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;padding:5px 0">
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;background:rgba(255,255,255,.06);font:500 12px/1 Barlow"><span style="width:12px;height:10px;border-radius:2px;background:#e2694a"></span>src<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#8a8079">›</span></div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:12px;height:10px;border-radius:2px;background:#4d453f"></span>tests</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:12px;height:10px;border-radius:2px;background:#4d453f"></span>docs</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>cyrius.cyml</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>README.md</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>VERSION</div>
+        </div>
+        <div style="width:196px;flex:none;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;padding:5px 0">
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;background:#e2694a;color:#170f0c"><span style="width:11px;height:13px;border-radius:2px;background:rgba(23,15,12,.55)"></span><span style="font:600 12px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ui.cyr</span><span style="width:6px;height:6px;border-radius:50%;background:#170f0c"></span></div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>main.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>render_test.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:11px;height:13px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span>test.cyr</div>
+          <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 11px;font:400 12px/1 Barlow;color:#c3bab4"><span style="width:12px;height:10px;border-radius:2px;background:#4d453f"></span>panes</div>
+          <div style="flex:1"></div>
+          <div style="height:22px;display:flex;align-items:center;padding:0 11px;border-top:1px solid rgba(255,255,255,.06);font:400 9.5px/1 'JetBrains Mono',monospace;color:#635b56">5 items · 1 selected</div>
+        </div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:16px;gap:14px;border-left:1px solid rgba(255,255,255,.04)">
+          <div style="flex:none;height:200px;border-radius:6px;border:1px solid rgba(255,255,255,.10);background:repeating-linear-gradient(135deg,#211b18 0 8px,#1a1512 8px 16px);display:grid;place-items:center"><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#635b56;letter-spacing:.06em">source preview · ui.cyr</span></div>
+          <div style="flex:none"><div style="font:600 15px/1.3 Barlow">ui.cyr</div><div style="font:400 10.5px/1.6 'JetBrains Mono',monospace;color:#8a8079;margin-top:4px">Cyrius source · 8.4 KB · 215 lines<br>modified 2026-08-02 14:11</div></div>
+          <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+          <div style="flex:none;display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#c3bab4">
+            <span style="color:#7a706a">owner</span><span>you · rw-r--r--</span>
+            <span style="color:#7a706a">volume</span><span>system · ext2</span>
+            <span style="color:#7a706a">tags</span><span style="color:#f0b7a4">toolchain</span>
+          </div>
+          <div style="flex:none"><div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#7a706a;margin-bottom:7px">RELATED BY MEANING</div><div style="display:flex;flex-direction:column;gap:5px;font:400 12px/1.4 Barlow;color:#c3bab4"><span>render_test.cyr</span><span>docs/development/state.md</span><span>panes/layout.cyr</span></div></div>
+          <div style="flex:1"></div>
+          <div style="flex:none;display:flex;gap:6px"><div style="height:26px;padding:0 11px;border-radius:13px;background:#e2694a;color:#170f0c;font:600 11.5px/26px Barlow">Copy to B</div><div style="height:26px;padding:0 11px;border-radius:13px;border:1px solid rgba(255,255,255,.14);font:400 11.5px/24px Barlow;color:#c3bab4">Rename…</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;border-top:1px solid rgba(255,255,255,.07);font:400 11px/1 'JetBrains Mono',monospace;color:#7a706a">
+    <span>5 items · 1 selected · 8.4 KB</span><span style="color:#3d3733">|</span><span>ext2 · 41.2 GB free</span>
+    <span style="flex:1"></span><span style="color:#5d554f">Bueller…</span><span style="font-size:11px">🦀</span>
+  </div>
+</div>
+</div></div>
+
+<div><div class="dv-sub">Small window · 420×560 · 🦀 tapped, menu as a sheet</div><div class="dv-card" style="border-color:rgba(0,0,0,.3)">
+<div style="width:420px;height:560px;background:#14100e;display:flex;flex-direction:column;color:#ece7e3;overflow:hidden;position:relative">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;background:rgba(226,105,74,.18);border:1px solid rgba(226,105,74,.45)"><span style="font-size:14px">🦀</span><span style="font:400 8px/1 'JetBrains Mono',monospace;color:#e2694a">▴</span></div>
+    <div style="width:1px;height:16px;background:rgba(255,255,255,.10)"></div>
+    <div style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#a8998f">…/<span style="color:#f2ece8;font-weight:500">src</span></div>
+    <div style="flex:1"></div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#1e1917;border:1px solid rgba(255,255,255,.09);display:grid;place-items:center"><span style="width:9px;height:9px;border:1.5px solid #a8998f;border-radius:50%"></span></div>
+  </div>
+  <div style="height:30px;flex:none;display:flex;align-items:stretch;background:#1a1512;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="display:flex;align-items:center;padding:0 12px;background:#14100e;box-shadow:inset 0 2px 0 #e2694a;font:500 11px/1 'JetBrains Mono',monospace;color:#f2ece8">A · src</div>
+    <div style="display:flex;align-items:center;padding:0 12px;font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">B · media</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;padding:0 12px;font:400 10px/1 'JetBrains Mono',monospace;color:#635b56">5</div>
+  </div>
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:#e2694a;color:#170f0c"><span style="width:14px;height:16px;border-radius:2px;background:rgba(23,15,12,.55)"></span><span style="font:600 13.5px/1 Barlow;flex:1">ui.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace">8.4 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span><span style="font:400 13.5px/1 Barlow;flex:1;color:#c3bab4">main.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">3.2 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(255,255,255,.02)"><span style="width:14px;height:16px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span><span style="font:400 13.5px/1 Barlow;flex:1;color:#c3bab4">render_test.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">1.1 KB</span></div>
+    <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#241d1a;border:1px solid rgba(255,255,255,.12)"></span><span style="font:400 13.5px/1 Barlow;flex:1;color:#c3bab4">test.cyr</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">840 B</span></div>
+    <div style="flex:1"></div>
+  </div>
+  <div style="height:28px;flex:none;display:flex;align-items:center;padding:0 12px;border-top:1px solid rgba(255,255,255,.07);font:400 10.5px/1 'JetBrains Mono',monospace;color:#7a706a"><span>1 selected</span><span style="flex:1"></span><span style="color:#5d554f">Bueller…</span><span style="font-size:10px;margin-left:5px">🦀</span></div>
+  <div style="position:absolute;inset:0;background:rgba(10,6,4,.5);display:flex;flex-direction:column;justify-content:flex-end">
+    <div style="background:#1c1613;border-top:1px solid rgba(255,255,255,.10);border-radius:14px 14px 0 0;box-shadow:0 -14px 40px rgba(0,0,0,.5);padding:10px 10px 14px">
+      <div style="width:34px;height:3px;border-radius:2px;background:rgba(255,255,255,.16);margin:0 auto 12px"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+        <div style="height:58px;border-radius:9px;background:rgba(226,105,74,.16);border:1px solid rgba(226,105,74,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="width:15px;height:12px;border-radius:2px;background:#e2694a"></span><span style="font:500 11px/1 Barlow;color:#f0b7a4">File</span></div>
+        <div style="height:58px;border-radius:9px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="width:13px;height:13px;border-radius:2px;border:1.5px solid #a8998f"></span><span style="font:400 11px/1 Barlow;color:#c3bab4">Edit</span></div>
+        <div style="height:58px;border-radius:9px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="font:400 13px/1 Barlow;color:#a8998f">↳</span><span style="font:400 11px/1 Barlow;color:#c3bab4">Go</span></div>
+        <div style="height:58px;border-radius:9px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="width:11px;height:11px;border-radius:50%;background:#4d8f7a"></span><span style="font:400 11px/1 Barlow;color:#c3bab4">Tags</span></div>
+        <div style="height:58px;border-radius:9px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="width:13px;height:13px;border-radius:2px;border:1.5px dashed #a8998f"></span><span style="font:400 11px/1 Barlow;color:#c3bab4">Index</span></div>
+        <div style="height:58px;border-radius:9px;background:rgba(255,255,255,.05);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><span style="width:13px;height:11px;border-radius:2px;border:1.5px solid #a8998f"></span><span style="font:400 11px/1 Barlow;color:#c3bab4">Window</span></div>
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:1px">
+        <div style="display:flex;align-items:center;height:34px;padding:0 8px;border-radius:7px;font:400 13px/1 Barlow;color:#ece7e3">New folder<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">⌘N</span></div>
+        <div style="display:flex;align-items:center;height:34px;padding:0 8px;border-radius:7px;font:400 13px/1 Barlow;color:#ece7e3">Batch rename…<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#635b56">⌘R</span></div>
+        <div style="display:flex;align-items:center;height:34px;padding:0 8px;border-radius:7px;font:400 13px/1 Barlow;color:#ece7e3">Find duplicates here</div>
+      </div>
+      <div style="margin-top:10px;font:400 10px/1 'JetBrains Mono',monospace;color:#5d554f;text-align:center">tap 🦀 again to dismiss · Bueller…</div>
+    </div>
+  </div>
+</div>
+</div></div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "make the crab menu a long-press instead of a click" · "show <a class="dv-oid" href="#2b">2b</a>'s File menu open in the light palette" · "wire <a class="dv-oid" href="#2a">2a</a> so the crab and pane tabs actually work"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Three directions — each shown full screen and small</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Hairline dual-pane — the by-the-book read. List/details left, grid right, tree sidebar, coral accent.</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+<div><div class="dv-sub">Full screen · 1280×768</div><div class="dv-card">
+<div style="width:1280px;height:768px;background:#f2f4f2;display:flex;flex-direction:column;color:#1a201c;overflow:hidden">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;background:#e9ede9;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;gap:7px"><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span><span style="width:10px;height:10px;border-radius:50%;background:#d5dbd6"></span></div>
+    <div style="display:flex;align-items:center;gap:7px"><span style="font-size:12px">🦀</span><span style="font:700 12px/1 Barlow;letter-spacing:.04em">crab</span></div>
+    <div style="flex:1"></div>
+    <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">2 panes · linked</div>
+  </div>
+  <div style="height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:#f7f9f7;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;gap:2px">
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#5c665f">‹</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#b3bcb6">›</div>
+      <div style="width:26px;height:26px;border-radius:5px;display:grid;place-items:center;font:400 13px/1 Barlow;color:#5c665f">↑</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px;font:400 12px/1 'JetBrains Mono',monospace;color:#5c665f">
+      <span>~</span><span style="color:#b3bcb6">/</span><span>projects</span><span style="color:#b3bcb6">/</span><span style="color:#1a201c;font-weight:500">cyrius</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:280px;height:28px;padding:0 10px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px">
+      <span style="width:9px;height:9px;border:1.5px solid #9aa49d;border-radius:50%"></span>
+      <span style="font:400 12px/1 Barlow;color:#9aa49d">Find by name or meaning…</span>
+      <span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#b3bcb6">⌘K</span>
+    </div>
+    <div style="display:flex;padding:2px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);border-radius:6px;gap:2px">
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;background:#fff;box-shadow:0 1px 1px rgba(30,45,35,.09);font:500 11px/1 Barlow">List</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">Grid</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">Columns</div>
+      <div style="height:22px;padding:0 9px;display:grid;place-items:center;border-radius:4px;font:400 11px/1 Barlow;color:#6c766f">Gallery</div>
+    </div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center"><span style="width:11px;height:11px;border-radius:2px;border:1.4px solid #5c665f;border-right-width:5px"></span></div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:224px;flex:none;background:#eef1ee;border-right:1px solid rgba(30,45,35,.10);display:flex;flex-direction:column;padding:12px 0">
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:0 14px 8px">PLACES</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;background:#dfe6e0;font:500 12.5px/1 Barlow"><span style="width:13px;height:11px;border-radius:2px 2px 2px 2px;background:#c25a3c"></span>Home</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Desktop</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Documents</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>Downloads</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>projects<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">▾</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px 0 26px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>cyrius</div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px 0 26px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;background:#b9c2bb"></span>agnos</div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:18px 14px 8px">SMART FOLDERS</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 8px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Recent<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">64</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Duplicates<span style="flex:1"></span><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#c25a3c">12</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Untagged<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">318</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 8px;border-radius:5px;font:400 12.5px/1 Barlow;color:#3a443e"><span style="width:13px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Large &amp; old<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#96a09a">27</span></div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:18px 14px 8px">TAGS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;padding:0 14px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#c25a3c"></span>toolchain</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#4d8f7a"></span>specs</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#6f7bbd"></span>archive</div>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:#dfe6e0;font:400 11.5px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#b39030"></span>wip</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="margin:0 14px;padding:9px 10px;background:#e5eae6;border:1px solid rgba(30,45,35,.08);border-radius:6px">
+        <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#96a09a;margin-bottom:5px">INDEX</div>
+        <div style="font:400 11.5px/1.4 Barlow;color:#3a443e">Local · 41,208 files</div>
+        <div style="height:3px;border-radius:2px;background:#d3dad4;margin-top:6px;overflow:hidden"><div style="width:86%;height:100%;background:#c25a3c"></div></div>
+      </div>
+    </div>
+
+    <div style="flex:1;display:flex;min-width:0">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid rgba(30,45,35,.10);background:#f7f9f7">
+        <div style="height:3px;flex:none;background:#c25a3c"></div>
+        <div style="height:28px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid rgba(30,45,35,.08);font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">
+          <span style="color:#1a201c;font-weight:500">~/projects/cyrius</span><span style="flex:1"></span><span>9 items</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:26px;align-items:center;border-bottom:1px solid rgba(30,45,35,.08);font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#96a09a">
+          <div>NAME</div><div style="text-align:right">SIZE</div><div>MODIFIED</div>
+        </div>
+        <div style="display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center;background:#c25a3c;color:#fff">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:14px;height:12px;border-radius:2px;background:rgba(255,255,255,.85)"></span><span style="font:500 12.5px/1 Barlow;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">src</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;opacity:.85">—</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;opacity:.85">08-02 14:11</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center;background:#f0d9d2">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:14px;height:12px;border-radius:2px;background:#c9836c"></span><span style="font:500 12.5px/1 Barlow">tests</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">—</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">08-01 09:40</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:14px;height:12px;border-radius:2px;background:#b9c2bb"></span><span style="font:400 12.5px/1 Barlow">docs</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">—</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">07-28 18:02</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center;background:rgba(30,45,35,.025)">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:12px;height:14px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6px/1 'JetBrains Mono',monospace;color:#7c867f">CY</span><span style="font:400 12.5px/1 Barlow">cyrius.cyml</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">2.1 KB</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">08-02 14:09</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:12px;height:14px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6px/1 'JetBrains Mono',monospace;color:#7c867f">MD</span><span style="font:400 12.5px/1 Barlow">CHANGELOG.md</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">33 KB</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">08-02 14:09</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center;background:rgba(30,45,35,.025)">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:12px;height:14px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6px/1 'JetBrains Mono',monospace;color:#7c867f">MD</span><span style="font:400 12.5px/1 Barlow">README.md</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">4.2 KB</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">07-30 11:15</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:12px;height:14px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6px/1 'JetBrains Mono',monospace;color:#7c867f">TX</span><span style="font:400 12.5px/1 Barlow">VERSION</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">6 B</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">08-02 14:09</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 74px 96px;gap:12px;padding:0 14px;height:28px;align-items:center;background:rgba(30,45,35,.025)">
+            <div style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:12px;height:14px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6px/1 'JetBrains Mono',monospace;color:#7c867f">LI</span><span style="font:400 12.5px/1 Barlow">LICENSE</span></div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;text-align:right;color:#7c867f">313 B</div>
+            <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">07-10 08:00</div>
+          </div>
+        </div>
+        <div style="flex:1"></div>
+        <div style="flex:none;padding:10px 14px;border-top:1px solid rgba(30,45,35,.08);background:#eef1ee">
+          <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#96a09a;margin-bottom:6px">SUGGESTED TAGS · src</div>
+          <div style="display:flex;gap:6px">
+            <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;border:1px dashed #c25a3c;font:400 11.5px/1 Barlow;color:#a4442b">+ toolchain</div>
+            <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;border:1px dashed #b3bcb6;font:400 11.5px/1 Barlow;color:#6c766f">+ cyrius</div>
+            <div style="display:flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;border:1px dashed #b3bcb6;font:400 11.5px/1 Barlow;color:#6c766f">+ wip</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="width:7px;flex:none;background:#eef1ee;border-right:1px solid rgba(30,45,35,.10);display:flex;align-items:center;justify-content:center"><div style="width:1px;height:26px;background:#b9c2bb"></div></div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f2f4f2">
+        <div style="height:3px;flex:none;background:#dde2de"></div>
+        <div style="height:28px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid rgba(30,45,35,.08);font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">
+          <span>~/pictures/screens</span><span style="flex:1"></span><span>Grid</span>
+        </div>
+        <div style="flex:1;padding:14px;display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:min-content;gap:14px;align-content:start">
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">boot-01.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:2px solid #c25a3c;background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:500 11.5px/1.2 Barlow;text-align:center;color:#a4442b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">compositor.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">harness.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">panes.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">tags.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">index.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">dupes.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="aspect-ratio:4/3;border-radius:5px;border:1px solid rgba(30,45,35,.10);background:repeating-linear-gradient(135deg,#e4e8e4 0 6px,#eef1ee 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">about.png</div></div>
+          <div style="grid-column:1/-1;display:flex;align-items:center;gap:9px;margin-top:2px"><div style="height:1px;flex:1;background:rgba(30,45,35,.10)"></div><div style="font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#96a09a">SEMANTICALLY NEAR</div><div style="height:1px;flex:1;background:rgba(30,45,35,.10)"></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px;opacity:.72"><div style="aspect-ratio:4/3;border-radius:5px;border:1px dashed rgba(30,45,35,.20);background:repeating-linear-gradient(135deg,#e8ebe8 0 6px,#f2f4f2 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">setu-old.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px;opacity:.72"><div style="aspect-ratio:4/3;border-radius:5px;border:1px dashed rgba(30,45,35,.20);background:repeating-linear-gradient(135deg,#e8ebe8 0 6px,#f2f4f2 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">wm-draft.png</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px;opacity:.72"><div style="aspect-ratio:4/3;border-radius:5px;border:1px dashed rgba(30,45,35,.20);background:repeating-linear-gradient(135deg,#e8ebe8 0 6px,#f2f4f2 6px 12px)"></div><div style="font:400 11.5px/1.2 Barlow;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">blend-92.png</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;background:#e9ede9;border-top:1px solid rgba(30,45,35,.10);font:400 11px/1 'JetBrains Mono',monospace;color:#6c766f">
+    <span>9 items · 2 selected · 35.4 KB</span>
+    <span style="color:#c0c8c2">|</span>
+    <span>ext2 · 41.2 GB free</span>
+    <span style="flex:1"></span>
+    <span style="color:#a8b2ab">Bueller…</span><span style="font-size:11px">🦀</span>
+  </div>
+</div>
+</div></div>
+
+<div><div class="dv-sub">Small window · 420×560</div><div class="dv-card">
+<div style="width:420px;height:560px;background:#f2f4f2;display:flex;flex-direction:column;color:#1a201c;overflow:hidden;position:relative">
+  <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:#e9ede9;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="width:26px;height:26px;border-radius:5px;background:#dfe6e0;display:grid;place-items:center"><div style="display:flex;flex-direction:column;gap:2.5px"><span style="width:11px;height:1.5px;background:#3a443e"></span><span style="width:11px;height:1.5px;background:#3a443e"></span><span style="width:11px;height:1.5px;background:#3a443e"></span></div></div>
+    <div style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#5c665f">…/<span style="color:#1a201c;font-weight:500">cyrius</span></div>
+    <div style="flex:1"></div>
+    <div style="width:26px;height:26px;border-radius:5px;background:#eef1ee;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center"><span style="width:9px;height:9px;border:1.5px solid #5c665f;border-radius:50%"></span></div>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="height:30px;flex:none;display:flex;align-items:center;padding:0 12px;font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#96a09a;border-bottom:1px solid rgba(30,45,35,.08)">9 ITEMS · PANE A</div>
+    <div style="display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:#c25a3c;color:#fff"><span style="width:16px;height:13px;border-radius:2px;background:rgba(255,255,255,.85)"></span><span style="font:500 13.5px/1 Barlow;flex:1">src</span><span style="font:400 11px/1 'JetBrains Mono',monospace;opacity:.85">›</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:16px;height:13px;border-radius:2px;background:#b9c2bb"></span><span style="font:400 13.5px/1 Barlow;flex:1">tests</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#a8b2ab">›</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(30,45,35,.025)"><span style="width:16px;height:13px;border-radius:2px;background:#b9c2bb"></span><span style="font:400 13.5px/1 Barlow;flex:1">docs</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#a8b2ab">›</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6.5px/1 'JetBrains Mono',monospace;color:#7c867f">CY</span><span style="font:400 13.5px/1 Barlow;flex:1">cyrius.cyml</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">2.1 KB</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(30,45,35,.025)"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6.5px/1 'JetBrains Mono',monospace;color:#7c867f">MD</span><span style="font:400 13.5px/1 Barlow;flex:1">CHANGELOG.md</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">33 KB</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6.5px/1 'JetBrains Mono',monospace;color:#7c867f">MD</span><span style="font:400 13.5px/1 Barlow;flex:1">README.md</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">4.2 KB</span></div>
+      <div style="display:flex;align-items:center;gap:11px;height:34px;padding:0 12px;background:rgba(30,45,35,.025)"><span style="width:14px;height:16px;border-radius:2px;background:#e2e6e2;border:1px solid rgba(30,45,35,.14);display:grid;place-items:center;font:600 6.5px/1 'JetBrains Mono',monospace;color:#7c867f">TX</span><span style="font:400 13.5px/1 Barlow;flex:1">VERSION</span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#7c867f">6 B</span></div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="flex:none;display:flex;padding:8px 12px;gap:6px;border-top:1px solid rgba(30,45,35,.08)">
+      <div style="flex:1;height:32px;border-radius:6px;background:#dfe6e0;display:grid;place-items:center;font:500 12px/1 Barlow">Pane A</div>
+      <div style="flex:1;height:32px;border-radius:6px;display:grid;place-items:center;font:400 12px/1 Barlow;color:#6c766f">Pane B</div>
+      <div style="width:32px;height:32px;border-radius:6px;background:#c25a3c;display:grid;place-items:center;font:400 15px/1 Barlow;color:#fff">+</div>
+    </div>
+  </div>
+  <div style="height:26px;flex:none;display:flex;align-items:center;padding:0 12px;background:#e9ede9;border-top:1px solid rgba(30,45,35,.10);font:400 10.5px/1 'JetBrains Mono',monospace;color:#6c766f"><span>1 selected</span><span style="flex:1"></span><span style="color:#a8b2ab">Bueller…</span><span style="font-size:10px;margin-left:5px">🦀</span></div>
+  <div style="position:absolute;inset:0;background:rgba(20,28,23,.34);display:flex">
+    <div style="width:268px;background:#eef1ee;border-right:1px solid rgba(30,45,35,.14);box-shadow:6px 0 24px rgba(20,28,23,.18);display:flex;flex-direction:column;padding:14px 0">
+      <div style="display:flex;align-items:center;gap:8px;padding:0 16px 14px"><span style="font-size:13px">🦀</span><span style="font:700 13px/1 Barlow;letter-spacing:.04em">crab</span></div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:0 16px 8px">PLACES</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;background:#dfe6e0;font:500 13px/1 Barlow"><span style="width:14px;height:12px;border-radius:2px;background:#c25a3c"></span>Home</div>
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;font:400 13px/1 Barlow;color:#3a443e"><span style="width:14px;height:12px;border-radius:2px;background:#b9c2bb"></span>Documents</div>
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;font:400 13px/1 Barlow;color:#3a443e"><span style="width:14px;height:12px;border-radius:2px;background:#b9c2bb"></span>Downloads</div>
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;font:400 13px/1 Barlow;color:#3a443e"><span style="width:14px;height:12px;border-radius:2px;background:#b9c2bb"></span>projects</div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:16px 16px 8px">SMART FOLDERS</div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;font:400 13px/1 Barlow;color:#3a443e"><span style="width:14px;height:12px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Recent<span style="flex:1"></span><span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#96a09a">64</span></div>
+        <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;font:400 13px/1 Barlow;color:#3a443e"><span style="width:14px;height:12px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Duplicates<span style="flex:1"></span><span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#c25a3c">12</span></div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:16px 16px 8px">TAGS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 16px">
+        <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:#dfe6e0;font:400 12px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#c25a3c"></span>toolchain</div>
+        <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:#dfe6e0;font:400 12px/1 Barlow"><span style="width:7px;height:7px;border-radius:50%;background:#4d8f7a"></span>specs</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="padding:0 16px;font:400 10.5px/1.4 'JetBrains Mono',monospace;color:#96a09a">Local index · 41,208 files</div>
+    </div>
+    <div style="flex:1"></div>
+  </div>
+</div>
+</div></div>
+</div>
+</div>
+
+<div class="dv-opt" id="1b">
+<div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Meaning-first, dark shell — search is the home screen. Icon rail, ranked results, live preview. Accent token drives everything tinted.</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+<div><div class="dv-sub">Full screen · 1280×768</div><div class="dv-card" style="border-color:rgba(0,0,0,.3)">
+<div style="width:1280px;height:768px;background:#14100e;display:flex;flex-direction:column;color:#ece7e3;overflow:hidden">
+  <div style="height:44px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">🦀</span><span style="font:700 12.5px/1 Barlow;letter-spacing:.05em">crab</span></div>
+    <div style="width:1px;height:18px;background:rgba(255,255,255,.10)"></div>
+    <div style="display:flex;align-items:center;gap:10px;flex:1;max-width:620px;height:30px;padding:0 12px;background:#1e1917;border:1px solid rgba(226,105,74,.45);border-radius:15px">
+      <span style="width:9px;height:9px;border:1.5px solid #e2694a;border-radius:50%"></span>
+      <span style="font:400 12.5px/1 Barlow;color:#f2ece8">invoices from last spring, the paid ones</span>
+      <span style="flex:1"></span>
+      <span style="font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.06em;color:#e2694a">SEMANTIC</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:6px;font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079"><span>local index</span><span style="width:6px;height:6px;border-radius:50%;background:#4d8f7a"></span></div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:56px;flex:none;border-right:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:6px">
+      <div style="width:36px;height:36px;border-radius:9px;background:rgba(226,105,74,.16);display:grid;place-items:center"><span style="width:13px;height:13px;border:1.6px solid #e2694a;border-radius:50%"></span></div>
+      <div style="width:36px;height:36px;border-radius:9px;display:grid;place-items:center"><span style="width:15px;height:12px;border-radius:2px;background:#5d554f"></span></div>
+      <div style="width:36px;height:36px;border-radius:9px;display:grid;place-items:center"><span style="width:13px;height:13px;border:1.6px solid #5d554f;border-radius:3px"></span></div>
+      <div style="width:36px;height:36px;border-radius:9px;display:grid;place-items:center"><span style="width:13px;height:13px;border:1.6px dashed #5d554f;border-radius:3px"></span></div>
+      <div style="flex:1"></div>
+      <div style="width:36px;height:36px;border-radius:9px;display:grid;place-items:center"><span style="width:14px;height:14px;border-radius:50%;border:1.6px solid #5d554f;display:grid;place-items:center;font:600 8px/1 'JetBrains Mono',monospace;color:#5d554f">i</span></div>
+    </div>
+
+    <div style="width:214px;flex:none;border-right:1px solid rgba(255,255,255,.07);padding:16px 0;display:flex;flex-direction:column">
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:0 16px 10px">REFINE</div>
+      <div style="display:flex;flex-direction:column;gap:2px;padding:0 10px">
+        <div style="display:flex;align-items:center;gap:9px;height:28px;padding:0 8px;border-radius:6px;background:rgba(255,255,255,.05);font:400 12.5px/1 Barlow">Kind<span style="flex:1"></span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#e2694a">PDF</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:28px;padding:0 8px;border-radius:6px;font:400 12.5px/1 Barlow;color:#c3bab4">Date<span style="flex:1"></span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">Mar–May</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:28px;padding:0 8px;border-radius:6px;font:400 12.5px/1 Barlow;color:#c3bab4">Size<span style="flex:1"></span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">any</span></div>
+        <div style="display:flex;align-items:center;gap:9px;height:28px;padding:0 8px;border-radius:6px;font:400 12.5px/1 Barlow;color:#c3bab4">Location<span style="flex:1"></span><span style="font:400 11px/1 'JetBrains Mono',monospace;color:#8a8079">~</span></div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:20px 16px 10px">TAGS FOUND</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 16px">
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:rgba(226,105,74,.18);border:1px solid rgba(226,105,74,.4);font:400 11.5px/1 Barlow;color:#f0b7a4">paid</div>
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:rgba(255,255,255,.05);font:400 11.5px/1 Barlow;color:#c3bab4">invoice</div>
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:rgba(255,255,255,.05);font:400 11.5px/1 Barlow;color:#c3bab4">2026-q2</div>
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:rgba(255,255,255,.05);font:400 11.5px/1 Barlow;color:#c3bab4">receipts</div>
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:12px;background:rgba(255,255,255,.05);font:400 11.5px/1 Barlow;color:#c3bab4">scanned</div>
+      </div>
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;padding:20px 16px 10px">SAVE AS</div>
+      <div style="margin:0 16px;height:30px;border-radius:6px;border:1px dashed rgba(255,255,255,.18);display:grid;place-items:center;font:400 12px/1 Barlow;color:#8a8079">Smart folder…</div>
+      <div style="flex:1"></div>
+      <div style="padding:0 16px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#635b56">42 hits in 31 ms<br>vector + name match</div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="height:32px;flex:none;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.07);font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a706a">
+        <span style="color:#ece7e3">RESULTS</span><span>·</span><span>RANKED BY MEANING</span><span style="flex:1"></span><span>NAME</span><span>MATCH</span>
+      </div>
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;gap:14px;padding:0 18px;height:46px;background:rgba(226,105,74,.14);border-left:3px solid #e2694a">
+          <div style="width:26px;height:32px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PDF</div>
+          <div style="min-width:0;flex:1"><div style="font:500 13px/1.3 Barlow">Nakamura-Studio-0413.pdf</div><div style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#8a8079">~/documents/finance/2026/q2</div></div>
+          <div style="display:flex;gap:5px"><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(226,105,74,.22);font:400 10.5px/20px Barlow;color:#f0b7a4">paid</span><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">invoice</span></div>
+          <div style="width:96px;display:flex;align-items:center;gap:8px"><div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><div style="width:94%;height:100%;background:#e2694a"></div></div><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#e2694a">94</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 18px;height:46px;border-left:3px solid transparent;border-bottom:1px solid rgba(255,255,255,.05)">
+          <div style="width:26px;height:32px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PDF</div>
+          <div style="min-width:0;flex:1"><div style="font:400 13px/1.3 Barlow">helios-freight-mar.pdf</div><div style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#8a8079">~/documents/finance/2026/q2</div></div>
+          <div style="display:flex;gap:5px"><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">invoice</span></div>
+          <div style="width:96px;display:flex;align-items:center;gap:8px"><div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><div style="width:88%;height:100%;background:#e2694a"></div></div><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#a8998f">88</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 18px;height:46px;border-left:3px solid transparent;border-bottom:1px solid rgba(255,255,255,.05)">
+          <div style="width:26px;height:32px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PNG</div>
+          <div style="min-width:0;flex:1"><div style="font:400 13px/1.3 Barlow">scan-2026-04-02-0004.png</div><div style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#8a8079">~/pictures/scans</div></div>
+          <div style="display:flex;gap:5px"><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">scanned</span><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">paid</span></div>
+          <div style="width:96px;display:flex;align-items:center;gap:8px"><div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><div style="width:81%;height:100%;background:#e2694a"></div></div><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#a8998f">81</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 18px;height:46px;border-left:3px solid transparent;border-bottom:1px solid rgba(255,255,255,.05)">
+          <div style="width:26px;height:32px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">ODS</div>
+          <div style="min-width:0;flex:1"><div style="font:400 13px/1.3 Barlow">q2-reconciliation.ods</div><div style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#8a8079">~/documents/finance</div></div>
+          <div style="display:flex;gap:5px"><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">2026-q2</span></div>
+          <div style="width:96px;display:flex;align-items:center;gap:8px"><div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><div style="width:74%;height:100%;background:#e2694a"></div></div><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#a8998f">74</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;padding:0 18px;height:46px;border-left:3px solid transparent;border-bottom:1px solid rgba(255,255,255,.05)">
+          <div style="width:26px;height:32px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PDF</div>
+          <div style="min-width:0;flex:1"><div style="font:400 13px/1.3 Barlow">brightline-may-final.pdf</div><div style="font:400 10.5px/1.3 'JetBrains Mono',monospace;color:#8a8079">~/downloads</div></div>
+          <div style="display:flex;gap:5px"><span style="height:20px;padding:0 8px;border-radius:10px;background:rgba(255,255,255,.06);font:400 10.5px/20px Barlow;color:#c3bab4">invoice</span></div>
+          <div style="width:96px;display:flex;align-items:center;gap:8px"><div style="flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.10);overflow:hidden"><div style="width:69%;height:100%;background:#c4674f"></div></div><span style="font:500 10px/1 'JetBrains Mono',monospace;color:#a8998f">69</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 18px 10px"><div style="height:1px;flex:1;background:rgba(255,255,255,.07)"></div><span style="font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#635b56">2 LIKELY DUPLICATES IN THIS SET</span><div style="height:1px;flex:1;background:rgba(255,255,255,.07)"></div></div>
+        <div style="margin:0 18px;border:1px dashed rgba(255,255,255,.14);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:14px">
+          <div style="flex:1"><div style="font:400 12.5px/1.4 Barlow;color:#c3bab4">brightline-may-final.pdf</div><div style="font:400 12.5px/1.4 Barlow;color:#c3bab4">brightline-may-final (1).pdf</div></div>
+          <div style="font:400 10.5px/1.4 'JetBrains Mono',monospace;color:#8a8079">byte-identical<br>1.4 MB each</div>
+          <div style="height:26px;padding:0 12px;border-radius:13px;background:#e2694a;color:#170f0c;font:600 11.5px/26px Barlow">Keep newest</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:300px;flex:none;border-left:1px solid rgba(255,255,255,.07);padding:18px;display:flex;flex-direction:column;gap:14px">
+      <div style="aspect-ratio:17/22;border-radius:6px;border:1px solid rgba(255,255,255,.10);background:repeating-linear-gradient(135deg,#211b18 0 7px,#1a1512 7px 14px)"></div>
+      <div><div style="font:600 14px/1.3 Barlow">Nakamura-Studio-0413.pdf</div><div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#8a8079;margin-top:4px">PDF · 412 KB · 2 pages<br>modified 2026-04-13 09:22</div></div>
+      <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+      <div><div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;margin-bottom:7px">WHY IT MATCHED</div><div style="font:400 12px/1.55 Barlow;color:#c3bab4">Contains an invoice total and a paid stamp; dated inside the requested window. Nearest neighbours are the other two Q2 studio invoices.</div></div>
+      <div><div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#7a706a;margin-bottom:7px">APPEARS IN</div><div style="display:flex;flex-direction:column;gap:4px;font:400 11.5px/1.4 Barlow;color:#c3bab4"><span>Smart · Unfiled receipts</span><span>Tag · paid</span><span>Recent · this quarter</span></div></div>
+      <div style="flex:1"></div>
+      <div style="font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#635b56">no external service<br>index stays on device</div>
+    </div>
+  </div>
+
+  <div style="height:30px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;border-top:1px solid rgba(255,255,255,.07);font:400 11px/1 'JetBrains Mono',monospace;color:#7a706a">
+    <span>42 results · 1 selected</span><span style="color:#3d3733">|</span><span>index fresh · 41,208 files</span>
+    <span style="flex:1"></span><span style="color:#5d554f">Bueller…</span><span style="font-size:11px">🦀</span>
+  </div>
+</div>
+</div>
+<div style="margin-top:14px"><div class="dv-sub">Theme tokens · supplied by the compositor</div>
+<div style="display:flex;gap:12px">
+  <div style="width:200px;border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,.25);background:#14100e">
+    <div style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="width:6px;height:6px;border-radius:50%;background:#e2694a"></span><span style="font:500 8.5px/1 'JetBrains Mono',monospace;color:#8a8079">crab · coral</span></div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:12px;border-radius:3px;background:#e2694a"></div><div style="height:8px;border-radius:3px;background:rgba(226,105,74,.22);width:80%"></div><div style="height:8px;border-radius:3px;background:rgba(255,255,255,.07);width:64%"></div><div style="height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:62%;height:100%;background:#e2694a"></div></div></div>
+  </div>
+  <div style="width:200px;border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,.25);background:#0e1413"
+    ><div style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="width:6px;height:6px;border-radius:50%;background:#3fa38c"></span><span style="font:500 8.5px/1 'JetBrains Mono',monospace;color:#7d8a86">system · teal</span></div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:12px;border-radius:3px;background:#3fa38c"></div><div style="height:8px;border-radius:3px;background:rgba(63,163,140,.22);width:80%"></div><div style="height:8px;border-radius:3px;background:rgba(255,255,255,.07);width:64%"></div><div style="height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:62%;height:100%;background:#3fa38c"></div></div></div>
+  </div>
+  <div style="width:200px;border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,.25);background:#111017">
+    <div style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="width:6px;height:6px;border-radius:50%;background:#8479e0"></span><span style="font:500 8.5px/1 'JetBrains Mono',monospace;color:#827e93">system · violet</span></div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:12px;border-radius:3px;background:#8479e0"></div><div style="height:8px;border-radius:3px;background:rgba(132,121,224,.22);width:80%"></div><div style="height:8px;border-radius:3px;background:rgba(255,255,255,.07);width:64%"></div><div style="height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:62%;height:100%;background:#8479e0"></div></div></div>
+  </div>
+  <div style="width:200px;border-radius:7px;overflow:hidden;border:1px solid rgba(0,0,0,.14);background:#f7f9f7">
+    <div style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid rgba(30,45,35,.10)"><span style="width:6px;height:6px;border-radius:50%;background:#c25a3c"></span><span style="font:500 8.5px/1 'JetBrains Mono',monospace;color:#7c867f">light · coral</span></div>
+    <div style="padding:8px;display:flex;flex-direction:column;gap:5px"><div style="height:12px;border-radius:3px;background:#c25a3c"></div><div style="height:8px;border-radius:3px;background:rgba(194,90,60,.20);width:80%"></div><div style="height:8px;border-radius:3px;background:rgba(30,45,35,.07);width:64%"></div><div style="height:3px;border-radius:2px;background:rgba(30,45,35,.10);overflow:hidden"><div style="width:62%;height:100%;background:#c25a3c"></div></div></div>
+  </div>
+</div>
+<p style="margin:8px 0 0;font:400 11.5px/1.5 Barlow;color:rgba(0,0,0,.5);max-width:840px">crab owns no theme UI — <em>aethersafha</em> hands down surface, text and accent; crab only decides where accent is allowed to land: focused pane edge, selection fill, match bars, progress, active folder mark. Everything else stays neutral, so a hot system accent can't wreck legibility. Same four panels are the contract to test a new compositor palette against.</p>
+</div>
+</div>
+
+<div><div class="dv-sub">Small window · 420×560</div><div class="dv-card" style="border-color:rgba(0,0,0,.3)">
+<div style="width:420px;height:560px;background:#14100e;display:flex;flex-direction:column;color:#ece7e3;overflow:hidden;position:relative">
+  <div style="height:42px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.07)">
+    <div style="width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,.05);display:grid;place-items:center"><div style="display:flex;flex-direction:column;gap:2.5px"><span style="width:11px;height:1.5px;background:#c3bab4"></span><span style="width:11px;height:1.5px;background:#c3bab4"></span><span style="width:11px;height:1.5px;background:#c3bab4"></span></div></div>
+    <div style="flex:1;height:28px;border-radius:14px;background:#1e1917;border:1px solid rgba(226,105,74,.45);display:flex;align-items:center;gap:8px;padding:0 11px"><span style="width:8px;height:8px;border:1.5px solid #e2694a;border-radius:50%"></span><span style="font:400 12px/1 Barlow;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">invoices last spring, paid</span></div>
+  </div>
+  <div style="height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 12px;overflow:hidden;border-bottom:1px solid rgba(255,255,255,.07)">
+    <span style="height:22px;padding:0 9px;border-radius:11px;background:rgba(226,105,74,.18);border:1px solid rgba(226,105,74,.4);font:400 11px/22px Barlow;color:#f0b7a4">paid</span>
+    <span style="height:22px;padding:0 9px;border-radius:11px;background:rgba(255,255,255,.05);font:400 11px/22px Barlow;color:#c3bab4">PDF</span>
+    <span style="height:22px;padding:0 9px;border-radius:11px;background:rgba(255,255,255,.05);font:400 11px/22px Barlow;color:#c3bab4">Mar–May</span>
+    <span style="flex:1"></span><span style="font:500 9.5px/1 'JetBrains Mono',monospace;color:#7a706a">42</span>
+  </div>
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:12px;padding:0 12px;height:52px;background:rgba(226,105,74,.14);border-left:3px solid #e2694a">
+      <div style="width:28px;height:34px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PDF</div>
+      <div style="flex:1;min-width:0"><div style="font:500 13px/1.3 Barlow;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Nakamura-Studio-0413.pdf</div><div style="font:400 10px/1.3 'JetBrains Mono',monospace;color:#8a8079">finance/2026/q2 · 412 KB</div></div>
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#e2694a">94</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:0 12px;height:52px;border-bottom:1px solid rgba(255,255,255,.05)">
+      <div style="width:28px;height:34px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PDF</div>
+      <div style="flex:1;min-width:0"><div style="font:400 13px/1.3 Barlow;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">helios-freight-mar.pdf</div><div style="font:400 10px/1.3 'JetBrains Mono',monospace;color:#8a8079">finance/2026/q2 · 288 KB</div></div>
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#8a8079">88</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:0 12px;height:52px;border-bottom:1px solid rgba(255,255,255,.05)">
+      <div style="width:28px;height:34px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">PNG</div>
+      <div style="flex:1;min-width:0"><div style="font:400 13px/1.3 Barlow;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">scan-2026-04-02-0004.png</div><div style="font:400 10px/1.3 'JetBrains Mono',monospace;color:#8a8079">pictures/scans · 3.1 MB</div></div>
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#8a8079">81</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:0 12px;height:52px;border-bottom:1px solid rgba(255,255,255,.05)">
+      <div style="width:28px;height:34px;border-radius:3px;background:#241d1a;border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;font:600 7px/1 'JetBrains Mono',monospace;color:#a8998f">ODS</div>
+      <div style="flex:1;min-width:0"><div style="font:400 13px/1.3 Barlow;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">q2-reconciliation.ods</div><div style="font:400 10px/1.3 'JetBrains Mono',monospace;color:#8a8079">finance · 96 KB</div></div>
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;color:#8a8079">74</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="margin:12px;border:1px dashed rgba(255,255,255,.14);border-radius:8px;padding:11px 13px">
+      <div style="font:600 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.08em;color:#7a706a;margin-bottom:6px">PREVIEW</div>
+      <div style="display:flex;gap:11px;align-items:center">
+        <div style="width:44px;height:56px;border-radius:4px;border:1px solid rgba(255,255,255,.10);background:repeating-linear-gradient(135deg,#211b18 0 6px,#1a1512 6px 12px)"></div>
+        <div style="font:400 11.5px/1.5 Barlow;color:#c3bab4">Invoice total + paid stamp, dated inside the window.</div>
+      </div>
+    </div>
+  </div>
+  <div style="height:28px;flex:none;display:flex;align-items:center;padding:0 12px;border-top:1px solid rgba(255,255,255,.07);font:400 10.5px/1 'JetBrains Mono',monospace;color:#7a706a"><span>31 ms · on device</span><span style="flex:1"></span><span style="color:#5d554f">Bueller…</span><span style="font-size:10px;margin-left:5px">🦀</span></div>
+</div>
+</div></div>
+</div>
+</div>
+
+<div class="dv-opt" id="1c">
+<div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Dense operator view — columns + gallery preview, transfer tray docked. For people who move thousands of files, not eight.</div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+<div><div class="dv-sub">Full screen · 1280×768</div><div class="dv-card">
+<div style="width:1280px;height:768px;background:#eceeec;display:flex;flex-direction:column;color:#1a201c;overflow:hidden">
+  <div style="height:34px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;background:#e2e6e2;border-bottom:1px solid rgba(30,45,35,.12)">
+    <div style="display:flex;align-items:center;gap:7px"><span style="font-size:11px">🦀</span><span style="font:700 11px/1 Barlow;letter-spacing:.05em">crab</span></div>
+    <div style="width:1px;height:15px;background:rgba(30,45,35,.14)"></div>
+    <div style="display:flex;gap:14px;font:400 11.5px/1 Barlow;color:#48524b"><span>File</span><span>Edit</span><span>Go</span><span>Tags</span><span>Index</span><span>Window</span></div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;font:400 10.5px/1 'JetBrains Mono',monospace;color:#7c867f"><span>compact</span><span style="width:22px;height:12px;border-radius:6px;background:#c25a3c;display:flex;align-items:center;justify-content:flex-end;padding:0 1.5px"><span style="width:9px;height:9px;border-radius:50%;background:#fff"></span></span></div>
+  </div>
+  <div style="height:34px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;background:#f3f5f3;border-bottom:1px solid rgba(30,45,35,.10)">
+    <div style="display:flex;gap:1px">
+      <div style="height:22px;padding:0 8px;border-radius:4px;display:grid;place-items:center;font:400 12px/1 Barlow;color:#48524b">‹</div>
+      <div style="height:22px;padding:0 8px;border-radius:4px;display:grid;place-items:center;font:400 12px/1 Barlow;color:#a8b2ab">›</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1px;font:400 11.5px/1 'JetBrains Mono',monospace;color:#5c665f">
+      <span style="height:22px;padding:0 7px;display:grid;place-items:center;border-radius:4px;background:#e6eae6">~</span><span style="color:#b3bcb6;padding:0 2px">/</span>
+      <span style="height:22px;padding:0 7px;display:grid;place-items:center;border-radius:4px;background:#e6eae6">media</span><span style="color:#b3bcb6;padding:0 2px">/</span>
+      <span style="height:22px;padding:0 7px;display:grid;place-items:center;border-radius:4px;background:#e6eae6">2026</span><span style="color:#b3bcb6;padding:0 2px">/</span>
+      <span style="height:22px;padding:0 7px;display:grid;place-items:center;border-radius:4px;background:#c25a3c;color:#fff;font-weight:500">shoot-0812</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:6px;font:400 11.5px/1 Barlow;color:#48524b">
+      <div style="height:22px;padding:0 9px;border-radius:4px;background:#e6eae6;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center">Sort · name</div>
+      <div style="height:22px;padding:0 9px;border-radius:4px;background:#e6eae6;border:1px solid rgba(30,45,35,.09);display:grid;place-items:center">Filter</div>
+      <div style="height:22px;padding:0 9px;border-radius:4px;background:#1a201c;color:#fff;display:grid;place-items:center">Columns</div>
+    </div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:170px;flex:none;background:#e6eae6;border-right:1px solid rgba(30,45,35,.10);padding:10px 0;display:flex;flex-direction:column">
+      <div style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:0 12px 6px">VOLUMES</div>
+      <div style="display:flex;flex-direction:column;padding:0 6px;gap:1px">
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;background:#d7ded8;font:500 12px/1 Barlow"><span style="width:11px;height:11px;border-radius:2px;background:#c25a3c"></span>system</div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:11px;border-radius:2px;background:#b9c2bb"></span>archive-a</div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:11px;border-radius:2px;background:#b9c2bb"></span>sd-card</div>
+      </div>
+      <div style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:14px 12px 6px">SMART</div>
+      <div style="display:flex;flex-direction:column;padding:0 6px;gap:1px">
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Raw only<span style="flex:1"></span><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">812</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Dupes<span style="flex:1"></span><span style="font:500 9.5px/1 'JetBrains Mono',monospace;color:#c25a3c">64</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:11px;height:11px;border-radius:2px;border:1.5px dashed #a8b2ab"></span>Unrated<span style="flex:1"></span><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">301</span></div>
+      </div>
+      <div style="font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.10em;color:#96a09a;padding:14px 12px 6px">TAGS</div>
+      <div style="display:flex;flex-direction:column;padding:0 6px;gap:1px">
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:7px;height:7px;border-radius:50%;background:#c25a3c"></span>select<span style="flex:1"></span><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">48</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:7px;height:7px;border-radius:50%;background:#4d8f7a"></span>delivered<span style="flex:1"></span><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">120</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:4px;font:400 12px/1 Barlow;color:#3a443e"><span style="width:7px;height:7px;border-radius:50%;background:#6f7bbd"></span>reject<span style="flex:1"></span><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">77</span></div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="padding:0 12px;font:400 9.5px/1.5 'JetBrains Mono',monospace;color:#96a09a">sd-card<br>28.1 / 64 GB</div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;background:#f3f5f3">
+      <div style="width:150px;flex:none;border-right:1px solid rgba(30,45,35,.09);display:flex;flex-direction:column;padding:4px 0">
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>2024</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>2025</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;background:#dfe6e0;font:500 11.5px/1 Barlow"><span style="width:11px;height:9px;border-radius:2px;background:#c25a3c"></span>2026<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">›</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>proxies</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>exports</div>
+      </div>
+      <div style="width:170px;flex:none;border-right:1px solid rgba(30,45,35,.09);display:flex;flex-direction:column;padding:4px 0">
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>shoot-0604</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>shoot-0719</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;background:#dfe6e0;font:500 11.5px/1 Barlow"><span style="width:11px;height:9px;border-radius:2px;background:#c25a3c"></span>shoot-0812<span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">›</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>shoot-0820</div>
+        <div style="display:flex;align-items:center;gap:7px;height:22px;padding:0 10px;font:400 11.5px/1 Barlow;color:#3a443e"><span style="width:11px;height:9px;border-radius:2px;background:#b9c2bb"></span>stills</div>
+      </div>
+      <div style="width:238px;flex:none;border-right:1px solid rgba(30,45,35,.09);display:flex;flex-direction:column;padding:4px 0">
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px;background:#c25a3c;color:#fff"><span style="width:9px;height:11px;border-radius:1.5px;background:rgba(255,255,255,.85)"></span><span style="font:500 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R1.dng</span><span style="width:6px;height:6px;border-radius:50%;background:#fff"></span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px;background:#f0d9d2"><span style="width:9px;height:11px;border-radius:1.5px;background:#c9836c"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R2.dng</span><span style="width:6px;height:6px;border-radius:50%;background:#c25a3c"></span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px;background:#f0d9d2"><span style="width:9px;height:11px;border-radius:1.5px;background:#c9836c"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R3.dng</span><span style="width:6px;height:6px;border-radius:50%;background:#c25a3c"></span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R4.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R5.dng</span><span style="width:6px;height:6px;border-radius:50%;background:#4d8f7a"></span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R6.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R7.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A001_0812_R8.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">B002_0812_R1.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">B002_0812_R2.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">B002_0812_R3.dng</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:22px;padding:0 10px"><span style="width:9px;height:11px;border-radius:1.5px;background:#cdd4ce"></span><span style="font:400 11.5px/1 Barlow;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">B002_0812_R4.dng</span></div>
+        <div style="flex:1"></div>
+        <div style="height:20px;display:flex;align-items:center;padding:0 10px;border-top:1px solid rgba(30,45,35,.08);font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a">812 items · 3 selected</div>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#eceeec">
+        <div style="flex:1;padding:12px;display:flex;flex-direction:column;gap:10px;min-height:0">
+          <div style="flex:1;border-radius:5px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 8px,#e9ece9 8px 16px);display:grid;place-items:center;min-height:0"><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#8b948d;letter-spacing:.06em">raw preview · A001_0812_R1</span></div>
+          <div style="flex:none;display:grid;grid-template-columns:repeat(6,1fr);gap:6px">
+            <div style="aspect-ratio:3/2;border-radius:3px;border:2px solid #c25a3c;background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+            <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+            <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+            <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+            <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+            <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+          </div>
+          <div style="flex:none;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#5c665f">
+            <span style="color:#96a09a">size</span><span>42.8 MB</span>
+            <span style="color:#96a09a">dims</span><span>8192 × 5464</span>
+            <span style="color:#96a09a">shot</span><span>2026-08-12 16:41:07</span>
+            <span style="color:#96a09a">camera</span><span>body A · 35 mm · f/2.0</span>
+            <span style="color:#96a09a">tags</span><span style="color:#a4442b">select</span>
+          </div>
+        </div>
+        <div style="flex:none;margin:0 12px 12px;background:#f7f9f7;border:1px solid rgba(30,45,35,.12);border-radius:6px;overflow:hidden">
+          <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid rgba(30,45,35,.08);font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7c867f"><span style="color:#1a201c">TRANSFERS</span><span style="flex:1"></span><span>2 ACTIVE</span></div>
+          <div style="padding:9px 11px;display:flex;flex-direction:column;gap:9px">
+            <div>
+              <div style="display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Barlow"><span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Copy · sd-card → archive-a</span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">68%</span></div>
+              <div style="height:4px;border-radius:2px;background:#dfe3df;margin-top:5px;overflow:hidden"><div style="width:68%;height:100%;background:#c25a3c"></div></div>
+              <div style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a;margin-top:4px">552 / 812 files · 118 MB/s · 3m 04s left</div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Barlow"><span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Index · embedding new files</span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">31%</span></div>
+              <div style="height:4px;border-radius:2px;background:#dfe3df;margin-top:5px;overflow:hidden"><div style="width:31%;height:100%;background:#4d8f7a"></div></div>
+              <div style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#96a09a;margin-top:4px">251 / 812 · local · pauses on battery</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:24px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;background:#e2e6e2;border-top:1px solid rgba(30,45,35,.12);font:400 10.5px/1 'JetBrains Mono',monospace;color:#6c766f">
+    <span>812 items · 3 selected · 128.4 MB</span><span style="color:#c0c8c2">|</span><span>archive-a · 2.1 TB free</span><span style="color:#c0c8c2">|</span><span>64 dupes flagged</span>
+    <span style="flex:1"></span><span style="color:#a8b2ab">Bueller…</span><span style="font-size:10px">🦀</span>
+  </div>
+</div>
+</div></div>
+
+<div><div class="dv-sub">Small window · 420×560</div><div class="dv-card">
+<div style="width:420px;height:560px;background:#eceeec;display:flex;flex-direction:column;color:#1a201c;overflow:hidden;position:relative">
+  <div style="height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:#e2e6e2;border-bottom:1px solid rgba(30,45,35,.12)">
+    <div style="width:26px;height:26px;border-radius:5px;background:#d7ded8;display:grid;place-items:center"><div style="display:flex;flex-direction:column;gap:2.5px"><span style="width:11px;height:1.5px;background:#3a443e"></span><span style="width:11px;height:1.5px;background:#3a443e"></span><span style="width:11px;height:1.5px;background:#3a443e"></span></div></div>
+    <div style="font:400 11px/1 'JetBrains Mono',monospace;color:#5c665f">…/<span style="color:#1a201c;font-weight:500">shoot-0812</span></div>
+    <div style="flex:1"></div>
+    <div style="height:22px;padding:0 9px;border-radius:11px;background:#c25a3c;color:#fff;font:500 10.5px/22px Barlow">3 selected</div>
+  </div>
+  <div style="height:30px;flex:none;display:flex;align-items:center;gap:6px;padding:0 12px;background:#f3f5f3;border-bottom:1px solid rgba(30,45,35,.10);font:400 11px/1 Barlow;color:#48524b">
+    <span style="height:20px;padding:0 8px;border-radius:4px;background:#1a201c;color:#fff;display:grid;place-items:center;font-size:10.5px">Gallery</span>
+    <span style="height:20px;padding:0 8px;border-radius:4px;display:grid;place-items:center;font-size:10.5px">List</span>
+    <span style="flex:1"></span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">812 items</span>
+  </div>
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:12px;gap:10px">
+    <div style="flex:none;height:172px;border-radius:5px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 8px,#e9ece9 8px 16px);display:grid;place-items:center"><span style="font:400 9.5px/1 'JetBrains Mono',monospace;color:#8b948d;letter-spacing:.06em">raw preview</span></div>
+    <div style="flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+      <div style="aspect-ratio:3/2;border-radius:3px;border:2px solid #c25a3c;background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+      <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+      <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+      <div style="aspect-ratio:3/2;border-radius:3px;border:1px solid rgba(30,45,35,.12);background:repeating-linear-gradient(135deg,#dfe3df 0 5px,#e9ece9 5px 10px)"></div>
+    </div>
+    <div style="flex:none;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font:400 10.5px/1.5 'JetBrains Mono',monospace;color:#5c665f">
+      <span style="color:#96a09a">name</span><span>A001_0812_R1.dng</span>
+      <span style="color:#96a09a">size</span><span>42.8 MB · 8192 × 5464</span>
+      <span style="color:#96a09a">tags</span><span style="color:#a4442b">select</span>
+    </div>
+    <div style="flex:1"></div>
+  </div>
+  <div style="flex:none;margin:0 12px 12px;background:#f7f9f7;border:1px solid rgba(30,45,35,.12);border-radius:6px;overflow:hidden">
+    <div style="height:24px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid rgba(30,45,35,.08);font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7c867f"><span style="color:#1a201c">TRANSFERS</span><span style="flex:1"></span><span>2</span></div>
+    <div style="padding:9px 11px;display:flex;flex-direction:column;gap:8px">
+      <div>
+        <div style="display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Barlow"><span style="flex:1">sd-card → archive-a</span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">68%</span></div>
+        <div style="height:4px;border-radius:2px;background:#dfe3df;margin-top:5px;overflow:hidden"><div style="width:68%;height:100%;background:#c25a3c"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Barlow"><span style="flex:1">Indexing new files</span><span style="font:400 10px/1 'JetBrains Mono',monospace;color:#7c867f">31%</span></div>
+        <div style="height:4px;border-radius:2px;background:#dfe3df;margin-top:5px;overflow:hidden"><div style="width:31%;height:100%;background:#4d8f7a"></div></div>
+      </div>
+    </div>
+  </div>
+  <div style="height:26px;flex:none;display:flex;align-items:center;padding:0 12px;background:#e2e6e2;border-top:1px solid rgba(30,45,35,.12);font:400 10.5px/1 'JetBrains Mono',monospace;color:#6c766f"><span>64 dupes flagged</span><span style="flex:1"></span><span style="color:#a8b2ab">Bueller…</span><span style="font-size:10px;margin-left:5px">🦀</span></div>
+</div>
+</div></div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Not yet drawn: context menu, inline rename, batch-rename sheet, drag-between-panes, empty / permission-denied panes, the <code style="font:400 11px/1 'JetBrains Mono',monospace">crab --about</code> screen.<br>Try next: "take <a class="dv-oid" href="#1a">1a</a>'s dual pane but <a class="dv-oid" href="#1b">1b</a>'s dark shell" · "show <a class="dv-oid" href="#1c">1c</a> at 320px wide" · "add the context menu and rename states to <a class="dv-oid" href="#1a">1a</a>"</p>
+</section>
+</x-dc>
+</body>
+</html>

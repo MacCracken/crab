@@ -2,6 +2,125 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.15] - 2026-08-26 — seven toolchain releases, same size, two-thirds new bytes
+
+### Changed — cyrius pin 6.5.28 -> **6.5.35**
+
+Seven releases. `cyrius build` had been printing `toolchain drift` on every invocation since the
+installed `cycc` moved to 6.5.35 — the pin is documentation, not enforcement, so crab was compiling
+with .35 while *declaring* .28. ⛔ **The declaration is the half that matters**: CI installs the
+toolchain by `grep '^cyrius = ' cyrius.cyml`, so a cold build got .28 and a local build got .35, and
+nothing in either run said so.
+
+⭐ **6.5.35's register-allocator rework rewrote two thirds of crab and changed its size by zero
+bytes.** Measured, both compilers run over the same tree, `build/crab` x86_64:
+
+|                  | 6.5.28    | 6.5.35              |
+|------------------|-----------|---------------------|
+| size             | 377,288 B | **377,288 B** (±0)  |
+| bytes differing  | —         | **240,284 (63.7 %)** |
+
+.35 replaced the "every live interval ends at the function end" stub with real loop-aware liveness
+and lifted the lifetime cap on register picks, so straight-line regions time-share registers for the
+first time. On crab that redistributes the code without shrinking it. ⚠ **No runtime claim is made
+here.** crab's cost is a `readdir` and a blit, neither of which this touches, and cyrius's own release
+notes say the runtime win was not demonstrable on their corpus either — their first A/B showing −11 %
+collapsed to noise at best-of-25.
+
+### Changed — `lib/` re-vendored from the 6.5.35 snapshot
+
+`cyrius lib sync` rewrote **29** stdlib leaves. **Two changed content**, and `cyrius.lock` moves
+exactly two hashes:
+
+- **`lib/fmt.cyr`** — 6.5.30's `fmt_float` carry fix. When the rounded fraction reached a full unit
+  the carry had nowhere to go, because the integer part had already been written to the buffer, so
+  the raw `10^decimals` was emitted verbatim as the fraction field: `3 - 1e-7` printed `2.1000000`.
+  ⚠ crab calls no `fmt_float` and no `f64_*` — this is correctness crab now carries but does not
+  exercise.
+- **`lib/syscalls_windows.cyr`** — 6.5.30's `Stat` enum. A compile-time contract only: `xstat`
+  returns −1 unconditionally on `CYRIUS_TARGET_WIN`, so no byte at those offsets is ever read.
+
+Everything else in `lib/` was already byte-identical to the .35 snapshot.
+
+⚠ **`lib sync` covers 29 of the 30 stdlib leaves crab actually vendors — `lib/atomic.cyr` is not one
+of them.** It is a transitive leaf (`alloc`, `io`, `fmt` and three `syscalls_*` files include it), it
+is not in `[deps].stdlib`, and the sync walks the *declared* set. Checked by hand this cut and it is
+already byte-identical to the .35 snapshot, so nothing is stale today — but it is the one file a
+toolchain bump can silently leave behind, and `cyrius.lock` would happily lock the old hash.
+
+### Unchanged — all six deps, verified rather than assumed
+
+sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · dhancha 0.9.12 · setu 0.8.7.
+
+⛔ **This is a checked result, not a skipped step.** Four of the six carry `path` alongside `tag`
+(rupa, kashi, dhancha, setu — sadish and rekha are tag-only), and **`path` wins**, so a green build is
+not evidence that the declared graph resolves. That is the drift 0.4.13 caught and closed. Each tag
+was checked three ways: against the sibling's `VERSION`, against `git rev-parse <tag> == HEAD` in the
+sibling working tree, and against the newest tag actually published on GitHub (`git ls-remote`,
+sorted `-V`). All six agree, and every vendored bundle in `lib/` is byte-identical to that sibling's
+`dist/` output. There was nothing to bump.
+
+### Fixed — four claims in `cyrius.cyml` that were false about the graph they describe
+
+The manifest's comment blocks are load-bearing — they are where the ⛔ rules live — so a stale one is
+worse than none. All four re-derived from the live tree:
+
+- **"`net` stays until setu moves off TCP"** — setu moved off TCP in **0.8.4 (2026-08-07)**; crab has
+  pinned past it since 0.4.5. Measured: with `net` deleted from `[deps].stdlib` *and* `lib/net.cyr`
+  removed, `cyrius deps` re-creates the leaf (30,092 B) from setu's `dist/setu.deps` sidecar and the
+  build is OK at the same 377,288 B. The declaration is **redundant**, not load-bearing. ⚠ It is
+  **not dropped here** — that is a separate change, not a version bump.
+- **"the agnos socket (`anu`)"** — the codename is **retired**, operator ruling 2026-08-05: *a name is
+  a distribution fact*, and a band that only appears as a prefix inside one kernel has no repo boundary
+  to cross. It is `#97 chan_op` / `VFS_CHAN = 11` / `chan_*`. `anu` resolves to nothing.
+- **"Every other dep in this stack carries both"**, in **four** places — false. **Four of six** carry
+  `path` (rupa, kashi, dhancha, setu); **sadish and rekha are tag-only** and always have been. A
+  reader trusting that comment would look for a `path` that is not there.
+- **"path=../rupa until tagged"** — rupa has been tagged since 0.1.3, and this manifest pins
+  `tag = "0.1.4"` ten lines below the claim.
+
+### Docs — `docs/development/state.md` rewritten; it had rotted for eleven releases
+
+⛔ **The file's own ⛔ warning about going stale came true a second time, and the second time was
+worse** — rot in a detailed file rather than neglect of an empty one. Untouched from 2026-08-07 to
+2026-08-26 (0.4.4 → 0.4.15), it asserted a `6.5.5` pin, **all six** dep versions wrong, a `Next` item
+that shipped in 0.4.6, the retired `anu` name, and — flatly false — **"Never run on iron"**, when crab
+has burned on iron twice and both burns found real defects (2026-08-08: orphaned alive holding one of
+16 system-wide `#86` shm slots, fixed in 0.4.6 · 2026-08-19: 114 entries at `/`, 32 listed, fixed in
+0.4.13/0.4.14).
+
+Two live gates in it were also **already cleared** and still read as open: the "re-establish crab's
+agnos standing before anything is called proven again" gate (cleared 0.4.5 — crab is the second client
+in agnos 1.56.40's ipc bite 7), and "`-smp 4` fault-kills" (that same run proved under `-smp 4`). The
+⛔ retraction blocks are kept as records; only the live claims were touched.
+
+Added a **Known gaps** section, which the file had never had. Its first entry: ⛔ a **stale `crab`
+binary is tracked at the repo root** (319,040 B, 2026-07-23, 58,248 B smaller than today's build).
+`.gitignore` covers `/build/` but not `/crab`, and `release.yml` publishes `git archive HEAD` with no
+`.gitattributes` `export-ignore` — so **every source tarball ships a months-old binary**, and that
+tarball is what `cyrius deps` fetches. Left for the operator: it is a git change.
+
+### Verified
+
+`cyrius build` OK on x86_64 (377,288 B) and `--agnos` (377,312 B) · `cyrius test` **11 / 0** ·
+`cyrius tests` 1 / 0 · `fuzz` PASS · `bench` PASS · `vet` 1 dep, 0 untrusted, 0 missing · `deny`
+0 violations · `fmt --check` clean.
+
+⚠ **`cyrius build --win` still fails, and it is not this release.** `error: refusing to emit binary
+with 2 reachable undefined function(s)` — `sys_socket` / `sys_connect`. Verified pre-existing by
+rebuilding the 0.4.14 tree with the 6.5.28 toolchain: identical failure, identical two symbols.
+
+⛔ **The obvious attribution is wrong, and this entry shipped it wrong in draft.** It is *not* the
+retired `net` TCP transport: `lib/net.cyr` names neither symbol — it reaches BSD sockets through the
+generic form (`syscall(NSYS_SOCKET, AF_INET, …)` at `net.cyr:197`), and a generic `syscall()` emits no
+named reference, so `net` cannot produce an undefined *name*. The only callers in the tree are
+`lib/setu.cyr:971` / `:973` / `:1022`, and they are **AF_UNIX / SOCK_SEQPACKET** — i.e. they exist
+*because* setu already moved off TCP (setu 0.8.4, 2026-08-07). The real cause is target-table
+coverage: `sys_socket` / `sys_connect` are defined in `lib/syscalls_linux_common.cyr:470` / `:515`,
+`lib/syscalls.cyr` routes `CYRIUS_TARGET_WIN` to `lib/syscalls_windows.cyr` instead, and that file
+defines `sys_socketpair` but neither of these two. Windows is not a declared crab target, so this is
+recorded rather than fixed.
+
 ## [0.4.14] - 2026-08-19 — narrating the listing WAS the cost
 
 ### Fixed — crab got slower the moment its entry cap grew

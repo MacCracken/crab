@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack; AI (semantic find / auto-tag / dedup) via daimon's vector store — files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.28"
+cyrius = "6.5.35"
 
 [build]
 entry = "src/main.cyr"
@@ -18,8 +18,17 @@ output = "crab"
 # net = setu's TCP client transport; result = net's return type.
 # ⛔ That TCP transport is RETIRED (2026-08-03) as the WRONG PRIMITIVE for local display IPC — not
 # because it failed: post-`net_src_for` (agnos 1.56.34) crab connected and presented un-rigged
-# (QEMU `-smp 1`, 2026-08-02). Replacement: the agnos socket (`anu`) — agnos
-# `docs/development/planning/ipc.md` §9/§10. `net` stays until setu moves off TCP.
+# (QEMU `-smp 1`, 2026-08-02). Replacement: the agnos **channel band** — syscall `#97 chan_op`,
+# `VFS_CHAN = 11`, kernel prefix `chan_*` (agnos `docs/development/planning/ipc.md` §9/§10).
+# ⛔ This comment said `anu` until 2026-08-26. THE CODENAME IS RETIRED — operator ruling 2026-08-05,
+# "a name is a distribution fact", and a band that only ever appears as a prefix inside one kernel has
+# no repo boundary to cross. Say `chan_*`; `anu` resolves to nothing in the kernel.
+# ⛔ And "`net` stays until setu moves off TCP" was FALSE from 2026-08-07: setu 0.8.4 removed TCP
+# (Linux is AF_UNIX/SOCK_SEQPACKET, agnos is the channel band), and crab has pinned past it since
+# 0.4.5. The declaration is now REDUNDANT rather than load-bearing — MEASURED 2026-08-26: with `net`
+# deleted from this list AND `lib/net.cyr` removed, `cyrius deps` re-creates the leaf (30,092 B) from
+# setu's `dist/setu.deps` sidecar and `cyrius build` is OK at the same 377,288 B. ⇒ Dropping it is a
+# real cleanup, not a risk — but it is a SEPARATE change and is not bundled into the 0.4.15 bump.
 # ⛔ `chrono` added 2026-08-07 — setu's agnos read path needs it, and crab was missing it while
 # building clean: `dist/setu.deps` under-reported 8 of setu's 12 leaves, which switched OFF
 # `cyrius deps`' own validation. setu 0.8.2 corrects its sidecar, so the check fires again and this
@@ -36,11 +45,16 @@ modules = ["dist/sadish.cyr"]
 
 # rupa (रूप — form / appearance) — the shared desktop theme-token core. crab colours
 # its panes/rows/status with the active MUDRA / SHANTA theme via dhancha's dh_theme_*,
-# which reference rupa's tokens — so crab supplies rupa too. path=../rupa until tagged.
+# which reference rupa's tokens — so crab supplies rupa too.
+# ⚠ This line read "path=../rupa until tagged" until 2026-08-26. rupa HAS been tagged since 0.1.3;
+# the `tag` ten lines below is real and published. The `path` is kept for local iteration, not for
+# want of a tag.
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
 # ⚠ `path` so a local rupa change can be built against before it is pushed — without it a burn
-# tests last week's tokens. Every other dep in this stack already carries both.
+# tests last week's tokens.
+# ⛔ This said "every other dep in this stack already carries both" — FALSE. **Four of six** carry
+# `path`: rupa, kashi, dhancha, setu. **sadish and rekha are tag-only** and always have been.
 path = "../rupa"
 # ⛔ >= 0.1.3 IS A HARD REQUIREMENT, NOT A FRESHNESS PREFERENCE. dhancha 0.9.6 added per-widget
 # motion, so `dist/dhancha.cyr` now references `RupaMotion` / `RupaEase` / `rupa_motion_duration` —
@@ -58,7 +72,8 @@ modules = ["dist/rekha.cyr"]
 # glyphs for default (font=0) text, so crab provides the glyph data.
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
-# ⚠ `path` — kashi is VENDORED (lib/kashi_font_data.cyr); every other dep in this stack carries both.
+# ⚠ `path` — kashi is VENDORED (lib/kashi_font_data.cyr). ⛔ The old tail "every other dep in this
+# stack carries both" was FALSE: sadish and rekha are tag-only. Four of six carry `path`.
 path = "../kashi"
 tag = "1.0.6"
 # ⛔⛔ THE FREESTANDING CORE IS A MEASURED CHOICE, NOT A SHORTCUT (recorded 2026-08-17, kashi 1.0.6).
@@ -76,7 +91,8 @@ modules = ["src/font_data.cyr"]
 
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
-# ⚠ `path` added 2026-08-16, matching every other dep in this stack: without it crab could only build
+# ⚠ `path` added 2026-08-16 (⛔ not "matching every other dep" — sadish and rekha are tag-only, so
+# this is four of six): without it crab could only build
 # against a PUBLISHED tag, so a local dhancha fix could not be exercised until it was pushed — which is
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
@@ -87,7 +103,8 @@ modules = ["dist/dhancha.cyr"]
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
 # ⚠ `path` added 2026-08-12 — setu 0.8.5 centralises the rendezvous ($SETU_SOCKET) and a
-# tag-only dep could not be built against it locally. Every other dep here carries both.
+# tag-only dep could not be built against it locally. ⛔ "Every other dep here carries both" was
+# FALSE — sadish and rekha are tag-only.
 path = "../setu"
 tag = "0.8.7"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
 modules = ["dist/setu.cyr"]
