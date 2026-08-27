@@ -29,11 +29,6 @@ enum CrabDir {
     CRAB_MAX_ENTRIES = 256;
 }
 
-# ⚠ Idle poll interval for the event loop. NOT a style preference — see the loop in main().
-enum CrabLoop {
-    CRAB_POLL_SLEEP_MS = 16;
-}
-
 # ⚠ `CRAB_REC_SZ` / `CRAB_REC_TYPE` / `CRAB_PATH_MAX` / `CRAB_NAME_MAX`, and the bounded path helpers
 # `crab_strcpy_n` / `crab_join_n`, live in `src/path.cyr` (pulled in via `src/ui.cyr` above). They are
 # there and not here for ONE reason: `tests/crab.tcyr` includes `ui.cyr`, never `main.cyr`, so
@@ -300,12 +295,15 @@ fn main(): i64 {
     # ⇒ The loop now ends on the two things that actually mean "stop": EOF and WINDOW_CLOSE. Both
     # were already handled; neither was allowed to be the reason the loop ended.
     #
-    # ⚠ AND THE SLEEP IS LOAD-BEARING, NOT POLITENESS. `dh_setu_poll_event` calls `setu_msg_new()`
+    # ⚠ AND THE IDLE WAIT IS LOAD-BEARING, NOT POLITENESS. `dh_setu_poll_event` calls `setu_msg_new()`
     # BEFORE it knows whether anything is pending, so every idle poll leaks ~80 B into an allocator
     # with no free. Removing the frame cap without slowing the poll would have turned a bounded
-    # 152 MB leak into an unbounded one — roughly 80 MB/s of idle growth. At ~60 Hz that is ~5 KB/s
-    # instead: still a leak, still upstream, but survivable while dhancha's poll is fixed.
-    # ⇒ Sleep ONLY when the poll came back empty, so a burst of events still drains at full speed.
+    # 152 MB leak into an unbounded one — roughly 80 MB/s of idle growth. Waiting on an interrupt
+    # instead of spinning bounds it to the tick rate: still a leak, still upstream, but survivable
+    # while dhancha's poll is fixed.
+    # ⇒ Wait ONLY when the poll came back empty, so a burst of events still drains at full speed.
+    # ⛔ WHICH wait primitive is not a detail — see the ⛔ block at the bottom of this loop. Getting
+    # it wrong froze the whole desktop, and only a QEMU run showed it.
     # ⚠ NOT `dh_client_next_event` (which blocks): crab must be able to redraw without input for the
     # idle mascot line, transfer progress and index progress. A blocking read forecloses all three.
     var running = 1;
@@ -363,8 +361,29 @@ fn main(): i64 {
                 else { setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes); }
             }
         }
+        # ⛔⛔ `sys_pause` (#14), NOT `sys_sleep_ms` (#41). THIS EXACT LINE WAS A REGRESSION IN A
+        # 0.5.0 DRAFT AND QEMU CAUGHT IT — no host test could have.
+        #
+        # The draft used `sys_sleep_ms(16)` to slow the idle poll. `sleep_ms` is the DOOM frame-pacing
+        # primitive: it calls **`preempt_disable()`** and then `hlt`s in a loop until the tick target
+        # (kernel/core/syscall.cyr, `num == 41`). Its own comment says the quiet part out loud —
+        # *"we can't be preempted off mid-sleep"*. That is correct for a game that owns the machine
+        # and catastrophic for a desktop client: while crab slept, **nothing else could be
+        # scheduled**. Measured against `puka-terminal-test.py`: clients placed 2, clients
+        # **presented 0**, `aethersafha --clients` never finished. The 0.4.15 baseline on the same
+        # harness scored presented 2 and exit 95. crab did not just fail to yield — it stopped the
+        # compositor from running at all.
+        #
+        # ⭐ `pause` (#14) is the primitive this loop actually wants: the syscall handler **yields to
+        # a ready proc first**, and only falls through to a safe IF=1 `hlt` when nothing else is
+        # runnable. So other processes get the CPU, and when the machine really is idle crab waits on
+        # an interrupt instead of spinning — which is also what bounds `dh_setu_poll_event`'s ~80 B
+        # per-poll leak until that dhancha gate closes.
+        # ⚠ It is NOT `sys_sched_yield`: yield hands off but comes straight back, so an idle desktop
+        # still spins a core at poll speed. `pause` is yield-then-wait.
+        #
         # Idle only. An event just handled means more may be queued — drain at full speed.
-        if ((running == 1) && (ev == 0)) { sys_sleep_ms(CRAB_POLL_SLEEP_MS); }
+        if ((running == 1) && (ev == 0)) { sys_pause(); }
     }
     #endif
     dh_client_close(c);          # symmetry: connected through the toolkit, close through it too

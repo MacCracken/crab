@@ -89,8 +89,13 @@ assumes otherwise.
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*
 - **Stop the idle leak** — `dh_setu_poll_event` calls `setu_msg_new()` before it knows whether
-  anything is pending, so every poll leaks ~80 B. 0.5.0 slowed the poll to ~60 Hz as a stopgap.
-  **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
+  anything is pending, so every poll leaks ~80 B. 0.5.0's stopgap is to wait on an interrupt when the
+  poll is empty. **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
+  ⛔ **Whatever replaces this wait, it must not be `sys_sleep_ms`.** That syscall `preempt_disable()`s,
+  so while crab waits nothing else on the machine can be scheduled — a 0.5.0 draft used it and the
+  compositor never presented at all (`presented: 0` against a baseline of 2). `sys_pause` (#14) yields
+  to a ready proc first and only halts when nothing else is runnable. The host suite is green either
+  way; **only a QEMU run distinguishes them**, so this line is a required QEMU gate, not a preference.
 
 > ⛔ **Gate: dhancha — per-frame allocation.** `crab_render` costs **749,704 B per frame**, measured,
 > and none of it is ever reclaimed (the allocator has no `free`). **89 % of that is two pixel

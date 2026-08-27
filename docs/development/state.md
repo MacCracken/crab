@@ -123,6 +123,26 @@ at least twice, and both burns found real defects:
   (0.4.13, `CRAB_MAX_ENTRIES` 32 → 256), and the per-entry stat tracing that revealed it was itself the
   performance regression the operator reported (0.4.14).
 
+✅ **QEMU, 2026-08-26, crab 0.5.0 on a real agnos kernel at `-smp 4`** — the 0.5.0 repairs, verified
+rather than argued for:
+
+- `agnos/scripts/harness/crab-listing-cap-test.py` — **PASS**. The `/bin` pane listed **45 of 45**
+  entries, no truncation warning, no fault. Drives the repaired path layer on real ext2.
+- `agnos/scripts/harness/puka-terminal-test.py` — **PASS**, background exit **95**, 2 compositor
+  presentations. crab connected over the current channel-band transport, presented, and left its loop
+  with `crab: compositor closed the window -- exiting` — the 0.5.0 `WINDOW_CLOSE` path on a real
+  compositor.
+
+⛔ **And QEMU EARNED ITS KEEP: it caught a regression the host suite could not see.** A 0.5.0 draft
+idled with `sys_sleep_ms`, which `preempt_disable()`s — so while crab slept **nothing else could be
+scheduled** and the compositor never presented at all (placed 2, presented **0**, `--clients` never
+returned). The host suite was **37/37 green for that build**, because the loop is inside
+`#ifdef CYRIUS_TARGET_AGNOS`. Shipped primitive is `sys_pause` (#14), which yields to a ready proc
+first. ⇒ **Any change to the agnos event loop needs a QEMU run before it is claimed.**
+
+⚠ **Not exercised on agnos:** `crab_descend` / `crab_ascend`. Neither harness drives navigation keys,
+so the bounded-join *refusal* path has host assertions only.
+
 ## Dependencies
 
 Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08-26**:

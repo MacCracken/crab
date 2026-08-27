@@ -59,15 +59,47 @@ short life.
 The loop now ends on the two things that actually mean stop — EOF and `WINDOW_CLOSE`. Both were
 already handled; neither was allowed to be the reason the loop ended.
 
-⛔ **And the sleep is load-bearing, not politeness.** `dh_setu_poll_event` calls `setu_msg_new()`
+⛔ **And the idle wait is load-bearing, not politeness.** `dh_setu_poll_event` calls `setu_msg_new()`
 *before* it knows whether anything is pending, so every idle poll leaks ~80 B into an allocator with
 no `free`. Removing the frame cap without slowing the poll would have turned a bounded 152 MB leak
-into an **unbounded** one — roughly 80 MB/s of idle growth. Sleeping ~16 ms between **empty** polls
-takes that to ~5 KB/s; a burst of events still drains at full speed. The upstream fix is a dhancha
+into an **unbounded** one — roughly 80 MB/s of idle growth. The loop now waits on an interrupt when
+the poll comes back empty, and drains at full speed when it does not. The upstream fix is a dhancha
 gate (roadmap M2).
 
 ⚠ Not `dh_client_next_event`, which blocks: crab must be able to redraw without input for the idle
 mascot line, transfer progress and index progress. A blocking read forecloses all three.
+
+### Fixed — the idle wait froze the whole desktop, and only QEMU caught it
+
+⛔⛔ **A draft of the fix above used `sys_sleep_ms(16)`, and it was a REGRESSION THAT PASSED THE
+ENTIRE HOST SUITE.** `sleep_ms` (#41) is the **DOOM frame-pacing** primitive: it calls
+`preempt_disable()` and then halts until its tick target. The kernel's own comment says the quiet
+part out loud — *"we can't be preempted off mid-sleep"*. That is correct for a game that owns the
+machine and catastrophic for a desktop client: **while crab slept, nothing else could be scheduled.**
+
+Measured A/B against `scripts/harness/puka-terminal-test.py` on a real agnos kernel in QEMU
+(`-smp 4`), same image, same mode, only the binary changed:
+
+| build | clients placed | clients presented | `--clients` verdict |
+|---|---:|---:|---|
+| 0.4.15 baseline | 2 | **2** | exit 95 — pass |
+| 0.5.0 draft (`sleep_ms`) | 2 | **0** | never returned — fail |
+| 0.5.0 shipped (`sys_pause`) | 2 | **2** | exit 95 — pass |
+
+⚠ **crab did not merely fail to yield — it stopped the compositor from running at all.** Both
+clients went dark, not just crab, and `aethersafha --clients` never finished.
+
+⭐ The shipped primitive is **`sys_pause` (#14)**, whose syscall handler **yields to a ready proc
+first** and only falls through to a safe `IF=1 hlt` when nothing else is runnable. Other processes
+get the CPU; on a genuinely idle machine crab waits on an interrupt instead of spinning, which is
+also what bounds the per-poll leak above.
+⚠ **Not `sys_sched_yield` either** — yield hands off and comes straight back, so an idle desktop
+still spins a core at poll speed. `pause` is yield-*then-wait*.
+
+⛔ **The host suite was green for all three builds.** 37/37 passed against the version that froze the
+desktop, because the loop lives inside `#ifdef CYRIUS_TARGET_AGNOS` and no host test executes it.
+This is the exact class of defect the QEMU harnesses exist for, and the reason the cause is now
+written as a ⛔ block at the call site rather than left as a one-word choice.
 
 ### Fixed — the window is no longer repainted after the compositor destroys it
 
@@ -217,17 +249,31 @@ memory on iron.
 
 ### Verified
 
-`cyrius build` OK on x86_64 (381,544 B) and `--agnos` (381,600 B) · `cyrius tests` **37 / 0** ·
+`cyrius build` OK on x86_64 (381,536 B) and `--agnos` (381,592 B) · `cyrius tests` **37 / 0** ·
 `fuzz` PASS · `bench` PASS · `vet` 1 dep, 0 untrusted, 0 missing · `deny` 0 violations ·
 `fmt --check` clean · coverage **53 %** (was 23 %).
 
-⚠ Binary grew 377,288 → 381,544 B (**+4,256**), which is the bounds checks. That is the price and it
+⚠ Binary grew 377,288 → 381,536 B (**+4,248**), which is the bounds checks. That is the price and it
 is worth stating rather than burying.
 
-⚠ **Not run on agnos or iron.** Every repair here is host-verified — compiled probes against the real
-functions plus mutation-proven assertions — and the two most consequential (the loop lifetime and the
-idle sleep) are in `#ifdef CYRIUS_TARGET_AGNOS` regions that **no host test executes**. They need a
-burn before they are claimed.
+⭐ **Run on a real agnos kernel in QEMU** (`-smp 4`), which is what caught the `sleep_ms` regression
+above:
+
+- `scripts/harness/crab-listing-cap-test.py` — **PASS**, exit 0. The `/bin` pane listed **45 of 45**
+  entries with no truncation warning and no fault, exercising the repaired path layer on real ext2:
+  `crab_join_n` once per entry into the 256-byte scratch, the readdir clamp, and the
+  `STAT_SIZE` / `STAT_MTIME` / `STAT_BUFSZ` named offsets.
+- `scripts/harness/puka-terminal-test.py` — **PASS**, background exit **95**, "both clients connected
+  and presented", 2 compositor presentations, 0 faults. crab connected over the **current channel-band
+  transport**, presented, and left its loop with `crab: compositor closed the window -- exiting` —
+  which is the 0.5.0 `WINDOW_CLOSE` path, observed on a real compositor rather than argued for.
+
+⚠ **Still not run on iron**, and QEMU is not a control for timing- or pressure-dependent behaviour —
+the harness README is explicit that a lossy-queue failure which killed a client on iron reproduced
+not at all under QEMU. The per-frame allocation ceiling in particular is an iron question.
+
+⚠ **`crab_descend` / `crab_ascend` were not exercised on agnos.** Both harnesses run crab without
+driving navigation keys, so the bounded-join *refusal* path has host assertions but no agnos run.
 
 ⚠ `cyrius build --win` still fails, unchanged and for the reason 0.4.15 recorded: `sys_socket` /
 `sys_connect` are absent from the Windows syscall table. Nothing in crab causes it.
