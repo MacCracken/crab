@@ -2,6 +2,236 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-08-26 — a P-1 sweep, and a roadmap that finally exists
+
+Four things, all of them structural: a P-1 audit of the whole codebase with its repairs, the
+deferral tail bubbled out of comment prose into a roadmap, the design canvas turned into a sequenced
+plan to 1.0, and the two decisions that plan rests on written down as ADRs.
+
+⚠ **No new user-visible features.** 0.5.0 is the release that stops building on a floor with holes in
+it. What it buys is that M2 onward can be built without re-discovering these.
+
+### Fixed — P1: the path helpers had no bounds, and ordinary navigation overflowed the heap
+
+`crab_strcpy` and `crab_join` took **no destination size and performed no length check of any kind**,
+while every destination was a fixed `alloc(256)`. Descent depth is unbounded, so a pane path grew by
+`1 + strlen(name)` on every Enter with nothing anywhere that stopped it.
+
+⛔ **It needed no hostile input — only Enter.** The bump allocator hands out adjacent blocks in call
+order, so the overrun landed on identifiable live objects:
+
+- `lpath + 256` **is** `rpath` — an overlong LEFT path silently rewrote the RIGHT pane's path string,
+  which the right pane then readdir'd. The operator sees one directory and gets another.
+- `rpath + 256` **is** `lbuf` — an overlong RIGHT path overwrote the other pane's 64-byte readdir
+  records **including their type bytes**, so entries changed name and flipped between file and
+  directory.
+- past `pathscr + 256` lie `statbuf` and then the `SetuClient` struct — the compositor fd and surface
+  id.
+
+Every write was a `store8`. There is no bounds checking on `store8`. All of it was silent.
+
+⚠ **Listing alone reached it, not just descending.** `crab_stat_all` joins path + `/` + name into the
+same 256-byte scratch **once per entry**, so a deep-but-legal directory overflowed on a plain
+readdir. Reproduced: a 252-char path joined with a 62-char name wrote **315 bytes** into a 256-byte
+buffer.
+
+⇒ `crab_strcpy_n` / `crab_join_n` take a capacity, stop at `cap - 1`, always NUL-terminate **inside**
+the allocation even when truncating, and return −1 when the source did not fit. The unbounded
+originals are **deleted** — there is no primitive left to misuse. `CRAB_PATH_MAX` sizes
+`lpath`/`rpath`/`pathscr` and bounds the helpers, the same one-constant-derived-everywhere discipline
+the readdir cap already had.
+
+⭐ **The return value is the fix, not the truncation.** A truncated path is a *different* path.
+`crab_stat_all` now reports the entry as unstattable rather than statting a truncated path and
+showing another file's size against this row; `crab_descend` refuses and says so rather than
+readdir'ing somewhere the operator did not ask to go.
+
+### Fixed — P1: the event loop was a spin count, and it ended sessions after about two seconds
+
+`while (frame < 2000000)` incremented once per **poll**, and nothing in the body blocks:
+`dh_client_poll_event` returns immediately on an idle channel and `sys_sched_yield` returns at once.
+So `frame` counted neither frames presented nor seconds nor user actions — it counted how fast the
+CPU could spin. At roughly a microsecond an iteration, **crab closed its own window after about two
+seconds**, mid-session, while focused and in use. The exit path printed nothing, so from the
+operator's side it was indistinguishable from a crash. It also burned one core at 100 % for its whole
+short life.
+
+The loop now ends on the two things that actually mean stop — EOF and `WINDOW_CLOSE`. Both were
+already handled; neither was allowed to be the reason the loop ended.
+
+⛔ **And the sleep is load-bearing, not politeness.** `dh_setu_poll_event` calls `setu_msg_new()`
+*before* it knows whether anything is pending, so every idle poll leaks ~80 B into an allocator with
+no `free`. Removing the frame cap without slowing the poll would have turned a bounded 152 MB leak
+into an **unbounded** one — roughly 80 MB/s of idle growth. Sleeping ~16 ms between **empty** polls
+takes that to ~5 KB/s; a burst of events still drains at full speed. The upstream fix is a dhancha
+gate (roadmap M2).
+
+⚠ Not `dh_client_next_event`, which blocks: crab must be able to redraw without input for the idle
+mascot line, transfer progress and index progress. A blocking read forecloses all three.
+
+### Fixed — the window is no longer repainted after the compositor destroys it
+
+The render + 334 KB shm write at the bottom of the event branch ran **unconditionally**, including on
+the `WINDOW_CLOSE` and EOF paths — drawing one last frame into a surface that had just been
+destroyed, and leaking a full render to do it.
+
+### Fixed — the size ladder rounded wrong, stopped at M, and overflowed
+
+Three defects in `crab_size_str`, each reproduced with a compiled probe against the real function:
+
+| input | was | now |
+|---|---|---|
+| `1048575` | `1024K` | **`1M`** |
+| `1073741824` | `1024M` | **`1G`** |
+| `107374182400` | `102400M` | **`100G`** |
+| `i64` max | **`K`** — a bare unit, no digits | **`8388608T`** |
+| `-1` | `""` (empty) | **`-`** |
+
+The first is a comparison hazard in the one application whose job is comparing files: a size that
+reads `1024K` when the next byte reads `1M`. The last two share a cause — `(val + 512)` **overflows**
+near `i64` max and wraps negative, the ladder exits on its first pass, and `crab_u2s` writes nothing
+at all for a negative. `st_size` is a `u64` read straight out of a kernel stat buffer, so a top-bit-set
+value is a corrupt-filesystem question, not an impossible one. Computing quotient and remainder
+separately cannot overflow at any input. `crab_u2s` now renders `-` rather than the empty string,
+which is what let a bare unit letter through.
+
+⚠ An unstattable file now renders `-` in the **pane** as well as the status line. It used to be blank
+in one and a dash in the other — one file, two renderings.
+
+### Fixed — a truncated name now says it was truncated
+
+The name column is 13 characters and names run to 62, so `A001_0812_R1.dng` and `A001_0812_R8.dng` —
+the design canvas's own fixture set — rendered as one identical row with no indication either was
+cut. An operator selects, descends and acts on rows. Truncated names now end in `~`.
+⚠ `~`, not `…`: the kashi system font is CP437 8×16 and has no ellipsis glyph.
+
+### Fixed — the date formatters clamp instead of writing an embedded NUL
+
+`crab_pad2`/`crab_pad4` write a fixed width, so an out-of-range value could not overflow — but
+`48 + t` for `t` outside `[0,9]` emits a non-digit, and for a large enough value emits **0**, an
+embedded NUL that truncates the whole status line at that point. The mtime they format is
+`load64(statbuf + STAT_MTIME)` — kernel data crab does not control.
+
+### Changed — `src/path.cyr`, so the P1 repair can be tested at all
+
+⛔ **`tests/crab.tcyr` includes `src/ui.cyr`, never `src/main.cyr`** — `main.cyr` ends in `_entry()`,
+so including it would *run the app*. Nothing defined in `main.cyr` was reachable from the suite. That
+was tolerable while it held transport glue; it stopped being tolerable when the sweep found a heap
+overflow in exactly the two functions living there. **A memory-safety repair that cannot be asserted
+on is a repair held on trust.**
+
+The record layout and the bounded helpers now live in `src/path.cyr`, which `ui.cyr` includes — so
+`main.cyr`, `render_test.cyr` and the suite all see one declaration.
+
+### Changed — named constants where the code had duplicated literals
+
+- `STAT_BUFSZ` / `STAT_SIZE` / `STAT_MTIME` replace `alloc(48)` and the bare offsets `16` and `40`.
+  `STAT_BUFSZ` is 48 on agnos and **144** on the Linux/Windows peers, and the allocation sits outside
+  the agnos `#ifdef` while the reads sit inside it — so the buffer is now sized by whichever peer the
+  build actually included.
+- `CRAB_REC_SZ` / `CRAB_REC_TYPE` replace the literals `64` and `63` at six sites across two files.
+  ⚠ These describe the **#81 syscall's** record geometry, which crab reports and does not choose;
+  naming them is about having one declaration, not about crab owning the layout.
+- `crab_readdir_into` clamps the returned count to `CRAB_MAX_ENTRIES`. ⚠ Defence in depth, not a
+  known defect — the syscall contract already bounds it. The clamp is there because `n` is a loop
+  bound over a buffer sized from the same constant.
+
+### Fixed — two silent exits, and an unchecked render
+
+The `attach_buf` and `commit` sends returned 1 in silence **after** the compositor had already minted
+a surface, so the one process that knew the failure said nothing. `crab_render`'s return is now
+checked at both call sites.
+
+### Fixed — the test suite had two defects of its own
+
+- ⛔ `crab_render` was called with **`rmt` as the left pane's mtimes**, so `lmt` was allocated,
+  filled, and never read — both panes rendered from one array. Both arrays hold the same value in the
+  fixture, which is exactly why it survived: the fixture could not tell the bug from the fix.
+- The suite header claimed the premultiplied flag was *"armed by `CRAB_PREMUL=1`"*. `CRAB_PREMUL` has
+  never existed anywhere in the tree; `crab_surface_flags` is a bare unconditional return. A reader
+  looking for the off switch would have found nothing and had no way to tell whether they were
+  misreading the code or the comment.
+
+### Added — 11 → 37 assertions, mutation-proven
+
+New groups cover the bounded path helpers (including the exact 252-char-path + 62-char-name shape
+that used to write 315 bytes into 256), the size ladder at every boundary, the date-formatter clamps,
+and the truncation marker. Reference coverage **23 % → 53 %**.
+
+⛔ **The truncation test was rewritten because its first draft could not fail.** It reimplemented
+`crab_row`'s name-column loop in the harness and asserted on the copy — so deleting the marker from
+the production function left the suite green. A test that mirrors the code under test is measuring
+itself. It now drives the real `crab_row` through a real `dh_list` and reads the resulting widget
+text back. This is the same defect 0.4.14 records, where counting per-entry trace lines made the
+diagnostic the thing being measured.
+
+Every new assertion is mutation-proven: reverting each bound, the overflow fix and the truncation
+marker each produce a named failure.
+
+### Added — `docs/development/roadmap.md`, and the deferral tail that fills it
+
+⛔ **The roadmap was the `cyrius init` template — `### M1 — _Title_ (v0.2.0)` — through fifteen
+releases.** So every deferral crab accumulated had nowhere to be sequenced, and lived as ⛔/⚠ prose
+scattered across `src/`, the CHANGELOG, `state.md` and `cyrius.cyml`. The only way to find them was
+to read all of it.
+
+**39 deferrals** were harvested and folded into eight milestones (M1 hardening → M8 assisted search),
+each carrying its **named upstream gate** rather than discovering it when the milestone starts:
+
+- **dhancha** — per-frame allocation (blocks everything after M2), the allocating idle poll, TABLE /
+  GRID / COLUMNS / TREE / MENU / PROGRESS / context menu / modal sheet
+- **rupa** — an `on-accent` token; without it a selected row cannot carry guaranteed-legible text
+- **setu** — `SETU_SURF_FULL_KEYS`, so key *release* and held keys exist
+- **agnos** — resumable readdir (a pane cannot represent more than 256 entries; the canvas draws 812),
+  and the write syscalls M4 needs
+- **rekha** — proportional text; crab passes `font = 0` and calls no `rekha_*` function today
+- **daimon** — the vector store the whole AI arc rests on. ⛔ crab's package description, its `[deps]`
+  comment and its README all promise it, and `cyrius.cyml` declares no daimon dependency.
+
+### Added — ADRs for the two decisions the roadmap rests on
+
+- **[ADR 0001](docs/adr/0001-compositor-owns-theming.md)** — the compositor owns theming; crab ships
+  no palette and no theme UI. The canvas's light and dark shells are two **compositor states**, not
+  two crab settings. ⚠ Recorded because the pressure to reverse it is predictable: "add a dark mode
+  toggle" looks like a small local change and is architecturally excluded.
+- **[ADR 0002](docs/adr/0002-semantic-find-is-a-mode.md)** — semantic find is a **mode over any
+  view**, not a view of its own. The canvas raises this as its own open question and notes *"cheapest
+  to build as a view; better to use as a mode"*. Deciding factor: the ranked-result affordances
+  belong in **browse** too — the canvas draws suggested tags in 1a's browse pane and dupe grouping is
+  useful in a plain listing. One result model that list, grid, columns and gallery all render.
+  ⚠ Consequence, stated up front: the entry record must carry optional match metadata from M3, not
+  M7 — the readdir record is the syscall's fixed 64 bytes and cannot hold it.
+
+### Added — `docs/architecture/001-every-frame-allocates-and-nothing-is-freed.md`
+
+**Measured: `crab_render` costs 749,704 B per frame at 114 entries per pane, and none of it is ever
+reclaimed.** 89 % of that is two full-size pixel buffers — and one of them, `dh_surface_new`'s
+`alloc(w*h*4)`, is **never written and never read**, because `dh_surface_render` allocates its own
+`sd_surface_new` to draw into.
+
+It has not bitten because crab repaints on input and used to exit after two seconds. Both of those
+accidents are now gone, and M2's self-redraw makes it **45 MB/s at 60 Hz**. The note records the
+measurement, the breakdown, the three-step upstream fix, and the rule it implies: **do not add a
+continuously-repainting element until the dhancha gate is closed** — it will work in QEMU and exhaust
+memory on iron.
+
+### Verified
+
+`cyrius build` OK on x86_64 (381,544 B) and `--agnos` (381,600 B) · `cyrius tests` **37 / 0** ·
+`fuzz` PASS · `bench` PASS · `vet` 1 dep, 0 untrusted, 0 missing · `deny` 0 violations ·
+`fmt --check` clean · coverage **53 %** (was 23 %).
+
+⚠ Binary grew 377,288 → 381,544 B (**+4,256**), which is the bounds checks. That is the price and it
+is worth stating rather than burying.
+
+⚠ **Not run on agnos or iron.** Every repair here is host-verified — compiled probes against the real
+functions plus mutation-proven assertions — and the two most consequential (the loop lifetime and the
+idle sleep) are in `#ifdef CYRIUS_TARGET_AGNOS` regions that **no host test executes**. They need a
+burn before they are claimed.
+
+⚠ `cyrius build --win` still fails, unchanged and for the reason 0.4.15 recorded: `sys_socket` /
+`sys_connect` are absent from the Windows syscall table. Nothing in crab causes it.
+
 ## [0.4.15] - 2026-08-26 — seven toolchain releases, same size, two-thirds new bytes
 
 ### Changed — cyrius pin 6.5.28 -> **6.5.35**

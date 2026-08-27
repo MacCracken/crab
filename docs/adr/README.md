@@ -19,4 +19,7 @@ Decisions about crab — what we chose, the context, and the consequences we acc
 
 ## Index
 
-_No ADRs yet. Add the first as `0001-kebab-case-title.md`._
+| ADR | Title | Status |
+|-----|-------|--------|
+| [0001](0001-compositor-owns-theming.md) | The compositor owns theming; crab ships no palette | Accepted |
+| [0002](0002-semantic-find-is-a-mode.md) | Semantic find is a mode over any view, not a view of its own | Accepted |

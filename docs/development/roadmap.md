@@ -1,38 +1,243 @@
 # crab — Roadmap
 
-> Milestone plan through v1.0. State lives in [`state.md`](state.md);
-> this file is the sequencing — what ships, in what order, against
-> what dependency gates.
+> Milestone plan through v1.0. State lives in [`state.md`](state.md); this file is the
+> **sequencing** — what ships, in what order, against what dependency gates.
+>
+> ⛔ **This file was the `cyrius init` scaffold template until 0.5.0** — `### M1 — _Title_ (v0.2.0)`
+> with the body `_Replace this with the first real milestone._` — while crab shipped fifteen
+> releases past it. Every deferral the codebase accumulated had nowhere to be sequenced, so they
+> lived as ⛔/⚠ prose scattered across `src/`, the CHANGELOG and `state.md`, and the only way to
+> find them was to read all of it. That is what this file now exists to prevent.
+
+## The north star
+
+crab is designed against [`Crab File Manager Mockups.dc.html`](../../Crab%20File%20Manager%20Mockups.dc.html)
+at the repo root — a design canvas with three directions, each drawn full-screen (1280×768) and small
+(420×560). **All three are absorbed on the way to 1.0**; they are not alternatives.
+
+| direction | what it contributes | lands in |
+|-----------|--------------------|----------|
+| **1a** hairline dual-pane | the shell: list/details, view switcher, sidebar, hairline seams, 28px rows | M2–M4 |
+| **1c** dense operator view | density: columns browser, gallery preview, transfer tray, volumes, menu bar | M5–M6 |
+| **1b** meaning-first | the **assisted-search surface**: NL query, ranked results, WHY IT MATCHED, dupes | M7–M8 |
+
+### Three decisions that are settled, and shape everything below
+
+1. ⛔ **The compositor owns theming. crab ships no theme switcher and no palette of its own.**
+   It reads surface/text/accent from aethersafha via `dh_theme_*` → rupa, and declares only which
+   parts of the UI accent is permitted to tint. The light and dark shells in the canvas are two
+   **compositor states**, not two crab settings. Any "add a dark mode toggle" request is out of
+   scope by construction — see [ADR 0001](../adr/0001-compositor-owns-theming.md).
+
+2. ⭐ **Semantic find is a MODE over any view, not a view of its own.** 1b is drawn as a screen, and
+   a screen is cheaper — but a screen means two result paths that drift, and the ranked/dupe/why-it-
+   matched affordances would exist only in one of them. One result model that list, grid, columns and
+   gallery all render. See [ADR 0002](../adr/0002-semantic-find-is-a-mode.md).
+
+3. ⚠ **1b's wireframe is the assisted-search surface specifically** — the query bar, REFINE facets,
+   ranked list, WHY IT MATCHED and APPEARS IN panels, the dupes-in-set grouping, and the on-device
+   guarantee. It is not the app shell; the shell is 1a's.
+
+### Still open (from the canvas's own "Open questions")
+
+- **Does the second pane ever leave?** At 420px all three directions show one pane plus a Pane A/B
+  switcher, so the canvas answers this in the affirmative — but it has not been ratified. Forced by M4.
+- **Which accent roles does the compositor hand over?** rupa publishes `accent`, `active`, `held`,
+  `faint` — but **no `on-accent`** (the ink colour to use *on* an accent fill). Until it does, a
+  selected row cannot carry guaranteed-legible text. **Gate: rupa.** Forced by M3.
+
+---
 
 ## v1.0 criteria
 
-_Define before tagging v0.1.0:_
-
-- [ ] Public API frozen — every exported symbol documented and tested
-- [ ] Test coverage adequate for the surface area
-- [ ] Benchmarks captured in `docs/benchmarks.md`
-- [ ] At least one downstream consumer green
-- [ ] CHANGELOG complete from v0.1.0 onward
+- [ ] All three canvas directions absorbed — shell (1a), density (1c), assisted search (1b as a mode)
+- [ ] Public surface documented and tested; reference coverage ≥ 80 %
+- [ ] `docs/benchmarks.md` captured from a real bench harness, not the scaffold's `bench_noop`
+- [ ] Green on iron, not only QEMU — the two defects crab has shipped were both iron-only
+- [ ] CHANGELOG complete from v0.1.0; ADRs written for every ⛔ invariant now living in comments
 - [ ] Security audit pass (`docs/audit/YYYY-MM-DD-audit.md`)
+- [ ] `docs/examples/` populated
+
+---
 
 ## Milestones
 
-### M0 — Scaffold (v0.1.0) — ✅ shipped 2026-07-10
+### M1 — Hardening (v0.5.0) — ✅ this release
 
-- `cyrius init` scaffold landed
-- Doc-tree per [first-party-documentation.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
-- ADRs / architecture notes / guides / examples folders ready
+The P-1 sweep and its repairs. No new features; the point was to stop building on a floor with holes
+in it. See the [CHANGELOG](../../CHANGELOG.md) for the full accounting.
 
-### M1 — _Title_ (v0.2.0)
+- ✅ **P1** bounded path helpers — `crab_join`/`crab_strcpy` had no destination cap and overflowed
+  `pathscr`/`lpath`/`rpath` into the *other pane's* buffers on ordinary Enter presses
+- ✅ **P1** the event loop no longer ends itself after ~2 s of spinning
+- ✅ **P1** the size ladder rounds, carries, reaches G/T, and cannot overflow
+- ✅ `src/path.cyr` extracted so the suite can reach the path layer at all
+- ✅ 11 → 37 assertions, mutation-proven; reference coverage 23 % → 53 %
 
-_Replace this with the first real milestone. Specify the user-visible change, the dep gates, and the acceptance criteria._
+### M2 — The window is real (v0.6.0)
 
-### M2 — _Title_ (v0.3.0)
+crab is a fixed 380×220 rectangle that only understands the keyboard. Everything in the canvas
+assumes otherwise.
 
-_…_
+- **Resize** — handle `WINDOW_CONFIGURE` (dhancha already decodes it; crab drops it on the floor).
+  `w`/`h` become state, the shm buffer is recreated, layout reflows. *Deferral #01, #04.*
+- **Pointer** — click to select, click to focus a pane, double-click to descend, scroll wheel.
+  dhancha already synthesizes eight pointer kinds and crab consumes none. *Deferral #05.*
+- **Key release / held keys** — request `SETU_SURF_FULL_KEYS` so Down can repeat. Today one press
+  moves one row. *Deferral #06.* **Gate: setu** — confirm the compositor honours the flag.
+- **Route through `dh_dispatch`** — crab still switches on raw keysyms while the 0.4.8→0.4.12 arc
+  moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
+  around it". *Deferral #07.*
+- **Stop the idle leak** — `dh_setu_poll_event` calls `setu_msg_new()` before it knows whether
+  anything is pending, so every poll leaks ~80 B. 0.5.0 slowed the poll to ~60 Hz as a stopgap.
+  **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
 
-## Out of scope (for v1.0)
+> ⛔ **Gate: dhancha — per-frame allocation.** `crab_render` costs **749,704 B per frame**, measured,
+> and none of it is ever reclaimed (the allocator has no `free`). **89 % of that is two pixel
+> buffers**, and one of them — `dh_surface_new`'s `alloc(w*h*4)` — is **never written or read**,
+> because `dh_surface_render` allocates its own `sd_surface_new`. Fixing that one line upstream
+> halves crab's leak. The rest needs `dh_surface_render` to reuse a surface, or an arena hook: the
+> stdlib already ships `arena_new`/`arena_reset` documented for exactly this "per-frame reuse"
+> pattern, but dhancha allocates via plain `alloc()` at 19 sites, so crab cannot redirect it.
+> **This gate blocks every milestone after M2** — a file manager that leaks 732 KiB per keypress
+> cannot ship a transfer tray that repaints continuously.
 
-_Capture what's deliberately NOT in scope for v1.0. The list keeps future contributors from adding to v1.0 by accident._
+### M3 — A browser you would actually use (v0.7.0)
 
-- _e.g. Windows support, GUI front-end, etc._
+- **Sorting** by name / size / modified / kind, directories-first, dotfile handling — the pane
+  currently renders raw readdir order, which is on-disk order. *Deferral #33.*
+- **Real columns** — NAME · SIZE · MODIFIED with headers, replacing the 13-character name column.
+  **Gate: dhancha** TABLE or column-header widget. *Deferral #32.*
+- **Selection memory on ascend** — Backspace returns you to the top of the parent instead of to the
+  directory you just left. *Deferral #34.*
+- **Start where the operator chose** — argv paths; `/bin` and `/` are hardcoded smoke-test targets.
+  `args` is declared in `[deps].stdlib` and never called. *Deferral #11.*
+- **Directories larger than the cap** — `CRAB_MAX_ENTRIES = 256` is a compile-time ceiling; the
+  canvas shows `812 items` in a pane and `41,208 files` indexed. Needs paged or streaming readdir.
+  **Gate: agnos** — a readdir that can resume. *Deferral #02.*
+- **Get the stat storm off the keystroke path** — one synchronous `sys_stat` per entry per listing.
+  *Deferral #03.*
+- **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
+
+### M4 — File operations (v0.8.0)
+
+crab is a read-only browser. Enter on a file does nothing, silently.
+
+- Copy · move · rename · delete · mkdir · open. **Gate: agnos** write syscalls. *Deferral #10.*
+- **Transfer tray** (1c) — active operations with progress, rate and ETA.
+  **Gate: dhancha** PROGRESS widget.
+- **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
+  **Gate: dhancha** context menu + modal sheet.
+- **Drag between panes** — dhancha already has `DRAG_START`/`DRAG_MOVE`/`DRAG_DROP`/`DRAG_END` and
+  `dh_widget_set_draggable`/`set_drop_target`. crab consumes none of it.
+- **Empty and permission-denied pane states** — also from the canvas's not-yet-drawn list.
+- **Ratify the small-window question** — one pane + switcher at 420px.
+
+### M5 — Views (v0.9.0)
+
+- **Grid**, **Columns** (miller), **Gallery** — the canvas's four-way view switcher.
+  **Gate: dhancha** GRID / COLUMNS widgets. Note `CANVAS` (0.9.9) exists and could carry app-drawn
+  grids, but the toolkit is the right home — "the rule lived in three apps, now it lives once".
+- **Preview pane** with real metadata (`42.8 MB · 8192 × 5464`, camera, shot).
+- **Thumbnails** — **Gate:** an image decoder; none exists in the stack today.
+- **Proportional text** — crab passes `font = 0` (kashi CP437 bitmap) and calls no `rekha_*`
+  function, while the README claims rekha TrueType and the canvas assumes Barlow + JetBrains Mono.
+  **Gate: rekha** + dhancha font plumbing. *Deferral #26.*
+
+### M6 — Sidebar, volumes, density (v0.9.x)
+
+- **Sidebar** — PLACES / SMART FOLDERS / TAGS / VOLUMES with capacity bars.
+  **Gate: dhancha** TREE widget; drawer overlay for the small window.
+- **Menu bar** (1c) — File · Edit · Go · Tags · Index · Window. **Gate: dhancha** MENU.
+- **The 🦀 menu** (canvas turn 2) — the mascot's chevron menu, light and dark, collapsed and revealed.
+
+### M7 — The index (v0.10.0)
+
+- **Local index** — `Local · 41,208 files`, `index fresh`, background indexing that
+  `pauses on battery`. **Gate: daimon.**
+- **Tags** — manual and suggested (`SUGGESTED TAGS · src → + toolchain + cyrius + wip`).
+- **Smart folders** — Recent, Duplicates, Untagged, Large & old, Raw only, Unrated.
+- **Duplicate detection** — byte-identical grouping, `Keep newest`.
+- ⛔ **Declare the daimon dependency or stop promising the AI arc.** The package description, the
+  `[deps]` comment and the README all commit to it; `cyrius.cyml` declares no daimon dep. daimon
+  2.1.0 exists locally with vector/RAG stores. *Deferral #18.*
+
+### M8 — Assisted search (v1.0.0)
+
+1b, **as a mode over every view**.
+
+- NL query bar (`invoices from last spring, the paid ones`), `⌘K` from anywhere
+- Ranked results with a MATCH column; REFINE facets (Kind · Date · Size · Location)
+- **WHY IT MATCHED** and **APPEARS IN** panels
+- Dupes-within-result-set grouping
+- ⭐ **`no external service` · `index stays on device`** — stated in the canvas UI, and it is a
+  promise the implementation must actually keep. **Gate: daimon** local-only embedding.
+- `SAVE AS → Smart folder…` closes the loop back to M7.
+
+---
+
+## Cross-cutting (not a milestone — do these continuously)
+
+### Testing and CI — the gate is thinner than it looks
+
+- ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI.** It is crab's strongest test,
+  mutation-proven against four regressions, and CI runs `cyrius test` which does not discover it.
+  *Deferral #14.*
+- ⛔ **CI never builds `--agnos`** — the target `state.md` calls "the real target". Every
+  `#ifdef CYRIUS_TARGET_AGNOS` region is uncompiled by the gate. *Deferral #15.*
+- CI runs neither `fuzz`, `bench`, `lint`, `fmt --check`, `vet`, `deny` nor `coverage`. *Deferral #36.*
+- **The fuzz harness reads none of its input** — `fuzz_main(data, len)` returns 0 without touching a
+  byte, so `cyrius fuzz` would PASS against anything. crab parses untrusted readdir records.
+  *Deferral #12.*
+- **The bench harness times an empty function.** crab has had exactly one performance regression and
+  it was reported from iron by an operator, not caught here. *Deferral #13.*
+- **Bring the agnos/iron harness into this repo** — both real defects crab shipped were agnos-runtime
+  behaviour no host test can see. *Deferral #16.*
+- **Automate the `path`-wins-over-`tag` re-verification** — 0.4.13 shipped a manifest naming a
+  library the build never compiled. *Deferral #19.*
+- **Enforce `state.md` currency** — it has rotted twice, once across eleven releases, and the file
+  itself diagnoses why: nothing gates it. *Deferral #37.*
+
+### Documentation debt
+
+- `CLAUDE.md` still carries two `cyrius init` placeholders — the identity line and the whole `## Goal`
+  section. It has never been edited. *Deferral #23.*
+- `README.md` § Status has said **"Scaffold."** since before the dual-pane GUI shipped in 0.2.0, and
+  lists it under *Planned scope*. *Deferral #24.* It also still names the retired `anu` codename
+  (*#25*) and claims rekha TrueType rendering crab does not do (*#26*).
+- `docs/architecture/` and `docs/adr/` are empty indexes. The ⛔ invariants live only in comments,
+  which means they die with the line they annotate. *Deferral #28.*
+- `docs/examples/`, `docs/benchmarks.md`, `docs/audit/` — declared, absent, and two are v1.0
+  criteria. *Deferral #39.*
+
+### Small, cheap, unblocked
+
+- Drop the redundant `net` stdlib declaration — 0.4.15 measured the removal clean. *Deferral #21.*
+- Cover `lib/atomic.cyr` in the toolchain sync, or make the sync walk transitive leaves. *Deferral #20.*
+- Give the stat trace an arm that works where it is needed — on agnos the compositor spawns crab,
+  so `CRAB_STAT_TRACE=1` in a shell environment never reaches it. *Deferral #35.*
+- Resolve `[build].test` pointing at a file that must stay empty. *Deferral #17.*
+- Close or formally park the `--win` failure (`sys_socket`/`sys_connect` absent from the Windows
+  syscall table; nothing in crab causes it). *Deferral #38.*
+
+### 🦀 Bueller
+
+`docs/development/mascot.md` carries an explicit "Easter egg — implementation TODO", and the canvas
+puts it exactly where the mascot doc asks: **one quiet home, the status bar**. *Deferral #29.*
+
+- Long idle / empty pane → `Bueller…` · pause · `Bueller…` · pause · `Bueller…?` — needs M2's
+  self-redraw (an event-driven-only loop cannot animate).
+- `crab --about` closing on `…anyone? …anyone?` — needs M3's argv handling.
+- ⚠ **Discipline, from the mascot doc: subtle and infrequent.** "The whole thing dies if it's trying
+  too hard." This is a constraint on the implementation, not colour commentary.
+
+---
+
+## Out of scope for v1.0
+
+- **A theme switcher, a palette, or any crab-owned colour UI** — the compositor owns theming. This is
+  the most likely thing to be asked for and the answer is architectural, not a preference.
+- **Windows as a target** — `--win` fails on two absent syscall stubs and nothing in crab causes it.
+  crab is an AGNOS desktop application.
+- **Network / remote filesystems** — crab is local-first by design.
+- **A plugin system.**

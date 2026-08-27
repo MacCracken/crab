@@ -5,12 +5,19 @@
 #
 # Include with the dhancha/sadish/rekha/kashi deps.
 
+include "src/path.cyr"
+
 # ⛔ `CRAB_ROWS_CAP = 7` LIVED HERE UNTIL 0.4.10 and it is deliberately not replaced by a bigger
 # number. A pane now holds a dhancha LIST, which scrolls and clips, so there is no row count to cap:
 # the viewport is however tall the window is and the content is however long the directory is.
 
 # Unsigned int -> decimal string in dst (NUL-terminated). Returns the length.
+# ⚠ A NEGATIVE NOW RENDERS "-" RATHER THAN NOTHING (0.5.0). The `while (v > 0)` loop below simply
+# does not run for a negative, so the old code returned length 0 having written only a NUL — and
+# every caller appends to that. A zero-length number is how an overflowed size became a bare unit
+# letter with no digits. Whatever a negative means here, it is never the empty string.
 fn crab_u2s(dst, n): i64 {
+    if (n < 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }
     if (n == 0) { store8(dst, 48); store8(dst + 1, 0); return 1; }
     var tmp = alloc(24);
     var i = 0;
@@ -22,34 +29,77 @@ fn crab_u2s(dst, n): i64 {
     return i;
 }
 
-# Format a byte size into dst as a short human string ("512", "4K", "15M").
-# A negative size (directory / stat failure) yields the empty string.
+# Format a byte size into dst as a short human string ("512", "4K", "15M", "2G", "1T").
+# A negative size (directory / stat failure) yields "-".
+#
+# ⛔ THE LADDER USED TO STOP AT M, AND THE ROUNDING COULD CARRY OFF THE END OF ITS OWN UNIT (0.5.0).
+# Two defects, both reproduced with a compiled probe against this function:
+#   1. `1048575` printed **"1024K"** — the K rounding `(val + 512) / 1024` carries to 1024, which is
+#      1 M and should have moved up a unit. A size read as 1024K when the very next byte reads 1M is
+#      a sorting and comparison hazard in a file manager, which is the one place sizes are compared.
+#   2. `1073741824` printed **"1024M"** and a 100 GB file printed **"102400M"** — six digits in a
+#      column budgeted for a short string, because the ladder had no G or T rung at all.
+# ⇒ Round FIRST, then carry, then pick the unit from the carried value. One divisor per rung, and the
+# carry check is `>= 1024` after rounding rather than before.
+#
+# ⚠ A negative now renders "-" rather than the empty string. `crab_u2s` writes nothing at all for a
+# negative argument, so the old empty return let the caller emit a bare unit letter with no number in
+# front of it — and it disagreed with `crab_status_str`, which already printed "-" for the same file.
+# One unstattable file, two different renderings, is worse than either.
 fn crab_size_str(dst, size): i64 {
-    if (size < 0) { store8(dst, 0); return 0; }
+    if (size < 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }   # "-"
     var val = size;
-    var unit = 0;                                     # 0 = bytes, 1 = K, 2 = M
-    if (val >= 1048576) { val = (val + 524288) / 1048576; unit = 2; }
-    else { if (val >= 1024) { val = (val + 512) / 1024; unit = 1; } }
+    var unit = 0;                                     # 0 = bytes, 1 = K, 2 = M, 3 = G, 4 = T
+    # ⛔ DIVIDE FIRST, THEN ROUND — `(val + 512)` OVERFLOWS. The obvious rounding idiom adds before
+    # dividing, and at a size near i64 max that addition wraps NEGATIVE: the ladder then exits on the
+    # first pass, `crab_u2s` writes nothing at all for a negative, and the row rendered as a bare
+    # **"K"** with no number in front of it. Caught by a probe against this function, not by reading
+    # it. `st_size` is a u64 read straight out of a kernel stat buffer, so a value with the top bit
+    # set is a corrupt-filesystem question, not an impossible one — and "K" is the worst possible
+    # answer to it. Computing the quotient and remainder separately cannot overflow at any input.
+    while ((val >= 1024) && (unit < 4)) {
+        var q = val / 1024;
+        if ((val - q * 1024) >= 512) { q = q + 1; }
+        val = q;
+        unit = unit + 1;
+    }
+    # The rounding above can land exactly on 1024 (e.g. 1048575 B -> 1024K). That is one full unit,
+    # so carry it rather than printing a value the next rung would print as 1.
+    if ((val >= 1024) && (unit < 4)) { val = val / 1024; unit = unit + 1; }
     var w = crab_u2s(dst, val);
-    if (unit == 1) { store8(dst + w, 75); w = w + 1; store8(dst + w, 0); }   # 'K'
-    if (unit == 2) { store8(dst + w, 77); w = w + 1; store8(dst + w, 0); }   # 'M'
+    if (unit == 1) { store8(dst + w, 75); w = w + 1; }   # 'K'
+    if (unit == 2) { store8(dst + w, 77); w = w + 1; }   # 'M'
+    if (unit == 3) { store8(dst + w, 71); w = w + 1; }   # 'G'
+    if (unit == 4) { store8(dst + w, 84); w = w + 1; }   # 'T'
+    store8(dst + w, 0);
     return w;
 }
 
 # Write n as exactly 2 zero-padded digits at dst (n in [0,99]). No NUL.
+# ⚠ CLAMPED (0.5.0). These write a FIXED width, so an out-of-range n could not overflow — but
+# `48 + t` for t outside [0,9] emits a byte that is not a digit, and for a large enough value it
+# emits **0**, i.e. an embedded NUL that truncates the whole status line at that point. The mtime
+# these format comes from `load64(statbuf + STAT_MTIME)` — kernel data crab does not control.
+# Clamping keeps a corrupt timestamp a display problem instead of a string-termination one.
 fn crab_pad2(dst, n): i64 {
-    var t = n / 10;
-    store8(dst, 48 + t); store8(dst + 1, 48 + (n - t * 10));
+    var v = n;
+    if (v < 0) { v = 0; }
+    if (v > 99) { v = 99; }
+    var t = v / 10;
+    store8(dst, 48 + t); store8(dst + 1, 48 + (v - t * 10));
     return 2;
 }
 
-# Write n as exactly 4 zero-padded digits at dst (a year). No NUL.
+# Write n as exactly 4 zero-padded digits at dst (a year). No NUL. Clamped — see crab_pad2.
 fn crab_pad4(dst, n): i64 {
-    var a = n / 1000;
-    var b = (n / 100) - a * 10;
-    var c = (n / 10) - (n / 100) * 10;
+    var v = n;
+    if (v < 0) { v = 0; }
+    if (v > 9999) { v = 9999; }
+    var a = v / 1000;
+    var b = (v / 100) - a * 10;
+    var c = (v / 10) - (v / 100) * 10;
     store8(dst, 48 + a); store8(dst + 1, 48 + b);
-    store8(dst + 2, 48 + c); store8(dst + 3, 48 + (n - (n / 10) * 10));
+    store8(dst + 2, 48 + c); store8(dst + 3, 48 + (v - (v / 10) * 10));
     return 4;
 }
 
@@ -105,6 +155,14 @@ fn crab_row(col, name, is_dir, size): i64 {
         store8(disp + k, ch);
         k = k + 1;
     }
+    # ⛔ SAY THAT IT WAS CUT (0.5.0). The column is 13 characters and names can be 62, so
+    # `agnos-kernel-build.log` and `agnos-kernel-build.tmp` both rendered as `agnos-kernel-` —
+    # two DIFFERENT files as one identical row, with no indication either was truncated. In a file
+    # manager that is not a cosmetic issue: the operator selects, descends and acts on rows.
+    # ⚠ '~' (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph.
+    if (done == 0) {
+        if (load8(name + 13) != 0) { store8(disp + 12, 126); }
+    }
     var w = 13;
     if (is_dir != 0) {
         store8(disp + w, 47); w = w + 1;              # '/' marks a directory
@@ -148,8 +206,8 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     dh_widget_set_flex(lst, 1);                # the list takes the column's remaining height
     var i = 0;
     while (i < count) {
-        var rec = buf + i * 64;                 # name (NUL-terminated) at +0
-        var is_dir = load8(rec + 63);           # type byte: 1 = dir
+        var rec = buf + i * CRAB_REC_SZ;        # name (NUL-terminated) at +0
+        var is_dir = load8(rec + CRAB_REC_TYPE);  # type byte: 1 = dir
         var sz = load64(sizes + i * 8);         # per-entry byte size (-1 = dir/unknown)
         crab_row(lst, rec, is_dir, sz);
         i = i + 1;
@@ -168,17 +226,20 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
 fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
     var out = alloc(96);
     if (count <= 0) { store8(out, 32); store8(out + 1, 0); return out; }
-    var rec = buf + sel * 64;
+    var rec = buf + sel * CRAB_REC_SZ;
     var w = 0;
     var k = 0; var ch = load8(rec + k);                 # name (<= 40)
     while ((ch != 0) && (k < 40)) { store8(out + w, ch); w = w + 1; k = k + 1; ch = load8(rec + k); }
     store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;
-    if (load8(rec + 63) == 1) {                         # directory -> "<dir>"
+    if (load8(rec + CRAB_REC_TYPE) == 1) {              # directory -> "<dir>"
         var dtag = "<dir>"; var t = 0;
         while (load8(dtag + t) != 0) { store8(out + w, load8(dtag + t)); w = w + 1; t = t + 1; }
     } else {                                            # file -> human size
         var ss = alloc(24); var sl = crab_size_str(ss, load64(sizes + sel * 8));
-        if (sl == 0) { store8(out + w, 45); w = w + 1; }
+        # ⚠ The old `if (sl == 0) { emit '-' }` compensation is GONE, and its absence is the fix:
+        # `crab_size_str` now renders "-" for an unstattable file itself, so both the pane row and
+        # this line get the same string from the same place. Compensating here was what let the two
+        # disagree — a blank in the pane, a dash in the status line, for one file.
         var m = 0; while (m < sl) { store8(out + w, load8(ss + m)); w = w + 1; m = m + 1; }
     }
     store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;

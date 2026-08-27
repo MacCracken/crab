@@ -6,4 +6,6 @@ Not decisions (those live in [`../adr/`](../adr/)) and not guides (those live in
 
 ## Items
 
-_Empty. Add a numbered entry (`001-kebab-case-title.md`) the first time the code has a non-obvious invariant a reader can't derive. Do not write entries for decisions — those are ADRs._
+| Note | Constraint |
+|------|-----------|
+| [001](001-every-frame-allocates-and-nothing-is-freed.md) | Every frame allocates ~750 KB and the allocator has no `free()` — this bounds what crab may repaint |

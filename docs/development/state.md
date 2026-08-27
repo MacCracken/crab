@@ -20,7 +20,10 @@
 
 ## Version
 
-**0.4.15** (2026-08-26) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.5.0** (2026-08-26) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+
+⭐ Refreshed **in the same commit as the CHANGELOG entry**, which is the rule the header below
+demands and the one this file broke twice.
 
 ## Toolchain
 
@@ -43,34 +46,38 @@
 
 ## Source
 
-738 lines across four files.
+922 lines across five files.
 
-- `src/main.cyr` (343) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
+- `src/main.cyr` (375) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
   `dh_client_poll_event` / `dh_client_close`), the readdir+stat layer, the frame loop.
   ⛔ It does **not** open its own setu connection (since 0.4.8) and does **not** run its own
   `setu_poll_input` switch (since 0.4.12) — depending on the toolkit for pixels while bypassing it for
   the transport was the bug, not the style.
   ⚠ The **present path stays hand-rolled on purpose**: a LIVE shared buffer (create once, rewrite in
-  place) against `dh_client_present`'s per-frame ATTACH+COMMIT. Different models — swapping them is not
-  a rename.
-  ⚠ `CRAB_MAX_ENTRIES = 256` (64 B records ⇒ a 16 KB pane buffer) and `crab_surface_flags()` returning
-  `SETU_SURF_PREMULTIPLIED` **unconditionally** — no flag, no arm, no env var — both live here.
-- `src/ui.cyr` (248) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
-  formatting, row build, status line. 52 `dh_*` calls.
+  place) against `dh_client_present`'s per-frame ATTACH+COMMIT. Different models — swapping them is
+  not a rename.
+  ⚠ `CRAB_MAX_ENTRIES = 256` and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
+  **unconditionally** — no flag, no arm, no env var — both live here.
+- `src/path.cyr` (91) — the #81 record layout and the **bounded** cstring/path helpers.
+  ⛔ It is a separate file for one reason: `tests/crab.tcyr` includes `ui.cyr`, never `main.cyr`
+  (which ends in `_entry()`, so including it would run the app). Nothing in `main.cyr` is reachable
+  from the suite, and 0.5.0's P1 repair lived exactly there. A memory-safety fix that cannot be
+  asserted on is a fix held on trust.
+- `src/ui.cyr` (309) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+  formatting, row build, status line.
   ⛔ `CRAB_ROWS_CAP = 7` is **gone** and deliberately not replaced by a bigger number — it was never a
-  display limit, it made entries past the 7th unselectable. `crab_maxsel` returns `count - 1`.
+  display limit, it made entries past the 7th unselectable.
   ⚠ **A row sets no background at all.** dhancha paints selection and focus from the list's own state;
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
-  showing. That is the trap in this port.
+  showing.
 - `src/render_test.cyr` (134) — a standalone harness: renders the production surface at 380×220 and
   dumps BGRA to `build/crab-render.bin`, 10 `check()` assertions.
+  ⛔ **It is not run by CI or by `cyrius test`** — see Known gaps.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
-  auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook, so a gate written here
-  never executes.
+  auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⚠ `cyrius coverage` reports **6/26 fns referenced (23 %)** — reference coverage, a floor and not a
-correctness proof. `cyrius lint` is clean apart from 8 lines over 120 characters (7 in `main.cyr`,
-1 in `ui.cyr`).
+⚠ `cyrius coverage` reports **14/26 fns referenced (53 %)** — up from 23 % at 0.4.15, and still a
+floor rather than a correctness proof. `cyrius lint` is clean apart from 8 lines over 120 characters.
 
 ## Proven
 
@@ -151,20 +158,30 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` (145) — the only suite `cyrius test` discovers. **11 passed / 0 failed**, 11
-  assertions. Asserts the AE-6 premultiplied `#92` contract on the **production** `crab_render`:
-  `a == 255` **and** `c <= a` across all **83,600** pixels (380×220), each with a negative control.
-- `src/render_test.cyr` — a separate standalone harness (10 `check()`s, dumps the surface); it is not
-  discovered by `cyrius test` and must be built and run on its own.
-- `tests/crab.bcyr` — benchmark stub (1 passed) · `tests/crab.fcyr` — fuzz stub (PASS).
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **37 passed / 0 failed** (was 11 at
+  0.4.15). Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render`
+  (`a == 255` and `c <= a` across all 83,600 pixels, with negative controls), plus 0.5.0's repairs:
+  the bounded path helpers, the size ladder at every boundary, the date-formatter clamps, and the
+  name-truncation marker.
+  ⭐ **Every 0.5.0 assertion is mutation-proven** — reverting each bound, the overflow fix and the
+  truncation marker each produce a named failure.
+  ⛔ The truncation test was rewritten because its first draft **could not fail**: it mirrored
+  `crab_row`'s loop in the harness and asserted on the copy, so deleting the marker from the
+  production function left the suite green. It now drives the real `crab_row` through a real
+  `dh_list`. A test that mirrors the code under test is measuring itself.
+- `src/render_test.cyr` — 10 further pixel assertions, mutation-proven against four regressions.
+  ⛔ **Never runs in CI or under `cyrius test`.**
+- `tests/crab.bcyr` — ⛔ benchmark **scaffold**: it times `bench_noop`, i.e. nothing about crab.
+- `tests/crab.fcyr` — ⛔ fuzz **scaffold**: `fuzz_main(data, len)` returns 0 without reading a byte
+  of `data`, so `cyrius fuzz` would PASS against any input.
 - `vet` 1 dep / 0 untrusted / 0 missing · `deny` 0 violations · `fmt --check` clean.
 
 ## Targets
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, 377,288 B                                       |
-| `--agnos`    | ✅ builds, 377,312 B — the real target                     |
+| x86_64 linux | ✅ builds, 381,544 B                                       |
+| `--agnos`    | ✅ builds, 381,600 B — the real target                     |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -178,20 +195,34 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 
 ## Known gaps
 
-- ⛔ **A stale `crab` binary is TRACKED at the repo root** — 319,040 B, built 2026-07-23, 58,248 B
-  smaller than the current build. `.gitignore` covers `/build/` but not `/crab`, and `cyrius.cyml`
-  sets `output = "crab"`, so the root name is exactly the build product. `.github/workflows/release.yml`
-  publishes `git archive HEAD`, and no `.gitattributes` marks it `export-ignore` — so **every source
-  tarball ships a months-old binary**, and that tarball is what `cyrius deps` fetches. Needs a
-  `git rm --cached crab` plus a `.gitignore` entry; left for the operator because it is a git change.
-- `docs/development/roadmap.md` is still the `cyrius init` scaffold template — `### M1 — _Title_
-  (v0.2.0)` with placeholder bodies — while crab has shipped through 0.4.15. It is the one doc here
-  that has never been written, said plainly because "see roadmap.md" is otherwise a pointer to nothing.
-- `CLAUDE.md` still carries two `cyrius init` placeholders: the identity line (`**crab** — crab —
-  TODO`) and the whole `## Goal` section. It has not been edited since scaffolding.
-- `README.md` § Status still opens `**Scaffold.**` and lists "dual-pane GUI" under *Planned scope* —
-  both stale since 0.2.0 (2026-07-10), which is the release that graduated crab from scaffold to a
-  working file manager.
+⭐ **All of these are now sequenced in [`roadmap.md`](roadmap.md) with named upstream gates** — 0.5.0
+harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
+only what a cold start must know *before touching the code*; the roadmap is the full inventory.
+
+- ⛔ **Every frame allocates ~750 KB and nothing is ever freed.** Measured: `crab_render` costs
+  **749,704 B** per call at 114 entries per pane, into a bump allocator with no `free()`. 89 % is two
+  full-size pixel buffers, and one of them — `dh_surface_new`'s — is **never written or read**. It has
+  not bitten because crab repaints only on input and used to exit after two seconds; both accidents
+  are gone as of 0.5.0. ⇒ **Do not add a continuously-repainting element** (animation, progress bar,
+  the idle mascot line) until the dhancha gate closes: at 60 Hz this is 45 MB/s. Full measurement and
+  the three-step upstream fix in
+  [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
+- ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI**, and CI **never builds
+  `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is
+  uncompiled by the gate. CI also runs no fuzz, bench, lint, `fmt --check`, vet, deny or coverage.
+- ⛔ **The fuzz and bench harnesses are both scaffolds** that measure nothing — see Tests above.
+- ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
+  description, the `[deps]` comment and the README all commit to semantic find / auto-tag / dedup on
+  daimon's vector store; `cyrius.cyml` declares no daimon dependency. daimon 2.1.0 exists locally.
+- ⚠ **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
+  all, silently — the return is discarded. (Roadmap M4.)
+- ⚠ **The window is a compile-time 380×220 and crab is keyboard-only.** `WINDOW_CONFIGURE` is decoded
+  by dhancha and dropped on the floor; the eight pointer event kinds dhancha synthesizes are all
+  ignored. (Roadmap M2.)
+- ⚠ `CLAUDE.md` still carries two `cyrius init` placeholders (the identity line and the whole `## Goal`
+  section), and `README.md` § Status has said **"Scaffold."** since before the dual-pane GUI shipped
+  in 0.2.0. The README also still names the retired `anu` codename and claims rekha TrueType text crab
+  does not render.
 
 ## Consumers
 
@@ -199,6 +230,15 @@ _None — top-level application._
 
 ## Next
 
-crab is the stack's only setu client already alpha-255 clean throughout, making it the natural first
-consumer of the compositor's premultiplied `#92` blend path. Behind that: dropping the redundant `net`
-declaration, and writing the roadmap.
+⭐ **[`roadmap.md`](roadmap.md) is now a real plan** — the `cyrius init` template it had been through
+fifteen releases is gone. Eight milestones from here to 1.0, sequenced against the design canvas at
+the repo root, each carrying its named upstream gate.
+
+Immediately next is **M2 — the window is real** (v0.6.0): resize, pointer input, key release, routing
+through `dh_dispatch`, and the event-driven wait. ⛔ **Its dhancha gate — per-frame allocation —
+blocks every milestone after it**, so it is the first thing to file upstream rather than the last.
+
+Two decisions are settled and recorded, and both shape everything downstream:
+[ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no
+palette) and [ADR 0002](../adr/0002-semantic-find-is-a-mode.md) (semantic find is a mode over any
+view, not a view of its own).

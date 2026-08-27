@@ -1,8 +1,11 @@
 # tests/crab.tcyr — crab test suite, HOST.
 #
 # ⭐⭐ WHAT THIS EXISTS TO GATE: `AE-6`, the agnos `gpu_shader_op #92` op 0x01 premultiplied blend.
-# crab is the arc's first client to request `SETU_SURF_PREMULTIPLIED` (armed by `CRAB_PREMUL=1`, see
-# `crab_surface_flags` in src/main.cyr), and that routing is only CORRECT if crab's pixels satisfy the
+# crab is the arc's first client to request `SETU_SURF_PREMULTIPLIED` — UNCONDITIONALLY: `crab_surface_flags`
+# (src/main.cyr) is a bare `return SETU_SURF_PREMULTIPLIED;` with no arm, no env var and no #ifdef.
+# ⚠ This header claimed the flag was "armed by `CRAB_PREMUL=1`" until 0.5.0. `CRAB_PREMUL` has never
+# existed anywhere in the tree; a reader looking for the off switch would have found nothing and had no
+# way to tell whether they were misreading the code or the comment. That routing is only CORRECT if crab's pixels satisfy the
 # op's precondition. The kernel does not check it and cannot: passing straight alpha to `#92` does not
 # error anywhere in the stack — **it renders washed out, silently**.
 #
@@ -65,7 +68,10 @@ fn t_render(w, h): i64 {
     # because the tree is rebuilt every frame. Fresh cells here — this harness renders one frame.
     var sl = alloc(8); store64(sl, 0);
     var sr = alloc(8); store64(sr, 0);
-    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, rmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
+    # ⛔ THIS PASSED `rmt` FOR THE LEFT PANE UNTIL 0.5.0, so `lmt` was allocated, filled, and never
+    # read — the two panes rendered from ONE mtime array. Both arrays hold the same value here, which
+    # is exactly why it survived: the fixture could not tell the bug from the fix.
+    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -138,7 +144,109 @@ fn main() {
     var out_half = src + (dst * (255 - a_half)) / 255;
     assert(out_half != src, "and at alpha 128 it genuinely differs — the identity is alpha-specific");
 
+    # ================================================================
+    # 0.5.0 — the P-1 sweep's repairs, pinned so a regression FAILS rather than renders wrong.
+    # ================================================================
+    test_group("crab — 0.5.0: the size ladder rounds, carries, and cannot overflow");
+    var sb = alloc(64);
+    # ⛔ Both of these printed a WRONG UNIT before 0.5.0: 1048575 -> "1024K", 1073741824 -> "1024M".
+    # A size that reads 1024K when the next byte reads 1M is a comparison hazard in the one
+    # application whose job is comparing files.
+    crab_size_str(sb, 1048575);
+    assert(t_streq(sb, "1M"), "1048575 B carries to 1M, not 1024K");
+    crab_size_str(sb, 1073741824);
+    assert(t_streq(sb, "1G"), "1 GiB is 1G — the ladder no longer stops at M");
+    crab_size_str(sb, 1099511627776);
+    assert(t_streq(sb, "1T"), "1 TiB is 1T");
+    crab_size_str(sb, 1023);
+    assert(t_streq(sb, "1023"), "below 1 KiB stays in bytes");
+    crab_size_str(sb, 1024);
+    assert(t_streq(sb, "1K"), "exactly 1 KiB is 1K");
+    # ⛔ THE OVERFLOW. `(val + 512)` wraps NEGATIVE near i64 max, the ladder exited on its first pass,
+    # and the row rendered as a bare "K" with no digits. st_size is a u64 out of a kernel buffer, so
+    # a top-bit-set value is a corrupt-filesystem question, not an impossible one.
+    crab_size_str(sb, 9223372036854775807);
+    assert(t_streq(sb, "8388608T"), "i64-max size renders a bounded number, not a bare unit letter");
+    crab_size_str(sb, 0 - 1);
+    assert(t_streq(sb, "-"), "an unstattable file is '-' in the PANE, matching the status line");
+    crab_u2s(sb, 0 - 7);
+    assert(t_streq(sb, "-"), "crab_u2s never returns the empty string, which is what let 'K' through");
+
+    test_group("crab — 0.5.0: the date formatters clamp instead of emitting a NUL");
+    var pb = alloc(16);
+    # ⛔ `48 + t` for an out-of-range t emits a non-digit, and for a large enough value emits 0 —
+    # an embedded NUL that TRUNCATES the status line at that point. The mtime is kernel data.
+    crab_pad4(pb, 123456); store8(pb + 4, 0);
+    assert(t_streq(pb, "9999"), "an absurd year clamps to 9999 rather than writing a NUL");
+    crab_pad2(pb, 0 - 5); store8(pb + 2, 0);
+    assert(t_streq(pb, "00"), "a negative field clamps to 00");
+    crab_mtime_str(pb, 1750000000);
+    assert(t_streq(pb, "2025-06-15 15:06"), "and an ordinary epoch still formats correctly");
+
+    test_group("crab — 0.5.0: a truncated name SAYS it was truncated");
+    # ⛔ The column is 13 chars and names run to 62, so two different files rendered as one identical
+    # row with no indication either was cut. An operator selects and acts on rows.
+    var nm = alloc(80);
+    var ni = 0; while (ni < 20) { store8(nm + ni, 97 + ni); ni = ni + 1; } store8(nm + 20, 0);
+    # ⛔ THIS ASSERTS AGAINST THE PRODUCTION `crab_row`, NOT A MIRROR OF IT. The first draft of this
+    # test reimplemented the name-column loop in the harness and asserted on the copy — so deleting
+    # the marker from `crab_row` left the suite GREEN. A test that mirrors the code under test is
+    # measuring itself; it is the same defect 0.4.14 records, where counting per-entry trace lines
+    # made the diagnostic the thing being measured. Mutation-proven both ways.
+    var lst = dh_list_new(26);
+    crab_row(lst, nm, 0, 1234);
+    var roww = dh_widget_first_child(lst);
+    assert(roww != 0, "the row widget was built");
+    assert_eq(load8(dh_widget_text(roww) + 12), 126, "a name longer than the column ends in '~'");
+    store8(nm + 13, 0);                              # exactly 13 characters — fits
+    var lst2 = dh_list_new(26);
+    crab_row(lst2, nm, 0, 1234);
+    var roww2 = dh_widget_first_child(lst2);
+    assert(load8(dh_widget_text(roww2) + 12) != 126, "a name that exactly fits is NOT marked truncated");
+
+    test_group("crab — 0.5.0: the path helpers are BOUNDED (the P1)");
+    # ⛔⛔ THIS IS THE 0.5.0 P-1. `crab_strcpy` / `crab_join` took no destination size and checked
+    # nothing, while every destination was a fixed alloc(256). Descent depth is unbounded, so the pane
+    # path grew by 1 + strlen(name) per Enter with nothing stopping it — and the bump allocator hands
+    # out adjacent blocks, so the overrun landed on the OTHER pane's path, then on its readdir records
+    # (type byte included), then on the SetuClient fd. Silent, every time. No hostile input: just Enter.
+    var pdst = alloc(512);
+    var longnm = alloc(80);
+    var q = 0; while (q < 62) { store8(longnm + q, 97); q = q + 1; } store8(longnm + 62, 0);
+    var deep = alloc(512);
+    var dq = 0; while (dq < 252) { store8(deep + dq, 98); dq = dq + 1; } store8(deep + 252, 0);
+
+    # The exact shape that used to overflow: a 252-char path joined with a 62-char name into cap 256.
+    assert_eq(crab_join_n(pdst, 256, deep, longnm), 0 - 1, "an over-long join REFUSES (-1) instead of writing past the cap");
+    assert(strlen(pdst) < 256, "...and what it did write is still NUL-terminated inside the buffer");
+
+    # A join that fits is unchanged in behaviour — the bound must not cost correctness.
+    assert_eq(crab_join_n(pdst, 256, "/", longnm), 63, "a fitting join returns its length");
+    assert_eq(load8(pdst), 47, "...starting with the root slash");
+    assert_eq(load8(pdst + 1), 97, "...then the name, with the root separator collapsed (no '//')");
+    assert_eq(crab_join_n(pdst, 256, "/bin", "ls"), 7, "an ordinary join inserts exactly one separator");
+    assert(t_streq(pdst, "/bin/ls"), "...producing /bin/ls");
+
+    # Exact-fit boundary: cap is a BYTE count including the NUL, so 7 chars need cap 8.
+    assert_eq(crab_strcpy_n(pdst, "abcdefg", 8), 7, "a string that exactly fits its cap is not truncated");
+    assert_eq(crab_strcpy_n(pdst, "abcdefgh", 8), 0 - 1, "one byte more REFUSES");
+    assert(t_streq(pdst, "abcdefg"), "...and leaves a valid, NUL-terminated prefix rather than a runaway");
+    assert_eq(crab_strcpy_n(pdst, "x", 1), 0 - 1, "cap 1 holds only the NUL, so any content refuses");
+    assert_eq(load8(pdst), 0, "...and that NUL is written inside the allocation");
+
     return assert_summary();
+}
+
+# --- 0.5.0 test helpers ---
+
+fn t_streq(a, b): i64 {
+    var i = 0;
+    while ((load8(a + i) != 0) && (load8(b + i) != 0)) {
+        if (load8(a + i) != load8(b + i)) { return 0; }
+        i = i + 1;
+    }
+    if (load8(a + i) != load8(b + i)) { return 0; }
+    return 1;
 }
 
 fn _entry(): i64 { var rc = main(); syscall(SYS_EXIT, rc); return 0; }

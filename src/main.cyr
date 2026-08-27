@@ -27,8 +27,18 @@ fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 # Records are 64 B, so 256 entries is a 16 KB pane buffer.
 enum CrabDir {
     CRAB_MAX_ENTRIES = 256;
-    CRAB_REC_SZ      = 64;
 }
+
+# ⚠ Idle poll interval for the event loop. NOT a style preference — see the loop in main().
+enum CrabLoop {
+    CRAB_POLL_SLEEP_MS = 16;
+}
+
+# ⚠ `CRAB_REC_SZ` / `CRAB_REC_TYPE` / `CRAB_PATH_MAX` / `CRAB_NAME_MAX`, and the bounded path helpers
+# `crab_strcpy_n` / `crab_join_n`, live in `src/path.cyr` (pulled in via `src/ui.cyr` above). They are
+# there and not here for ONE reason: `tests/crab.tcyr` includes `ui.cyr`, never `main.cyr`, so
+# anything defined in this file CANNOT BE TESTED. The 0.5.0 path-overflow fix is the reason that
+# stopped being acceptable — a P1 memory-safety repair with no reachable test is a repair on trust.
 
 # ⭐⭐ `AE-6` — crab's surface is PREMULTIPLIED, unconditionally.
 #
@@ -61,30 +71,6 @@ fn crab_log_cd(path): i64 {
 
 # --- path helpers for directory navigation (Enter descends, Backspace ascends) ---
 
-# Copy a NUL-terminated cstring src -> dst (incl. the NUL). Returns the length.
-fn crab_strcpy(dst, src): i64 {
-    var i = 0;
-    var ch = load8(src);
-    while (ch != 0) { store8(dst + i, ch); i = i + 1; ch = load8(src + i); }
-    store8(dst + i, 0);
-    return i;
-}
-
-# Join a directory path + an entry name into dst as "path/name" (NUL-terminated),
-# collapsing the separator when path already ends in '/' (i.e. the root "/").
-fn crab_join(dst, path, name): i64 {
-    var w = 0;
-    var i = 0;
-    var ch = load8(path + i);
-    while (ch != 0) { store8(dst + w, ch); w = w + 1; i = i + 1; ch = load8(path + i); }
-    if (w > 0) { if (load8(dst + w - 1) != 47) { store8(dst + w, 47); w = w + 1; } }
-    var j = 0;
-    var c2 = load8(name + j);
-    while (c2 != 0) { store8(dst + w, c2); w = w + 1; j = j + 1; c2 = load8(name + j); }
-    store8(dst + w, 0);
-    return w;
-}
-
 # readdir `path` into `buf` (up to CRAB_MAX_ENTRIES records); returns the entry count (>= 0).
 # agnos-only (sys_readdir is the #81 wrapper); on the host it yields 0 (mock panes).
 #
@@ -97,6 +83,11 @@ fn crab_readdir_into(path, buf): i64 {
     n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
     #endif
     if (n < 0) { n = 0; }
+    # ⚠ Defence in depth, not a known defect: the #81 contract bounds the count by `max`, so this
+    # clamp is unreachable today. It is here because `n` is used as a loop bound over a buffer sized
+    # from the SAME constant — if the kernel contract ever drifts, the failure is a silent read past
+    # lbuf/rbuf, and a one-line clamp is cheaper than the burn that would find it.
+    if (n > CRAB_MAX_ENTRIES) { n = CRAB_MAX_ENTRIES; }
     if (n >= CRAB_MAX_ENTRIES) {
         crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
         crab_say(" has more entries than are shown\n");
@@ -131,14 +122,16 @@ fn crab_stat_trace_init(): i64 {
 fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
     var i = 0;
     while (i < count) {
-        var rec = buf + i * 64;
+        var rec = buf + i * CRAB_REC_SZ;
         var sz = 0 - 1;                              # stat-failure default
         var mt = 0 - 1;
-        crab_join(pathscr, path, rec);
+        # ⛔ A TRUNCATED JOIN IS NOT A PATH — it names a DIFFERENT file, so statting it would report
+        # someone else's size and mtime against this row. Unstattable is the honest answer.
+        var jl = crab_join_n(pathscr, CRAB_PATH_MAX, path, rec);
         #ifdef CYRIUS_TARGET_AGNOS
-        if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) {
-            sz = load64(statbuf + 16);               # st_size  @ +16 (agnos stat struct §4.1)
-            mt = load64(statbuf + 40);               # st_mtime @ +40 (unix seconds)
+        if ((jl >= 0) && (sys_stat(pathscr, strlen(pathscr), statbuf) == 0)) {
+            sz = load64(statbuf + STAT_SIZE);        # agnos stat struct §4.1 — named, not a literal
+            mt = load64(statbuf + STAT_MTIME);       # unix seconds
             # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
             # This printed unconditionally for every entry and allocated 24 B for every entry — with
             # the old 32-entry cap that was 32 lines; at 256 on a real `/` (114 entries on iron) it
@@ -166,11 +159,18 @@ fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
 # Returns the new entry count (>= 0), or -1 when the selection is not a dir / empty.
 fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf): i64 {
     if (count <= 0) { return -1; }
-    var rec = buf + sel * 64;
-    if (load8(rec + 63) != 1) { return -1; }        # type byte: 1 = dir
-    crab_strcpy(namescr, rec);                       # copy name out before readdir overwrites buf
-    crab_join(pathscr, path, namescr);
-    crab_strcpy(path, pathscr);
+    if (sel < 0) { return -1; }
+    if (sel >= count) { return -1; }                 # belt-and-braces: sel indexes a record below
+    var rec = buf + sel * CRAB_REC_SZ;
+    if (load8(rec + CRAB_REC_TYPE) != 1) { return -1; }     # type byte: 1 = dir
+    if (crab_strcpy_n(namescr, rec, CRAB_NAME_MAX) < 0) { return -1; }   # name out before readdir overwrites buf
+    # ⛔ REFUSE, do not truncate. Descending into a truncated path would readdir a directory the
+    # operator did not select — silently, and with the pane header showing the name they DID select.
+    if (crab_join_n(pathscr, CRAB_PATH_MAX, path, namescr) < 0) {
+        crab_say("crab: path too long -- refusing to descend\n");
+        return -1;
+    }
+    if (crab_strcpy_n(path, pathscr, CRAB_PATH_MAX) < 0) { return -1; }
     var n = crab_readdir_into(path, buf);
     crab_stat_all(path, buf, n, sizes, mtimes, pathscr, statbuf);
     return n;
@@ -199,19 +199,22 @@ fn main(): i64 {
 
     # Two panes, each listing a real directory. On agnos, readdir(#81) fills a buffer
     # of fixed 64-byte records; on the host the panes stay empty (render_test mocks them).
-    var lpath = alloc(256);
-    var rpath = alloc(256);
-    crab_strcpy(lpath, "/bin");             # mutable pane paths — Enter/Backspace rewrite them
-    crab_strcpy(rpath, "/");
+    var lpath = alloc(CRAB_PATH_MAX);
+    var rpath = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(lpath, "/bin", CRAB_PATH_MAX);   # mutable pane paths — Enter/Backspace rewrite them
+    crab_strcpy_n(rpath, "/", CRAB_PATH_MAX);
     var lbuf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ);
     var rbuf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ);
     var lsizes = alloc(CRAB_MAX_ENTRIES * 8);             # per-entry byte sizes (parallel to lbuf)
     var rsizes = alloc(CRAB_MAX_ENTRIES * 8);
     var lmtimes = alloc(CRAB_MAX_ENTRIES * 8);            # per-entry mtime (unix seconds)
     var rmtimes = alloc(CRAB_MAX_ENTRIES * 8);
-    var namescr = alloc(64);                # scratch: selected entry name (descend)
-    var pathscr = alloc(256);               # scratch: joined child path (descend / stat)
-    var statbuf = alloc(48);                # scratch: agnos stat struct (§4.1)
+    var namescr = alloc(CRAB_NAME_MAX);     # scratch: selected entry name (descend)
+    var pathscr = alloc(CRAB_PATH_MAX);     # scratch: joined child path (descend / stat)
+    # ⚠ `STAT_BUFSZ`, not a literal 48. It is 48 on agnos (§4.1) and 144 on the Linux/Windows peers,
+    # and this alloc sits OUTSIDE the agnos #ifdef while the reads sit inside it — so the buffer is
+    # sized by whichever peer the build actually included, which is the only correct answer.
+    var statbuf = alloc(STAT_BUFSZ);        # scratch: stat struct, sized by the target's own contract
     var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, CRAB_MAX_ENTRIES) -> count (0 on host)
     crab_stat_all(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf);
     var rn = crab_readdir_into(rpath, rbuf);
@@ -255,6 +258,7 @@ fn main(): i64 {
     var scroll_r = alloc(8); store64(scroll_r, 0);
 
     var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
+    if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
     var reply = setu_msg_new();
@@ -262,8 +266,11 @@ fn main(): i64 {
     if (setu_msg_kind(reply) != SETU_SURFACE_CREATED) { crab_say("crab: reply was not surface_created\n"); return 1; }
     var sid = setu_msg_arg(reply, 0);
     var stride = w * 4;
-    if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { return 1; }
-    if (setu_send(fd, setu_commit(sid)) < 0) { return 1; }
+    # ⚠ These two used to `return 1` in silence, AFTER the compositor had already minted a surface —
+    # so the one process that knew the attach or the commit had failed said nothing, and the failure
+    # looked from outside like a client that never ran. Every other exit here names itself.
+    if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { crab_say("crab: attach_buf send failed\n"); return 1; }
+    if (setu_send(fd, setu_commit(sid)) < 0) { crab_say("crab: commit send failed\n"); return 1; }
     crab_say("crab: dual-pane file-manager UI presented over setu\n");
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
@@ -282,14 +289,33 @@ fn main(): i64 {
     # `setu_client_poll_input`, which reassembles the stream. crab never noticed because it only
     # reads presses; the next consumer to want held keys would have.
     # ⚠ The PRESENT path below is deliberately unchanged — see the note at the connect site.
-    var frame = 0;
-    while (frame < 2000000) {
+    # ⛔⛔ THE LOOP BOUND WAS A SPIN COUNT, AND IT ENDED SESSIONS (fixed 0.5.0). This was
+    # `while (frame < 2000000)` with `frame` incremented once per POLL — and no call in the body
+    # blocks: `dh_client_poll_event` returns 0 immediately on an idle channel and `sys_sched_yield`
+    # returns at once. So `frame` counted neither frames presented nor seconds nor user actions; it
+    # counted how fast the CPU could spin. At roughly a microsecond an iteration that is about
+    # **two seconds** before crab closed its own window, mid-session, while focused and in use —
+    # and the exit path printed NOTHING, so from the operator's side it was indistinguishable from
+    # a crash. It also burned one core at 100% for its whole (short) life.
+    # ⇒ The loop now ends on the two things that actually mean "stop": EOF and WINDOW_CLOSE. Both
+    # were already handled; neither was allowed to be the reason the loop ended.
+    #
+    # ⚠ AND THE SLEEP IS LOAD-BEARING, NOT POLITENESS. `dh_setu_poll_event` calls `setu_msg_new()`
+    # BEFORE it knows whether anything is pending, so every idle poll leaks ~80 B into an allocator
+    # with no free. Removing the frame cap without slowing the poll would have turned a bounded
+    # 152 MB leak into an unbounded one — roughly 80 MB/s of idle growth. At ~60 Hz that is ~5 KB/s
+    # instead: still a leak, still upstream, but survivable while dhancha's poll is fixed.
+    # ⇒ Sleep ONLY when the poll came back empty, so a burst of events still drains at full speed.
+    # ⚠ NOT `dh_client_next_event` (which blocks): crab must be able to redraw without input for the
+    # idle mascot line, transfer progress and index progress. A blocking read forecloses all three.
+    var running = 1;
+    while (running == 1) {
         var ev = dh_client_poll_event(c);
-        # ⛔ EOF IS NOT "no input". -6 means the connection is gone; carrying on would spin 2M frames
-        # rendering into a surface nobody reads, holding the `#86` slot the whole time.
+        # ⛔ EOF IS NOT "no input". -6 means the connection is gone; carrying on would render into a
+        # surface nobody reads, holding the `#86` slot the whole time.
         if (ev == (0 - 6)) {
             crab_say("crab: connection closed -- exiting\n");
-            frame = 2000000;
+            running = 0;
         }
         if (ev > 0) {
             var k = dh_event_kind(ev);
@@ -304,7 +330,7 @@ fn main(): i64 {
             # simply never sent and never handled. Nothing here is a protocol extension.
             if (k == WINDOW_CLOSE) {
                 crab_say("crab: compositor closed the window -- exiting\n");
-                frame = 2000000;                 # fall out of the loop, then run the normal teardown
+                running = 0;                     # fall out of the loop, then run the normal teardown
             }
             if (k == KEY) {
                 var u = dh_event_a(ev);
@@ -328,11 +354,17 @@ fn main(): i64 {
                     if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
                 }
             }
-            var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
-            setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
+            # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run
+            # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
+            # into a surface the compositor had just destroyed, and leaking a full render to do it.
+            if (running == 1) {
+                var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
+                if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                else { setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes); }
+            }
         }
-        sys_sched_yield();
-        frame = frame + 1;
+        # Idle only. An event just handled means more may be queued — drain at full speed.
+        if ((running == 1) && (ev == 0)) { sys_sleep_ms(CRAB_POLL_SLEEP_MS); }
     }
     #endif
     dh_client_close(c);          # symmetry: connected through the toolkit, close through it too

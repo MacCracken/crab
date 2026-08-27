@@ -1,0 +1,91 @@
+# crab path layer — the readdir record layout and the BOUNDED cstring/path helpers.
+#
+# ⛔⛔ WHY THIS FILE EXISTS AS A FILE (0.5.0). These helpers used to live in `src/main.cyr`, and
+# `tests/crab.tcyr` includes `src/ui.cyr` — never `main.cyr`, because `main.cyr` ends in `_entry()`
+# and including it would RUN the app. So nothing in main.cyr was reachable from the suite. That was
+# tolerable while it held only transport glue; it stopped being tolerable when the P-1 sweep found a
+# heap overflow in exactly these two functions. A memory-safety repair that cannot be asserted on is
+# a repair held on trust, and this project does not keep those.
+# ⇒ ui.cyr includes this, main.cyr includes ui.cyr, the suite includes ui.cyr. One declaration, and
+# every consumer — including the tests — can see it.
+
+# The agnos `#81` readdir record layout. ⛔ THIS IS THE SYSCALL'S GEOMETRY, NOT CRAB'S — crab reports
+# it and cannot choose it (`lib/syscalls_x86_64_agnos.cyr`: "max fixed 64-byte records, name NUL-term
+# at +0, type at +63"). It is named here rather than spelled `64`/`63` at each site for ONE reason:
+# both this file and `main.cyr` index these records, and until 0.5.0 they did it with bare literals
+# in six places. If the contract ever moves, a named constant makes that a compile-time edit in one
+# spot instead of a silent read at the wrong stride.
+# ⚠ Declared HERE, not in main.cyr, because main.cyr includes this file — so this is the declaration
+# both files can see. Layering follows the include order, not the other way round.
+enum CrabRec {
+    CRAB_REC_SZ   = 64;      # bytes per record
+    CRAB_REC_TYPE = 63;      # offset of the type byte within a record (1 = dir)
+}
+
+# ⛔⛔ ONE CAP FOR EVERY PATH BUFFER, AND THE HELPERS TAKE IT (0.5.0). Until 0.5.0 `crab_strcpy` and
+# `crab_join` had NO destination size and no length check of any kind, while every destination was a
+# fixed `alloc(256)`. Descent depth is unbounded, so the pane path grew by `1 + strlen(name)` on every
+# Enter with nothing anywhere that stopped it.
+#
+# ⚠ IT WAS NOT A THEORETICAL OVERFLOW AND IT NEEDED NO HOSTILE INPUT — only Enter. The bump allocator
+# hands out adjacent blocks in call order, so the overrun landed on identifiable live objects:
+# `lpath + 256` IS `rpath` (an overlong LEFT path silently rewrote the RIGHT pane's path, which the
+# right pane then readdir'd), `rpath + 256` IS `lbuf` (corrupting the other pane's 64-byte records
+# INCLUDING the type byte at +63, so entries changed name and flipped between file and directory),
+# and past `pathscr + 256` lie `statbuf` and then the SetuClient struct — i.e. the compositor fd and
+# surface id. Every write was a `store8`, so all of it was silent.
+#
+# ⚠ Listing alone reached it, not just descending: `crab_stat_all` joins path + "/" + name into the
+# same 256-byte scratch once PER ENTRY, so a deep-but-legal directory overflowed on a plain readdir.
+#
+# ⇒ `CRAB_PATH_MAX` sizes lpath/rpath/pathscr AND bounds the helpers. Same discipline as the readdir
+# cap above: one constant, derived everywhere, never a literal at a call site.
+enum CrabPath {
+    CRAB_PATH_MAX = 256;
+    CRAB_NAME_MAX = 64;      # one readdir record — the longest name that can exist
+}
+
+# Copy a NUL-terminated cstring src -> dst, writing AT MOST `cap` bytes including the NUL.
+# Returns the length written, or -1 if src did not fit. dst is ALWAYS NUL-terminated inside
+# its allocation, even on the truncation path — a caller that ignores -1 still gets a valid
+# cstring rather than a runaway.
+fn crab_strcpy_n(dst, src, cap): i64 {
+    if (cap <= 0) { return -1; }
+    var lim = cap - 1;
+    var i = 0;
+    var ch = load8(src);
+    while ((ch != 0) && (i < lim)) { store8(dst + i, ch); i = i + 1; ch = load8(src + i); }
+    store8(dst + i, 0);
+    if (ch != 0) { return -1; }
+    return i;
+}
+
+# Join a directory path + an entry name into dst as "path/name" (NUL-terminated), collapsing the
+# separator when path already ends in '/' (i.e. the root "/"). Writes AT MOST `cap` bytes including
+# the NUL. Returns the joined length, or -1 if it did not fit.
+#
+# ⛔ THE RETURN VALUE IS THE WHOLE POINT — a truncated path is a DIFFERENT path, and acting on one
+# is worse than refusing. `crab_stat_all` must report the entry as unstattable rather than stat a
+# truncated path (which would show a DIFFERENT file's size), and `crab_descend` must refuse the
+# descent rather than readdir somewhere the operator did not ask to go.
+fn crab_join_n(dst, cap, path, name): i64 {
+    if (cap <= 0) { return -1; }
+    var lim = cap - 1;
+    var w = 0;
+    var i = 0;
+    var ch = load8(path + i);
+    while ((ch != 0) && (w < lim)) { store8(dst + w, ch); w = w + 1; i = i + 1; ch = load8(path + i); }
+    if (ch != 0) { store8(dst + w, 0); return -1; }
+    if (w > 0) {
+        if (load8(dst + w - 1) != 47) {
+            if (w >= lim) { store8(dst + w, 0); return -1; }
+            store8(dst + w, 47); w = w + 1;
+        }
+    }
+    var j = 0;
+    var c2 = load8(name + j);
+    while ((c2 != 0) && (w < lim)) { store8(dst + w, c2); w = w + 1; j = j + 1; c2 = load8(name + j); }
+    store8(dst + w, 0);
+    if (c2 != 0) { return -1; }
+    return w;
+}
