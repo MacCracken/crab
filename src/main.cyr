@@ -265,6 +265,26 @@ fn main(): i64 {
     var surf = dh_surface_new(w, h);
     if (surf == 0) { crab_say("crab: surface alloc failed\n"); return 1; }
 
+    # ⛔⛔ THE PER-FRAME ARENA (0.6.0-dev, dhancha 0.9.15) — step 3 of the allocation gate, and the
+    # only one of the three that reclaims rather than merely stops allocating. crab rebuilds its whole
+    # widget tree every frame (which is what makes the toolkit-owned selection and the scroll
+    # round-trip work), and `lib/alloc.cyr` is a bump allocator with **no `free()`** — so before this,
+    # every tree crab ever built was retained for the life of the process. `dh_frame_begin` at the top
+    # of `crab_render` rewinds this arena; `dh_falloc` in `src/ui.cyr` draws from it.
+    # ⭐ GROWABLE, NOT FIXED, AND THAT IS THE WHOLE POINT. `arena_reset` on a GROW arena rewinds to the
+    # first chunk and **keeps the chain**, so the loop converges on its high-water mark and then costs
+    # the global allocator nothing at all. A fixed arena would have to guess a capacity, and guessing
+    # low means `dh_falloc` silently spilling back to the global heap — the leak, quietly restored.
+    # ⚠ 256 KiB sizes the COMMON case, not the worst. A pane at the `CRAB_MAX_ENTRIES` ceiling needs
+    # more; GROW chains one extra chunk once and reuses it forever, which is cheaper than sizing for a
+    # ceiling that is almost never reached.
+    # ⛔ IT MUST BE INSTALLED BEFORE THE FIRST `crab_render`, not inside the loop: the first render is
+    # what establishes the high-water mark, and a tree built on the global heap before the arena
+    # existed would never be reclaimed.
+    var frame_arena = arena_new_growable(262144);
+    if (frame_arena == 0) { crab_say("crab: frame arena alloc failed\n"); return 1; }
+    dh_frame_arena_set(frame_arena);
+
     var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);

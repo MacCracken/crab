@@ -50,9 +50,9 @@ demands and the one this file broke twice.
 
 ## Source
 
-982 lines across five files.
+1024 lines across five files.
 
-- `src/main.cyr` (407) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
+- `src/main.cyr` (427) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
   `dh_client_poll_event` / `dh_client_close`), the readdir+stat layer, the frame loop.
   ⛔ It does **not** open its own setu connection (since 0.4.8) and does **not** run its own
   `setu_poll_input` switch (since 0.4.12) — depending on the toolkit for pixels while bypassing it for
@@ -67,8 +67,13 @@ demands and the one this file broke twice.
   (which ends in `_entry()`, so including it would run the app). Nothing in `main.cyr` is reachable
   from the suite, and 0.5.0's P1 repair lived exactly there. A memory-safety fix that cannot be
   asserted on is a fix held on trust.
-- `src/ui.cyr` (326) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` (348) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
+  ⛔ **EVERY PER-FRAME ALLOCATION IN THIS FILE GOES THROUGH `dh_falloc`, NOT `alloc`** (step 3). It is
+  a lifetime requirement, not an optimisation: `dh_widget_set_text` stores the pointer and does not
+  copy, so a row's `disp` string and the status line's buffer must die with the widgets pointing at
+  them. `crab_render` calls `dh_frame_begin()` at the top — placed here rather than in `main.cyr` so
+  every caller is correct without remembering. ⚠ No-op unless an arena is installed.
   ⛔ **`crab_render` TAKES THE SURFACE, it does not create one** (step 2 of the allocation gate). It
   used to call `dh_surface_new` per call, which threw away dhancha 0.9.14's per-DhSurface render-target
   cache every frame. `w`/`h` are read back off the surface rather than passed, so they cannot disagree
@@ -153,7 +158,10 @@ so the bounded-join *refusal* path has host assertions only.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08-26**:
+Declared in `cyrius.cyml`. **Five of six are at their latest published tag; dhancha is not** —
+`../dhancha` holds an uncommitted, untagged **0.9.15** (step 3 of the allocation gate) and `path` wins
+over `tag`, so the local build compiles 0.9.15 while the manifest declares 0.9.14. The tag is left
+behind deliberately; see the ⛔ at `[deps.dhancha]` in the manifest.
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
@@ -161,7 +169,7 @@ Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08
 | rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.14 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
+| dhancha | 0.9.14 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*` ⛔ **local tree is 0.9.15, unpublished** |
 | setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⭐ **dhancha 0.9.13 and 0.9.14 (both 2026-08-26) are the per-frame allocation gate**, steps 1 and 2 —
@@ -204,9 +212,20 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **45 passed / 0 failed** (37 at 0.5.0,
-  11 at 0.4.15). The 8 added cover the reused render target: identity, frame independence over a full
-  334,400-byte compare, and a scribbled-sentinel coverage check.
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **55 passed / 0 failed** (45 after step
+  2, 37 at 0.5.0, 11 at 0.4.15). The 18 added cover the allocation arc: the reused render target
+  (identity, frame independence over a full 334,400-byte compare, a scribbled-sentinel coverage
+  check) and the per-frame arena (twenty renders moving the global heap by exactly 0 bytes, the arena
+  holding one frame rather than twenty, and the pixels still satisfying `#92` when arena'd).
+  ⛔ **The convergence test was worthless in its first draft and mutation caught it.** It used
+  `main.cyr`'s 256 KiB arena against a three-entry fixture, so twenty frames fitted with room to
+  spare — deleting `dh_frame_begin()` from `crab_render` entirely left the whole suite green, because
+  an arena that is merely big enough never touches the global heap whether it is rewound or not. It
+  now uses a deliberately tight 8 KiB arena, so a missing rewind has to chain, and asserts
+  `arena_used` and `arena_capacity_total` directly rather than only the global delta.
+  ⚠ **`main.cyr`'s own arena installation is NOT covered** — `tests/crab.tcyr` includes `ui.cyr` and
+  never `main.cyr` (which ends in `_entry()`), so deleting `dh_frame_arena_set` from `main` fails
+  nothing. Same structural gap that hid 0.5.0's P1.
   ⛔ **The sentinel check has TWO independent guarantors and neither mutation alone fails it** —
   deleting dhancha's `sd_clear` leaves it green (crab's opaque full-window root still covers), and
   making crab's root transparent leaves it green (the clear still covers); **only removing both
@@ -256,35 +275,43 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
 only what a cold start must know *before touching the code*; the roadmap is the full inventory.
 
-- ⚠ **Every frame allocates ~78 KB and nothing is ever freed — 89.6 % NARROWED, still not closed.**
-  Reproduced and then re-measured with a host probe (`alloc_used()` deltas around five back-to-back
-  `crab_render` calls at 380×220, 114 entries per pane, into **one** surface):
+- ✅ **CLOSED 2026-08-27 — a rendered frame now costs the global heap ZERO bytes.** It was 746,440 B
+  per `crab_render`, permanently, into a bump allocator with no `free()`. Three steps, each measured
+  with a host probe taking `alloc_used()` deltas around back-to-back renders:
 
-  | | per frame |
+  | | per steady-state frame |
   |---|---:|
   | baseline (dhancha 0.9.12) | 746,440 B |
-  | + step 1 (dhancha 0.9.13) | 412,040 B |
-  | + step 2 (dhancha 0.9.14 + crab) | **77,568 B** |
+  | + step 1 (0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
+  | + step 2 (0.9.14 + crab) — the sadish render target, reused | 77,568 B |
+  | + step 3 (0.9.15 + crab) — the widget tree, arena'd | **0 B** |
 
-  **Step 1** deferred `dh_surface_new`'s pixel buffer, which was allocated on every surface and
-  **never written and never read** by anything in the stack. **Step 2** cached the sadish render
-  target on the DhSurface — ⛔ **and that half was NOT purely upstream**, contrary to what two
-  documents said: `crab_render` was minting a fresh `DhSurface` every call, so a per-DhSurface cache
-  would have been thrown away each frame. crab now holds **one surface for the session**
-  (`src/main.cyr`) and `crab_render` takes it as a parameter, reading `w`/`h` back off it — 18 → 17
-  parameters, shorter for gaining one.
-  ⚠ **Step 2 is a CONTRACT CHANGE**: `dh_surface_render` may now return the same surface twice. A
-  caller wanting two frames at once needs two `DhSurface`s; `src/render_test.cyr` is exactly that
-  caller and creates two, guarded by `check(sds2 == sds, 0)`.
-  ⚠ Neither step was "one line", which the roadmap and the architecture note both claimed.
-  ⛔ **What remains is the widget tree — ~236 records at 248 B, now 75 % of the frame** — plus crab's
-  own ~19 KB of row/status scratch (was under 5 % of the problem, now roughly a quarter). Closing it
-  needs an arena hook in dhancha; the stdlib ships `arena_new`/`arena_reset` for exactly this, but
-  dhancha allocates via plain `alloc()` at 19 sites.
-  ⚠ **The repaint rule still stands.** 77,568 B at 60 Hz is 4.7 MB/s into an allocator with no
-  `free()` — the rule was never about the factor. ⭐ What changed is the margin: an element repainting
-  a few times a minute is now clearly affordable, where at 750 KB a frame it was not. Full measurement
-  in [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
+  Identical at 114 entries per pane (the iron count for `/`) and at 256 (`CRAB_MAX_ENTRIES`).
+  ⚠ **Zero is per-frame, not total** — crab pays a one-time **~597 KB** (334,432 B render target +
+  262,144 B arena chunk), allocated on the first frame and reused for the process's life.
+  ⚠ Neither step 1 nor step 2 was the "one line" two documents claimed, and step 2 was not purely
+  upstream. All three are mutation-verified on both sides.
+  ⛔ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`** — a single
+  plain `alloc()` in `crab_render` reintroduces a per-frame leak. `tests/crab.tcyr` asserts twenty
+  rendered frames move the global heap by exactly 0 bytes, so the suite will say so.
+  ⛔ **`dh_frame_begin` also clears dhancha's retained widget pointers** (`_dh_focus` and friends) and
+  the two halves cannot be separated — never call `arena_reset` on a frame arena directly. It follows
+  that crab **must re-establish focus every frame**, which `crab_pane` does. Full accounting in
+  [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
+- ⭐ **The "no continuously-repainting element" rule is LIFTED for the frame, and REPLACED for the
+  poll.** The idle mascot line, a transfer tray and index progress are no longer blocked by the frame
+  cost. ⛔ But `dh_setu_poll_event` still calls `setu_msg_new()` **before** it knows whether anything
+  is pending, so every idle poll allocates ~80 B on the global heap, never reclaimed — ~4.8 KB/s at
+  60 Hz. Four orders of magnitude better than what it replaces, and still unbounded.
+  **Gate: dhancha**, roadmap M2, *deferral #09*.
+- ⚠ **`lib/` IS NOT WHAT COMPILES, and that sharpens the `path`-wins hazard considerably.** Measured
+  2026-08-27: appending garbage to `lib/dhancha.cyr` leaves the build green, while appending it to
+  `../dhancha/dist/dhancha.cyr` fails it — the `path` override compiles the **sibling's `dist/`**
+  directly, and crab's vendored copy is a committed record that `cyrius deps` refreshes and
+  `cyrius.lock` hashes. Appending garbage to `lib/alloc.cyr` is also harmless: the stdlib comes from
+  the **installed toolchain**, not `lib/`. ⇒ This file's Toolchain note that "a toolchain bump without
+  a `lib sync` leaves the stdlib behind" describes the snapshot, not the compiler input, and the
+  stdlib's arena internals **cannot be mutation-tested from this repo**.
 - ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI**, and CI **never builds
   `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is
   uncompiled by the gate. CI also runs no fuzz, bench, lint, `fmt --check`, vet, deny or coverage.
@@ -318,8 +345,13 @@ fifteen releases is gone. Eight milestones from here to 1.0, sequenced against t
 the repo root, each carrying its named upstream gate.
 
 Immediately next is **M2 — the window is real** (v0.6.0): resize, pointer input, key release, routing
-through `dh_dispatch`, and the event-driven wait. ⛔ **Its dhancha gate — per-frame allocation —
-blocks every milestone after it**, so it is the first thing to file upstream rather than the last.
+through `dh_dispatch`, and the event-driven wait. ✅ **Its dhancha gate — per-frame allocation — is
+CLOSED** (dhancha 0.9.13 / 0.9.14 / 0.9.15 plus the crab half): a rendered frame costs the global heap
+zero bytes, and nothing downstream is blocked by it any more.
+⛔ **M2's *deferral #09* inherits the constraint it used to carry.** `dh_setu_poll_event` allocates
+~80 B on every poll whether or not anything is pending, so anything that repaints without input still
+grows the heap without bound — ~4.8 KB/s at 60 Hz. It is now the precondition for the idle mascot
+line, the transfer tray and index progress.
 
 Two decisions are settled and recorded, and both shape everything downstream:
 [ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no

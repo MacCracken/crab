@@ -91,8 +91,9 @@ assumes otherwise.
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*
 - **Stop the idle leak** — `dh_setu_poll_event` calls `setu_msg_new()` before it knows whether
-  anything is pending, so every poll leaks ~80 B. ⚠ Now the *largest* remaining per-event leak in the
-  toolkit relative to a frame, after steps 1 and 2 took the frame itself to 77,568 B. 0.5.0's stopgap is to wait on an interrupt when the
+  anything is pending, so every poll leaks ~80 B. ⛔ **PROMOTED: this is now the ONLY unbounded
+  per-cycle allocation left in the render/input loop**, the frame itself having gone to zero, and it
+  is the precondition for every self-repainting element on the roadmap. 0.5.0's stopgap is to wait on an interrupt when the
   poll is empty. **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
   ⛔ **Whatever replaces this wait, it must not be `sys_sleep_ms`.** That syscall `preempt_disable()`s,
   so while crab waits nothing else on the machine can be scheduled — a 0.5.0 draft used it and the
@@ -100,30 +101,32 @@ assumes otherwise.
   to a ready proc first and only halts when nothing else is runnable. The host suite is green either
   way; **only a QEMU run distinguishes them**, so this line is a required QEMU gate, not a preference.
 
-> ⚠ **Gate: dhancha — per-frame allocation. 89.6 % CLOSED (2026-08-26), and still blocking.**
-> `crab_render` cost **746,440 B per frame**, measured, and none of it is ever reclaimed (the
-> allocator has no `free`). Two of the three steps have landed:
+> ✅ **Gate: dhancha — per-frame allocation. CLOSED 2026-08-27.** A rendered frame now costs the
+> global heap **zero bytes**, at 114 entries per pane and at the 256 `CRAB_MAX_ENTRIES` ceiling alike.
 >
-> | | per frame |
+> | | per steady-state frame |
 > |---|---:|
 > | baseline (dhancha 0.9.12) | 746,440 B |
-> | + step 1 (dhancha 0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
-> | + step 2 (dhancha 0.9.14 + crab) — the sadish render target, reused | **77,568 B** |
+> | + step 1 (0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
+> | + step 2 (0.9.14 + crab) — the sadish render target, reused | 77,568 B |
+> | + step 3 (0.9.15 + crab) — the widget tree, arena'd | **0 B** |
 >
-> ⚠ **NEITHER STEP WAS THE "one line" THIS FILE CLAIMED.** Step 1's naive form breaks dhancha's
-> `event_test` by downgrading `dh_surface_present`'s refusal code, so the allocation is deferred into
-> `dh_surface_pixels` instead. Step 2 was **not purely upstream**: `crab_render` was minting a fresh
-> `DhSurface` every call, so dhancha's per-DhSurface cache would have been discarded each frame —
-> crab now holds one surface for the session and takes it as a parameter. Both mutation-verified.
-> ⚠ Step 2 is a **contract change**: `dh_surface_render` may return the same surface twice.
-> ⛔ **The gate is NOT closed and the milestone ordering does not change.** What remains is the
-> **widget tree — ~236 records at 248 B, now 75 % of the frame** — plus crab's own ~19 KB of scratch.
-> Closing it needs **step 3, an arena hook in dhancha**: the stdlib ships `arena_new`/`arena_reset`
-> documented for exactly this "per-frame reuse" pattern, but dhancha allocates via plain `alloc()` at
-> 19 sites, so crab cannot redirect it.
-> ⚠ **The repaint rule stands.** 77,568 B at 60 Hz is 4.7 MB/s into an allocator with no `free()`.
-> ⭐ But the margin has changed: an element repainting a few times a minute is now clearly
-> affordable, where at 750 KB a frame it was not.
+> ⚠ Zero is per-frame, not total: a one-time **~597 KB** (render target + arena chunk) is allocated on
+> the first frame and reused for the process's life. That fixed cost instead of a per-keypress one is
+> the whole point.
+> ⚠ **This file called steps 1 and 2 "one line" and "upstream". Both were wrong** — step 1's naive
+> form breaks dhancha's `event_test`, and step 2 needed a matching crab change because `crab_render`
+> was minting a `DhSurface` per frame. All three steps are mutation-verified on both sides.
+> ⇒ **This gate no longer blocks the milestones after M2.**
+
+> ⭐ **AND THE REPAINT RULE IS LIFTED — for the frame. A NEW GATE REPLACES IT.** "Do not add a
+> continuously-repainting element" stood for three releases and was right at 45 MB/s. The frame is now
+> free, so the idle mascot line (*deferral #29*), M4's transfer tray and M7's index progress are no
+> longer blocked by it. ⛔ **But `dh_setu_poll_event` still allocates on every poll** — it calls
+> `setu_msg_new()` before it knows whether anything is pending, ~80 B on the global heap, never
+> reclaimed. Continuous repaint implies continuous polling, so at 60 Hz that is ~4.8 KB/s of permanent
+> growth: four orders of magnitude better, still unbounded. **Closing *deferral #09* is now the
+> precondition for anything that repaints without input.**
 
 ### M3 — A browser you would actually use (v0.7.0)
 

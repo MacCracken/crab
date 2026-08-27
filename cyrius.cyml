@@ -108,13 +108,24 @@ path = "../dhancha"
 # frame is not a cache.
 # ⛔ 0.9.14 IS A CONTRACT CHANGE: `dh_surface_render` may return the SAME surface twice. A caller that
 # wants two frames at once needs two DhSurfaces — `src/render_test.cyr` is one, and guards it.
-# ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins over `tag` and a green local build
-# proves nothing about the declared graph: sibling `VERSION` = 0.9.14; `git rev-parse 0.9.14` == HEAD
-# in `../dhancha` (b228a8b); `git ls-remote --tags` shows `refs/tags/0.9.14` at that same commit; and
-# — the only check that would have caught 0.4.13's manifest naming a library the build never compiled
-# — `path` was DISABLED so `cyrius deps` actually cloned the tag, and the resulting `lib/dhancha.cyr`
-# matched the `path` build's SHA-256 exactly. Re-do all four at every cut; the first three would each
-# have passed 0.4.13.
+#   0.9.15 — step 3: a per-frame ARENA for the widget tree and layout scratch, rewound by
+#            `dh_frame_begin`.                                       77,568 ->       0 B per frame
+# ⛔⛔ THIS TAG IS BEHIND WHAT THE LOCAL BUILD COMPILES — DELIBERATELY. `../dhancha` holds an
+# UNCOMMITTED, UNTAGGED **0.9.15**. `path` wins over `tag`, so every local build and measurement is
+# ALREADY against 0.9.15 while this line says 0.9.14. Left behind on purpose: an unpublished tag fails
+# CI loudly, whereas the alternative is CI silently resolving a different library than the local tree.
+# **Bump to "0.9.15" in the SAME change that commits and tags dhancha**, and re-run the four-way check.
+# ⛔ VERIFIED FOUR WAYS when this line last moved, because `path` wins and a green local build proves
+# nothing about the declared graph: sibling `VERSION`; `git rev-parse <tag>` == HEAD in `../dhancha`;
+# `git ls-remote --tags` showing the tag at that commit; and — the only check that would have caught
+# 0.4.13's manifest naming a library the build never compiled — `path` DISABLED so `cyrius deps`
+# actually clones the tag, then comparing SHA-256. The first three would each have passed 0.4.13.
+# ⚠⚠ AND `lib/dhancha.cyr` IS NOT WHAT COMPILES WHILE `path` IS SET — MEASURED 2026-08-27 by
+# appending garbage to it and watching the build succeed, then appending garbage to
+# `../dhancha/dist/dhancha.cyr` and watching it fail. The `path` override compiles the SIBLING'S
+# `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
+# refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
+# "`path` wins" already implied.
 tag    = "0.9.14"
 modules = ["dist/dhancha.cyr"]
 

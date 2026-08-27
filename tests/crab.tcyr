@@ -344,6 +344,95 @@ fn main() {
     var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
     assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
+    # ================================================================
+    test_group("crab — 0.6.0: a rendered frame costs the global heap NOTHING");
+    # ================================================================
+    # ⛔⛔ WHAT THIS EXISTS TO GATE, AND IT IS THE WHOLE POINT OF THE ALLOCATION ARC. crab rebuilds
+    # its entire widget tree every frame — that is what makes the toolkit-owned selection and the
+    # scroll round-trip work — and `lib/alloc.cyr` is a bump allocator with **no `free()`**. So every
+    # tree crab ever built used to be retained for the life of the process: 746,440 B per frame at
+    # 380x220 with 114 entries per pane, measured. Steps 1 and 2 (dhancha 0.9.13 / 0.9.14) took that
+    # to 77,568 B by killing two full-size pixel buffers. **Step 3 takes it to zero** — `crab_render`
+    # calls `dh_frame_begin`, and every per-frame allocation on both sides now draws from an arena
+    # that is rewound rather than abandoned.
+    # ⚠ THE ASSERTION IS "THE GLOBAL HEAP DOES NOT MOVE", not "an arena is in use". An arena that
+    # chained a fresh chunk every frame would satisfy any structural check and leak exactly as much.
+    var aw = 380;
+    var ah = 220;
+    var asurf = dh_surface_new(aw, ah);
+    var al = alloc(16 * 64); var ar2 = alloc(16 * 64);
+    t_entry(al, 0, "aethersafha", 0); t_entry(al, 1, "puka", 0); t_entry(al, 2, "crab", 0);
+    t_entry(ar2, 0, "bin", 1);        t_entry(ar2, 1, "boot", 1); t_entry(ar2, 2, "readme.md", 0);
+    var alz = alloc(16 * 8); var arz = alloc(16 * 8);
+    var alm = alloc(16 * 8); var arm = alloc(16 * 8);
+    var ai = 0;
+    while (ai < 3) {
+        store64(alz + ai * 8, 14995144 + ai); store64(arz + ai * 8, 4096 + ai);
+        store64(alm + ai * 8, 1783900800);    store64(arm + ai * 8, 1783900800);
+        ai = ai + 1;
+    }
+    var asl = alloc(8); var asr = alloc(8);
+
+    # ⛔ THE PRE-ARENA BASELINE, ASSERTED RATHER THAN ASSUMED. Without it, a zero delta below would
+    # be indistinguishable from a render that did nothing.
+    assert_eq(dh_frame_arena_get(), 0, "no frame arena is installed by default");
+    store64(asl, 0); store64(asr, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    var n0 = alloc_used();
+    store64(asl, 0); store64(asr, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    assert(alloc_used() - n0 > 0, "WITHOUT an arena a frame still costs the global heap");
+
+    # ⛔⛔ THE ARENA IS DELIBERATELY TIGHT — 8 KiB, NOT THE 256 KiB `src/main.cyr` INSTALLS — AND THE
+    # FIRST DRAFT OF THIS GROUP WAS WORTHLESS FOR WANT OF THAT. It used main's 256 KiB against a
+    # THREE-entry fixture, so a frame costs a few KiB and twenty of them fit inside the arena with
+    # room to spare. Deleting `dh_frame_begin()` from `crab_render` outright — never rewinding at all
+    # — left the whole suite green, because an arena that is merely big enough never touches the
+    # global heap whether you rewind it or not. Caught by mutation, not by reading.
+    # ⇒ Size the arena to about ONE frame, so a missing rewind overflows on the second or third and
+    # has to chain — which is a global `alloc()` and therefore visible.
+    var farena = arena_new_growable(8192);
+    assert(farena != 0, "the per-frame arena is created");
+    dh_frame_arena_set(farena);
+
+    # Warm-up: the first arena'd frame establishes what one frame costs.
+    store64(asl, 0); store64(asr, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    var one_frame = arena_used(farena);
+    assert(one_frame > 0, "the frame really landed in the arena");
+    var cap0 = arena_capacity_total(farena);
+
+    var a0 = alloc_used();
+    var af = 0;
+    while (af < 20) {
+        store64(asl, 0); store64(asr, 0);
+        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+        af = af + 1;
+    }
+    # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
+    # so twenty frames re-walk the same memory and the global bump pointer never moves.
+    assert_eq(alloc_used() - a0, 0, "TWENTY rendered frames cost the global heap exactly 0 bytes");
+
+    # ⚠ THE DIRECT FORM OF THE SAME CLAIM, and the one that does not depend on the arena's capacity
+    # at all: after twenty identical frames the arena holds exactly ONE frame's worth. The sizes
+    # `crab_render` requests are input-independent (fixed 48/96/24-byte scratch, one widget per row),
+    # so this is exact rather than approximate — and the loop holds `active_pane` fixed to keep it so.
+    assert_eq(arena_used(farena), one_frame, "the arena holds ONE frame after twenty renders");
+    assert_eq(arena_capacity_total(farena), cap0, "...and the chunk chain never had to extend");
+
+    # ⛔ AND THE PIXELS ARE STILL RIGHT. A frame whose widgets were freed mid-render would still
+    # produce *a* surface; this is the check that it produces the right one.
+    store64(asl, 0); store64(asr, 0);
+    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    assert(asds != 0, "an arena'd frame still renders");
+    t_bad_alpha = 0; t_bad_premul = 0;
+    assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
+              "...and every pixel still satisfies the #92 premultiplied contract");
+
+    # Leave global state as we found it — later suites and `main`'s own callers must not inherit it.
+    dh_frame_arena_set(0);
+    assert_eq(dh_frame_arena_get(), 0, "the frame arena is uninstalled again");
+
     return assert_summary();
 }
 

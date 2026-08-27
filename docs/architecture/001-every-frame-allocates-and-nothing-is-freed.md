@@ -1,151 +1,135 @@
-# 001 — Every frame allocates, and nothing is ever freed
+# 001 — Every frame allocated, and nothing was ever freed
 
-**Measured**: 2026-08-26, against crab 0.5.0 and dhancha 0.9.12.
-**Re-measured**: 2026-08-26, against dhancha **0.9.14** + crab's hoisted surface — steps 1 and 2 are DONE.
+**Measured**: 2026-08-26 against crab 0.5.0 / dhancha 0.9.12.
+**Closed**: 2026-08-27 against dhancha 0.9.15 + crab's frame arena.
 
-> ⭐ **Steps 1 and 2 have landed and the per-frame cost is down 89.6 %: 746,440 B → 77,568 B.**
+> ⭐ **A rendered frame now costs the global heap ZERO bytes.** Measured at both 114 entries per pane
+> (the real iron count for `/`) and 256 (the `CRAB_MAX_ENTRIES` ceiling).
 >
-> | | per frame | note |
-> |---|---:|---|
-> | baseline (dhancha 0.9.12) | 746,440 B | |
-> | after step 1 (dhancha 0.9.13) | 412,040 B | `dh_surface_new`'s dead pixel buffer, deferred |
-> | after step 2 (dhancha 0.9.14 + crab) | **77,568 B** | the sadish render target, reused |
+> | | per steady-state frame |
+> |---|---:|
+> | baseline (dhancha 0.9.12) | 746,440 B |
+> | + step 1 (dhancha 0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
+> | + step 2 (dhancha 0.9.14 + crab) — the sadish render target, reused | 77,568 B |
+> | + step 3 (dhancha 0.9.15 + crab) — the widget tree, arena'd | **0 B** |
 >
-> ⚠ **The gate is still not closed.** What remains is the widget tree — ~236 records rebuilt every
-> frame — and crab's own row/status scratch, and the allocator still has **no `free()`**, so 77,568 B
-> per frame is still permanent growth. At 60 Hz it is **4.7 MB/s**, down from 45 MB/s. Step 3 (an
-> arena hook in dhancha) is what closes it.
-> ⚠ Step 2 also cost a **one-time 334,544 B**: the first frame still allocates the render target. It
-> is paid once per surface for the life of the process, not once per frame.
-> ⛔ Two claims this document made and got wrong are corrected below: step 1 was **not** "one line",
-> and step 2 was **not** purely upstream.
+> ⚠ **Zero is per-frame, not total.** crab pays a **one-time ~597 KB**: the 334,432 B render target
+> plus the 262,144 B arena chunk, both allocated on the first frame and reused for the life of the
+> process. That is the whole point — a fixed cost instead of a per-keypress one.
+> ⛔ **This document has been wrong twice in ways worth keeping**: step 1 was not "one line", and step
+> 2 was not purely upstream. Both corrections are below, with what made them wrong.
 
-## The invariant
+## The invariant — still true about the substrate
 
-crab rebuilds its **entire widget tree on every render**, and the allocator underneath it
-(`lib/alloc.cyr` / `lib/alloc_agnos.cyr`) is a **bump allocator with no `free()`**. `alloc()` moves a
+`lib/alloc.cyr` / `lib/alloc_agnos.cyr` is a **bump allocator with no `free()`**. `alloc()` moves a
 pointer through a chain of mmap'd 2 MB chunks; old chunks are never unmapped. `alloc_reset()` exists
 but rewinds the *whole* arena, which would invalidate the pane paths, the readdir buffers and the
 compositor client struct — so crab cannot call it.
 
-**Therefore: every byte a render touches is retained for the life of the process.**
+**Therefore: every byte a render touches with plain `alloc()` is retained for the life of the
+process.** That has not changed and will not. What changed is that crab's render path no longer uses
+plain `alloc()` — dhancha 0.9.15 lets a caller supply a per-frame arena, and `arena_reset` is a bump
+back to base with no free list.
 
-This is not a bug in crab, and it is not a bug in dhancha alone. It is the shape of the substrate,
-and it constrains every feature on the roadmap. A reader cannot derive it from `crab_render`, which
-looks like ordinary immediate-mode UI code.
+⛔ **The escape is opt-in and narrow.** dhancha routes exactly two things onto the arena — widget
+records (`dh_widget_new`) and layout's measure scratch — because those are the only allocations that
+die with the frame by construction. Surfaces, the setu client's shared buffer, event records and
+queues, textinput buffers and canvas surfaces all outlive a frame and stay on the global allocator.
+Routing `dh_surface_new` would free crab's session surface out from under it on the first rewind, and
+the bump allocator would then hand that memory back out — corrupting silently rather than faulting.
 
 ## The number
 
-Measured with a host probe calling the production `crab_render` at 380×220 with 114 entries per pane
-(the real iron count for `/`, recorded in `src/main.cyr`):
+A host probe takes `alloc_used()` deltas around back-to-back `crab_render` calls at 380×220, into one
+surface and one arena — the lifetimes `src/main.cyr` uses:
 
 ```
-frame delta bytes: 412112      <- frame 1 pays the one-time render target
-frame delta bytes: 77568
-frame delta bytes: 77568
-frame delta bytes: 77568
-frame delta bytes: 77568
+frame delta bytes: 334544      <- frame 1 pays the one-time render target
+frame delta bytes: 0
+frame delta bytes: 0
+frame delta bytes: 0
+arena high-water bytes: 262144
 ```
 
-**77,568 B per steady-state frame**, against **746,440 B** before dhancha 0.9.13. Where it goes now:
+Identical at 114 and at 256 entries per pane: the 256 KiB initial chunk absorbs both, so the arena
+never even has to chain.
 
-| item | bytes | note |
-|---|---:|---|
-| `dh_surface_new` pixel buffer | ~~334,440~~ **0** | ✅ **fixed, dhancha 0.9.13** — deferred to `dh_surface_pixels`, which nothing calls |
-| `sd_surface_new` inside `dh_surface_render` | ~~334,432~~ **0 per frame** | ✅ **fixed, dhancha 0.9.14 + crab** — cached on the DhSurface, which crab now holds for the session. Still 334,432 B **once**. |
-| ~236 widget records @ 248 B | 58,528 | **step 3, still open** — 75 % of what is left |
-| crab's own row/status scratch | ~19,000 | `disp`, size strings, `crab_u2s` temporaries |
+| item | before | now |
+|---|---:|---:|
+| `dh_surface_new` pixel buffer | 334,440 | **0** — deferred (0.9.13); nothing calls the accessor |
+| `sd_surface_new` render target | 334,432 | **0/frame** — cached on the DhSurface (0.9.14); 334,432 B once |
+| ~236 widget records @ 248 B | 58,528 | **0** — arena'd, rewound each frame (0.9.15) |
+| crab's row/status scratch | ~19,000 | **0** — same arena, via `dh_falloc` |
 
-⚠ **The original figure in this document was 749,704 B and the reproduction measured 746,440 B.** The
-3,264 B gap is fixture-dependent — entry-name lengths and the file/directory mix change how much row
-and status scratch each frame allocates — not a change in the code. **The two pixel buffers reproduce
-to the byte** (334,440 and 334,432), which is the part the conclusion rests on. The probe is
-`alloc_used()` deltas around five back-to-back `crab_render` calls at 380x220, 114 entries per pane,
-into **one** surface — the same lifetime `src/main.cyr` uses.
+⚠ **The original figure in this document was 749,704 B; the reproduction measured 746,440 B.** The
+3,264 B gap is fixture-dependent — name lengths and the file/directory mix change how much row and
+status scratch a frame allocates — not a change in the code. The two pixel buffers reproduced to the
+byte, which is the part the conclusion rested on.
 
-⛔ **The widget tree is now 75 % of the frame**, so step 3 is what the remaining work is.
+## What it took, and the two things this document got wrong
 
-**Before 0.9.13, 89 % of it was two full-size pixel buffers, and one of them was pure waste.**
-`dh_surface_new` did `alloc(40)` then `alloc(w*h*4)` and stored the buffer at `DH_S_PIXELS` — but
-`dh_surface_render` ignored it entirely and allocated its own `sd_surface_new(w, h)` to draw into.
-Nothing ever touched the first buffer. **Both are now gone from the per-frame path**: the first is
-allocated only if someone asks for it (0.9.13), the second is allocated once per DhSurface and reused
-(0.9.14). Together they were the 89 %, and the measurement bears that out — 746,440 → 77,568 B.
+1. ✅ **Step 1 (dhancha 0.9.13) — stop allocating the buffer nothing reads.** `dh_surface_new`
+   allocated `w*h*4` bytes that `dh_surface_render` ignored in favour of its own `sd_surface_new`.
+   Nothing in the stack ever wrote or read it.
+   ⛔ **It was NOT "one line", which this document asserted twice.** Storing 0 breaks dhancha's
+   `programs/event_test.cyr`: `dh_surface_present` returns `_NO_SURFACE` when pixels are 0 and
+   `_UNSUPPORTED` otherwise, so a permanently-zero field silently downgrades 0.9.5's "refuse loudly
+   and diagnosably" contract to "bad surface". The shipped fix **defers** the allocation into
+   `dh_surface_pixels` so the published accessor's contract is unchanged for any external holder.
+   ⚠ A "one-line upstream fix" that a test in the upstream repo rejects is the shape of estimate made
+   from reading the caller and not the callee's suite.
 
-## Why it has not bitten yet, and when it will
+2. ✅ **Step 2 (dhancha 0.9.14 + crab) — reuse the render target.** Cached on the `DhSurface`
+   (`DH_S_SDS` at +40; the struct grew 40 → 48 B).
+   ⛔ **It was NOT purely upstream, which this document asserted.** A cached target must outlive the
+   frame, and `crab_render` was calling `dh_surface_new` **itself, once per call** — so a
+   per-DhSurface cache would have been discarded every frame and saved crab nothing. crab now holds
+   one surface for the session and takes it as a parameter, reading `w`/`h` back off it.
+   ⚠ **It is a contract change**: `dh_surface_render` may return the same surface twice. A caller
+   wanting two frames at once needs two `DhSurface`s — `src/render_test.cyr` is one, and guards it
+   with `check(sds2 == sds, 0)`.
 
-crab renders **on input**, not continuously. A navigation session of a few hundred keypresses costs a
-few hundred megabytes and the process exits before anyone notices. Until 0.5.0 the event loop also
-terminated itself after about two seconds of spinning, which capped the damage by accident.
-
-Two roadmap items remove that accident:
-
-- **M2's self-redraw** — the idle mascot line, transfer progress and index progress all repaint
-  *without* input. At 60 Hz, 77,568 B/frame is **4.7 MB/s** — down from 45 MB/s, and still unbounded.
-- **M4's transfer tray** — repaints continuously for the duration of a copy.
-
-There is a second, smaller leak on the same footing: `dh_setu_poll_event` (`lib/dhancha.cyr:2646`)
-calls `setu_msg_new()` **before** it knows whether anything is pending, so every idle poll leaks
-~80 B. ⛔ **0.5.0's stopgap is `sys_pause` (#14), NOT a ~16 ms sleep, and this document said sleep.**
-A `sys_sleep_ms` draft `preempt_disable()`d the machine and the compositor never presented at all —
-see the ⛔ block at the call site in `src/main.cyr`. `pause` yields to a ready proc and then waits on
-an interrupt, which bounds the same leak without stopping the scheduler.
-
-## What the fix looks like, and where it lives
-
-**Mostly upstream.** dhancha allocates through plain `alloc()` at 19 sites and offers no arena hook,
-so crab cannot redirect the widget-tree allocations no matter how it is written. ⚠ **The render
-target is the exception** — see step 2: that one needs a change on *both* sides. Three
-steps, roughly in value order:
-
-1. ✅ **DONE (dhancha 0.9.13) — stop allocating the unused buffer in `dh_surface_new`.** Measured
-   746,440 → 412,040 B/frame, a 44.8 % cut; `dh_surface_new(380,220)` is 334,440 B → 40 B.
-   ⛔ **AND IT WAS NOT "one line", WHICH THIS DOCUMENT ASSERTED TWICE.** Simply storing 0 breaks
-   dhancha's `programs/event_test.cyr` S): `dh_surface_present` returns `_NO_SURFACE` when pixels are
-   0 and `_UNSUPPORTED` otherwise, so a permanently-zero field silently downgrades 0.9.5's
-   "refuse loudly and diagnosably" contract into "bad surface". The shipped fix **defers** the
-   allocation into `dh_surface_pixels` (allocate on first call, cache) so the published accessor's
-   contract is unchanged for any external holder while every caller that never asks pays nothing.
-   Mutation-verified: the naive variant fails `event_test` with exit 1.
-   ⚠ A "one-line upstream fix" that a test in the upstream repo rejects is the shape of estimate that
-   gets made from reading the caller and not the callee's suite.
-2. ✅ **DONE (dhancha 0.9.14 + crab) — `dh_surface_render` reuses its render target.** Measured
-   412,040 → **77,568 B/frame**. The target is cached on the `DhSurface` (`DH_S_SDS` at +40; the
-   struct grew 40 → 48 bytes) and reused whenever the dimensions still match.
-   ⛔ **AND IT WAS NOT PURELY UPSTREAM, WHICH THIS DOCUMENT ASSERTED.** A cached target has to hang
-   off something that outlives the frame, and `crab_render` was calling `dh_surface_new` **itself,
-   once per call** — so a cache on the DhSurface would have been thrown away every frame and saved
-   crab exactly nothing. The dhancha change is inert without the crab half. crab now creates **one
-   surface for the session** in `src/main.cyr` and passes it in; `crab_render` takes `surf` and reads
-   `w`/`h` back off it, so the signature got *shorter* (18 → 17 parameters) for gaining one.
-   ⚠ **It is a real contract change**: `dh_surface_render` used to return a fresh surface every call
-   and now returns the same one. A caller wanting two frames at once needs two `DhSurface`s —
-   `src/render_test.cyr` is exactly that caller and now creates two, with a `check(sds2 == sds, 0)`
-   guard so a future regression to a shared target cannot pass silently.
-   ⚠ Resize abandons the old target rather than freeing it (there is nothing to free with), so a
-   resize costs one screenful once. That is the right trade against one per frame.
-
-3. **Give dhancha an arena hook.** The stdlib already ships `arena_new` / `arena_alloc` /
-   `arena_reset` (`lib/alloc.cyr:370-540`) documented for exactly this *"per-frame / per-emission
-   reuse"* pattern — `arena_reset` is a bump-back-to-base with no free list. A widget tree built into
-   a per-frame arena and reset each frame costs nothing to reclaim.
-
-crab's own share (~19 KB/frame) is fixable locally by hoisting the row and status scratch buffers out
-of the render path. ⚠ **It was under 5 % of the problem and is now roughly a quarter of it** — the two
-pixel buffers were so much larger that everything else rounded to noise. It is still second to the
-widget tree (75 %), but it is no longer negligible.
+3. ✅ **Step 3 (dhancha 0.9.15 + crab) — arena the widget tree.** `dh_frame_arena_set` installs it,
+   `dh_falloc` draws from it, `dh_frame_begin` rewinds it. crab installs a **growable** arena in
+   `src/main.cyr` and `crab_render` calls `dh_frame_begin` at the top, so every caller is correct
+   without remembering.
+   ⭐ **Growable is load-bearing.** `arena_reset` on a GROW arena rewinds to the first chunk and
+   **keeps the chain**, so the loop converges on its high-water mark and then allocates nothing at
+   all. A fixed arena would have to guess a capacity, and guessing low means `dh_falloc` spilling
+   back to the global heap — the leak, quietly restored.
+   ⛔ **`dh_frame_begin` does two things and they cannot be separated.** `_dh_focus`, `_dh_hover`,
+   `_dh_press` and `_dh_drag_src` are raw widget pointers dhancha holds across calls; after a rewind
+   they address memory the arena is about to hand out again. Resetting without clearing them turns a
+   memory saving into silent misbehaviour. **Never call `arena_reset` on a frame arena directly.**
+   ⚠ It follows that **an app using a frame arena must re-establish focus every frame** — crab does,
+   in `crab_pane`. Cross-frame widget identity and a per-frame arena are mutually exclusive by
+   construction, not by policy.
+   ⚠ **crab's own scratch had to move too, and not as an optimisation.** `dh_widget_set_text` stores
+   the pointer and does not copy, so a row's display string and the status line's buffer must share
+   the widget's lifetime. Leaving those on the global allocator while the widgets moved would have
+   been the one lifetime mismatch this design can produce.
 
 ## What a reader should take from this
 
-- **Do not add a continuously-repainting element** — an animation, a progress bar, a clock — until
-  the dhancha gate is closed. It will work in QEMU and exhaust memory on iron. ⚠ **Steps 1 and 2
-  landing do not lift this.** 77,568 B/frame at 60 Hz is 4.7 MB/s, and the allocator still has no
-  `free()`, so the growth is still unbounded — the rule was never about the factor. ⭐ What HAS
-  changed is the margin: an element that repaints a few times a minute is now clearly affordable,
-  where at 750 KB a frame it was not.
-- **Do not "fix" this in crab** by caching the widget tree. Rebuilding it every frame is what makes
-  the scroll-offset round-trip and the toolkit-owned selection work; the 0.4.10 port depends on it.
-  ⚠ Note this is about the **widget tree**, not the surface — hoisting the *surface* out of the frame
-  is exactly what step 2 did, and it is safe precisely because a surface carries no per-frame state.
-- The gate is tracked in [`../development/roadmap.md`](../development/roadmap.md) M2 and blocks every
-  milestone after it.
+- ⭐ **The "do not add a continuously-repainting element" rule is LIFTED for the frame itself.** It
+  stood for three releases and it was right: at 746,440 B a frame, 60 Hz was 45 MB/s into an
+  allocator with no `free()`. A rendered frame now costs zero. The idle mascot line (deferral #29),
+  a transfer tray (M4) and index progress (M7) are no longer blocked by *this*.
+- ⛔ **But a NEW gate takes its place, and it is not hypothetical.** `dh_setu_poll_event` calls
+  `setu_msg_new()` **before** it knows whether anything is pending, so every idle poll allocates —
+  ~80 B, on the global heap, never reclaimed. A continuously-repainting element implies continuous
+  polling, so at 60 Hz that is ~4.8 KB/s of permanent growth. Slower than what it replaces by four
+  orders of magnitude, and still unbounded. **Gate: dhancha** — hoist the buffer or accept a
+  caller-owned one. Roadmap M2, *deferral #09*.
+- ⚠ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`.** A single
+  plain `alloc()` in `crab_render` reintroduces a per-frame leak, and the suite will say so:
+  `tests/crab.tcyr` asserts twenty rendered frames move the global heap by exactly 0 bytes.
+- **Do not "fix" the widget tree by caching it.** Rebuilding it every frame is what makes the
+  scroll-offset round-trip and the toolkit-owned selection work; the 0.4.10 port depends on it. The
+  arena is what makes rebuilding free — the tree is still rebuilt.
+- ⚠ **`lib/` is not what compiles.** Measured 2026-08-27: appending garbage to crab's
+  `lib/dhancha.cyr` leaves the build green, while appending it to `../dhancha/dist/dhancha.cyr` fails
+  it — the `path` override compiles the sibling's `dist/` directly. Appending garbage to
+  `lib/alloc.cyr` is also harmless: the stdlib comes from the installed toolchain. ⇒ **The stdlib's
+  arena internals cannot be mutation-tested from this repo**, so the arena assertions here pin the
+  observable contract (chain grew, global heap flat, chain stable) rather than the implementation.

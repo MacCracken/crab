@@ -7,6 +7,17 @@
 
 include "src/path.cyr"
 
+# ⭐⭐ EVERY PER-FRAME ALLOCATION IN THIS FILE GOES THROUGH `dh_falloc` (0.6.0-dev), NOT `alloc`.
+# `dh_falloc` draws from the arena `dh_frame_arena_set` installed and `dh_frame_begin` rewinds — so a
+# frame's scratch is reclaimed instead of retained by a bump allocator that has no `free()`.
+# ⛔ IT IS NOT AN OPTIMISATION FOR `disp` AND `out`, IT IS A LIFETIME REQUIREMENT.
+# `dh_widget_set_text` **stores the pointer and does not copy**, so a row's display string and the
+# status line's buffer must live exactly as long as the widgets that point at them. Leaving those two
+# on the global allocator while the widgets moved to the arena would be the one mismatch this design
+# can produce — the widget dies at `dh_frame_begin` and the string outlives it forever.
+# ⚠ With no arena set, `dh_falloc` IS `alloc`. Every caller that has not opted in — `tests/crab.tcyr`,
+# `src/render_test.cyr` — behaves exactly as before.
+
 # ⛔ `CRAB_ROWS_CAP = 7` LIVED HERE UNTIL 0.4.10 and it is deliberately not replaced by a bigger
 # number. A pane now holds a dhancha LIST, which scrolls and clips, so there is no row count to cap:
 # the viewport is however tall the window is and the content is however long the directory is.
@@ -19,7 +30,7 @@ include "src/path.cyr"
 fn crab_u2s(dst, n): i64 {
     if (n < 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }
     if (n == 0) { store8(dst, 48); store8(dst + 1, 0); return 1; }
-    var tmp = alloc(24);
+    var tmp = dh_falloc(24);
     var i = 0;
     var v = n;
     while (v > 0) { store8(tmp + i, 48 + (v - (v / 10) * 10)); i = i + 1; v = v / 10; }
@@ -144,7 +155,7 @@ fn crab_row(col, name, is_dir, size): i64 {
     # through. This deletion is the point of the port: the rule lived in three apps, now it lives once.
     dh_widget_set_bg(row, 0 - 1);
     dh_widget_set_pref(row, 0, 26);
-    var disp = alloc(48);
+    var disp = dh_falloc(48);   # ⛔ the widget POINTS at this — same lifetime, not a copy
     var k = 0; var done = 0;                          # name column: 13 chars, space-padded
     while (k < 13) {
         var ch = 32;
@@ -169,7 +180,7 @@ fn crab_row(col, name, is_dir, size): i64 {
         store8(disp + w, 0);
     } else {
         store8(disp + w, 32); w = w + 1;              # gap before the size
-        var ss = alloc(24);
+        var ss = dh_falloc(24);
         var sl = crab_size_str(ss, size);
         var m = 0;
         while (m < sl) { store8(disp + w, load8(ss + m)); w = w + 1; m = m + 1; }
@@ -224,7 +235,7 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
 # Build the status-line text (returned as a cstring) for the active pane's selected
 # entry: "<name>   <size|<dir>>   <mtime>". Empty pane -> a single space.
 fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
-    var out = alloc(96);
+    var out = dh_falloc(96);    # ⛔ the status LABEL points at this — same lifetime
     if (count <= 0) { store8(out, 32); store8(out + 1, 0); return out; }
     var rec = buf + sel * CRAB_REC_SZ;
     var w = 0;
@@ -235,7 +246,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
         var dtag = "<dir>"; var t = 0;
         while (load8(dtag + t) != 0) { store8(out + w, load8(dtag + t)); w = w + 1; t = t + 1; }
     } else {                                            # file -> human size
-        var ss = alloc(24); var sl = crab_size_str(ss, load64(sizes + sel * 8));
+        var ss = dh_falloc(24); var sl = crab_size_str(ss, load64(sizes + sel * 8));
         # ⚠ The old `if (sl == 0) { emit '-' }` compensation is GONE, and its absence is the fix:
         # `crab_size_str` now renders "-" for an unstattable file itself, so both the pane row and
         # this line get the same string from the same place. Compensating here was what let the two
@@ -243,7 +254,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
         var m = 0; while (m < sl) { store8(out + w, load8(ss + m)); w = w + 1; m = m + 1; }
     }
     store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;
-    var ds = alloc(24); var dl = crab_mtime_str(ds, load64(mtimes + sel * 8));   # mtime date
+    var ds = dh_falloc(24); var dl = crab_mtime_str(ds, load64(mtimes + sel * 8));   # mtime date
     var q = 0; while (q < dl) { store8(out + w, load8(ds + q)); w = w + 1; q = q + 1; }
     store8(out + w, 0);
     return out;
@@ -268,6 +279,17 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 # surfaces; `src/render_test.cyr` is exactly such a caller and does exactly that.
 fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
     if (surf == 0) { return 0; }
+    # ⛔⛔ THIS FREES THE PREVIOUS FRAME'S WIDGET TREE AND SCRATCH (0.6.0-dev, dhancha 0.9.15). It is
+    # here rather than in `src/main.cyr` so that EVERY caller is correct without remembering — a
+    # render loop that forgot it would leak exactly as much as before, silently and with a green suite.
+    # ⚠ NO-OP UNLESS AN ARENA IS INSTALLED, so the test harnesses are unaffected.
+    # ⚠ IT ALSO CLEARS dhancha's RETAINED WIDGET POINTERS (`_dh_focus` and friends), which is why the
+    # toolkit exposes this rather than a bare `arena_reset` — see the ⛔ on `dh_frame_begin`. crab is
+    # safe because `crab_pane` re-establishes focus on the active pane every frame, below.
+    # ⛔ AFTER THIS LINE, EVERY WIDGET POINTER FROM A PREVIOUS FRAME IS DEAD — including the root
+    # still stored on `surf`. Nothing reads it before `dh_surface_set_root` replaces it; do not add
+    # anything that does.
+    dh_frame_begin();
     var w = dh_surface_width(surf);
     var h = dh_surface_height(surf);
     var root = dh_widget_new(WINDOW);
