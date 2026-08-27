@@ -111,10 +111,15 @@ assumes otherwise.
 - **Route through `dh_dispatch`** — crab still switches on raw keysyms while the 0.4.8→0.4.12 arc
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*
-- **Stop the idle leak** — `dh_setu_poll_event` calls `setu_msg_new()` before it knows whether
-  anything is pending, so every poll leaks ~80 B. ⛔ **PROMOTED: this is now the ONLY unbounded
-  per-cycle allocation left in the render/input loop**, the frame itself having gone to zero, and it
-  is the precondition for every self-repainting element on the roadmap. 0.5.0's stopgap is to wait on an interrupt when the
+- ✅ **CLOSED 2026-08-27 (dhancha 0.9.16) — the idle leak.** `dh_setu_poll_event` called
+  `setu_msg_new()` (80 B) **before** it knew whether anything was pending; the message is pure scratch,
+  so it is now one hoisted buffer per process. **200 idle polls move the global heap by 0 bytes**,
+  asserted in dhancha's `poll_test`. ⇒ With the frame already at zero, **crab's render/input loop
+  allocates nothing in steady state**. *Deferral #09.*
+  ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle. Only the idle path is
+  free.
+  ⛔ **Whatever replaces the idle wait must still not be `sys_sleep_ms`** — see the ⛔ below; that is
+  unchanged by this. 0.5.0's stopgap is to wait on an interrupt when the
   poll is empty. **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
   ⛔ **Whatever replaces this wait, it must not be `sys_sleep_ms`.** That syscall `preempt_disable()`s,
   so while crab waits nothing else on the machine can be scheduled — a 0.5.0 draft used it and the
@@ -140,14 +145,15 @@ assumes otherwise.
 > was minting a `DhSurface` per frame. All three steps are mutation-verified on both sides.
 > ⇒ **This gate no longer blocks the milestones after M2.**
 
-> ⭐ **AND THE REPAINT RULE IS LIFTED — for the frame. A NEW GATE REPLACES IT.** "Do not add a
-> continuously-repainting element" stood for three releases and was right at 45 MB/s. The frame is now
-> free, so the idle mascot line (*deferral #29*), M4's transfer tray and M7's index progress are no
-> longer blocked by it. ⛔ **But `dh_setu_poll_event` still allocates on every poll** — it calls
-> `setu_msg_new()` before it knows whether anything is pending, ~80 B on the global heap, never
-> reclaimed. Continuous repaint implies continuous polling, so at 60 Hz that is ~4.8 KB/s of permanent
-> growth: four orders of magnitude better, still unbounded. **Closing *deferral #09* is now the
-> precondition for anything that repaints without input.**
+> ⭐⭐ **AND THE REPAINT RULE IS LIFTED OUTRIGHT (2026-08-27).** "Do not add a continuously-repainting
+> element" stood for three releases and was right at 45 MB/s. It had two halves and **both are now
+> zero**: the frame (0.9.13–0.9.15) and the **poll** (0.9.16 — `dh_setu_poll_event` allocated an 80 B
+> message before it knew whether anything was pending; it is now one hoisted scratch per process).
+> **crab's render/input loop allocates nothing in steady state**, asserted at 200 idle polls moving
+> the global heap by 0 bytes. ⇒ The idle mascot line (*deferral #29*), M4's transfer tray and M7's
+> index progress are unblocked.
+> ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle, and bounded by how fast
+> a human types.
 
 ### M3 — A browser you would actually use (v0.7.0)
 

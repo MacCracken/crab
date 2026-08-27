@@ -115,12 +115,12 @@ byte, which is the part the conclusion rested on.
   stood for three releases and it was right: at 746,440 B a frame, 60 Hz was 45 MB/s into an
   allocator with no `free()`. A rendered frame now costs zero. The idle mascot line (deferral #29),
   a transfer tray (M4) and index progress (M7) are no longer blocked by *this*.
-- ⛔ **But a NEW gate takes its place, and it is not hypothetical.** `dh_setu_poll_event` calls
-  `setu_msg_new()` **before** it knows whether anything is pending, so every idle poll allocates —
-  ~80 B, on the global heap, never reclaimed. A continuously-repainting element implies continuous
-  polling, so at 60 Hz that is ~4.8 KB/s of permanent growth. Slower than what it replaces by four
-  orders of magnitude, and still unbounded. **Gate: dhancha** — hoist the buffer or accept a
-  caller-owned one. Roadmap M2, *deferral #09*.
+- ✅ **And the other half of the loop closed the same week (dhancha 0.9.16).** `dh_setu_poll_event`
+  called `setu_msg_new()` **before** it knew whether anything was pending — 80 B per idle poll, never
+  reclaimed, ~4.8 KB/s at 60 Hz. The message is pure scratch, so it is now one hoisted buffer per
+  process. ⇒ **crab's render/input loop allocates nothing in steady state**, and the repaint rule is
+  lifted outright rather than moved. *Deferral #09.*
+  ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle.
 - ⚠ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`.** A single
   plain `alloc()` in `crab_render` reintroduces a per-frame leak, and the suite will say so:
   `tests/crab.tcyr` asserts twenty rendered frames move the global heap by exactly 0 bytes.

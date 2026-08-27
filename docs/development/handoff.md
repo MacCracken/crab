@@ -1,6 +1,6 @@
-# Handoff — **0.6.0 is cut.** A frame costs zero bytes; `main.cyr` is testable; nothing is mid-arc.
+# Handoff — 0.6.0 is cut; **M2 has started.** The render/input loop now allocates nothing at all.
 
-> **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
+> **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated as M2 opened.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
 >
 > ⚠ **Refresh or delete this file when the next release ships. A stale handoff is worse than none.**
@@ -14,14 +14,14 @@
 
 | | |
 |---|---|
-| Version | **0.6.0** (2026-08-27). ⚠ Uncommitted — `VERSION`, CHANGELOG, `src/app.cyr` and the docs are in the working tree. `../dhancha` is clean at **0.9.15** (`935a84c`). |
+| Version | **0.6.0** at `998341f 0.6.0 complete`. ⚠ `../dhancha` carries an **uncommitted, untagged 0.9.16**; crab's tree carries the docs for it. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,584 B** · `--agnos` **381,648 B** · `--win` fails (pre-existing, not crab's) |
+| Build | x86_64 **381,592 B** · `--agnos` **381,656 B** · `--win` fails (pre-existing, not crab's) |
 | Tests | `cyrius test` **75 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
 | Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
 | Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.15** · setu 0.8.7 — all six at their latest published tag, verified four ways |
-| Mid-arc work | **None.** 0.6.0 is complete. Next slot is **M2 — the window is real (v0.6.1)**, now unblocked. |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.15 declared, 0.9.16 compiled (unpublished)** · setu 0.8.7 |
+| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** *Deferral #09* is done (dhancha 0.9.16, uncommitted). Resize, pointer, key-release and `dh_dispatch` are untouched. |
 
 ---
 
@@ -64,6 +64,50 @@ string must die with its widget.
 **Verified**: dhancha 11/11 suites, lint + fmt clean, `vet` 0 untrusted, dist in sync; crab
 `cyrius test` **55/0**, `render_test` 0 failed checks, host 381,608 B, `--agnos` 381,672 B, re-staged.
 All three steps mutation-verified on both sides.
+
+## M2 — started. *Deferral #09* is closed: the loop allocates nothing
+
+**dhancha 0.9.16** (uncommitted, untagged). `dh_setu_poll_event` opened with `setu_msg_new()` — an
+80-byte `alloc` — and only *then* asked whether a frame was pending. With no `free()` under it, an
+idle desktop grew the heap once per wakeup forever, and a client repainting without input grew it at
+the repaint rate: ~4.8 KB/s at 60 Hz.
+
+The message is pure scratch — `setu_client_poll_input` fills it and `dh_setu_map_input` reads it to
+build a **separate** `DhEvent` — so it is now one hoisted buffer per process, handed out zeroed.
+
+⭐ **This was the last unbounded per-cycle allocation.** 0.9.13–0.9.15 took a rendered frame to zero;
+this is the other half. **crab's whole render/input loop now allocates nothing in steady state**, and
+the "no continuously-repainting element" rule is lifted **outright** rather than moved — the idle
+mascot line (*deferral #29*), M4's transfer tray and M7's index progress are unblocked.
+
+⚠ An **event** still costs 56 B (`dh_event_new`). That is per input, not per cycle, and bounded by how
+fast a human types.
+
+⚠ **NOT on the frame arena, and the trap is worth naming**: routing the scratch through `dh_falloc`
+would be wrong, because polling happens in the event loop while `dh_frame_begin` rewinds the arena
+inside the caller's render — the scratch would be freed under a loop still using it. Per-frame and
+per-poll are different lifetimes.
+
+**Verified on the host**: dhancha 11/11 suites; `poll_test` gains 8 checks including **200 idle polls
+moving the global heap by exactly 0 bytes**, with a non-vacuity arm proving a client that *does* have
+frames still costs something. Mutation-verified: reverting to per-call allocation fails. crab
+`cyrius test` 75/0, `render_test` 0 failed.
+
+⭐ **Verified on a real agnos kernel in QEMU (2026-08-27)**, because the poll is inside the event loop
+and the ⛔ below says no loop change may be claimed without one. `puka-terminal-test.py` — **PASS**,
+background exit **95**, both clients connected, **2 presentations**, and the serial log carries
+`crab: dual-pane file-manager UI presented over setu` followed by
+`crab: compositor closed the window -- exiting`. So crab still connects, presents and leaves cleanly
+*through the changed poll*.
+⚠ **What that run does NOT show**: this harness has the compositor close crab's window quickly, so —
+exactly as the open-items section below has said since 0.5.0 — **it cannot distinguish loop-lifetime
+behaviour**. It is evidence the poll change did not regress connect/present/close, and nothing more.
+⛔ **One assertion in that group is honestly labelled as NOT pinning what it looks like.** The
+"reused scratch is handed out clean" checks cannot fail — `dh_setu_map_input` maps `SETU_CLOSE` with a
+literal `a = 0`, and every kind that reads an arg has it guaranteed by `setu_decode`'s argc check. The
+zeroing is **unexercised defence**, measured not assumed, and both the test and the source say so.
+
+---
 
 ## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
 
@@ -200,6 +244,14 @@ call site; don't delete it.
 ---
 
 ## What is verified, and what is not
+
+⭐ **Verified on a real agnos kernel in QEMU, crab 0.6.0 (2026-08-27)** — the first on-target run of
+the whole 0.6.0 tree (the `app.cyr` extraction, the reused render target, the per-frame arena):
+
+- `agnos/scripts/harness/crab-listing-cap-test.py` — **PASS**, exit 0. `/bin` listed **45 of 45**, no
+  truncation, no fault, no per-entry stat noise. So the extraction and the arena did not disturb the
+  readdir/stat path on real ext2. ⚠ This harness never reaches the compositor — crab does both pane
+  readdirs before it touches setu — so it says nothing about the event loop.
 
 **Verified on a real agnos kernel in QEMU (`-smp 4`), crab 0.5.0:**
 

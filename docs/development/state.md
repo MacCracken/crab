@@ -154,6 +154,17 @@ rather than argued for:
   with `crab: compositor closed the window -- exiting` — the 0.5.0 `WINDOW_CLOSE` path on a real
   compositor.
 
+✅ **QEMU, 2026-08-27, crab 0.6.0 + dhancha 0.9.16** — the first on-target run of the 0.6.0 tree and
+of the M2 poll change:
+
+- `crab-listing-cap-test.py` — **PASS**, exit 0, `/bin` listed **45 of 45**. The `app.cyr` extraction,
+  the reused render target and the per-frame arena did not disturb the readdir/stat path on real
+  ext2. ⚠ This harness never reaches the compositor, so it says nothing about the event loop.
+- `puka-terminal-test.py` — **PASS**, background exit **95**, 2 presentations; serial carries
+  `presented over setu` then `compositor closed the window -- exiting`. crab connects, presents and
+  leaves cleanly **through the hoisted-scratch poll**. ⚠ The compositor closes crab's window quickly
+  here, so it still **cannot distinguish loop-lifetime behaviour** — see the open item below.
+
 ⛔ **And QEMU EARNED ITS KEEP: it caught a regression the host suite could not see.** A 0.5.0 draft
 idled with `sys_sleep_ms`, which `preempt_disable()`s — so while crab slept **nothing else could be
 scheduled** and the compositor never presented at all (placed 2, presented **0**, `--clients` never
@@ -300,12 +311,15 @@ only what a cold start must know *before touching the code*; the roadmap is the 
   the two halves cannot be separated — never call `arena_reset` on a frame arena directly. It follows
   that crab **must re-establish focus every frame**, which `crab_pane` does. Full accounting in
   [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
-- ⭐ **The "no continuously-repainting element" rule is LIFTED for the frame, and REPLACED for the
-  poll.** The idle mascot line, a transfer tray and index progress are no longer blocked by the frame
-  cost. ⛔ But `dh_setu_poll_event` still calls `setu_msg_new()` **before** it knows whether anything
-  is pending, so every idle poll allocates ~80 B on the global heap, never reclaimed — ~4.8 KB/s at
-  60 Hz. Four orders of magnitude better than what it replaces, and still unbounded.
-  **Gate: dhancha**, roadmap M2, *deferral #09*.
+- ✅ **CLOSED 2026-08-27 — the "no continuously-repainting element" rule is LIFTED OUTRIGHT.** It had
+  two halves and both are now zero: the frame (dhancha 0.9.13–0.9.15, see above) and the **poll**
+  (dhancha 0.9.16 — `dh_setu_poll_event` called `setu_msg_new()` for 80 B before it knew whether
+  anything was pending; the message is pure scratch and is now one hoisted buffer per process).
+  **crab's render/input loop allocates nothing in steady state.** 200 idle polls move the global heap
+  by exactly 0 bytes, asserted in dhancha's `poll_test`. *Deferral #09.*
+  ⇒ The idle mascot line (#29), M4's transfer tray and M7's index progress are unblocked.
+  ⚠ **An EVENT still costs 56 B** (`dh_event_new`) — that is per input, not per cycle, and bounded by
+  how fast a human types. Only the idle path is free.
 - ⚠ **`lib/` IS NOT WHAT COMPILES, and that sharpens the `path`-wins hazard considerably.** Measured
   2026-08-27: appending garbage to `lib/dhancha.cyr` leaves the build green, while appending it to
   `../dhancha/dist/dhancha.cyr` fails it — the `path` override compiles the **sibling's `dist/`**
@@ -352,10 +366,9 @@ see the roadmap's M1.5): resize, pointer input, key release, routing
 through `dh_dispatch`, and the event-driven wait. ✅ **Its dhancha gate — per-frame allocation — is
 CLOSED** (dhancha 0.9.13 / 0.9.14 / 0.9.15 plus the crab half): a rendered frame costs the global heap
 zero bytes, and nothing downstream is blocked by it any more.
-⛔ **M2's *deferral #09* inherits the constraint it used to carry.** `dh_setu_poll_event` allocates
-~80 B on every poll whether or not anything is pending, so anything that repaints without input still
-grows the heap without bound — ~4.8 KB/s at 60 Hz. It is now the precondition for the idle mascot
-line, the transfer tray and index progress.
+✅ **And *deferral #09* — the per-poll allocation that inherited the constraint — is CLOSED too**
+(dhancha 0.9.16). The whole render/input loop is allocation-free in steady state, so nothing about
+memory blocks M2 or anything after it.
 
 Two decisions are settled and recorded, and both shape everything downstream:
 [ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no

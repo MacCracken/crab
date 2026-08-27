@@ -111,10 +111,19 @@ path = "../dhancha"
 # wants two frames at once needs two DhSurfaces — `src/render_test.cyr` is one, and guards it.
 #   0.9.15 — step 3: a per-frame ARENA for the widget tree and layout scratch, rewound by
 #            `dh_frame_begin`.                                       77,568 ->       0 B per frame
+# ⭐ 0.9.16 — the OTHER half of the loop: `dh_setu_poll_event` no longer allocates an 80 B message
+#            before it knows whether anything is pending.                 80 ->       0 B per poll
+#            ⇒ crab's render/input loop now allocates NOTHING in steady state, which is what makes a
+#            self-repainting element affordable. (M2 deferral #09.)
 # ⛔ 0.9.15 IS ALSO A CONTRACT ADDITION: `dh_frame_begin` rewinds the arena **and** clears dhancha's
 # retained widget pointers (`_dh_focus` and friends). The two halves cannot be separated — never call
 # `arena_reset` on a frame arena directly — and an app on a frame arena must re-establish focus every
 # frame, which `crab_pane` does.
+# ⛔⛔ THIS TAG IS BEHIND WHAT THE LOCAL BUILD COMPILES — DELIBERATELY. `../dhancha` holds an
+# UNCOMMITTED, UNTAGGED **0.9.16**. `path` wins, so every local build and measurement is ALREADY
+# against it. Left behind on purpose: an unpublished tag fails CI loudly, whereas the alternative is
+# CI silently resolving a different library than the local tree. **Bump to "0.9.16" in the SAME change
+# that commits and tags dhancha**, and re-run the four-way check below.
 # ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins and a green local build proves
 # nothing about the declared graph: sibling `VERSION` = 0.9.15; `git rev-parse 0.9.15` == HEAD in
 # `../dhancha` (935a84c); `git ls-remote --tags` shows `refs/tags/0.9.15` at that same commit; and —
