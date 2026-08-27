@@ -550,7 +550,14 @@ fn main() {
     assert_eq(crab_surface_bytes(CRAB_DIM_MAX + 1, 8), 0 - 1, "an over-wide ask is refused");
     assert_eq(crab_surface_bytes(8, CRAB_DIM_MAX + 1), 0 - 1, "...and an over-tall one");
     assert_eq(crab_surface_bytes(4096, 4096), 0 - 1, "an in-axis extent past the BYTE cap is refused");
-    assert_eq(crab_surface_bytes(2048, 2048), CRAB_SURFACE_BYTES_MAX, "...and the cap itself is allowed");
+    assert_eq(crab_surface_bytes(2896, 2896), 33547264, "...just under the cap is allowed");
+    # ⛔ THE CAP IS THE ABSURDITY BOUND, NOT A PROMISE THE KERNEL WILL BACK IT. agnos caps a `#71`
+    # pmm slot at **2 MB** and only a real GPU carveout (`#86`) reaches 32 MB — and `setu_buf_create`
+    # picks between them at runtime, so a client cannot know which applies. A QEMU run found this the
+    # hard way: policy said yes to a maximize, the create failed, and the first draft had already
+    # closed its only buffer. ⇒ `main.cyr` now creates before closing and survives a refusal; **a
+    # green line here is not evidence the extent is obtainable.**
+    assert(crab_surface_bytes(1024, 512) <= 2097152, "a 2 MB-backable extent is comfortably in range");
 
     assert_eq(crab_resize_wanted(380, 220, 800, 600), 1, "a real new extent is adopted");
     # ⚠ THE NO-OP MATTERS AS MUCH AS THE ADOPT. A compositor may re-send CONFIGURE with the size we

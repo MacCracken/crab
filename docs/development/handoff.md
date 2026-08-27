@@ -14,14 +14,14 @@
 
 | | |
 |---|---|
-| Version | **0.6.0** at `b42b4d6 m2 work started`. `../dhancha` is clean at **0.9.16** (`68c60f8`), tagged and consumed. |
+| Version | **0.6.0** at `dc3fc38 m2 surface resize work`. `../dhancha` is clean at **0.9.17** (`b297604`), tagged and consumed. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,632 B** · `--agnos` **381,848 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius test` **89 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
+| Build | x86_64 **381,632 B** · `--agnos` **381,840 B** · `--win` fails (pre-existing, not crab's) |
+| Tests | `cyrius test` **90 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
 | Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
 | Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.16 declared, 0.9.17 compiled (unpublished)** · setu 0.8.7 |
-| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 done + verified. **Resize BUILT but NOT VERIFIED — policy tested, plumbing unproven.** Pointer, key-release, `dh_dispatch` untouched. |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.17** · setu 0.8.7 — all six at their latest published tag, verified four ways |
+| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 done + verified. Resize built; **refusal path QEMU-proven, adopt path not reachable under QEMU.** Pointer, key-release, `dh_dispatch` untouched. |
 
 ---
 
@@ -109,48 +109,57 @@ zeroing is **unexercised defence**, measured not assumed, and both the test and 
 
 ---
 
-## ⚠ Resize is BUILT and NOT VERIFIED — read this before recording it as done
+## ⚠ Resize — built, and a new harness found a real bug in it on the first run
 
 `WINDOW_CONFIGURE` has reached apps since dhancha 0.9.12 and crab dropped it for five releases, so a
-maximise grew the window and not the file manager. That is now handled end to end:
+maximise grew the window and not the file manager. It is now handled — **dhancha 0.9.17** adds
+`dh_surface_resize` (which also closes a latent overflow 0.9.13 created, and makes 0.9.14's dormant
+dimension check live), and crab acts on the event.
 
-- **dhancha 0.9.17** adds `dh_surface_resize` — the entry point that had been missing the whole time.
-  ⛔ It also closes **a latent buffer overflow 0.9.13 created and nothing could reach until now**:
-  `dh_surface_pixels` caches a `w*h*4` buffer on first ask, which was safe only while `w`/`h` were
-  immutable. Resize drops that cache; without it a grown surface hands back a short buffer.
-  ⭐ And it makes **0.9.14's dimension check live** — the branch written before anything could reach
-  it, documented and *measured* as unreachable, whose ⚠ said "when `dh_surface_resize` lands, add the
-  test then." It landed; deleting those four lines now fails three checks.
-- **crab** handles the event: refuse a degenerate ask, ignore an ask for the size we already have,
-  `dh_surface_resize`, close+recreate the `#86` slot **only when the byte size changed**, then
-  re-ATTACH + COMMIT after the next render. Layout reflows for free — `crab_render` reads `w`/`h` off
-  the surface.
+### ⛔ What the harness caught, and it would have shipped otherwise
 
-⛔⛔ **WHAT IS PROVEN AND WHAT IS NOT.** The **policy** — `crab_resize_wanted`, `crab_surface_bytes`,
-their caps and the same-extent no-op — is in `src/app.cyr` with 14 assertions, mutation-proven four
-ways. The **plumbing** — the surface resize, the slot swap, the re-ATTACH — is in `main.cyr`, which no
-host suite can reach, and **nothing has driven a real CONFIGURE**.
-⇒ A QEMU run today shows `puka-terminal-test.py` **PASS** (background exit 95, 2 presentations, crab
-presents and leaves cleanly) — that is **no regression**, nothing more. `crab: resized` appears **zero
-times** in that log, correctly: the harness never triggers a maximise.
+`agnos/scripts/harness/crab-resize-test.py` — **new**, and the only harness that both starts crab and
+leaves it running. It drives boot → `aethersafha` → **F2 → DOWN → Enter** → F5. The DOWN is
+load-bearing: the launcher registry is `/bin/puka` at 0 and `/bin/crab` at 1, and `lnch_openp` resets
+the selection to 0, so a harness without it launches puka and scores whatever puka did.
 
-### ⇒ The next job, with the recipe already found
+**First run: crab died.** `crab: buf_create failed on resize -- exiting`. The draft closed its only
+shm buffer before knowing the replacement existed — it destroyed a working surface to attempt an
+upgrade. setu's own `setu_client_present` closes first, but it has an **inline-pixel fallback** to
+land on; crab's hand-rolled LIVE-buffer path has none, so copying that order was fatal.
+⇒ **Create before close**, and a failed create now leaves the old buffer and the old extent in place.
 
-`ae-resize-fault-test.py` does boot → `aethersafha` → **F2 → Enter → F5 (maximize)**, and F5 is what
-makes the compositor send CONFIGURE. Copy that skeleton, ensure **crab** is what the launcher spawns,
-and assert:
+**And the byte cap was invented, not derived.** It was 16 MB, taken from "the framebuffer's own
+size". agnos actually caps a `#71` pmm slot at **2 MB** and only a real GPU carveout (`#86`) reaches
+**32 MB** — and `setu_buf_create` picks between them at runtime, so a client cannot know which
+applies. ⇒ The cap is now the absurdity bound and **the kernel is the arbiter**.
 
-1. `crab: resized` in serial — the ask was adopted;
-2. a keystroke sent **after** it is still answered with `crab: key received` — which incidentally
-   settles **the loop-lifetime question open since 0.5.0**, because no existing harness both starts
-   crab and leaves it running.
+### What is proven, and what is not
 
-⚠ That is *deferral #16* ("bring the agnos/iron harness into crab's own repo") arriving with a
-concrete first job, exactly as this file predicted at 0.5.0.
+⭐ **PARTIAL PASS, and it is recorded as partial.** crab launches from the launcher, presents,
+receives a real CONFIGURE for **2048x2018** (~16.5 MB), refuses it because QEMU has **no GPU
+carveout** so only the 2 MB pmm slot is available, stays at its old extent, and **answers 6
+keystrokes afterwards**.
+
+- ✅ **The refusal path is proven** — which is exactly the bug the first run found.
+- ⛔ **The adopt path is NOT proven and cannot be here.** It needs a machine whose `#86` carveout can
+  back the ask. **Do not read the PARTIAL as a pass for resize working.**
+- ⭐ **This also settles the loop-lifetime question open since 0.5.0.** Six answered keystrokes, well
+  after launch, on a live desktop — no existing harness both started crab and left it running, and
+  "no exit line" was never evidence. An ANSWER is.
+
+⚠ **The harness is flaky by nature and says so.** QEMU drains HID once per frame, so a burst that
+lands between drains is gone: the key-delivery probe measured 3/8 on one run and **0/8** on the next
+against the same image. It now retries the probe four times and the launch six, and returns
+**INCONCLUSIVE** rather than a verdict when nothing was delivered — a harness that scores a pass for a
+test it never performed is worse than none.
+
+⚠ It lives in `agnos/scripts/harness/` beside its siblings; *deferral #16* (move crab's harnesses into
+crab's own repo) is still open.
 
 ---
 
-## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
+## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
 
 `main.cyr` ends in `_entry();`, so a suite that included it would run the app. Everything in it was
 therefore **unreachable from any test**: the readdir parser, the stat layer, `crab_descend`,

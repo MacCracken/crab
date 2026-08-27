@@ -64,7 +64,18 @@ fn crab_surface_flags(): i64 {
 # buffer, re-attach, re-commit) stays there because it is syscalls; the *decision* is here.
 enum CrabWindow {
     CRAB_DIM_MAX = 4096;                 # per-axis sanity bound
-    CRAB_SURFACE_BYTES_MAX = 16777216;   # 2048x2048x4 — the framebuffer's own size
+    # ⛔⛔ THIS WAS 16 MB ("the framebuffer's own size") AND THAT NUMBER WAS INVENTED, NOT DERIVED.
+    # QEMU found it: on a maximize the compositor asked for a full-screen surface, crab's policy said
+    # yes, and `setu_buf_create` then failed — because the kernel's shm caps are
+    #   `SHM_MAX_SIZE     = 2,097,152`  (2 MB)  — syscall `#71`, pmm-backed: ONE 2 MB page per buffer
+    #   `SHM_GPU_MAX_SIZE = 33,554,432` (32 MB) — syscall `#86`, one slot of the GPU carveout
+    # `setu_buf_create` asks `#86` first and falls back to `#71`, so **which cap applies depends on
+    # whether the machine has a GPU carveout — and under QEMU it does not.** A client cannot query
+    # which backing it got.
+    # ⇒ THE CAP HERE IS THE ABSURDITY BOUND, NOT THE ANSWER. It is the highest any backing could ever
+    # provide; the real arbiter is whether `setu_buf_create` succeeds, and `main.cyr` now survives a
+    # refusal instead of guessing. Guessing was the bug.
+    CRAB_SURFACE_BYTES_MAX = 33554432;   # agnos SHM_GPU_MAX_SIZE — the ceiling of any backing
 }
 
 # Byte size of a `w` x `h` BGRA surface, or **-1** when the extent is not one we will honour.
@@ -83,6 +94,17 @@ fn crab_surface_bytes(w, h): i64 {
     var n = w * h * 4;
     if (n > CRAB_SURFACE_BYTES_MAX) { return 0 - 1; }
     return n;
+}
+
+# Log a resize outcome with its extent. ⚠ "resized" on its own proves an event arrived, not that the
+# surface actually grew — and the two look identical in a serial log, which is how a harness scores a
+# pass for a test it never performed. The NUMBERS are the oracle.
+fn crab_log_extent(tag, w, h): i64 {
+    var d = alloc(24);
+    crab_say(tag);
+    crab_u2s(d, w); crab_say(d); crab_say("x");
+    crab_u2s(d, h); crab_say(d); crab_say("\n");
+    return 0;
 }
 
 # Should a `WINDOW_CONFIGURE` ask be adopted? -> 1 adopt, 0 ignore.

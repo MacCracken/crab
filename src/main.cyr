@@ -194,27 +194,37 @@ fn main(): i64 {
                 var ah = dh_event_b(ev);
                 if (crab_resize_wanted(w, h, aw, ah) == 1) {
                     var nb = crab_surface_bytes(aw, ah);
-                    if (dh_surface_resize(surf, aw, ah) == DHANCHA_OK) {
-                        # ⛔ CLOSE BEFORE CREATE, and only when the SIZE actually changed. A `#86`
-                        # GPU-visible slot is one of **16 system-wide**; leaking one per configure
-                        # during a window drag would exhaust the desktop, which is the same resource
-                        # the 2026-08-08 orphaned-client burn was about. This is setu's own pattern —
-                        # `setu_client_present` closes then recreates on a size change.
-                        if (nb != nbytes) {
-                            setu_buf_close(buf_id);
-                            buf_id = setu_buf_create(nb);
-                            if (buf_id < 0) {
-                                crab_say("crab: buf_create failed on resize -- exiting\n");
-                                running = 0;
-                            }
+                    var nbuf = buf_id;
+                    var ok = 1;
+                    if (nb != nbytes) {
+                        # ⛔⛔ CREATE BEFORE CLOSE. THE FIRST DRAFT CLOSED FIRST AND QEMU KILLED IT:
+                        # on a maximize `setu_buf_create` failed, crab had already released its only
+                        # buffer, and it exited — `crab: buf_create failed on resize -- exiting`.
+                        # **Never destroy a working surface to attempt an upgrade.** setu's own
+                        # `setu_client_present` closes first, but it has an inline-pixel fallback to
+                        # land on; crab's hand-rolled LIVE-buffer path has none, so the same order is
+                        # fatal here. Two slots are held for one call, which is 2 of 16 transiently.
+                        nbuf = setu_buf_create(nb);
+                        if (nbuf < 0) {
+                            # ⛔ A REFUSED RESIZE IS A FROZEN EXTENT, NOT A DEATH. The kernel caps a
+                            # `#71` pmm slot at 2 MB and only a real GPU carveout (`#86`) reaches
+                            # 32 MB — under QEMU there is no carveout, so a fullscreen ask cannot be
+                            # backed at all. Staying at the old size is the documented degradation
+                            # for a client that cannot honour a CONFIGURE; exiting is not.
+                            crab_log_extent("crab: cannot back a surface of ", aw, ah);
+                            ok = 0;
                         }
-                        if (running == 1) {
+                        else { setu_buf_close(buf_id); }
+                    }
+                    if (ok == 1) {
+                        if (dh_surface_resize(surf, aw, ah) == DHANCHA_OK) {
+                            buf_id = nbuf;
                             w = aw;
                             h = ah;
                             nbytes = nb;
                             stride = w * 4;
-                            resized = 1;         # the ATTACH+COMMIT happens after the render below
-                            crab_say("crab: resized\n");
+                            resized = 1;     # the ATTACH+COMMIT happens after the render below
+                            crab_log_extent("crab: resized to ", w, h);
                         }
                     }
                 }

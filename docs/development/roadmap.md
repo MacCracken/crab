@@ -102,18 +102,24 @@ mapping has now been wrong once, and nothing gates it.
 crab is a fixed 380×220 rectangle that only understands the keyboard. Everything in the canvas
 assumes otherwise.
 
-- **Resize** — ⚠ **BUILT, NOT YET VERIFIED.** `WINDOW_CONFIGURE` is handled: `dh_surface_resize`
-  (dhancha 0.9.17, the entry point that had been missing for five releases), the `#86` shm slot closed
-  and re-created only when the byte size changes, `w`/`h`/`stride` become state, and a re-ATTACH +
-  COMMIT after the next render. Layout reflows for free because `crab_render` reads `w`/`h` off the
-  surface. *Deferral #01, #04.*
-  ⛔ **The POLICY is tested (`crab_resize_wanted` / `crab_surface_bytes` in `src/app.cyr`, 14
-  assertions, mutation-proven); the PLUMBING is not and cannot be from a host suite.** Per the ⛔
-  below, that half is unproven until a QEMU run drives a real CONFIGURE.
-  ⇒ **The harness is the next job, and the recipe is known**: `ae-resize-fault-test.py` already does
-  boot → `aethersafha` → F2 → Enter → **F5 (maximize)**, which is what makes the compositor send
-  CONFIGURE. Oracle: `crab: resized` in serial, then a keystroke answered *after* it — which also
-  settles the loop-lifetime question open since 0.5.0. That is *deferral #16* arriving with a job.
+- **Resize** — ⚠ **BUILT; the REFUSAL path is QEMU-proven, the ADOPT path is not reachable here.**
+  `WINDOW_CONFIGURE` is handled: `dh_surface_resize` (dhancha 0.9.17), the `#86` shm slot **created
+  before the old one is closed**, `w`/`h`/`stride` as state, a re-ATTACH + COMMIT after the next
+  render. Layout reflows for free — `crab_render` reads `w`/`h` off the surface. *Deferral #01, #04.*
+  ⛔ **A new harness found a real bug on its first run.** `scripts/harness/crab-resize-test.py`
+  (agnos) drives boot → F2 → **DOWN** → Enter → F5, and crab died with
+  `buf_create failed on resize -- exiting`: the first draft closed its only buffer before knowing the
+  replacement existed. setu's own `setu_client_present` closes first, but it has an inline-pixel
+  fallback to land on; crab's hand-rolled LIVE-buffer path has none, so copying that order was fatal.
+  ⛔ **And the byte cap was invented rather than derived.** It was 16 MB ("the framebuffer's size");
+  agnos actually caps a `#71` pmm slot at **2 MB** and only a real GPU carveout (`#86`) reaches 32 MB,
+  with `setu_buf_create` choosing between them at runtime. ⇒ The cap is now the absurdity bound and
+  **the kernel is the arbiter**; crab survives a refusal by staying at its old extent.
+  ⚠ **What is proven**: crab launches from the launcher, receives a real CONFIGURE for **2048x2018**,
+  refuses it because QEMU has no carveout, stays at its old size, and **answers 6 keystrokes
+  afterwards**. **What is not**: the adopt path, which needs a machine whose `#86` carveout can back
+  the ask. Say so rather than reading the PARTIAL as a pass.
+
 - **Pointer** — click to select, click to focus a pane, double-click to descend, scroll wheel.
   dhancha already synthesizes eight pointer kinds and crab consumes none. *Deferral #05.*
 - **Key release / held keys** — request `SETU_SURF_FULL_KEYS` so Down can repeat. Today one press

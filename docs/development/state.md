@@ -181,16 +181,19 @@ so the bounded-join *refusal* path has host assertions only.
 
 - ✅ **Idle-poll allocation (*#09*)** — dhancha 0.9.16. The loop allocates nothing in steady state.
   Host-tested (200 idle polls, 0 bytes) and QEMU-confirmed for no regression.
-- ⚠ **Resize (*#01/#04*) — BUILT, NOT VERIFIED.** `WINDOW_CONFIGURE` is handled end to end:
-  `dh_surface_resize` (dhancha 0.9.17), the `#86` shm slot closed and re-created **only when the byte
-  size changes**, `w`/`h`/`stride` as state, a re-ATTACH + COMMIT after the next render. Layout
-  reflows for free because `crab_render` reads `w`/`h` off the surface.
-  ⛔ **The policy is tested and the plumbing is not.** `crab_resize_wanted` / `crab_surface_bytes`
-  live in `app.cyr` with 14 mutation-proven assertions; everything that touches a syscall is in
-  `main.cyr`, which no host suite can reach. **Do not record resize as working.** A QEMU run must
-  drive a real CONFIGURE first — `ae-resize-fault-test.py` already does boot → F2 → Enter → **F5
-  (maximize)**, which is what makes the compositor send one. Oracle: `crab: resized`, then a keystroke
-  answered *after* it.
+- ⚠ **Resize (*#01/#04*) — built; REFUSAL path QEMU-proven, ADOPT path not reachable under QEMU.**
+  `dh_surface_resize` (dhancha 0.9.17), the `#86` slot **created before the old is closed**,
+  `w`/`h`/`stride` as state, re-ATTACH + COMMIT after the next render. Layout reflows for free.
+  ⛔ **A new harness (`agnos/scripts/harness/crab-resize-test.py`) found a real bug on its first
+  run**: crab closed its only shm buffer before knowing the replacement existed and exited. setu's
+  `setu_client_present` closes first but has an inline-pixel fallback; crab's LIVE-buffer path has
+  none, so that order was fatal here.
+  ⛔ **And the byte cap was invented, not derived** — 16 MB from "the framebuffer's size", when agnos
+  caps a `#71` pmm slot at **2 MB** and only a `#86` GPU carveout reaches 32 MB, chosen at runtime.
+  The cap is now the absurdity bound; the kernel is the arbiter.
+  ⭐ **Measured**: crab launches via F2→DOWN→Enter, receives a CONFIGURE for **2048x2018**, refuses it
+  (no carveout under QEMU), stays at its old extent, and **answers 6 keystrokes afterwards** — which
+  also settles the loop-lifetime question open since 0.5.0.
 - **Untouched**: pointer input (#05), key release / `SETU_SURF_FULL_KEYS` (#06, **gate: setu**),
   routing through `dh_dispatch` (#07).
 
@@ -204,11 +207,12 @@ Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08
 | rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.16 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
+| dhancha | 0.9.17 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
 | setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
-⭐ **dhancha 0.9.13 / 0.9.14 / 0.9.15 are the per-frame allocation gate, and 0.9.16 is the per-poll
-half — together the render/input loop allocates nothing in steady state.** The gate is CLOSED — the
+⭐ **dhancha 0.9.13 / 0.9.14 / 0.9.15 are the per-frame allocation gate, 0.9.16 is the per-poll half
+(together the render/input loop allocates nothing in steady state), and 0.9.17 is M2's
+`dh_surface_resize`.** The allocation gate is CLOSED — the
 dead pixel buffer deferred, the sadish render target reused, then the widget tree and layout scratch
 moved onto a per-frame arena. **746,440 → 0 B per steady-state `crab_render` frame**; see Known gaps.
 ⚠ Two of the three are contract changes: 0.9.14's `dh_surface_render` may return the same surface
@@ -218,9 +222,9 @@ the arena.
 ⛔ **THE TAG WAS VERIFIED FOUR WAYS BEFORE THE MANIFEST MOVED, AND ONLY THE FOURTH IS EVIDENCE.**
 `path` wins over `tag`, so a green local build says nothing about the declared graph:
 
-1. sibling `VERSION` = `0.9.16`;
-2. `git rev-parse 0.9.16` == `HEAD` in `../dhancha` (`68c60f8`), working tree clean;
-3. `git ls-remote --tags` shows `refs/tags/0.9.16` at that same commit;
+1. sibling `VERSION` = `0.9.17`;
+2. `git rev-parse 0.9.17` == `HEAD` in `../dhancha` (`b297604`), working tree clean;
+3. `git ls-remote --tags` shows `refs/tags/0.9.17` at that same commit;
 4. ⭐ **`path` DISABLED so `cyrius deps` actually cloned the tag from the remote** — the resulting
    `lib/dhancha.cyr` hashed to `7b99ec62…`, identical to the `path` build and to
    `git show 0.9.15:dist/dhancha.cyr`. **The first three would each have passed 0.4.13**, the release
