@@ -1,8 +1,6 @@
-# Handoff — 0.5.0 is shipped. **The allocation gate is CLOSED: a frame costs zero bytes.**
+# Handoff — **0.6.0 is cut.** A frame costs zero bytes; `main.cyr` is testable; nothing is mid-arc.
 
-> **Written 2026-08-26, at 0.5.0. Updated 2026-08-26** after the first cut at the dhancha per-frame
-> allocation gate, again as 0.9.13 and 0.9.14 were published, and again on 2026-08-27 when step 3
-> closed it. Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
+> **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
 >
 > ⚠ **Refresh or delete this file when the next release ships. A stale handoff is worse than none.**
@@ -16,14 +14,14 @@
 
 | | |
 |---|---|
-| Version | **0.5.0** at `20944b0 surface updates`. ⚠ **Both** working trees are dirty — crab carries step 3; `../dhancha` carries an untagged **0.9.15**. |
+| Version | **0.6.0** (2026-08-27). ⚠ Uncommitted — `VERSION`, CHANGELOG, `src/app.cyr` and the docs are in the working tree. `../dhancha` is clean at **0.9.15** (`935a84c`). |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,608 B** · `--agnos` **381,672 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius test` **55 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
-| Coverage | **14/26 fns (53 %)** — reference coverage, a floor not a proof |
-| Source | 982 lines: `main.cyr` 407 · `ui.cyr` 326 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.14 declared, 0.9.15 compiled (unpublished)** · setu 0.8.7 |
-| Mid-arc work | ⚠ **The allocation gate is fully closed** — all three steps done and measured. dhancha **0.9.15 is uncommitted and untagged**. Next slot is **M2 (v0.6.0)**, now unblocked. |
+| Build | x86_64 **381,584 B** · `--agnos` **381,648 B** · `--win` fails (pre-existing, not crab's) |
+| Tests | `cyrius test` **75 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
+| Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
+| Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.15** · setu 0.8.7 — all six at their latest published tag, verified four ways |
+| Mid-arc work | **None.** 0.6.0 is complete. Next slot is **M2 — the window is real (v0.7.0)**, now unblocked. |
 
 ---
 
@@ -34,7 +32,7 @@
 | baseline (dhancha 0.9.12) | **746,440 B** |
 | + step 1 (0.9.13, published `c273159`) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
 | + step 2 (0.9.14, published `b228a8b`) — the sadish render target, reused | 77,568 B |
-| + step 3 (0.9.15, **UNCOMMITTED**) — the widget tree, arena'd | **0 B** |
+| + step 3 (0.9.15, published `935a84c`) — the widget tree, arena'd | **0 B** |
 
 Measured with a host probe taking `alloc_used()` deltas around back-to-back `crab_render` calls at
 380×220, into one surface and one arena — the lifetimes `src/main.cyr` uses. **Identical at 114
@@ -67,14 +65,41 @@ string must die with its widget.
 `cyrius test` **55/0**, `render_test` 0 failed checks, host 381,608 B, `--agnos` 381,672 B, re-staged.
 All three steps mutation-verified on both sides.
 
-### ⛔ Do this first: commit and tag dhancha 0.9.15
+## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
 
-`path` wins over `tag`, so **the local build already compiles 0.9.15 while the manifest declares
-0.9.14**. The tag is left behind on purpose — an unpublished tag fails CI loudly, whereas the
-alternative is CI silently resolving a different library than the local tree.
-⭐ When the tag moves, re-run the **four-way** check: sibling `VERSION`; `git rev-parse <tag>` == HEAD;
-`git ls-remote --tags`; **and disable `path` so `cyrius deps` actually clones the tag**, comparing
-`lib/dhancha.cyr`'s SHA-256. Only the fourth would have caught 0.4.13. Deferral #19, still open.
+`main.cyr` ends in `_entry();`, so a suite that included it would run the app. Everything in it was
+therefore **unreachable from any test**: the readdir parser, the stat layer, `crab_descend`,
+`crab_ascend`, the premultiplied surface flag. In a program whose two shipped defects were both found
+on iron. `src/path.cyr` was carved out of the same file at 0.5.0 after a P1 memory-safety repair
+landed where the suite could not see it; **`src/app.cyr` finishes that extraction** and `main.cyr` is
+now `main()` and `_entry()` and nothing else.
+
+⭐ **The frame-arena setup was MOVED rather than tested around.** It used to be created and installed
+in `main()`, where deleting `dh_frame_arena_set` broke no test while quietly restoring a
+77 KB-per-frame leak. `crab_render` owns it now — created on first use, installed if nothing else is,
+rewound every frame. There is no setup step left for `main()` to forget, which is a better answer than
+an assertion would have been.
+
+⚠ **The residual gap is irreducible and is not pretended away**: `main()` itself still cannot be
+called from a suite that would then run the app. It is now down to the **event loop alone** — and that
+loop is already the thing `state.md` says needs a QEMU run before any claim about it.
+
+**Result**: 37 → **75** assertions, reference coverage **53 % → 70 %** (19/27 fns, 6/6 files), against
+a v1.0 criterion of 80 %. Seven mutations against the newly reachable layer, each producing a named
+failure — including "`crab_render` stops installing the arena", which is the original gap.
+
+---
+
+### ✅ The dependency is published and the manifest was moved honestly
+
+`[deps.dhancha] tag` is **0.9.15**, verified four ways — sibling `VERSION`; `git rev-parse 0.9.15` ==
+HEAD (`935a84c`), tree clean; `git ls-remote --tags` at that commit; **and `path` disabled so
+`cyrius deps` actually cloned the tag**, giving `lib/dhancha.cyr` = `7b99ec62…`, identical to the
+`path` build and to `git show 0.9.15:dist/dhancha.cyr`.
+
+⛔ **Only the fourth is evidence**, and finding #1 below is why it matters even more than "path wins"
+suggested: `lib/` is not what compiles at all. The first three would each have passed 0.4.13.
+Re-run all four at every cut; automating it is deferral **#19**, still open.
 
 ### ⭐ The repaint rule is LIFTED — and immediately replaced
 
@@ -115,6 +140,19 @@ release. Do not let that be the reason it goes unrecorded.
 ⚠ **The probe is still a scratch harness**, so the 0-bytes-per-frame figure is not re-derivable by
 anyone else — though `tests/crab.tcyr` now *gates* it, which is the more important half. A real bench
 harness is deferral **#13**; `tests/crab.bcyr` still times `bench_noop`.
+
+---
+
+## What 0.6.0 did
+
+Two structural things, **no user-visible features** — crab looks and behaves exactly as 0.5.0 did.
+The allocation gate closed (746,440 → 0 B per frame, across dhancha 0.9.13/0.9.14/0.9.15 and the
+matching crab halves), and `src/app.cyr` was extracted so `main.cyr`'s contents could be tested at
+all. Full accounting in the [CHANGELOG](../../CHANGELOG.md).
+
+⚠ **0.6.0 took the version number the roadmap had reserved for M2.** None of M2 shipped. M2 is now
+**v0.7.0**, and the roadmap notes that the later milestone versions are indicative — the
+milestone→version mapping has now been wrong once.
 
 ---
 
@@ -215,7 +253,7 @@ different). ⇒ **Compare with `cmp`, never with the size.**
 
 ---
 
-## Next slot — M2, and the gate that dominates it
+## Next slot — M2 (v0.7.0), with its gate already closed
 
 [`roadmap.md`](roadmap.md) sequences eight milestones to 1.0. Next is **M2 — the window is real**:
 resize (`WINDOW_CONFIGURE` is decoded by dhancha and dropped on the floor), pointer input (dhancha
@@ -259,6 +297,8 @@ crab's roadmap. Filing them is an open, un-started task.
 
 ## Known-stale, and owned by nobody yet
 
+- ✅ **CLOSED 2026-08-27 — nothing in `src/main.cyr` was reachable from a test.** See the section
+  above. *Deferral: none — it was never filed, which is part of why it survived.*
 - ✅ **CLOSED 2026-08-26 — `CLAUDE.md`'s two `cyrius init` placeholders.** The operator supplied the
   mission statement; the identity line and `## Goal` are real. *Deferral #23.*
 - ✅ **CLOSED 2026-08-26 — `README.md` § Status**, which had opened **"Scaffold."** and listed the

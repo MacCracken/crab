@@ -277,8 +277,33 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 # ⚠ THE RETURNED SURFACE BELONGS TO `surf` AND IS OVERWRITTEN BY THE NEXT RENDER INTO IT — see the
 # ⛔ on `dh_surface_render` in dhancha 0.9.14. A caller that wants two frames at once needs two
 # surfaces; `src/render_test.cyr` is exactly such a caller and does exactly that.
+# ⭐⭐ THE PER-FRAME ARENA IS OWNED HERE, NOT BY `main()` (0.6.0). It used to be created and installed
+# in `src/main.cyr`, and that was a gap the suite could not see: `tests/crab.tcyr` cannot include
+# `main.cyr` (it ends in `_entry();`), so deleting `dh_frame_arena_set` from `main` broke nothing that
+# any test could notice while quietly restoring a 77 KB-per-frame leak.
+# ⇒ The fix is architectural rather than a new assertion: the setup lives next to the render that
+# needs it, is created on first use, and is reachable from the suite. There is no longer a step for
+# `main()` to forget.
+# ⚠ GROWABLE, AND THAT IS LOAD-BEARING. `arena_reset` on a GROW arena rewinds to the first chunk and
+# KEEPS the chain, so the render loop converges on its high-water mark and then costs the global
+# allocator nothing at all. A fixed arena would have to guess a capacity, and guessing low means
+# `dh_falloc` silently spilling back to the global heap — the leak, quietly restored.
+# ⚠ 256 KiB sizes the COMMON case, not the worst. Measured: it absorbs a full frame at the
+# `CRAB_MAX_ENTRIES` ceiling (256 entries per pane) without ever chaining. GROW covers anything past
+# that with one extra chunk, reused forever.
+var crab_arena = 0;
+
+# @public — crab's per-frame arena, created on first call. -> the arena, or 0 if it could not be made.
+fn crab_frame_arena(): i64 {
+    if (crab_arena == 0) { crab_arena = arena_new_growable(262144); }
+    return crab_arena;
+}
+
 fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
     if (surf == 0) { return 0; }
+    # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
+    # own arena (a test measuring the spill path, say) keeps it.
+    if (dh_frame_arena_get() == 0) { dh_frame_arena_set(crab_frame_arena()); }
     # ⛔⛔ THIS FREES THE PREVIOUS FRAME'S WIDGET TREE AND SCRATCH (0.6.0-dev, dhancha 0.9.15). It is
     # here rather than in `src/main.cyr` so that EVERY caller is correct without remembering — a
     # render loop that forgot it would leak exactly as much as before, silently and with a green suite.

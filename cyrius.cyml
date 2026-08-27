@@ -97,8 +97,9 @@ git = "https://github.com/MacCracken/dhancha.git"
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-# ⭐ THE PER-FRAME ALLOCATION GATE, in two steps, both measured against `crab_render` at 380x220 with
-# 114 entries per pane (docs/architecture/001):
+# ⭐ THE PER-FRAME ALLOCATION GATE — CLOSED, in three steps, each measured against `crab_render` at
+# 380x220 with 114 entries per pane, and re-confirmed at the 256 CRAB_MAX_ENTRIES ceiling
+# (docs/architecture/001):
 #   0.9.13 — step 1: `dh_surface_new` no longer allocates a `w*h*4` pixel buffer that nothing in the
 #            stack ever wrote or read.                              746,440 -> 412,040 B per frame
 #   0.9.14 — step 2: the sadish render target is cached on the DhSurface and reused.
@@ -110,23 +111,23 @@ path = "../dhancha"
 # wants two frames at once needs two DhSurfaces — `src/render_test.cyr` is one, and guards it.
 #   0.9.15 — step 3: a per-frame ARENA for the widget tree and layout scratch, rewound by
 #            `dh_frame_begin`.                                       77,568 ->       0 B per frame
-# ⛔⛔ THIS TAG IS BEHIND WHAT THE LOCAL BUILD COMPILES — DELIBERATELY. `../dhancha` holds an
-# UNCOMMITTED, UNTAGGED **0.9.15**. `path` wins over `tag`, so every local build and measurement is
-# ALREADY against 0.9.15 while this line says 0.9.14. Left behind on purpose: an unpublished tag fails
-# CI loudly, whereas the alternative is CI silently resolving a different library than the local tree.
-# **Bump to "0.9.15" in the SAME change that commits and tags dhancha**, and re-run the four-way check.
-# ⛔ VERIFIED FOUR WAYS when this line last moved, because `path` wins and a green local build proves
-# nothing about the declared graph: sibling `VERSION`; `git rev-parse <tag>` == HEAD in `../dhancha`;
-# `git ls-remote --tags` showing the tag at that commit; and — the only check that would have caught
-# 0.4.13's manifest naming a library the build never compiled — `path` DISABLED so `cyrius deps`
-# actually clones the tag, then comparing SHA-256. The first three would each have passed 0.4.13.
+# ⛔ 0.9.15 IS ALSO A CONTRACT ADDITION: `dh_frame_begin` rewinds the arena **and** clears dhancha's
+# retained widget pointers (`_dh_focus` and friends). The two halves cannot be separated — never call
+# `arena_reset` on a frame arena directly — and an app on a frame arena must re-establish focus every
+# frame, which `crab_pane` does.
+# ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins and a green local build proves
+# nothing about the declared graph: sibling `VERSION` = 0.9.15; `git rev-parse 0.9.15` == HEAD in
+# `../dhancha` (935a84c); `git ls-remote --tags` shows `refs/tags/0.9.15` at that same commit; and —
+# the only check that would have caught 0.4.13's manifest naming a library the build never compiled —
+# `path` DISABLED so `cyrius deps` actually clones the tag, then comparing SHA-256. The first three
+# would each have passed 0.4.13. Re-do all four at every cut. (Automating it: deferral #19.)
 # ⚠⚠ AND `lib/dhancha.cyr` IS NOT WHAT COMPILES WHILE `path` IS SET — MEASURED 2026-08-27 by
 # appending garbage to it and watching the build succeed, then appending garbage to
 # `../dhancha/dist/dhancha.cyr` and watching it fail. The `path` override compiles the SIBLING'S
 # `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
 # refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
-# "`path` wins" already implied.
-tag    = "0.9.14"
+# "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
+tag    = "0.9.15"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

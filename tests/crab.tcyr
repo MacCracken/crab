@@ -27,7 +27,11 @@
 # `#92` must produce a picture BYTE-IDENTICAL to the opaque `#87` copy. The iron oracle for AE-6 is
 # therefore "the panel does not change", which is falsifiable by anything wrong in the shader path.
 
-include "src/ui.cyr"
+# ⭐ `app.cyr`, NOT `ui.cyr` (0.6.0). It pulls in `ui.cyr` -> `path.cyr` as before, and ALSO the
+# application layer extracted out of `main.cyr` — the readdir parser, the stat layer, descend, ascend
+# and the surface flag. None of those were reachable from any test before the extraction, because
+# `main.cyr` ends in `_entry();` and including it would run the app.
+include "src/app.cyr"
 
 # --- a mock readdir buffer, mirroring src/render_test.cyr's fixture shape ------------------------
 # One 64-byte record per entry: NUL-terminated name at +0, type byte at +63.
@@ -98,7 +102,7 @@ fn t_scan_premul(pix, n): i64 {
         if (a != 255) { t_bad_alpha = t_bad_alpha + 1; }
         if (b > a) { t_bad_premul = t_bad_premul + 1; }
         else { if (g > a) { t_bad_premul = t_bad_premul + 1; }
-               else { if (r > a) { t_bad_premul = t_bad_premul + 1; } } }
+            else { if (r > a) { t_bad_premul = t_bad_premul + 1; } } }
         i = i + 1;
     }
     return t_bad_alpha + t_bad_premul;
@@ -373,15 +377,34 @@ fn main() {
     }
     var asl = alloc(8); var asr = alloc(8);
 
-    # ⛔ THE PRE-ARENA BASELINE, ASSERTED RATHER THAN ASSUMED. Without it, a zero delta below would
-    # be indistinguishable from a render that did nothing.
-    assert_eq(dh_frame_arena_get(), 0, "no frame arena is installed by default");
+    # ⭐ crab OWNS ITS ARENA (0.6.0) — `crab_render` creates and installs one on first use, so there
+    # is no setup step for `main()` to forget. That is the fix for the coverage gap this file used to
+    # have: the arena used to be installed in `main.cyr`, which no test can reach.
+    # ⚠ Uninstall first — earlier groups in this file have already rendered, so "nothing is installed
+    # yet" would be an assertion about suite ordering rather than about crab.
+    dh_frame_arena_set(0);
+    assert_eq(dh_frame_arena_get(), 0, "the frame arena can be uninstalled");
+    store64(asl, 0); store64(asr, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    assert(dh_frame_arena_get() != 0, "a render installs one BY ITSELF — no step for main() to forget");
+    assert_eq(dh_frame_arena_get(), crab_frame_arena(), "...crab's own, not some other arena");
+
+    # ⛔ THE NON-VACUITY GUARD, AND IT HAD TO CHANGE SHAPE. It used to be "render with no arena and
+    # watch the heap grow" — impossible now that `crab_render` installs one. Instead: install a
+    # deliberately TINY, NON-GROWABLE arena. `dh_falloc` cannot serve from it, falls back to the
+    # global allocator (dhancha's documented spill), and the heap grows again. That proves the probe
+    # below can still SEE a cost — and it is the only thing in this suite that exercises the fallback
+    # at all, which is otherwise a path taken only when an arena is misconfigured.
+    var tiny = arena_new(64);
+    assert(tiny != 0, "a deliberately tiny arena is created");
+    dh_frame_arena_set(tiny);
     store64(asl, 0); store64(asr, 0);
     crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
     var n0 = alloc_used();
     store64(asl, 0); store64(asr, 0);
     crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
-    assert(alloc_used() - n0 > 0, "WITHOUT an arena a frame still costs the global heap");
+    assert(alloc_used() - n0 > 0,
+      "a frame that cannot fit its arena SPILLS to the global heap instead of failing");
 
     # ⛔⛔ THE ARENA IS DELIBERATELY TIGHT — 8 KiB, NOT THE 256 KiB `src/main.cyr` INSTALLS — AND THE
     # FIRST DRAFT OF THIS GROUP WAS WORTHLESS FOR WANT OF THAT. It used main's 256 KiB against a
@@ -427,11 +450,96 @@ fn main() {
     assert(asds != 0, "an arena'd frame still renders");
     t_bad_alpha = 0; t_bad_premul = 0;
     assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
-              "...and every pixel still satisfies the #92 premultiplied contract");
+      "...and every pixel still satisfies the #92 premultiplied contract");
 
-    # Leave global state as we found it — later suites and `main`'s own callers must not inherit it.
-    dh_frame_arena_set(0);
-    assert_eq(dh_frame_arena_get(), 0, "the frame arena is uninstalled again");
+    # Leave crab's own arena installed, which is the state every other caller expects.
+    dh_frame_arena_set(crab_frame_arena());
+
+    # ================================================================
+    test_group("crab — 0.6.0: the application layer, reachable from a test at last");
+    # ================================================================
+    # ⛔⛔ EVERY ASSERTION IN THIS GROUP WAS IMPOSSIBLE UNTIL `src/app.cyr` WAS CARVED OUT OF
+    # `src/main.cyr`. That file ends in `_entry();`, so including it from a suite runs the app —
+    # which meant the readdir parser, the stat layer, descend, ascend and the surface flag had
+    # **zero reachable coverage**, in a program whose two shipped defects were both found on iron.
+    # `src/path.cyr` was carved out for the same reason at 0.5.0, after a P1 memory-safety repair
+    # landed where the suite could not see it. This is that extraction finished.
+
+    # ⭐ AE-6: the flag is UNCONDITIONAL — no arm, no env var, no #ifdef. `state.md` calls that out
+    # as load-bearing, and until now nothing checked it.
+    assert_eq(crab_surface_flags(), SETU_SURF_PREMULTIPLIED,
+      "the surface flag is premultiplied, unconditionally");
+
+    # --- descend REFUSES rather than truncating, and that path had host assertions only ----------
+    # ⛔ A truncated join names a DIFFERENT directory. Descending into it would readdir something the
+    # operator did not select while the pane header shows the name they did — which is the shape of
+    # the 0.5.0 P1. `state.md` records that `crab_descend`/`crab_ascend` have never been exercised on
+    # agnos; this at least makes the refusal path assertable on the host.
+    var dpath = alloc(CRAB_PATH_MAX);
+    var dbuf  = alloc(4 * CRAB_REC_SZ);
+    var dsz   = alloc(4 * 8);
+    var dmt   = alloc(4 * 8);
+    var dname = alloc(CRAB_NAME_MAX);
+    var dscr  = alloc(CRAB_PATH_MAX);
+    var dstat = alloc(STAT_BUFSZ);
+
+    t_entry(dbuf, 0, "sub", 1);          # a directory
+    t_entry(dbuf, 1, "file.txt", 0);     # a file
+
+    assert_eq(crab_descend(dpath, dbuf, 0, 0, dname, dscr, dsz, dmt, dstat), 0 - 1,
+      "descend refuses an empty pane");
+    assert_eq(crab_descend(dpath, dbuf, 0 - 1, 2, dname, dscr, dsz, dmt, dstat), 0 - 1,
+      "descend refuses a negative selection");
+    assert_eq(crab_descend(dpath, dbuf, 2, 2, dname, dscr, dsz, dmt, dstat), 0 - 1,
+      "descend refuses a selection past the count");
+    crab_strcpy_n(dpath, "/bin", CRAB_PATH_MAX);
+    assert_eq(crab_descend(dpath, dbuf, 1, 2, dname, dscr, dsz, dmt, dstat), 0 - 1,
+      "descend refuses a FILE — only the type byte says it is a directory");
+    assert(t_streq(dpath, "/bin"), "...and a refused descend leaves the path untouched");
+
+    # ⛔ THE REFUSAL THAT MATTERS: a name that cannot be joined within CRAB_PATH_MAX. Fill the path
+    # to just under the cap so any child overflows it.
+    var brim = alloc(CRAB_PATH_MAX);
+    var bi2 = 0;
+    while (bi2 < CRAB_PATH_MAX - 4) { store8(brim + bi2, 97); bi2 = bi2 + 1; }   # 'a'
+    store8(brim, 47);                                                            # leading '/'
+    store8(brim + bi2, 0);
+    crab_strcpy_n(dpath, brim, CRAB_PATH_MAX);
+    assert_eq(crab_descend(dpath, dbuf, 0, 2, dname, dscr, dsz, dmt, dstat), 0 - 1,
+      "descend REFUSES when the joined child path would not fit");
+    assert(t_streq(dpath, brim), "...and leaves the pane's path exactly as it was");
+
+    # --- ascend stops at the root and truncates to the parent otherwise -------------------------
+    crab_strcpy_n(dpath, "/", CRAB_PATH_MAX);
+    assert_eq(crab_ascend(dpath, dbuf, dsz, dmt, dscr, dstat), 0 - 1, "ascend refuses at the root");
+    assert(t_streq(dpath, "/"), "...leaving the root path intact");
+
+    crab_strcpy_n(dpath, "/usr/local/bin", CRAB_PATH_MAX);
+    crab_ascend(dpath, dbuf, dsz, dmt, dscr, dstat);
+    assert(t_streq(dpath, "/usr/local"), "ascend truncates to the parent");
+    crab_ascend(dpath, dbuf, dsz, dmt, dscr, dstat);
+    assert(t_streq(dpath, "/usr"), "...and again");
+    crab_ascend(dpath, dbuf, dsz, dmt, dscr, dstat);
+    # ⛔ THE ONE-SEGMENT CASE IS SPECIAL AND IS WHERE AN OFF-BY-ONE WOULD LIVE: truncating at the
+    # last '/' would leave the EMPTY string, not "/", and an empty path is not the root.
+    assert(t_streq(dpath, "/"), "...and one segment from the root yields '/', not the empty string");
+    assert_eq(crab_ascend(dpath, dbuf, dsz, dmt, dscr, dstat), 0 - 1, "...which then refuses");
+
+    # --- the stat layer marks unstattable entries rather than inventing numbers -----------------
+    # ⚠ On the host there is no `sys_stat`, so every entry takes the failure default. That is exactly
+    # the contract worth pinning: -1, not 0 — `crab_size_str` renders -1 as "-" and 0 as "0".
+    store64(dsz, 12345); store64(dmt, 12345);
+    crab_stat_all("/bin", dbuf, 2, dsz, dmt, dscr, dstat);
+    assert_eq(load64(dsz), 0 - 1, "an unstattable entry's size is -1, not 0");
+    assert_eq(load64(dmt), 0 - 1, "...and so is its mtime");
+    var sbb = alloc(24);
+    crab_size_str(sbb, load64(dsz));
+    assert(t_streq(sbb, "-"), "...which the pane renders as '-'");
+
+    # --- readdir clamps to the cap ---------------------------------------------------------------
+    # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
+    # rather than the clamp. Stated because a green line here must not be read as covering the cap.
+    assert_eq(crab_readdir_into("/bin", dbuf), 0, "readdir yields 0 on the host — the mock-pane path");
 
     return assert_summary();
 }

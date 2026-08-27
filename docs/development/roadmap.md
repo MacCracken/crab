@@ -53,7 +53,7 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 ## v1.0 criteria
 
 - [ ] All three canvas directions absorbed — shell (1a), density (1c), assisted search (1b as a mode)
-- [ ] Public surface documented and tested; reference coverage ≥ 80 %
+- [ ] Public surface documented and tested; reference coverage ≥ 80 % — **70 % at 0.6.0**
 - [ ] `docs/benchmarks.md` captured from a real bench harness, not the scaffold's `bench_noop`
 - [ ] Green on iron, not only QEMU — the two defects crab has shipped were both iron-only
 - [ ] CHANGELOG complete from v0.1.0; ADRs written for every ⛔ invariant now living in comments
@@ -64,7 +64,7 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 
 ## Milestones
 
-### M1 — Hardening (v0.5.0) — ✅ this release
+### M1 — Hardening (v0.5.0) — ✅ shipped
 
 The P-1 sweep and its repairs. No new features; the point was to stop building on a floor with holes
 in it. See the [CHANGELOG](../../CHANGELOG.md) for the full accounting.
@@ -76,7 +76,26 @@ in it. See the [CHANGELOG](../../CHANGELOG.md) for the full accounting.
 - ✅ `src/path.cyr` extracted so the suite can reach the path layer at all
 - ✅ 11 → 37 assertions, mutation-proven; reference coverage 23 % → 53 %
 
-### M2 — The window is real (v0.6.0)
+### M1.5 — The allocation gate, and a floor under the tests (v0.6.0) — ✅ shipped
+
+Not a planned milestone: it is M2's **gate** plus the test debt closing it exposed, and it took the
+version number M2 had reserved. No user-visible features.
+
+- ✅ **A rendered frame costs the global heap ZERO bytes** — 746,440 B → 0, across dhancha 0.9.13,
+  0.9.14 and 0.9.15 plus the matching crab halves. See the gate note under M2 below.
+- ✅ **`src/app.cyr` extracted from `src/main.cyr`**, which ends in `_entry();` and so could never be
+  included by a test. The readdir parser, the stat layer, `crab_descend`, `crab_ascend` and the
+  surface flag had **zero reachable coverage** until this. Finishes the extraction 0.5.0 began with
+  `src/path.cyr`.
+- ✅ **The frame-arena setup moved out of `main()`** rather than being tested around — `crab_render`
+  owns it, so there is no step left for `main()` to forget.
+- ✅ 37 → 75 assertions; reference coverage 53 % → 70 % against a v1.0 criterion of 80 %.
+
+⚠ **Version numbers below shifted by one minor and the later ones are INDICATIVE.** M2 was v0.6.0;
+this release took it. Re-derive the number at each cut rather than trusting the heading — the mapping
+from milestone to version has now been wrong once.
+
+### M2 — The window is real (v0.7.0)
 
 crab is a fixed 380×220 rectangle that only understands the keyboard. Everything in the canvas
 assumes otherwise.
@@ -128,7 +147,7 @@ assumes otherwise.
 > growth: four orders of magnitude better, still unbounded. **Closing *deferral #09* is now the
 > precondition for anything that repaints without input.**
 
-### M3 — A browser you would actually use (v0.7.0)
+### M3 — A browser you would actually use (v0.8.0)
 
 - **Sorting** by name / size / modified / kind, directories-first, dotfile handling — the pane
   currently renders raw readdir order, which is on-disk order. *Deferral #33.*
@@ -145,7 +164,7 @@ assumes otherwise.
   *Deferral #03.*
 - **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
 
-### M4 — File operations (v0.8.0)
+### M4 — File operations (v0.9.0)
 
 crab is a read-only browser. Enter on a file does nothing, silently.
 
@@ -159,7 +178,7 @@ crab is a read-only browser. Enter on a file does nothing, silently.
 - **Empty and permission-denied pane states** — also from the canvas's not-yet-drawn list.
 - **Ratify the small-window question** — one pane + switcher at 420px.
 
-### M5 — Views (v0.9.0)
+### M5 — Views (v0.9.x)
 
 - **Grid**, **Columns** (miller), **Gallery** — the canvas's four-way view switcher.
   **Gate: dhancha** GRID / COLUMNS widgets. Note `CANVAS` (0.9.9) exists and could carry app-drawn
@@ -219,6 +238,15 @@ crab is a read-only browser. Enter on a file does nothing, silently.
   it was reported from iron by an operator, not caught here. *Deferral #13.*
 - **Bring the agnos/iron harness into this repo** — both real defects crab shipped were agnos-runtime
   behaviour no host test can see. *Deferral #16.*
+- ✅ **CLOSED 0.6.0 — nothing in `src/main.cyr` was reachable from a test.** `src/app.cyr` carries the
+  application layer now; `main.cyr` is `main()` and `_entry()` and nothing else. ⚠ The residual gap is
+  irreducible and is down to the event loop alone — and the one setup step that used to live in
+  `main()` (the frame arena) was **moved** into `crab_render` rather than tested around.
+- ⛔ **Three tests could not fail in their first draft, and only mutation testing said so** (0.6.0):
+  a residue check over trees that repainted every pixel; a convergence check whose arena was four
+  times larger than the frame it measured; and dhancha's grow test, which never grew. ⇒ **Assert that
+  the thing you are measuring can be observed to FAIL**, and size fixtures against the mechanism
+  rather than for comfort.
 - **Automate the `path`-wins-over-`tag` re-verification** — 0.4.13 shipped a manifest naming a
   library the build never compiled. *Deferral #19.*
 - **Enforce `state.md` currency** — it has rotted twice, once across eleven releases, and the file

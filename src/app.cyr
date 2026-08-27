@@ -1,0 +1,188 @@
+# crab — the APPLICATION LAYER: everything `main()` does that is not the event loop.
+#
+# ⛔⛔ THIS FILE EXISTS FOR ONE REASON: `src/main.cyr` ENDS IN `_entry();`, SO INCLUDING IT FROM A
+# TEST WOULD RUN THE APP. Every function here used to live there, which meant **none of it was
+# reachable from `tests/crab.tcyr`** — no assertion could touch the readdir parser, the stat layer,
+# descend, ascend, or the premultiplied surface flag. `src/path.cyr` was carved out of the same file
+# at 0.5.0 for the same reason, after a P1 memory-safety repair landed somewhere the suite could not
+# see; this is that extraction finished rather than repeated.
+#
+# ⇒ `main.cyr` now holds `main()` and `_entry()` and nothing else. Anything added to crab that is not
+# literally the event loop belongs HERE, where it can be asserted on.
+#
+# ⚠ THE RESIDUAL GAP IS IRREDUCIBLE AND IS NOT PRETENDED AWAY: `main()` itself still cannot be called
+# from a suite that would then run the app. The mitigation is architectural rather than test-shaped —
+# `crab_render` installs the frame arena and calls `dh_frame_begin()` itself (see `src/ui.cyr`), so
+# the setup `main()` used to own and could have forgotten is no longer `main()`'s to forget.
+
+include "src/ui.cyr"
+
+fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
+
+# ⛔ ONE cap for the readdir buffer AND the readdir call. It was the literal `32` in seven places —
+# the call plus six allocations — so raising the cap without finding every allocation writes past
+# the buffer, and raising an allocation without the call changes nothing. Keep them derived.
+#
+# ⚠ 32 was not enough for a REAL root. Iron 2026-08-19: `/` held **114** entries after a few burns
+# (run outputs land there), so crab showed 32 and silently dropped 82 — a file the shell's `ls`
+# listed was simply absent from the pane, which reads as a filesystem fault rather than a cap.
+# Records are 64 B, so 256 entries is a 16 KB pane buffer.
+enum CrabDir {
+    CRAB_MAX_ENTRIES = 256;
+}
+
+# ⚠ `CRAB_REC_SZ` / `CRAB_REC_TYPE` / `CRAB_PATH_MAX` / `CRAB_NAME_MAX`, and the bounded path helpers
+# `crab_strcpy_n` / `crab_join_n`, live in `src/path.cyr` (pulled in via `src/ui.cyr` above). They are
+# there and not here for ONE reason: `tests/crab.tcyr` includes `ui.cyr`, never `main.cyr`, so
+# anything defined in this file CANNOT BE TESTED. The 0.5.0 path-overflow fix is the reason that
+# stopped being acceptable — a P1 memory-safety repair with no reachable test is a repair on trust.
+
+# ⭐⭐ `AE-6` — crab's surface is PREMULTIPLIED, unconditionally.
+#
+# This is what routes crab through agnos `gpu_shader_op #92` op 0x01 — a real per-pixel
+# `out = src + dst * (1 - src_a)` on the shader cores — instead of `#87`, a byte mover with no ALU that can
+# only copy. The blend is the one operation CP-DMA structurally cannot do, and it had no client at all.
+#
+# ⭐ crab satisfies the op's precondition by construction: sadish's `sd_alpha_of()` maps a bare `sd_rgb`
+# value's 0 byte to 255 and `draw.cyr` stores that, so every pixel crab produces is **alpha 255**. At
+# a == 255 premultiplied and straight alpha are the same bytes, so the surface is trivially premultiplied
+# and the blend collapses to `out = src + dst*0 = src`. `tests/crab.tcyr` asserts `a == 255 && c <= a` on
+# every pixel of the production render, with negative controls, so the precondition is a gate and not a
+# hope. [[feedback_audit_re_derive_dont_validate_comments]]
+#
+# ⚠ A boot whose GPU cannot run the shader is handled in the COMPOSITOR, per window: `ae_gpu_present_frame`
+# falls back to `#87` for a premultiplied surface when the envelope is absent, which is exact at alpha 255.
+# Nothing is conditional here, and there is no arm — the client states what its pixels ARE and the
+# compositor decides how to draw them.
+fn crab_surface_flags(): i64 {
+    return SETU_SURF_PREMULTIPLIED;
+}
+
+# Log a navigation to serial (the smoke's dispositive gate — like "key received").
+fn crab_log_cd(path): i64 {
+    crab_say("crab: cd ");
+    crab_say(path);
+    crab_say("\n");
+    return 0;
+}
+
+# --- path helpers for directory navigation (Enter descends, Backspace ascends) ---
+
+# readdir `path` into `buf` (up to CRAB_MAX_ENTRIES records); returns the entry count (>= 0).
+# agnos-only (sys_readdir is the #81 wrapper); on the host it yields 0 (mock panes).
+#
+# ⚠ A FULL BUFFER IS NOT A COMPLETE LISTING. `sys_readdir` returns what fit, so `n == max` cannot be
+# told apart from "there were more" — it is the only truncation signal there is. SAY SO: a pane that
+# quietly stops at the cap looks like the missing files do not exist.
+fn crab_readdir_into(path, buf): i64 {
+    var n = -1;
+    #ifdef CYRIUS_TARGET_AGNOS
+    n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
+    #endif
+    if (n < 0) { n = 0; }
+    # ⚠ Defence in depth, not a known defect: the #81 contract bounds the count by `max`, so this
+    # clamp is unreachable today. It is here because `n` is used as a loop bound over a buffer sized
+    # from the SAME constant — if the kernel contract ever drifts, the failure is a silent read past
+    # lbuf/rbuf, and a one-line clamp is cheaper than the burn that would find it.
+    if (n > CRAB_MAX_ENTRIES) { n = CRAB_MAX_ENTRIES; }
+    if (n >= CRAB_MAX_ENTRIES) {
+        crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
+        crab_say(" has more entries than are shown\n");
+    }
+    # ⭐ ONE LINE PER LISTING, ALWAYS. This is the honest oracle for "did the pane see everything":
+    # a COUNT, stated once. Inferring it by counting per-entry lines made the diagnostic itself the
+    # cost being measured, and 114 console writes per navigation is what made crab feel slow.
+    if (crab_sdig != 0) {
+        crab_u2s(crab_sdig, n);
+        crab_say("crab: listed "); crab_say(crab_sdig); crab_say(" entries in "); crab_say(path); crab_say("\n");
+    }
+    return n;
+}
+
+# stat every entry in `buf` (count records) and store its byte size in sizes[i]
+# and mtime (unix seconds) in mtimes[i]; a stat failure stores -1 in both. On
+# agnos each entry (files AND dirs) is stat'd (#33 — size @ +16, mtime @ +40 of
+# the §4.1 struct) via its full path; on the host both stay -1 (mock render_test).
+# Per-entry stat tracing: OFF unless CRAB_STAT_TRACE=1. `crab_sdig` is allocated ONCE — the old code
+# called alloc(24) per entry with no free, so a session of navigating leaked 24 B per file listed.
+var crab_stat_trace = 0;
+var crab_sdig       = 0;
+
+fn crab_stat_trace_init(): i64 {
+    crab_sdig = alloc(24);
+    var v = getenv("CRAB_STAT_TRACE");
+    if (v == 0) { return 0; }
+    if (load8(v) == 49) { crab_stat_trace = 1; }     # '1'
+    return 0;
+}
+
+fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
+    var i = 0;
+    while (i < count) {
+        var rec = buf + i * CRAB_REC_SZ;
+        var sz = 0 - 1;                              # stat-failure default
+        var mt = 0 - 1;
+        # ⛔ A TRUNCATED JOIN IS NOT A PATH — it names a DIFFERENT file, so statting it would report
+        # someone else's size and mtime against this row. Unstattable is the honest answer.
+        var jl = crab_join_n(pathscr, CRAB_PATH_MAX, path, rec);
+        #ifdef CYRIUS_TARGET_AGNOS
+        if ((jl >= 0) && (sys_stat(pathscr, strlen(pathscr), statbuf) == 0)) {
+            sz = load64(statbuf + STAT_SIZE);        # agnos stat struct §4.1 — named, not a literal
+            mt = load64(statbuf + STAT_MTIME);       # unix seconds
+            # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
+            # This printed unconditionally for every entry and allocated 24 B for every entry — with
+            # the old 32-entry cap that was 32 lines; at 256 on a real `/` (114 entries on iron) it
+            # is 114 writes to a console THREE PROCESSES SHARE UNSERIALISED, on every readdir, i.e.
+            # every descend and every ascend. Iron 2026-08-19: "crab shows way more entries than
+            # before but is responding slower from inputs." The listing was not the cost; narrating
+            # it was.
+            # ⇒ Bounded, and off by default. `CRAB_STAT_TRACE=1` in the environment brings it back
+            # for a burn that actually needs the per-entry readout.
+            if (crab_stat_trace == 1) {
+                crab_u2s(crab_sdig, sz);
+                crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(crab_sdig); crab_say("\n");
+            }
+        }
+        #endif
+        store64(sizes + i * 8, sz);
+        store64(mtimes + i * 8, mt);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Descend: if the selected entry (buf[sel], sel < count) is a directory, rewrite
+# `path` in place to path/name, re-readdir into `buf`, and re-stat size+mtime.
+# Returns the new entry count (>= 0), or -1 when the selection is not a dir / empty.
+fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf): i64 {
+    if (count <= 0) { return -1; }
+    if (sel < 0) { return -1; }
+    if (sel >= count) { return -1; }                 # belt-and-braces: sel indexes a record below
+    var rec = buf + sel * CRAB_REC_SZ;
+    if (load8(rec + CRAB_REC_TYPE) != 1) { return -1; }     # type byte: 1 = dir
+    if (crab_strcpy_n(namescr, rec, CRAB_NAME_MAX) < 0) { return -1; }   # name out before readdir overwrites buf
+    # ⛔ REFUSE, do not truncate. Descending into a truncated path would readdir a directory the
+    # operator did not select — silently, and with the pane header showing the name they DID select.
+    if (crab_join_n(pathscr, CRAB_PATH_MAX, path, namescr) < 0) {
+        crab_say("crab: path too long -- refusing to descend\n");
+        return -1;
+    }
+    if (crab_strcpy_n(path, pathscr, CRAB_PATH_MAX) < 0) { return -1; }
+    var n = crab_readdir_into(path, buf);
+    crab_stat_all(path, buf, n, sizes, mtimes, pathscr, statbuf);
+    return n;
+}
+
+# Ascend: truncate `path` in place to its parent directory, re-readdir into `buf`,
+# and re-stat size+mtime. Returns the new entry count (>= 0), or -1 at the root "/".
+fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
+    var n = strlen(path);
+    if (n <= 1) { return -1; }                       # already at "/"
+    var last = 0;
+    var j = 0;
+    while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
+    if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
+    var cnt = crab_readdir_into(path, buf);
+    crab_stat_all(path, buf, cnt, sizes, mtimes, pathscr, statbuf);
+    return cnt;
+}

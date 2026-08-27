@@ -2,6 +2,110 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-08-27 — a rendered frame costs nothing, and `main.cyr` is testable
+
+Two structural things, no user-visible features. crab looks and behaves exactly as 0.5.0 did.
+
+⚠ **This release took the version number the roadmap had reserved for M2** ("the window is real" —
+resize, pointer input, key release, `dh_dispatch`). **None of M2 shipped here**; what shipped is the
+gate that was blocking every milestone after it, plus the test floor that gate exposed. M2 is now
+v0.7.0 in [`docs/development/roadmap.md`](docs/development/roadmap.md) and the later milestone
+versions are marked indicative.
+
+### Fixed — every frame allocated ~750 KB and nothing was ever freed
+
+`crab_render` cost **746,440 B per call** at 380x220 with 114 entries per pane, into a bump allocator
+with **no `free()`** — so every frame crab ever drew was retained for the life of the process. It had
+not bitten because crab repaints only on input and used to exit after two seconds; 0.5.0 removed both
+accidents.
+
+| | per steady-state frame |
+|---|---:|
+| 0.5.0 (dhancha 0.9.12) | 746,440 B |
+| + dhancha 0.9.13 — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
+| + dhancha 0.9.14 + crab — the sadish render target, reused | 77,568 B |
+| + dhancha 0.9.15 + crab — the widget tree, arena'd | **0 B** |
+
+Identical at 114 entries per pane (the real iron count for `/`) and at 256, the `CRAB_MAX_ENTRIES`
+ceiling. ⚠ **Zero is per-frame, not total** — a one-time ~597 KB (334,432 B render target + 262,144 B
+arena chunk) is allocated on the first frame and reused for the process's life. A fixed cost instead
+of a per-keypress one is the whole point.
+
+crab's side: `crab_render` takes a caller-owned `DhSurface` instead of minting one per call (18 → 17
+parameters — `w`/`h` are read off the surface, so they can no longer disagree with it), every
+per-frame allocation in `src/ui.cyr` goes through `dh_falloc`, and `crab_render` owns, installs and
+rewinds the frame arena itself.
+
+⛔ **`dh_widget_set_text` stores the pointer and does not copy**, so moving the row and status
+strings onto the arena was a *lifetime* requirement, not an optimisation — a global-alloc string on
+an arena widget outlives the widget forever.
+
+⚠ Two upstream claims this project had recorded were wrong and are corrected in
+[`docs/architecture/001`](docs/architecture/001-every-frame-allocates-and-nothing-is-freed.md): the
+first step was **not** "one line" (the naive form breaks dhancha's `event_test` by downgrading
+`dh_surface_present`'s refusal code), and the second was **not** purely upstream (a per-`DhSurface`
+cache saves nothing while the caller mints a `DhSurface` per frame).
+
+### Changed — dhancha 0.9.12 → 0.9.15, and two of the three are contract changes
+
+- **0.9.14**: `dh_surface_render` may return the **same** surface twice. A caller wanting two frames
+  at once needs two `DhSurface`s — `src/render_test.cyr` is exactly that caller and now creates two,
+  guarded by `check(sds2 == sds, 0)`.
+- **0.9.15**: `dh_frame_begin` rewinds the arena **and** clears dhancha's retained widget pointers
+  (`_dh_focus`, `_dh_hover`, `_dh_press`, `_dh_drag_src`). The halves cannot be separated — never
+  call `arena_reset` on a frame arena directly — and an app on a frame arena **must re-establish
+  focus every frame**, which `crab_pane` does.
+
+### Fixed — nothing in `src/main.cyr` was reachable from any test
+
+`main.cyr` ends in `_entry();`, so including it from a suite runs the app. The readdir parser, the
+stat layer, `crab_descend`, `crab_ascend` and the premultiplied surface flag therefore had **zero
+reachable coverage** — in a program whose two shipped defects were both found on iron. `src/path.cyr`
+was carved out of the same file at 0.5.0 for the same reason; **`src/app.cyr` finishes that
+extraction.** `main.cyr` is now `main()` and `_entry()` and nothing else.
+
+⭐ **And the arena setup was moved out of `main()` rather than tested around it.** It used to be
+created and installed there, where deleting `dh_frame_arena_set` broke no test while restoring a
+77 KB-per-frame leak. `crab_render` now owns it. The residual gap — `main()` itself is not callable
+from a suite — is irreducible, and is now down to the event loop alone.
+
+### Testing
+
+**37 → 75 assertions**, reference coverage **53 % → 70 %** (19/27 fns, 6/6 files). New groups: the
+reused render target, the zero-cost frame, and the application layer.
+
+⭐ **Mutation-verified throughout** — 7 mutations against the app layer and arena ownership, 3 against
+crab's surface reuse, and 5 against dhancha's arena, each producing named failures.
+
+⛔ **Three tests could not fail in their first draft, and only mutation testing said so.**
+- The surface-reuse residue check rendered trees that repainted every pixel, so deleting dhancha's
+  `sd_clear` left it green.
+- The convergence check used a 256 KiB arena against a three-entry fixture, so twenty frames fitted
+  with room to spare — deleting `dh_frame_begin()` **entirely** left the whole suite green. An arena
+  that is merely big enough never touches the global heap whether it is rewound or not.
+- dhancha's own grow test claimed to "force the chain to extend" against an arena four times larger
+  than the frame it rendered.
+
+⚠ **The zero-cost gate has two independent guarantors and no single mutation fails it** — deleting
+dhancha's `sd_clear` leaves it green (crab's opaque root still covers) and making crab's root
+transparent leaves it green (the clear still covers); only removing **both** fails, at 7,744 surviving
+bytes. Correct for a property test, but it means a green crab suite is **not** evidence that the
+toolkit still clears — that lives in dhancha's `programs/draw_test.cyr`.
+
+### Known — the repaint rule moved rather than lifted
+
+The frame is free, so the idle mascot line, M4's transfer tray and M7's index progress are no longer
+blocked by it. ⛔ But `dh_setu_poll_event` still calls `setu_msg_new()` **before** it knows whether
+anything is pending — ~80 B per poll, never reclaimed, ~4.8 KB/s at 60 Hz. Continuous repaint implies
+continuous polling, so closing that (roadmap M2, *deferral #09*, **gate: dhancha**) is the
+precondition for anything that repaints without input.
+
+⚠ **`lib/` is not what compiles.** Measured: appending garbage to `lib/dhancha.cyr` leaves the build
+green while appending it to `../dhancha/dist/dhancha.cyr` fails — the `path` override compiles the
+sibling's `dist/` directly. `lib/alloc.cyr` is inert too; the stdlib comes from the installed
+toolchain. ⇒ The stdlib's arena internals **cannot be mutation-tested from this repo**, and the
+`path`-wins hazard is worse than previously documented.
+
 ## [0.5.0] - 2026-08-26 — a P-1 sweep, and a roadmap that finally exists
 
 Four things, all of them structural: a P-1 audit of the whole codebase with its repairs, the
