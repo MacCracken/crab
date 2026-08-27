@@ -97,7 +97,15 @@ git = "https://github.com/MacCracken/dhancha.git"
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-tag    = "0.9.12"
+# ⭐ 0.9.13 (2026-08-26) — the per-frame allocation fix: `dh_surface_new` no longer allocates a
+# `w*h*4` pixel buffer that nothing in the stack ever wrote or read. Measured 746,440 -> 412,040 B per
+# `crab_render`, a 44.8 % cut; see docs/architecture/001. ⚠ The gate is NARROWED, NOT CLOSED —
+# `dh_surface_render`'s own `sd_surface_new` is 81 % of what remains.
+# ⛔ Verified three ways before this line moved, because `path` wins over `tag` and a green local build
+# proves nothing about the declared graph: sibling `VERSION` = 0.9.13; `git rev-parse 0.9.13` == HEAD
+# in `../dhancha`; and `git ls-remote --tags` shows `refs/tags/0.9.13` at that same commit. Re-do all
+# three at every cut — 0.4.13 shipped a manifest naming a library the build never compiled.
+tag    = "0.9.13"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

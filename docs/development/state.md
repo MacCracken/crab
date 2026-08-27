@@ -3,6 +3,10 @@
 > Refreshed every release. CLAUDE.md is preferences/process/procedures
 > (durable); this file is **state** (volatile).
 >
+> ⭐ **Picking the work up cold? Read [`handoff.md`](handoff.md) first** — it carries what is
+> verified vs merely built, the open QEMU verification, and the one ⛔ that must be read before
+> touching the agnos event loop.
+>
 > ⛔ **This file described an empty scaffold ("0.1.0, no releases yet, initial scaffold only") until
 > 2026-08-02, five releases after that stopped being true.** A state file that is wrong is worse than a
 > missing one, because it is what a cold start reads first.
@@ -46,9 +50,9 @@ demands and the one this file broke twice.
 
 ## Source
 
-922 lines across five files.
+941 lines across five files.
 
-- `src/main.cyr` (375) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
+- `src/main.cyr` (394) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
   `dh_client_poll_event` / `dh_client_close`), the readdir+stat layer, the frame loop.
   ⛔ It does **not** open its own setu connection (since 0.4.8) and does **not** run its own
   `setu_poll_input` switch (since 0.4.12) — depending on the toolkit for pixels while bypassing it for
@@ -153,8 +157,22 @@ Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08
 | rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.12 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
+| dhancha | 0.9.13 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
 | setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
+
+⭐ **dhancha 0.9.13 (2026-08-26) is the per-frame allocation fix** — `dh_surface_new` no longer
+allocates a `w*h*4` pixel buffer that nothing in the stack ever wrote or read. See Known gaps for the
+measurement. Published as `c273159`, and the tag was verified **four** ways before crab's manifest
+moved, because `path` wins over `tag` and a green local build proves nothing about the declared graph:
+
+1. sibling `VERSION` = `0.9.13`;
+2. `git rev-parse 0.9.13` == `HEAD` in `../dhancha`, working tree clean;
+3. `git ls-remote --tags` shows `refs/tags/0.9.13` at that same commit;
+4. ⭐ **and the declared graph was actually resolved** — with `path` temporarily disabled,
+   `cyrius deps` cloned the tag from the remote and produced a `lib/dhancha.cyr` with the **identical**
+   SHA-256 (`0972d27b…`) as the `path` build and as `git show 0.9.13:dist/dhancha.cyr`. That fourth
+   check is the only one that would have caught 0.4.13's manifest naming a library the build never
+   compiled; the first three would all have passed it.
 
 ⛔ **`path` WINS over `tag`, so a green local build is not evidence that the declared graph resolves.**
 That is the drift 0.4.13 caught and closed. **Four of six** carry `path` — the table's own column says
@@ -200,8 +218,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, 381,544 B                                       |
-| `--agnos`    | ✅ builds, 381,600 B — the real target                     |
+| x86_64 linux | ✅ builds, 381,536 B                                       |
+| `--agnos`    | ✅ builds, 381,592 B — the real target                     |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -219,13 +237,22 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
 only what a cold start must know *before touching the code*; the roadmap is the full inventory.
 
-- ⛔ **Every frame allocates ~750 KB and nothing is ever freed.** Measured: `crab_render` costs
-  **749,704 B** per call at 114 entries per pane, into a bump allocator with no `free()`. 89 % is two
-  full-size pixel buffers, and one of them — `dh_surface_new`'s — is **never written or read**. It has
-  not bitten because crab repaints only on input and used to exit after two seconds; both accidents
-  are gone as of 0.5.0. ⇒ **Do not add a continuously-repainting element** (animation, progress bar,
-  the idle mascot line) until the dhancha gate closes: at 60 Hz this is 45 MB/s. Full measurement and
-  the three-step upstream fix in
+- ⛔ **Every frame allocates ~412 KB and nothing is ever freed — NARROWED, NOT CLOSED.** Reproduced
+  2026-08-26 with a host probe (`alloc_used()` deltas around five back-to-back `crab_render` calls at
+  380×220, 114 entries per pane): **746,440 B/frame**. ⭐ **dhancha 0.9.13 takes it to 412,040 B — a
+  44.8 % cut** by deferring `dh_surface_new`'s pixel buffer, which was allocated on every surface and
+  **never written and never read** by anything in the stack; that call is now 334,440 B → **40 B**.
+  ⚠ The ⛔ was "one line upstream" in two documents and it is not: storing 0 breaks dhancha's
+  `event_test` S) by downgrading `dh_surface_present`'s `_UNSUPPORTED` refusal to `_NO_SURFACE`.
+  Mutation-verified both ways.
+  ⛔ **What remains is `dh_surface_render`'s own `sd_surface_new` — 334,432 B, now 81 % of the frame
+  on its own — and it is NOT purely upstream.** A reused render target must outlive the frame, but
+  `crab_render` builds a fresh `DhSurface` every call (`src/ui.cyr`), so a dhancha-side cache saves
+  crab nothing without a matching crab change. It also makes `dh_surface_render` able to return the
+  same surface twice, which `src/render_test.cyr` can observe. ⇒ Operator decision.
+  ⚠ **The repaint rule is UNCHANGED by the fix.** **Do not add a continuously-repainting element**
+  (animation, progress bar, the idle mascot line) until the gate closes: 412,040 B at 60 Hz is still
+  24 MB/s, and the allocator still has no `free()`. Full measurement and the three-step fix in
   [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
 - ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI**, and CI **never builds
   `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is

@@ -8,7 +8,7 @@
 
 ## Project Identity
 
-**crab** — crab — TODO
+**crab** 🦀 (the hermit crab — it carries its `$HOME` on its back and reaches out to grab) — the sovereign, Cyrius-native file manager for the AGNOS desktop.
 
 - **Type**: Binary
 - **License**: GPL-3.0-only
@@ -18,7 +18,7 @@
 
 ## Goal
 
-_TODO: one-or-two-sentence mission statement. What does crab OWN in the stack? Durable — doesn't change per release._
+Own the AGNOS desktop's file surface — browsing, acting on, and making sense of what is on disk as a resident of the native stack.
 
 ## Current State
 
@@ -67,6 +67,8 @@ cyrius test                          # run [build].test + tests/*.tcyr
 - [`docs/architecture/`](docs/architecture/) — Non-obvious constraints (*what's true about the code?*)
 - [`docs/guides/`](docs/guides/) — Task-oriented how-tos
 - [`docs/examples/`](docs/examples/) — Runnable examples
+- [`docs/development/handoff.md`](docs/development/handoff.md) — **Read first on a cold start** —
+  what is verified vs merely built, open items, and the ⛔ hazards
 - [`docs/development/state.md`](docs/development/state.md) — Live state snapshot
 - [`docs/development/roadmap.md`](docs/development/roadmap.md) — Milestones through v1.0
 

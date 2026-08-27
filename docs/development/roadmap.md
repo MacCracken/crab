@@ -3,6 +3,8 @@
 > Milestone plan through v1.0. State lives in [`state.md`](state.md); this file is the
 > **sequencing** — what ships, in what order, against what dependency gates.
 >
+> ⭐ Starting a slot? [`handoff.md`](handoff.md) has the current state and the open items.
+>
 > ⛔ **This file was the `cyrius init` scaffold template until 0.5.0** — `### M1 — _Title_ (v0.2.0)`
 > with the body `_Replace this with the first real milestone._` — while crab shipped fifteen
 > releases past it. Every deferral the codebase accumulated had nowhere to be sequenced, so they
@@ -97,14 +99,23 @@ assumes otherwise.
   to a ready proc first and only halts when nothing else is runnable. The host suite is green either
   way; **only a QEMU run distinguishes them**, so this line is a required QEMU gate, not a preference.
 
-> ⛔ **Gate: dhancha — per-frame allocation.** `crab_render` costs **749,704 B per frame**, measured,
-> and none of it is ever reclaimed (the allocator has no `free`). **89 % of that is two pixel
-> buffers**, and one of them — `dh_surface_new`'s `alloc(w*h*4)` — is **never written or read**,
-> because `dh_surface_render` allocates its own `sd_surface_new`. Fixing that one line upstream
-> halves crab's leak. The rest needs `dh_surface_render` to reuse a surface, or an arena hook: the
-> stdlib already ships `arena_new`/`arena_reset` documented for exactly this "per-frame reuse"
-> pattern, but dhancha allocates via plain `alloc()` at 19 sites, so crab cannot redirect it.
-> **This gate blocks every milestone after M2** — a file manager that leaks 732 KiB per keypress
+> ⛔ **Gate: dhancha — per-frame allocation. HALF-CLOSED (2026-08-26), still blocking.**
+> `crab_render` cost **746,440 B per frame**, measured, and none of it is ever reclaimed (the
+> allocator has no `free`). 89 % of that was two pixel buffers, and one of them — `dh_surface_new`'s
+> `alloc(w*h*4)` — was **never written or read**, because `dh_surface_render` allocates its own
+> `sd_surface_new`.
+> ⭐ **That half is FIXED in dhancha 0.9.13: 746,440 → 412,040 B/frame, a 44.8 % cut.** ⚠ It was
+> **not** the "one line" this file and the architecture note both called it — storing 0 breaks
+> dhancha's `event_test` by downgrading `dh_surface_present`'s refusal code, so the fix defers the
+> allocation into `dh_surface_pixels` instead. Mutation-verified.
+> ⛔ **The gate is NOT closed and the milestone ordering does not change.** `dh_surface_render`'s own
+> `sd_surface_new` is 334,432 B — **81 % of what is left** — and reusing it is **not purely upstream**:
+> `crab_render` builds a fresh `DhSurface` every frame, so a dhancha-side cache saves crab nothing
+> without a matching crab change, and it lets `dh_surface_render` return the same surface twice, which
+> `src/render_test.cyr` can observe. The widget tree (~58 KB/frame) still needs an arena hook: the
+> stdlib ships `arena_new`/`arena_reset` documented for exactly this "per-frame reuse" pattern, but
+> dhancha allocates via plain `alloc()` at 19 sites, so crab cannot redirect it.
+> **This gate still blocks every milestone after M2** — a file manager that leaks 402 KiB per keypress
 > cannot ship a transfer tray that repaints continuously.
 
 ### M3 — A browser you would actually use (v0.7.0)
