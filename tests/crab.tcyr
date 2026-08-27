@@ -568,6 +568,63 @@ fn main() {
     assert_eq(crab_resize_wanted(380, 220, 0, 600), 0, "a degenerate ask is refused, not clamped");
     assert_eq(crab_resize_wanted(380, 220, 99999, 600), 0, "an absurd ask is refused");
 
+    # --- M2: the pointer policy and the hit-test geometry ----------------------------------------
+    # ⛔ crab OWNS ITS INTERACTION STATE — pane index and row index, never widget pointers. Operator
+    # ruling 2026-08-27: `dh_dispatch` tracks a press by widget pointer, and `dh_frame_begin` rewinds
+    # the arena between a press and its release, so the press target would no longer exist. A row
+    # index survives a rebuild because it is crab's own model. These assertions are only possible
+    # because of that choice — a widget-pointer design would be untestable from a host suite.
+    assert_eq(crab_is_double(0, 3, 1000, 0, 3, 1200), 1, "same pane, same row, inside the window");
+    assert_eq(crab_is_double(0, 3, 1000, 0, 3, 1000 + CRAB_DOUBLECLICK_MS), 1, "...at the boundary");
+    assert_eq(crab_is_double(0, 3, 1000, 0, 3, 1001 + CRAB_DOUBLECLICK_MS), 0, "...one ms past is not");
+    assert_eq(crab_is_double(0, 3, 1000, 1, 3, 1100), 0, "the OTHER pane is not a double-click");
+    assert_eq(crab_is_double(0, 3, 1000, 0, 4, 1100), 0, "a different ROW is two selections, not a double");
+    assert_eq(crab_is_double(0 - 1, 0 - 1, 0, 0, 3, 1100), 0, "the first click of a session is single");
+    assert_eq(crab_is_double(0, 3, 1000, 0, 0 - 1, 1100), 0, "a click off any row cannot pair");
+    # ⛔ A NEGATIVE INTERVAL IS NEVER A DOUBLE-CLICK. `clock_now_ms` is monotonic on agnos, so this
+    # should be unreachable — which is exactly why it is asserted rather than assumed. Guessing
+    # "double" on a backwards clock descends into a directory the operator clicked once, and a wrong
+    # descend is indistinguishable from a misclick afterwards.
+    assert_eq(crab_is_double(0, 3, 2000, 0, 3, 1000), 0, "a backwards clock is never a double-click");
+
+    # ⭐ THE GEOMETRY, AGAINST A REAL RENDERED TREE — not against arithmetic that mirrors the layout.
+    # `crab_hit` walks the widget tree `crab_render` just built, so this exercises the same structure
+    # that reaches the screen. ⚠ It must run AFTER a render: the tree and the recorded root live for
+    # exactly one frame.
+    var hsurf = dh_surface_new(380, 220);
+    var hl = alloc(16 * 64); var hrr = alloc(16 * 64);
+    t_entry(hl, 0, "alpha", 1); t_entry(hl, 1, "beta", 0); t_entry(hl, 2, "gamma", 0);
+    t_entry(hrr, 0, "one", 1);  t_entry(hrr, 1, "two", 0);  t_entry(hrr, 2, "three", 0);
+    var hlz = alloc(16 * 8); var hrz = alloc(16 * 8);
+    var hlm = alloc(16 * 8); var hrm = alloc(16 * 8);
+    var hi = 0;
+    while (hi < 3) {
+        store64(hlz + hi * 8, 100 + hi); store64(hrz + hi * 8, 200 + hi);
+        store64(hlm + hi * 8, 1783900800); store64(hrm + hi * 8, 1783900800);
+        hi = hi + 1;
+    }
+    var hsl = alloc(8); store64(hsl, 0);
+    var hsr = alloc(8); store64(hsr, 0);
+    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr);
+
+    var hb = alloc(16);
+    # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
+    # first row of each pane rather than an edge, so the assertion is about which pane and row a
+    # click lands in and not about a boundary pixel.
+    var lx = (380 - 6) / 4;                  # a column inside the LEFT pane
+    var rx2 = 380 - lx;                      # ...and inside the RIGHT one
+    assert_eq(crab_hit(lx, 41, hb), 1, "a click inside the left pane lands somewhere");
+    assert_eq(load64(hb), 0, "...and reports the LEFT pane");
+    assert_eq(load64(hb + 8), 0, "...on row 0");
+    assert_eq(crab_hit(rx2, 41, hb), 1, "a click inside the right pane lands");
+    assert_eq(load64(hb), 1, "...and reports the RIGHT pane");
+    assert_eq(crab_hit(lx, 67, hb), 1, "a click one row down lands");
+    assert_eq(load64(hb + 8), 1, "...and reports row 1 — the rows are distinguished, not lumped");
+    # ⛔ THE STATUS LINE IS NOT A PANE. It owns the bottom of the window; a click there that reported
+    # a row would select a file the operator never pointed at.
+    assert_eq(crab_hit(lx, 220 - 6, hb), 0, "a click on the status line is not in a pane");
+    assert_eq(load64(hb), 0 - 1, "...and reports no pane");
+
     # --- readdir clamps to the cap ---------------------------------------------------------------
     # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
     # rather than the clamp. Stated because a green line here must not be read as covering the cap.

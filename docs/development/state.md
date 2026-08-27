@@ -194,8 +194,21 @@ so the bounded-join *refusal* path has host assertions only.
   ⭐ **Measured**: crab launches via F2→DOWN→Enter, receives a CONFIGURE for **2048x2018**, refuses it
   (no carveout under QEMU), stays at its old extent, and **answers 6 keystrokes afterwards** — which
   also settles the loop-lifetime question open since 0.5.0.
-- **Untouched**: pointer input (#05), key release / `SETU_SURF_FULL_KEYS` (#06, **gate: setu**),
-  routing through `dh_dispatch` (#07).
+  ⭐ **And the harness is proven to go red**: with the `WINDOW_CONFIGURE` branch removed it reports
+  FAIL (no CONFIGURE line at all) against PARTIAL for the real build, so "crab refused the ask" and
+  "crab ignored the ask" are distinguishable. Without that the QEMU result would mean nothing.
+- ✅ **Pointer (*#05*) — click to select, click to focus a pane, double-click to descend.**
+  QEMU-proven (`crab: click`, then 5 keystrokes answered). crab is the **first client to decode
+  `SETU_INPUT_PTR_MOVE`**.
+  ⛔ **crab owns the interaction state; `dh_dispatch` is deliberately NOT used** — it tracks a press
+  by widget pointer, and `dh_frame_begin` clears those between a press and its release. crab tracks
+  pane + row index; dhancha supplies geometry via `dh_hit_test`. Operator ruling 2026-08-27.
+  ⚠ `SETU_INPUT_PTR_BTN` carries no coordinates, so position comes from `PTR_MOVE`.
+  ⚠ **Scroll wheel is NOT done** — setu has no wheel message kind. **Gate: setu.**
+  ⚠ **Pane headers are not clickable** — the header is a sibling of the list, so the hit walk never
+  reaches it.
+- **Untouched**: key release / `SETU_SURF_FULL_KEYS` (#06, **gate: setu**), routing through
+  `dh_dispatch` (#07 — ⚠ the KEY half is safe; adopting it wholesale is not, same ruling as above).
 
 ## Dependencies
 

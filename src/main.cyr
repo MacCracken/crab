@@ -118,6 +118,19 @@ fn main(): i64 {
     if (setu_send(fd, setu_commit(sid)) < 0) { crab_say("crab: commit send failed\n"); return 1; }
     crab_say("crab: dual-pane file-manager UI presented over setu\n");
     var resized = 0;        # set by WINDOW_CONFIGURE, consumed by the re-ATTACH after the next render
+    # ⭐ POINTER STATE (M2, *deferral #05*), OWNED BY crab RATHER THAN BY `dh_dispatch`.
+    # ⛔ `SETU_INPUT_PTR_BTN` CARRIES NO COORDINATES — only button and state. The position comes from
+    # `SETU_INPUT_PTR_MOVE`, so a client that does not track motion has nowhere to put a click. That
+    # is why these two exist and why the MOVE arm is not optional.
+    # ⚠ The last-click cells are crab's OWN model — pane index and row index, never widget pointers.
+    # A widget pointer would not survive `dh_frame_begin`'s arena rewind between the two clicks of a
+    # double-click; a row index does. See the ⛔ in `src/app.cyr`.
+    var ptr_x = 0;
+    var ptr_y = 0;
+    var last_pane = 0 - 1;
+    var last_row = 0 - 1;
+    var last_ms = 0;
+    var hit = alloc(16);
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
     # switch the active pane; Up/Down (0x52/0x51) or k/j move its selection (clamped
@@ -226,6 +239,56 @@ fn main(): i64 {
                             resized = 1;     # the ATTACH+COMMIT happens after the render below
                             crab_log_extent("crab: resized to ", w, h);
                         }
+                    }
+                }
+            }
+            # ⭐ POINTER MOTION — track it, do not act on it. Coordinates are CONTENT-relative and
+            # the compositor has already dropped anything outside the content rect (its own ⛔: a
+            # pointer on the titlebar produced a negative `ry`, and a client indexing by it reads
+            # before its buffer). crab relies on that bound rather than re-deriving it.
+            # ⚠ aethersafha dedupes motion, so a stationary pointer costs nothing.
+            if (k == POINTER_MOVE) {
+                ptr_x = dh_event_a(ev);
+                ptr_y = dh_event_b(ev);
+            }
+            # ⭐⭐ CLICK: focus the pane, select the row, and descend on a double-click.
+            # ⚠ PRESS ONLY (`b == 1`). Acting on the release as well would double every click, and on
+            # a double-click would descend twice — the second descend landing wherever the first left
+            # the selection.
+            if (k == POINTER_BTN) {
+                if (dh_event_b(ev) == 1) {
+                    if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                        var hp = load64(hit);
+                        var hr = load64(hit + 8);
+                        active_pane = hp;             # clicking a pane focuses it, even off-row
+                        var now = clock_now_ms();
+                        if (hr >= 0) {
+                            # ⚠ CLAMP AGAINST THE LIVE COUNT. The tree was built from the count at the
+                            # last render; nothing has changed it since, but a row index is an index
+                            # into arrays sized by `CRAB_MAX_ENTRIES` and is not worth trusting.
+                            if (hp == 0) { if (hr < ln) { sel_l = hr; } }
+                            if (hp == 1) { if (hr < rn) { sel_r = hr; } }
+                            if (crab_is_double(last_pane, last_row, last_ms, hp, hr, now) == 1) {
+                                if (hp == 0) {
+                                    var dl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf);
+                                    if (dl >= 0) { ln = dl; sel_l = 0; crab_log_cd(lpath); }
+                                }
+                                if (hp == 1) {
+                                    var dr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf);
+                                    if (dr >= 0) { rn = dr; sel_r = 0; crab_log_cd(rpath); }
+                                }
+                                # ⛔ CONSUME THE PAIR. Leaving `last_row` set would make a third click
+                                # a second double-click, descending twice on a triple-click.
+                                last_pane = 0 - 1;
+                                last_row = 0 - 1;
+                            }
+                            else {
+                                last_pane = hp;
+                                last_row = hr;
+                                last_ms = now;
+                            }
+                        }
+                        crab_say("crab: click\n");
                     }
                 }
             }

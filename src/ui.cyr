@@ -299,6 +299,71 @@ fn crab_frame_arena(): i64 {
     return crab_arena;
 }
 
+# ⭐⭐ THE CURRENT FRAME'S TREE, FOR HIT-TESTING (M2, *deferral #05*). `crab_render` records the root
+# and the two pane LISTs here so a pointer event can be mapped to (pane, row) without crab
+# re-deriving the layout arithmetic — which would be the geometric form of a test that mirrors the
+# code it is testing.
+#
+# ⛔ THE LIFETIME IS EXACTLY ONE FRAME, AND THAT IS SAFE FOR ONE REASON ONLY: these are refreshed by
+# the same render that builds the tree they point into, and the tree is only rewound by the NEXT
+# `crab_render`'s `dh_frame_begin()`. So between renders — which is precisely when input is handled —
+# they address live widgets. ⚠ Do not read them from anywhere else, and never store them.
+# ⚠ This is the same rule dhancha states for `_dh_focus`: on a per-frame arena, any widget pointer
+# must be re-established every frame. crab can hold these because it re-establishes them every frame;
+# it cannot hold a PRESS across frames, which is why `dh_dispatch` is not used — see `src/app.cyr`.
+var crab_root = 0;
+var crab_llst = 0;
+var crab_rlst = 0;
+
+# Map a content-relative pointer position to crab's own model. -> 1 when it landed inside a pane.
+#   out16 + 0 : pane  (0 = left, 1 = right, -1 = none)
+#   out16 + 8 : row   (index within that pane, -1 = the pane but not a row)
+#
+# ⚠ COORDINATES ARE CONTENT-RELATIVE AND ALREADY BOUNDS-CHECKED BY THE COMPOSITOR. aethersafha drops
+# any position outside the content rect before forwarding, because a pointer on the titlebar produced
+# `ry` in [-30,-1] and a client indexing `ry / row_h` read before its own buffer. crab does not
+# re-derive that bound; it relies on it, and this note is where that reliance is written down.
+# ⚠ A CLICK ON A PANE HEADER RETURNS 0 TODAY. The header is a sibling of the list, not inside it, so
+# the walk below never reaches a LIST and the click does nothing. Focusing a pane by its header is a
+# reasonable thing to want; it is simply not claimed here.
+fn crab_hit(x, y, out16): i64 {
+    store64(out16, 0 - 1);
+    store64(out16 + 8, 0 - 1);
+    if (crab_root == 0) { return 0; }
+    var w = dh_hit_test(crab_root, x, y);
+    if (w == 0) { return 0; }
+    # Walk up to whichever pane LIST contains the hit, remembering the child we came through —
+    # that child IS the row, because `dh_list_add` makes rows direct children of the list.
+    var node = w;
+    var child = 0;
+    var pane = 0 - 1;
+    while (node != 0) {
+        if (node == crab_llst) { pane = 0; }
+        if (node == crab_rlst) { pane = 1; }
+        if (pane >= 0) { store64(out16, pane); }
+        if (pane >= 0) { node = 0; }
+        else {
+            child = node;
+            node = dh_widget_parent(node);
+        }
+    }
+    if (pane < 0) { return 0; }
+    if (child == 0) { return 1; }                 # inside the list, but not on a row
+    var lst = crab_llst;
+    if (pane == 1) { lst = crab_rlst; }
+    var i = 0;
+    var r = dh_list_row_at(lst, i);
+    while (r != 0) {
+        if (r == child) {
+            store64(out16 + 8, i);
+            return 1;
+        }
+        i = i + 1;
+        r = dh_list_row_at(lst, i);
+    }
+    return 1;
+}
+
 fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
     if (surf == 0) { return 0; }
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
@@ -339,6 +404,10 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt));
     dh_widget_add_child(root, status);
 
+    # ⚠ RECORDED FOR HIT-TESTING, and refreshed here every frame — see the ⛔ on `crab_root`.
+    crab_root = root;
+    crab_llst = llst;
+    crab_rlst = rlst;
     dh_surface_set_root(surf, root);
     dh_layout_apply(root, w, h);
 

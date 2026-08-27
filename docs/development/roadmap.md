@@ -115,18 +115,45 @@ assumes otherwise.
   agnos actually caps a `#71` pmm slot at **2 MB** and only a real GPU carveout (`#86`) reaches 32 MB,
   with `setu_buf_create` choosing between them at runtime. ⇒ The cap is now the absurdity bound and
   **the kernel is the arbiter**; crab survives a refusal by staying at its old extent.
+  ⭐ **The harness is proven to go red**: with the `WINDOW_CONFIGURE` branch removed it reports FAIL
+  (no CONFIGURE line at all), against PARTIAL for the real build — so "refused" and "ignored" are
+  distinguishable, which is the only thing that makes the QEMU result meaningful.
   ⚠ **What is proven**: crab launches from the launcher, receives a real CONFIGURE for **2048x2018**,
   refuses it because QEMU has no carveout, stays at its old size, and **answers 6 keystrokes
   afterwards**. **What is not**: the adopt path, which needs a machine whose `#86` carveout can back
   the ask. Say so rather than reading the PARTIAL as a pass.
 
-- **Pointer** — click to select, click to focus a pane, double-click to descend, scroll wheel.
-  dhancha already synthesizes eight pointer kinds and crab consumes none. *Deferral #05.*
+- **Pointer** — ✅ **click to select, click to focus a pane, double-click to descend.** *Deferral #05.*
+  ⭐ **QEMU-proven**: `crab: click` on a real kernel, crab resolving a click to a pane and answering 5
+  keystrokes afterwards. crab is the **first client to decode `SETU_INPUT_PTR_MOVE`** — aethersafha's
+  own note says "no shipped client decodes PTR_MOVE yet", so this wire had never run end to end.
+  ⛔ **crab OWNS THE INTERACTION STATE — it does NOT use `dh_dispatch`** (operator ruling 2026-08-27).
+  `dh_dispatch` tracks a press by **widget pointer** (`_dh_press`), and crab renders after every
+  handled event with `dh_frame_begin()` rewinding the arena and clearing exactly those pointers — so
+  a press and its release are separated by a rebuild and the target no longer exists. crab tracks
+  **pane index + row index**, which survive a rebuild because they are its own model. dhancha
+  supplies geometry only, via `dh_hit_test` over the tree the last render built.
+  ⚠ `SETU_INPUT_PTR_BTN` carries **no coordinates** — only button and state — so crab tracks position
+  from `PTR_MOVE`. A client that ignores motion has nowhere to put a click.
+  ⚠ **NOT DONE: the scroll wheel.** setu has no wheel message kind — `SETU_INPUT_PTR_BTN` carries a
+  button code and X11's 4/5 convention is not in the protocol. Claiming it would be inventing a wire.
+  **Gate: setu** — needs a kind, or a ratified button encoding.
+  ⚠ **NOT DONE: focusing a pane by its header.** The header is a sibling of the list, not inside it,
+  so `crab_hit`'s walk never reaches a LIST and the click does nothing. Reasonable to want; not
+  claimed.
+  ⚠ Row-level precision is asserted on the **host**, against the real rendered tree — the emulated
+  mouse is `usb-mouse` (relative), so a harness cannot land on a chosen pixel and does not pretend to.
 - **Key release / held keys** — request `SETU_SURF_FULL_KEYS` so Down can repeat. Today one press
   moves one row. *Deferral #06.* **Gate: setu** — confirm the compositor honours the flag.
 - **Route through `dh_dispatch`** — crab still switches on raw keysyms while the 0.4.8→0.4.12 arc
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*
+  ⚠ **The KEY half is safe; the rest is not.** `dh_dispatch` routes a KEY to `dh_focus_get()`, and
+  crab re-establishes focus every frame in `crab_pane`, so that path survives the arena rewind.
+  ⛔ **But adopting it wholesale would also hand the LIST its own key handling, and the selection it
+  would keep lives on a widget that is destroyed every frame** — which is precisely why `sel_l` /
+  `sel_r` are app state pushed in via `dh_list_select`, not toolkit state read back out. See the ⛔
+  under Pointer: the same ruling governs both.
 - ✅ **CLOSED 2026-08-27 (dhancha 0.9.16) — the idle leak.** `dh_setu_poll_event` called
   `setu_msg_new()` (80 B) **before** it knew whether anything was pending; the message is pure scratch,
   so it is now one hoisted buffer per process. **200 idle polls move the global heap by 0 bytes**,

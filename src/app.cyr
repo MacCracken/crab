@@ -96,6 +96,40 @@ fn crab_surface_bytes(w, h): i64 {
     return n;
 }
 
+# ⭐⭐ POINTER POLICY (M2, *deferral #05*). Like the resize policy above, the DECISION lives here so a
+# test can reach it; the geometry is in `src/ui.cyr` and the syscall plumbing in `src/main.cyr`.
+#
+# ⛔⛔ AND crab OWNS ITS INTERACTION STATE — IT DOES NOT USE `dh_dispatch`. Operator ruling
+# 2026-08-27, and the reason is structural: `dh_dispatch` tracks a press by storing a **widget
+# pointer** (`_dh_press`), and crab rebuilds its whole tree every frame with `dh_frame_begin()`
+# rewinding the arena and clearing exactly those pointers. A press and its release are separated by a
+# rebuild, so the press target no longer exists. dhancha 0.9.15 says it outright — *cross-frame widget
+# identity and a per-frame arena are mutually exclusive by construction* — and press/release tracking
+# IS cross-frame widget identity. ⇒ crab tracks **pane index + row index**, which survive a rebuild
+# because they are its own model rather than the toolkit's. The toolkit supplies geometry only.
+enum CrabPointer {
+    CRAB_DOUBLECLICK_MS = 400;
+}
+
+# Is this click the second half of a double-click? -> 1 double, 0 single.
+#
+# ⚠ SAME ROW, SAME PANE, AND INSIDE THE WINDOW. Two clicks on different rows are two selections, not
+# an activation — treating them as a double would descend into whichever row happened to be second.
+# ⛔ A NEGATIVE INTERVAL IS NEVER A DOUBLE-CLICK. `clock_now_ms` is monotonic on agnos (bound to
+# uptime, `#40`), so `dt < 0` should be impossible — which is exactly why it must not be *assumed*.
+# If the clock ever moves backwards, guessing "double" would descend into a directory the operator
+# only clicked once, and a wrong descend is indistinguishable from a misclick after the fact.
+fn crab_is_double(prev_pane, prev_row, prev_ms, pane, row, ms): i64 {
+    if (prev_row < 0) { return 0; }              # no previous click to pair with
+    if (row < 0) { return 0; }
+    if (prev_pane != pane) { return 0; }
+    if (prev_row != row) { return 0; }
+    var dt = ms - prev_ms;
+    if (dt < 0) { return 0; }
+    if (dt > CRAB_DOUBLECLICK_MS) { return 0; }
+    return 1;
+}
+
 # Log a resize outcome with its extent. ⚠ "resized" on its own proves an event arrived, not that the
 # surface actually grew — and the two look identical in a serial log, which is how a harness scores a
 # pass for a test it never performed. The NUMBERS are the oracle.

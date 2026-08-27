@@ -16,12 +16,12 @@
 |---|---|
 | Version | **0.6.0** at `dc3fc38 m2 surface resize work`. `../dhancha` is clean at **0.9.17** (`b297604`), tagged and consumed. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,632 B** · `--agnos` **381,840 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius test` **90 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
+| Build | x86_64 **385,760 B** · `--agnos` **385,976 B** · `--win` fails (pre-existing, not crab's) |
+| Tests | `cyrius test` **107 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
 | Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
 | Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
 | Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.17** · setu 0.8.7 — all six at their latest published tag, verified four ways |
-| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 done + verified. Resize built; **refusal path QEMU-proven, adopt path not reachable under QEMU.** Pointer, key-release, `dh_dispatch` untouched. |
+| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 ✅ · resize ⚠ (refusal QEMU-proven, adopt unreachable here) · **pointer ✅ QEMU-proven**. Left: key-release (#06, gate: setu), `dh_dispatch` (#07), scroll wheel (gate: setu). |
 
 ---
 
@@ -148,6 +148,18 @@ keystrokes afterwards**.
   after launch, on a live desktop — no existing harness both started crab and left it running, and
   "no exit line" was never evidence. An ANSWER is.
 
+⭐ **AND IT HAS BEEN PROVEN TO GO RED.** That matters more than usual here, because under QEMU the
+honest outcome is a *refusal*, so "did not resize" is ambiguous unless the log separates the two.
+Measured against the same image with only the binary changed:
+
+| build | serial | verdict |
+|---|---|---|
+| real crab | `cannot back a surface of 2048x2018`, 6 keys answered | PARTIAL (rc 0) |
+| `WINDOW_CONFIGURE` branch removed | no CONFIGURE line at all | **FAIL** (rc 1) |
+
+⇒ The discriminator is that crab **saw the ask and said so**. A build that ignores the event is
+silent, and silence is what the harness scores red.
+
 ⚠ **The harness is flaky by nature and says so.** QEMU drains HID once per frame, so a burst that
 lands between drains is gone: the key-delivery probe measured 3/8 on one run and **0/8** on the next
 against the same image. It now retries the probe four times and the launch six, and returns
@@ -159,7 +171,44 @@ crab's own repo) is still open.
 
 ---
 
-## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
+## ✅ Pointer input — and the ruling that shaped it
+
+⛔ **crab OWNS ITS INTERACTION STATE. `dh_dispatch` is deliberately NOT used** (operator ruling
+2026-08-27). `dh_dispatch` tracks a press by storing a **widget pointer** (`_dh_press`,
+`_dh_drag_src`, `_dh_hover`) and matching it on release. crab rebuilds its whole tree every frame and
+renders after **every handled event**; `crab_render` opens with `dh_frame_begin()`, which rewinds the
+arena and clears exactly those pointers. A press and its release are separated by a rebuild, so the
+target no longer exists.
+⚠ Not a dhancha bug — it is 0.9.15's own rule (*cross-frame widget identity and a per-frame arena are
+mutually exclusive by construction*) meeting a feature that **is** cross-frame widget identity.
+⇒ crab tracks **pane index + row index**, which survive a rebuild because they are its own model.
+dhancha supplies geometry only, through `dh_hit_test` over the tree the last render built — valid
+because those pointers are refreshed by the same render and read only between renders.
+
+**Shipped**: click to select, click to focus a pane, double-click to descend (400 ms, monotonic
+`clock_now_ms`). ⭐ **QEMU-proven**: `crab: click` on a real kernel, a click resolved to a pane, and
+5 keystrokes answered afterwards. crab is the **first client to decode `SETU_INPUT_PTR_MOVE`** —
+aethersafha's own note says no shipped client did, so this wire had never run end to end.
+
+⚠ `SETU_INPUT_PTR_BTN` carries **no coordinates**, only button and state, so position comes from
+`PTR_MOVE`. A client that ignores motion has nowhere to put a click.
+
+### ⚠ Two things NOT done, and not claimed
+
+- **Scroll wheel.** setu has no wheel message kind; `PTR_BTN` carries a button code and X11's 4/5
+  convention is not in the protocol. Claiming it would be inventing a wire. **Gate: setu.**
+- **Clicking a pane header to focus it.** The header is a sibling of the list, not inside it, so the
+  hit walk never reaches a LIST. Reasonable to want; simply not built.
+
+⚠ **M4's drag-between-panes is governed by the same ruling** — `DRAG_START`/`MOVE`/`DROP`/`END` all
+route through `_dh_drag_src`, so it must be built on crab's model too, not on dhancha's.
+⚠ **#07's KEY half remains safe** (`dh_dispatch` routes KEY to `dh_focus_get()`, re-established every
+frame by `crab_pane`); adopting it wholesale is not, because the LIST would keep a selection on a
+widget destroyed each frame — which is why `sel_l`/`sel_r` are app state.
+
+---
+
+## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
 
 `main.cyr` ends in `_entry();`, so a suite that included it would run the app. Everything in it was
 therefore **unreachable from any test**: the readdir parser, the stat layer, `crab_descend`,
