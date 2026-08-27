@@ -153,10 +153,7 @@ so the bounded-join *refusal* path has host assertions only.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`. **Five of six are at their latest published tag as of 2026-08-26; dhancha
-is not** — `../dhancha` holds an uncommitted, untagged **0.9.14** (step 2 of the allocation gate) and
-`path` wins over `tag`, so the local build compiles 0.9.14 while the manifest declares 0.9.13. The tag
-is left behind deliberately; see the ⛔ at `[deps.dhancha]` in the manifest.
+Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08-26**:
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
@@ -164,22 +161,26 @@ is left behind deliberately; see the ⛔ at `[deps.dhancha]` in the manifest.
 | rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.13 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*` ⛔ **local tree is 0.9.14, unpublished** |
+| dhancha | 0.9.14 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
 | setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
-⭐ **dhancha 0.9.13 (2026-08-26) is the per-frame allocation fix** — `dh_surface_new` no longer
-allocates a `w*h*4` pixel buffer that nothing in the stack ever wrote or read. See Known gaps for the
-measurement. Published as `c273159`, and the tag was verified **four** ways before crab's manifest
-moved, because `path` wins over `tag` and a green local build proves nothing about the declared graph:
+⭐ **dhancha 0.9.13 and 0.9.14 (both 2026-08-26) are the per-frame allocation gate**, steps 1 and 2 —
+`dh_surface_new`'s dead pixel buffer deferred, then the sadish render target cached on the DhSurface
+and reused. Together **746,440 → 77,568 B per `crab_render` frame**; see Known gaps.
+⚠ **0.9.14 is a CONTRACT CHANGE** — `dh_surface_render` may return the same surface twice.
 
-1. sibling `VERSION` = `0.9.13`;
-2. `git rev-parse 0.9.13` == `HEAD` in `../dhancha`, working tree clean;
-3. `git ls-remote --tags` shows `refs/tags/0.9.13` at that same commit;
-4. ⭐ **and the declared graph was actually resolved** — with `path` temporarily disabled,
-   `cyrius deps` cloned the tag from the remote and produced a `lib/dhancha.cyr` with the **identical**
-   SHA-256 (`0972d27b…`) as the `path` build and as `git show 0.9.13:dist/dhancha.cyr`. That fourth
-   check is the only one that would have caught 0.4.13's manifest naming a library the build never
-   compiled; the first three would all have passed it.
+⛔ **THE TAG WAS VERIFIED FOUR WAYS BEFORE THE MANIFEST MOVED, AND ONLY THE FOURTH IS EVIDENCE.**
+`path` wins over `tag`, so a green local build says nothing about the declared graph:
+
+1. sibling `VERSION` = `0.9.14`;
+2. `git rev-parse 0.9.14` == `HEAD` in `../dhancha` (`b228a8b`), working tree clean;
+3. `git ls-remote --tags` shows `refs/tags/0.9.14` at that same commit;
+4. ⭐ **`path` DISABLED so `cyrius deps` actually cloned the tag from the remote** — the resulting
+   `lib/dhancha.cyr` hashed to `0af5421c…`, identical to the `path` build and to
+   `git show 0.9.14:dist/dhancha.cyr`. **The first three would each have passed 0.4.13**, the release
+   that shipped a manifest naming a library the build never compiled. Only step 4 catches that.
+
+⚠ Re-run all four at every cut. Automating it is roadmap deferral **#19**, still open.
 
 ⛔ **`path` WINS over `tag`, so a green local build is not evidence that the declared graph resolves.**
 That is the drift 0.4.13 caught and closed. **Four of six** carry `path` — the table's own column says

@@ -97,25 +97,25 @@ git = "https://github.com/MacCracken/dhancha.git"
 # how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
 # evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-# ⛔⛔ THIS TAG IS BEHIND THE LIBRARY THE LOCAL BUILD IS COMPILING — DELIBERATELY. `../dhancha` holds
-# an UNCOMMITTED, UNTAGGED **0.9.14**: `dh_surface_render` now reuses a render target cached on the
-# DhSurface instead of allocating one per call. `path` wins over `tag`, so every local build and every
-# local measurement is ALREADY against 0.9.14 while this line says 0.9.13.
-# ⇒ Left behind ON PURPOSE: naming an unpublished tag makes CI fail loudly, whereas the alternative is
-# CI silently resolving a different library than the local tree. **Bump to "0.9.14" in the SAME change
-# that commits and tags dhancha**, and re-run the four-way check below.
-# ⭐ 0.9.13 (2026-08-26) — step 1: `dh_surface_new` no longer allocates a `w*h*4` pixel buffer that
-# nothing in the stack ever wrote or read. 746,440 -> 412,040 B per `crab_render`.
-# ⭐ 0.9.14 — step 2: the sadish render target is cached on the DhSurface. 412,040 -> 77,568 B, once
-# crab stopped minting a DhSurface per frame (`src/ui.cyr`; the dhancha half alone saves crab nothing).
-# ⚠ 0.9.14 IS A CONTRACT CHANGE: `dh_surface_render` may return the SAME surface twice. See
-# docs/architecture/001.
-# ⛔ Verified FOUR ways when the tag last moved, because `path` wins and a green local build proves
-# nothing about the declared graph: sibling `VERSION`; `git rev-parse <tag>` == HEAD in `../dhancha`;
-# `git ls-remote --tags` showing the tag at that commit; and — the only one that would have caught
-# 0.4.13's manifest naming a library the build never compiled — disabling `path` so `cyrius deps`
-# actually resolves the tag, then comparing `lib/dhancha.cyr`'s SHA-256.
-tag    = "0.9.13"
+# ⭐ THE PER-FRAME ALLOCATION GATE, in two steps, both measured against `crab_render` at 380x220 with
+# 114 entries per pane (docs/architecture/001):
+#   0.9.13 — step 1: `dh_surface_new` no longer allocates a `w*h*4` pixel buffer that nothing in the
+#            stack ever wrote or read.                              746,440 -> 412,040 B per frame
+#   0.9.14 — step 2: the sadish render target is cached on the DhSurface and reused.
+#                                                                   412,040 ->  77,568 B per frame
+# ⚠ Step 2 only pays off because crab ALSO stopped minting a DhSurface per frame (`src/ui.cyr`,
+# `src/main.cyr`). The dhancha half alone saves crab nothing — a cache on an object thrown away each
+# frame is not a cache.
+# ⛔ 0.9.14 IS A CONTRACT CHANGE: `dh_surface_render` may return the SAME surface twice. A caller that
+# wants two frames at once needs two DhSurfaces — `src/render_test.cyr` is one, and guards it.
+# ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins over `tag` and a green local build
+# proves nothing about the declared graph: sibling `VERSION` = 0.9.14; `git rev-parse 0.9.14` == HEAD
+# in `../dhancha` (b228a8b); `git ls-remote --tags` shows `refs/tags/0.9.14` at that same commit; and
+# — the only check that would have caught 0.4.13's manifest naming a library the build never compiled
+# — `path` was DISABLED so `cyrius deps` actually cloned the tag, and the resulting `lib/dhancha.cyr`
+# matched the `path` build's SHA-256 exactly. Re-do all four at every cut; the first three would each
+# have passed 0.4.13.
+tag    = "0.9.14"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

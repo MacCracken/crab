@@ -1,4 +1,4 @@
-# Handoff — 0.5.0 is shipped. **The allocation gate is 89.6 % closed; dhancha 0.9.14 is uncommitted.**
+# Handoff — 0.5.0 is shipped. **The allocation gate is 89.6 % closed; step 3 is what remains.**
 
 > **Written 2026-08-26, at 0.5.0. Updated 2026-08-26** after the first cut at the dhancha per-frame
 > allocation gate, again once dhancha 0.9.13 was published, and again after step 2 landed. Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
@@ -15,24 +15,24 @@
 
 | | |
 |---|---|
-| Version | **0.5.0** at `19c6e8c docs`. ⚠ Working trees are **NOT** clean in **either repo** — crab carries step 2 plus the README pass; `../dhancha` carries an untagged 0.9.14. |
+| Version | **0.5.0** at `19c6e8c docs`. ⚠ crab's working tree is **NOT** clean — it carries step 2 plus the README pass. `../dhancha` is clean at **0.9.14** (`b228a8b`), tagged and pushed. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
 | Build | x86_64 **381,568 B** · `--agnos` **381,632 B** · `--win` fails (pre-existing, not crab's) |
 | Tests | `cyrius test` **45 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) · fmt clean |
 | Coverage | **14/26 fns (53 %)** — reference coverage, a floor not a proof |
 | Source | 982 lines: `main.cyr` 407 · `ui.cyr` 326 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.13 declared, 0.9.14 compiled (unpublished)** · setu 0.8.7 |
-| Mid-arc work | ⛔ **YES.** Steps 1 and 2 of the allocation gate are done and measured; **dhancha 0.9.14 is uncommitted and untagged**, and crab compiles against it via `path`. Next slot is still **M2 (v0.6.0)**. |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.14** · setu 0.8.7 — all six at their latest published tag, verified four ways |
+| Mid-arc work | ⚠ Steps 1 and 2 of the allocation gate are done, measured, and consumed against published tags. **Step 3 is open and is now 75 % of the frame.** crab's own tree is uncommitted. Next slot is still **M2 (v0.6.0)**. |
 
 ---
 
-## ⛔ The allocation gate — steps 1 and 2 done, step 3 open, and half of it is uncommitted
+## The allocation gate — steps 1 and 2 done and consumed, step 3 open
 
 | | per `crab_render` frame |
 |---|---:|
 | baseline (dhancha 0.9.12) | **746,440 B** |
 | + step 1 (dhancha 0.9.13, published `c273159`) | **412,040 B** |
-| + step 2 (dhancha **0.9.14, UNCOMMITTED** + crab) | **77,568 B** |
+| + step 2 (dhancha **0.9.14** `b228a8b` + crab) | **77,568 B** |
 | total | **−89.6 %** |
 
 Measured with a host probe taking `alloc_used()` deltas around five back-to-back `crab_render` calls
@@ -60,22 +60,28 @@ frame 1 — so it now creates two, guarded by `check(sds2 == sds, 0)`.
 crab `cyrius test` **45/0**, `render_test` 0 failed checks, host **381,568 B** and `--agnos`
 **381,632 B**. No new lines over 120 chars (still 9 across `src/`, unchanged from HEAD).
 
-### ⛔ Two things must happen together, and one is a trap
+### ✅ The dependency is published and the manifest was moved honestly
 
-1. **Commit and tag dhancha 0.9.14**, then bump crab's `[deps.dhancha] tag` to `0.9.14`.
-   `path` wins over `tag`, so **the local build already compiles 0.9.14 while the manifest declares
-   0.9.13**. The tag is left behind on purpose — an unpublished tag fails CI loudly, whereas the
-   alternative is CI silently resolving a different library than the local tree. There is a ⛔ block
-   at the tag in `cyrius.cyml`.
-   ⭐ When the tag moves, re-run the **four-way** check: sibling `VERSION`; `git rev-parse <tag>` ==
-   HEAD; `git ls-remote --tags`; **and disable `path` so `cyrius deps` actually resolves the tag**,
-   comparing `lib/dhancha.cyr`'s SHA-256. Only the fourth would have caught 0.4.13's manifest naming
-   a library the build never compiled. Deferral #19 (automate it) is still open; this is the recipe.
-2. ⛔ **`cyrius distlib` MUST be followed by `sh scripts/sync-deps-sidecar.sh` in dhancha.** distlib
-   rewrites `dist/dhancha.deps` and re-adds `kashi_font_data`, which is VENDORED, not stdlib — every
-   consumer then hard-fails `cyrius deps` with *"dep dhancha requires 'kashi_font_data' but it is not
-   in the cyrius stdlib"*. I hit this mid-session by running distlib alone. dhancha's CI gates it;
-   a local run does not.
+`[deps.dhancha] tag` is **0.9.14**, verified **four** ways — `path` wins over `tag`, so a green local
+build proves nothing about the declared graph:
+
+1. sibling `VERSION` = `0.9.14`;
+2. `git rev-parse 0.9.14` == HEAD in `../dhancha` (`b228a8b`), tree clean;
+3. `git ls-remote --tags` shows `refs/tags/0.9.14` at that commit;
+4. ⭐ **`path` DISABLED so `cyrius deps` actually cloned the tag** — the resulting `lib/dhancha.cyr`
+   hashed to `0af5421c…`, identical to the `path` build and to `git show 0.9.14:dist/dhancha.cyr`.
+
+⛔ **Only the fourth is evidence.** The first three would each have passed 0.4.13 — the release that
+shipped a manifest naming a library the build never compiled. Re-run all four at every cut; automating
+it is deferral **#19**, still open, and this is the recipe.
+
+### ⛔ A trap to know about before touching dhancha
+
+**`cyrius distlib` MUST be followed by `sh scripts/sync-deps-sidecar.sh`.** distlib rewrites
+`dist/dhancha.deps` and re-adds `kashi_font_data`, which is VENDORED, not stdlib — every consumer then
+hard-fails `cyrius deps` with *"dep dhancha requires 'kashi_font_data' but it is not in the cyrius
+stdlib"*. I hit this mid-session by running distlib alone. dhancha's CI gates it; a local run does
+not, and the error names the sidecar last.
 
 ### ⚠ What is left — step 3, and it is now most of the problem
 
