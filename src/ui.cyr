@@ -249,9 +249,27 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
     return out;
 }
 
-# Build + render the dual-pane window: two readdir panes on top, a status line
-# (the active selection's size + mtime) along the bottom.
-fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
+# Build + render the dual-pane window into the CALLER'S surface: two readdir panes on top, a status
+# line (the active selection's size + mtime) along the bottom. -> the sadish SdSurface, or 0.
+#
+# ⛔⛔ THE SURFACE IS A PARAMETER, NOT A LOCAL (0.6.0-dev), AND THAT IS THE WHOLE POINT OF THE CHANGE.
+# This function used to call `dh_surface_new(w, h)` itself, once per call — so every frame minted a
+# fresh DhSurface, and dhancha's per-DhSurface render-target cache (0.9.14) would have saved crab
+# **nothing**: a cache on an object that is thrown away each frame is not a cache. Hoisting the
+# surface into the caller is what turns 334,432 B per frame into 334,432 B once.
+# ⚠ MEASURED: 412,040 -> 77,608 B per frame, with the two steps together taking 746,440 -> 77,608.
+#
+# ⭐ `w`/`h` ARE NO LONGER PARAMETERS — they are read back off the surface. They were always required
+# to equal the surface's own dimensions (this function passed the same pair to `dh_surface_new`), so
+# taking them separately only created a way for them to disagree. The signature gets shorter, not
+# longer, for gaining a parameter.
+# ⚠ THE RETURNED SURFACE BELONGS TO `surf` AND IS OVERWRITTEN BY THE NEXT RENDER INTO IT — see the
+# ⛔ on `dh_surface_render` in dhancha 0.9.14. A caller that wants two frames at once needs two
+# surfaces; `src/render_test.cyr` is exactly such a caller and does exactly that.
+fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
+    if (surf == 0) { return 0; }
+    var w = dh_surface_width(surf);
+    var h = dh_surface_height(surf);
     var root = dh_widget_new(WINDOW);
     dh_widget_set_layout(root, BOX_V);          # panes row on top, status line below
     dh_widget_set_bg(root, dh_theme_bg());     # the desktop void
@@ -274,7 +292,6 @@ fn crab_render(w, h, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt));
     dh_widget_add_child(root, status);
 
-    var surf = dh_surface_new(w, h);
     dh_surface_set_root(surf, root);
     dh_layout_apply(root, w, h);
 

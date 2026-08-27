@@ -91,7 +91,8 @@ assumes otherwise.
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*
 - **Stop the idle leak** — `dh_setu_poll_event` calls `setu_msg_new()` before it knows whether
-  anything is pending, so every poll leaks ~80 B. 0.5.0's stopgap is to wait on an interrupt when the
+  anything is pending, so every poll leaks ~80 B. ⚠ Now the *largest* remaining per-event leak in the
+  toolkit relative to a frame, after steps 1 and 2 took the frame itself to 77,568 B. 0.5.0's stopgap is to wait on an interrupt when the
   poll is empty. **Gate: dhancha** — hoist the buffer or accept a caller-owned one. *Deferral #09.*
   ⛔ **Whatever replaces this wait, it must not be `sys_sleep_ms`.** That syscall `preempt_disable()`s,
   so while crab waits nothing else on the machine can be scheduled — a 0.5.0 draft used it and the
@@ -99,24 +100,30 @@ assumes otherwise.
   to a ready proc first and only halts when nothing else is runnable. The host suite is green either
   way; **only a QEMU run distinguishes them**, so this line is a required QEMU gate, not a preference.
 
-> ⛔ **Gate: dhancha — per-frame allocation. HALF-CLOSED (2026-08-26), still blocking.**
+> ⚠ **Gate: dhancha — per-frame allocation. 89.6 % CLOSED (2026-08-26), and still blocking.**
 > `crab_render` cost **746,440 B per frame**, measured, and none of it is ever reclaimed (the
-> allocator has no `free`). 89 % of that was two pixel buffers, and one of them — `dh_surface_new`'s
-> `alloc(w*h*4)` — was **never written or read**, because `dh_surface_render` allocates its own
-> `sd_surface_new`.
-> ⭐ **That half is FIXED in dhancha 0.9.13: 746,440 → 412,040 B/frame, a 44.8 % cut.** ⚠ It was
-> **not** the "one line" this file and the architecture note both called it — storing 0 breaks
-> dhancha's `event_test` by downgrading `dh_surface_present`'s refusal code, so the fix defers the
-> allocation into `dh_surface_pixels` instead. Mutation-verified.
-> ⛔ **The gate is NOT closed and the milestone ordering does not change.** `dh_surface_render`'s own
-> `sd_surface_new` is 334,432 B — **81 % of what is left** — and reusing it is **not purely upstream**:
-> `crab_render` builds a fresh `DhSurface` every frame, so a dhancha-side cache saves crab nothing
-> without a matching crab change, and it lets `dh_surface_render` return the same surface twice, which
-> `src/render_test.cyr` can observe. The widget tree (~58 KB/frame) still needs an arena hook: the
-> stdlib ships `arena_new`/`arena_reset` documented for exactly this "per-frame reuse" pattern, but
-> dhancha allocates via plain `alloc()` at 19 sites, so crab cannot redirect it.
-> **This gate still blocks every milestone after M2** — a file manager that leaks 402 KiB per keypress
-> cannot ship a transfer tray that repaints continuously.
+> allocator has no `free`). Two of the three steps have landed:
+>
+> | | per frame |
+> |---|---:|
+> | baseline (dhancha 0.9.12) | 746,440 B |
+> | + step 1 (dhancha 0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
+> | + step 2 (dhancha 0.9.14 + crab) — the sadish render target, reused | **77,568 B** |
+>
+> ⚠ **NEITHER STEP WAS THE "one line" THIS FILE CLAIMED.** Step 1's naive form breaks dhancha's
+> `event_test` by downgrading `dh_surface_present`'s refusal code, so the allocation is deferred into
+> `dh_surface_pixels` instead. Step 2 was **not purely upstream**: `crab_render` was minting a fresh
+> `DhSurface` every call, so dhancha's per-DhSurface cache would have been discarded each frame —
+> crab now holds one surface for the session and takes it as a parameter. Both mutation-verified.
+> ⚠ Step 2 is a **contract change**: `dh_surface_render` may return the same surface twice.
+> ⛔ **The gate is NOT closed and the milestone ordering does not change.** What remains is the
+> **widget tree — ~236 records at 248 B, now 75 % of the frame** — plus crab's own ~19 KB of scratch.
+> Closing it needs **step 3, an arena hook in dhancha**: the stdlib ships `arena_new`/`arena_reset`
+> documented for exactly this "per-frame reuse" pattern, but dhancha allocates via plain `alloc()` at
+> 19 sites, so crab cannot redirect it.
+> ⚠ **The repaint rule stands.** 77,568 B at 60 Hz is 4.7 MB/s into an allocator with no `free()`.
+> ⭐ But the margin has changed: an element repainting a few times a minute is now clearly
+> affordable, where at 750 KB a frame it was not.
 
 ### M3 — A browser you would actually use (v0.7.0)
 
@@ -216,11 +223,16 @@ crab is a read-only browser. Enter on a file does nothing, silently.
 
 ### Documentation debt
 
-- `CLAUDE.md` still carries two `cyrius init` placeholders — the identity line and the whole `## Goal`
-  section. It has never been edited. *Deferral #23.*
-- `README.md` § Status has said **"Scaffold."** since before the dual-pane GUI shipped in 0.2.0, and
-  lists it under *Planned scope*. *Deferral #24.* It also still names the retired `anu` codename
-  (*#25*) and claims rekha TrueType rendering crab does not do (*#26*).
+- ✅ **CLOSED 2026-08-26 — `CLAUDE.md`'s two `cyrius init` placeholders are gone.** The identity line
+  and the `## Goal` section now carry the operator's wording. *Deferral #23.*
+- ✅ **CLOSED 2026-08-26 — `README.md` § Status.** It had said **"Scaffold."** since before the
+  dual-pane GUI shipped in 0.2.0, and listed that GUI under *Planned scope*. It now states what works,
+  what does not (read-only, fixed 380×220, keyboard-only, no AI arc), and defers every volatile number
+  to `state.md`. *Deferral #24.* The retired `anu` codename (*#25*) and the rekha TrueType claim
+  (*#26*) are corrected in the same pass — crab passes `font = 0` and draws with kashi's CP437 bitmap.
+  ⚠ **A third over-claim was found while writing it and is also fixed**: the draft said the panes had
+  "size and modified columns". They do not — a row is one LABEL holding a 13-char name plus `/` or a
+  size, and the mtime appears only in the status line. Real columns are M3.
 - `docs/architecture/` and `docs/adr/` are empty indexes. The ⛔ invariants live only in comments,
   which means they die with the line they annotate. *Deferral #28.*
 - `docs/examples/`, `docs/benchmarks.md`, `docs/audit/` — declared, absent, and two are v1.0

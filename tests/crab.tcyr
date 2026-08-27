@@ -71,7 +71,12 @@ fn t_render(w, h): i64 {
     # ⛔ THIS PASSED `rmt` FOR THE LEFT PANE UNTIL 0.5.0, so `lmt` was allocated, filled, and never
     # read — the two panes rendered from ONE mtime array. Both arrays hold the same value here, which
     # is exactly why it survived: the fixture could not tell the bug from the fix.
-    return crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
+    # ⚠ A FRESH SURFACE PER CALL, ON PURPOSE. Since dhancha 0.9.14 a DhSurface owns and reuses its
+    # sadish render target, so every caller of this helper that wants an independent picture needs its
+    # own surface. Sharing one here would make two `t_render()` results alias and any test comparing
+    # them would be comparing a frame with itself.
+    var surf = dh_surface_new(w, h);
+    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -233,6 +238,111 @@ fn main() {
     assert(t_streq(pdst, "abcdefg"), "...and leaves a valid, NUL-terminated prefix rather than a runaway");
     assert_eq(crab_strcpy_n(pdst, "x", 1), 0 - 1, "cap 1 holds only the NUL, so any content refuses");
     assert_eq(load8(pdst), 0, "...and that NUL is written inside the allocation");
+
+    # ================================================================
+    test_group("crab — 0.6.0: ONE surface, reused every frame, and reuse is pixel-identical");
+    # ================================================================
+    # ⛔⛔ WHAT THIS EXISTS TO GATE. `crab_render` used to mint its own `dh_surface_new` per call and
+    # dhancha allocated a fresh `sd_surface_new` inside every `dh_surface_render` — 334,432 B per
+    # frame into an allocator with **no `free()`**, retained for the life of the process. crab now
+    # holds ONE surface for the whole session (`src/main.cyr`) and dhancha 0.9.14 caches the render
+    # target on it. Measured: 746,440 -> 77,568 B per frame.
+    # ⚠ THE RISK THE SAVING BUYS is residue: a reused target is not zeroed between frames the way a
+    # fresh allocation is, so anything the new frame fails to paint shows the OLD frame through. That
+    # is invisible to every other assertion in this file, because they all read one frame.
+    # ⇒ Render a frame, keep a byte copy, render a DIFFERENT frame over it, render the first again,
+    # and compare all 334,400 bytes. Nothing short of a full-surface compare catches partial residue.
+    #
+    # ⛔⛔ AND THE OBVIOUS VERSION OF THIS TEST IS VACUOUS — MEASURED, NOT ASSUMED. Deleting
+    # `sd_clear` from dhancha's `dh_surface_render` does **not** fail anything below, because
+    # `crab_render` gives its root WINDOW an opaque `dh_theme_bg()` and lays it out at the full
+    # `w`x`h` — so crab's own tree repaints every pixel whether or not the toolkit cleared first.
+    # crab is immune to residue, and it is immune BY A PROPERTY OF ITS OWN UI, not by dhancha's clear.
+    # ⇒ So the sentinel check below pins THAT property directly: scribble a value over every byte and
+    # prove one render erases all of it. It asks "can residue survive?", not "who erased it".
+    # ⚠ MUTATION RESULTS, RECORDED BECAUSE THEY ARE COUNTER-INTUITIVE. The property has TWO
+    # independent guarantors — dhancha's `sd_clear` and crab's opaque full-window root — so removing
+    # EITHER ONE ALONE leaves this suite green:
+    #   · delete `sd_clear` from `dh_surface_render`  -> 45/45 pass (crab's root still covers)
+    #   · set crab's root to `bg = -1`                -> 45/45 pass (the clear still covers)
+    #   · delete BOTH                                 -> FAILS, 7,744 bytes survive the render
+    # That is the correct shape for a property test and NOT a weak one: it fires exactly when the
+    # property is broken and stays quiet while any mechanism still upholds it. ⛔ But it does mean
+    # **this file does not pin dhancha's clear** — that lives in dhancha's own `programs/draw_test.cyr`,
+    # against a tree deliberately built not to cover its surface. Do not read a green suite here as
+    # evidence the toolkit still clears.
+    var rw = 380;
+    var rh = 220;
+    var rsurf = dh_surface_new(rw, rh);
+    assert(rsurf != 0, "a session surface can be created");
+
+    var rl = alloc(16 * 64); var rr = alloc(16 * 64);
+    t_entry(rl, 0, "aethersafha", 0); t_entry(rl, 1, "puka", 0); t_entry(rl, 2, "crab", 0);
+    t_entry(rr, 0, "bin", 1);         t_entry(rr, 1, "boot", 1); t_entry(rr, 2, "readme.md", 0);
+    var rlz = alloc(16 * 8); var rrz = alloc(16 * 8);
+    var rlm = alloc(16 * 8); var rrm = alloc(16 * 8);
+    var ri = 0;
+    while (ri < 3) {
+        store64(rlz + ri * 8, 14995144 + ri); store64(rrz + ri * 8, 4096 + ri);
+        store64(rlm + ri * 8, 1783900800);    store64(rrm + ri * 8, 1783900800);
+        ri = ri + 1;
+    }
+    var ra = alloc(8); store64(ra, 0);
+    var rb = alloc(8); store64(rb, 0);
+
+    # Frame A: left pane active, selection 0.
+    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    assert(fa != 0, "frame A rendered into the caller's surface");
+    var nbytes = rw * rh * 4;
+    var snap = alloc(nbytes);
+    var apix = sd_surface_pixels(fa);
+    var bi = 0;
+    while (bi < nbytes) { store8(snap + bi, load8(apix + bi)); bi = bi + 1; }
+
+    # Frame B: the OTHER pane active, a different selection — a visibly different picture.
+    store64(ra, 0); store64(rb, 0);
+    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    assert_eq(fb, fa, "the surface hands back the SAME render target — this is the reuse");
+    var diff = 0;
+    bi = 0;
+    while (bi < nbytes) {
+        if (load8(apix + bi) != load8(snap + bi)) { diff = diff + 1; }
+        bi = bi + 1;
+    }
+    # ⚠ Guard the guard: if frame B looked identical to frame A the residue check below would pass
+    # vacuously, proving only that nothing was drawn.
+    assert(diff > 0, "frame B really does differ from frame A, so the residue check is not vacuous");
+
+    # Frame A again, into the same reused target. Every byte must match the snapshot.
+    store64(ra, 0); store64(rb, 0);
+    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    assert_eq(fa2, fa, "...still the same target on the third render");
+    var residue = 0;
+    bi = 0;
+    while (bi < nbytes) {
+        if (load8(apix + bi) != load8(snap + bi)) { residue = residue + 1; }
+        bi = bi + 1;
+    }
+    assert_eq(residue, 0, "re-rendering frame A into the REUSED target is byte-identical to the first");
+
+    # ⭐ THE SENTINEL: nothing that was in this buffer before a render survives it.
+    bi = 0;
+    while (bi < nbytes) { store8(apix + bi, 0x5A); bi = bi + 1; }
+    store64(ra, 0); store64(rb, 0);
+    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    var survived = 0;
+    bi = 0;
+    while (bi < nbytes) {
+        if (load8(apix + bi) != load8(snap + bi)) { survived = survived + 1; }
+        bi = bi + 1;
+    }
+    assert_eq(survived, 0, "a scribbled buffer is fully overpainted — crab's tree covers every pixel");
+
+    # ⚠ AND TWO SURFACES STILL GIVE TWO PICTURES — the escape hatch `src/render_test.cyr` depends on.
+    var rsurf2 = dh_surface_new(rw, rh);
+    store64(ra, 0); store64(rb, 0);
+    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
     return assert_summary();
 }

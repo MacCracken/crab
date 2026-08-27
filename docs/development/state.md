@@ -50,9 +50,9 @@ demands and the one this file broke twice.
 
 ## Source
 
-941 lines across five files.
+982 lines across five files.
 
-- `src/main.cyr` (394) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
+- `src/main.cyr` (407) — entry, **dhancha** client lifecycle (`dh_client_connect` / `dh_client_fd` /
   `dh_client_poll_event` / `dh_client_close`), the readdir+stat layer, the frame loop.
   ⛔ It does **not** open its own setu connection (since 0.4.8) and does **not** run its own
   `setu_poll_input` switch (since 0.4.12) — depending on the toolkit for pixels while bypassing it for
@@ -67,21 +67,25 @@ demands and the one this file broke twice.
   (which ends in `_entry()`, so including it would run the app). Nothing in `main.cyr` is reachable
   from the suite, and 0.5.0's P1 repair lived exactly there. A memory-safety fix that cannot be
   asserted on is a fix held on trust.
-- `src/ui.cyr` (309) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` (326) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
+  ⛔ **`crab_render` TAKES THE SURFACE, it does not create one** (step 2 of the allocation gate). It
+  used to call `dh_surface_new` per call, which threw away dhancha 0.9.14's per-DhSurface render-target
+  cache every frame. `w`/`h` are read back off the surface rather than passed, so they cannot disagree
+  with it. ⚠ The returned surface is **reused** — two frames at once need two surfaces.
   ⛔ `CRAB_ROWS_CAP = 7` is **gone** and deliberately not replaced by a bigger number — it was never a
   display limit, it made entries past the 7th unselectable.
   ⚠ **A row sets no background at all.** dhancha paints selection and focus from the list's own state;
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
-- `src/render_test.cyr` (134) — a standalone harness: renders the production surface at 380×220 and
+- `src/render_test.cyr` (145) — a standalone harness: renders the production surface at 380×220 and
   dumps BGRA to `build/crab-render.bin`, 10 `check()` assertions.
   ⛔ **It is not run by CI or by `cyrius test`** — see Known gaps.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
 ⚠ `cyrius coverage` reports **14/26 fns referenced (53 %)** — up from 23 % at 0.4.15, and still a
-floor rather than a correctness proof. `cyrius lint` is clean apart from 8 lines over 120 characters.
+floor rather than a correctness proof. `cyrius lint` is clean apart from **9** lines over 120 characters (8 in `main.cyr`, 1 in `ui.cyr` — re-derived 2026-08-26; this file said 8).
 
 ## Proven
 
@@ -149,7 +153,10 @@ so the bounded-join *refusal* path has host assertions only.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08-26**:
+Declared in `cyrius.cyml`. **Five of six are at their latest published tag as of 2026-08-26; dhancha
+is not** — `../dhancha` holds an uncommitted, untagged **0.9.14** (step 2 of the allocation gate) and
+`path` wins over `tag`, so the local build compiles 0.9.14 while the manifest declares 0.9.13. The tag
+is left behind deliberately; see the ⛔ at `[deps.dhancha]` in the manifest.
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
@@ -157,7 +164,7 @@ Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08
 | rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.13 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
+| dhancha | 0.9.13 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*` ⛔ **local tree is 0.9.14, unpublished** |
 | setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⭐ **dhancha 0.9.13 (2026-08-26) is the per-frame allocation fix** — `dh_surface_new` no longer
@@ -196,8 +203,15 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **37 passed / 0 failed** (was 11 at
-  0.4.15). Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render`
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **45 passed / 0 failed** (37 at 0.5.0,
+  11 at 0.4.15). The 8 added cover the reused render target: identity, frame independence over a full
+  334,400-byte compare, and a scribbled-sentinel coverage check.
+  ⛔ **The sentinel check has TWO independent guarantors and neither mutation alone fails it** —
+  deleting dhancha's `sd_clear` leaves it green (crab's opaque full-window root still covers), and
+  making crab's root transparent leaves it green (the clear still covers); **only removing both
+  fails**, at 7,744 surviving bytes. Measured, not assumed. ⇒ A green suite here is **not** evidence
+  that the toolkit still clears — that is pinned in dhancha's own `programs/draw_test.cyr`.
+  Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render`
   (`a == 255` and `c <= a` across all 83,600 pixels, with negative controls), plus 0.5.0's repairs:
   the bounded path helpers, the size ladder at every boundary, the date-formatter clamps, and the
   name-truncation marker.
@@ -207,7 +221,11 @@ separate change, not bundled into a version bump.
   `crab_row`'s loop in the harness and asserted on the copy, so deleting the marker from the
   production function left the suite green. It now drives the real `crab_row` through a real
   `dh_list`. A test that mirrors the code under test is measuring itself.
-- `src/render_test.cyr` — 10 further pixel assertions, mutation-proven against four regressions.
+- `src/render_test.cyr` — 11 further pixel assertions, mutation-proven against four regressions.
+  ⚠ It now creates **two** `DhSurface`s, on purpose: it holds two frames live (asserts on the first,
+  renders the second, then dumps the FIRST at the end), and since dhancha 0.9.14 one surface would
+  hand both renders the same target. The added `check(sds2 == sds, 0)` is the guard — without it, a
+  future regression to a shared target would silently make it dump the wrong picture.
   ⛔ **Never runs in CI or under `cyrius test`.**
 - `tests/crab.bcyr` — ⛔ benchmark **scaffold**: it times `bench_noop`, i.e. nothing about crab.
 - `tests/crab.fcyr` — ⛔ fuzz **scaffold**: `fuzz_main(data, len)` returns 0 without reading a byte
@@ -237,23 +255,35 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
 only what a cold start must know *before touching the code*; the roadmap is the full inventory.
 
-- ⛔ **Every frame allocates ~412 KB and nothing is ever freed — NARROWED, NOT CLOSED.** Reproduced
-  2026-08-26 with a host probe (`alloc_used()` deltas around five back-to-back `crab_render` calls at
-  380×220, 114 entries per pane): **746,440 B/frame**. ⭐ **dhancha 0.9.13 takes it to 412,040 B — a
-  44.8 % cut** by deferring `dh_surface_new`'s pixel buffer, which was allocated on every surface and
-  **never written and never read** by anything in the stack; that call is now 334,440 B → **40 B**.
-  ⚠ The ⛔ was "one line upstream" in two documents and it is not: storing 0 breaks dhancha's
-  `event_test` S) by downgrading `dh_surface_present`'s `_UNSUPPORTED` refusal to `_NO_SURFACE`.
-  Mutation-verified both ways.
-  ⛔ **What remains is `dh_surface_render`'s own `sd_surface_new` — 334,432 B, now 81 % of the frame
-  on its own — and it is NOT purely upstream.** A reused render target must outlive the frame, but
-  `crab_render` builds a fresh `DhSurface` every call (`src/ui.cyr`), so a dhancha-side cache saves
-  crab nothing without a matching crab change. It also makes `dh_surface_render` able to return the
-  same surface twice, which `src/render_test.cyr` can observe. ⇒ Operator decision.
-  ⚠ **The repaint rule is UNCHANGED by the fix.** **Do not add a continuously-repainting element**
-  (animation, progress bar, the idle mascot line) until the gate closes: 412,040 B at 60 Hz is still
-  24 MB/s, and the allocator still has no `free()`. Full measurement and the three-step fix in
-  [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
+- ⚠ **Every frame allocates ~78 KB and nothing is ever freed — 89.6 % NARROWED, still not closed.**
+  Reproduced and then re-measured with a host probe (`alloc_used()` deltas around five back-to-back
+  `crab_render` calls at 380×220, 114 entries per pane, into **one** surface):
+
+  | | per frame |
+  |---|---:|
+  | baseline (dhancha 0.9.12) | 746,440 B |
+  | + step 1 (dhancha 0.9.13) | 412,040 B |
+  | + step 2 (dhancha 0.9.14 + crab) | **77,568 B** |
+
+  **Step 1** deferred `dh_surface_new`'s pixel buffer, which was allocated on every surface and
+  **never written and never read** by anything in the stack. **Step 2** cached the sadish render
+  target on the DhSurface — ⛔ **and that half was NOT purely upstream**, contrary to what two
+  documents said: `crab_render` was minting a fresh `DhSurface` every call, so a per-DhSurface cache
+  would have been thrown away each frame. crab now holds **one surface for the session**
+  (`src/main.cyr`) and `crab_render` takes it as a parameter, reading `w`/`h` back off it — 18 → 17
+  parameters, shorter for gaining one.
+  ⚠ **Step 2 is a CONTRACT CHANGE**: `dh_surface_render` may now return the same surface twice. A
+  caller wanting two frames at once needs two `DhSurface`s; `src/render_test.cyr` is exactly that
+  caller and creates two, guarded by `check(sds2 == sds, 0)`.
+  ⚠ Neither step was "one line", which the roadmap and the architecture note both claimed.
+  ⛔ **What remains is the widget tree — ~236 records at 248 B, now 75 % of the frame** — plus crab's
+  own ~19 KB of row/status scratch (was under 5 % of the problem, now roughly a quarter). Closing it
+  needs an arena hook in dhancha; the stdlib ships `arena_new`/`arena_reset` for exactly this, but
+  dhancha allocates via plain `alloc()` at 19 sites.
+  ⚠ **The repaint rule still stands.** 77,568 B at 60 Hz is 4.7 MB/s into an allocator with no
+  `free()` — the rule was never about the factor. ⭐ What changed is the margin: an element repainting
+  a few times a minute is now clearly affordable, where at 750 KB a frame it was not. Full measurement
+  in [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
 - ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI**, and CI **never builds
   `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is
   uncompiled by the gate. CI also runs no fuzz, bench, lint, `fmt --check`, vet, deny or coverage.
@@ -266,10 +296,15 @@ only what a cold start must know *before touching the code*; the roadmap is the 
 - ⚠ **The window is a compile-time 380×220 and crab is keyboard-only.** `WINDOW_CONFIGURE` is decoded
   by dhancha and dropped on the floor; the eight pointer event kinds dhancha synthesizes are all
   ignored. (Roadmap M2.)
-- ⚠ `CLAUDE.md` still carries two `cyrius init` placeholders (the identity line and the whole `## Goal`
-  section), and `README.md` § Status has said **"Scaffold."** since before the dual-pane GUI shipped
-  in 0.2.0. The README also still names the retired `anu` codename and claims rekha TrueType text crab
-  does not render.
+- ✅ **CLOSED 2026-08-26 — the `cyrius init` placeholders and the stale README.** `CLAUDE.md` now
+  carries a real identity line and `## Goal`; `README.md` § Status no longer says **"Scaffold."** (it
+  had, since before the dual-pane GUI shipped in 0.2.0) and no longer lists that GUI under *Planned
+  scope*. The retired `anu` codename and the rekha-TrueType claim are corrected — crab passes
+  `font = 0` and draws with kashi's CP437 8×16 bitmap, calling no `rekha_*` function.
+  ⚠ **The README's own replacement text over-claimed once before it landed** and was corrected against
+  the code: there are **no per-row SIZE/MODIFIED columns**. A row is a single LABEL — 13-char name
+  (truncation marked `~`) plus `/` for a directory or a size for a file — and the mtime appears only in
+  the status line. Columns with headers are M3, gated on a dhancha table widget.
 
 ## Consumers
 

@@ -1,14 +1,24 @@
 # 001 — Every frame allocates, and nothing is ever freed
 
 **Measured**: 2026-08-26, against crab 0.5.0 and dhancha 0.9.12.
-**Re-measured**: 2026-08-26, against dhancha **0.9.13** — step 1 below is DONE.
+**Re-measured**: 2026-08-26, against dhancha **0.9.14** + crab's hoisted surface — steps 1 and 2 are DONE.
 
-> ⭐ **Step 1 has landed upstream (dhancha 0.9.13) and the per-frame cost is down 44.8 %:
-> 746,440 B → 412,040 B.** `dh_surface_new` went from 334,440 B to **40 B**. Steps 2 and 3 are
-> untouched, so the gate is *narrowed, not closed* — 412 KB per keypress is still unreclaimed, and
-> the "do not add a continuously-repainting element" rule below still stands (24 MB/s at 60 Hz).
-> ⚠ Step 1 was **not** the one-line change this document called it — see the correction under
-> "What the fix looks like".
+> ⭐ **Steps 1 and 2 have landed and the per-frame cost is down 89.6 %: 746,440 B → 77,568 B.**
+>
+> | | per frame | note |
+> |---|---:|---|
+> | baseline (dhancha 0.9.12) | 746,440 B | |
+> | after step 1 (dhancha 0.9.13) | 412,040 B | `dh_surface_new`'s dead pixel buffer, deferred |
+> | after step 2 (dhancha 0.9.14 + crab) | **77,568 B** | the sadish render target, reused |
+>
+> ⚠ **The gate is still not closed.** What remains is the widget tree — ~236 records rebuilt every
+> frame — and crab's own row/status scratch, and the allocator still has **no `free()`**, so 77,568 B
+> per frame is still permanent growth. At 60 Hz it is **4.7 MB/s**, down from 45 MB/s. Step 3 (an
+> arena hook in dhancha) is what closes it.
+> ⚠ Step 2 also cost a **one-time 334,544 B**: the first frame still allocates the render target. It
+> is paid once per surface for the life of the process, not once per frame.
+> ⛔ Two claims this document made and got wrong are corrected below: step 1 was **not** "one line",
+> and step 2 was **not** purely upstream.
 
 ## The invariant
 
@@ -30,37 +40,37 @@ Measured with a host probe calling the production `crab_render` at 380×220 with
 (the real iron count for `/`, recorded in `src/main.cyr`):
 
 ```
-frame delta bytes: 412152
-frame delta bytes: 412040
-frame delta bytes: 412040
-frame delta bytes: 412040
-frame delta bytes: 412040
-total over 5 frames: 2060312
+frame delta bytes: 412112      <- frame 1 pays the one-time render target
+frame delta bytes: 77568
+frame delta bytes: 77568
+frame delta bytes: 77568
+frame delta bytes: 77568
 ```
 
-**412,040 B per frame**, against **746,440 B** before dhancha 0.9.13. Where it goes now:
+**77,568 B per steady-state frame**, against **746,440 B** before dhancha 0.9.13. Where it goes now:
 
 | item | bytes | note |
 |---|---:|---|
-| `dh_surface_new` pixel buffer | ~~334,440~~ **40** | ✅ **fixed in dhancha 0.9.13** — deferred to `dh_surface_pixels`, which nothing calls |
-| `sd_surface_new` inside `dh_surface_render` | 334,432 | the real render target — **step 2, still open** |
-| ~236 widget records @ 248 B | 58,528 | root, panes, columns, headers, lists, 228 rows — **step 3, still open** |
+| `dh_surface_new` pixel buffer | ~~334,440~~ **0** | ✅ **fixed, dhancha 0.9.13** — deferred to `dh_surface_pixels`, which nothing calls |
+| `sd_surface_new` inside `dh_surface_render` | ~~334,432~~ **0 per frame** | ✅ **fixed, dhancha 0.9.14 + crab** — cached on the DhSurface, which crab now holds for the session. Still 334,432 B **once**. |
+| ~236 widget records @ 248 B | 58,528 | **step 3, still open** — 75 % of what is left |
 | crab's own row/status scratch | ~19,000 | `disp`, size strings, `crab_u2s` temporaries |
 
 ⚠ **The original figure in this document was 749,704 B and the reproduction measured 746,440 B.** The
 3,264 B gap is fixture-dependent — entry-name lengths and the file/directory mix change how much row
 and status scratch each frame allocates — not a change in the code. **The two pixel buffers reproduce
 to the byte** (334,440 and 334,432), which is the part the conclusion rests on. The probe is
-`alloc_used()` deltas around five back-to-back `crab_render` calls at 380x220, 114 entries per pane.
+`alloc_used()` deltas around five back-to-back `crab_render` calls at 380x220, 114 entries per pane,
+into **one** surface — the same lifetime `src/main.cyr` uses.
 
-⛔ **`sd_surface_new` is now 81 % of what remains**, so step 2 is no longer a secondary item — it is
-almost the whole problem.
+⛔ **The widget tree is now 75 % of the frame**, so step 3 is what the remaining work is.
 
 **Before 0.9.13, 89 % of it was two full-size pixel buffers, and one of them was pure waste.**
-`dh_surface_new` (`lib/dhancha.cyr:2167`) did `alloc(40)` then `alloc(w*h*4)` and stored the buffer at
-`DH_S_PIXELS` — but `dh_surface_render` (`:2468`) ignores it entirely and allocates its own
-`sd_surface_new(w, h)` to draw into. Nothing ever touched the first buffer. **That half is gone**;
-the second buffer remains, and is now 81 % of the frame on its own.
+`dh_surface_new` did `alloc(40)` then `alloc(w*h*4)` and stored the buffer at `DH_S_PIXELS` — but
+`dh_surface_render` ignored it entirely and allocated its own `sd_surface_new(w, h)` to draw into.
+Nothing ever touched the first buffer. **Both are now gone from the per-frame path**: the first is
+allocated only if someone asks for it (0.9.13), the second is allocated once per DhSurface and reused
+(0.9.14). Together they were the 89 %, and the measurement bears that out — 746,440 → 77,568 B.
 
 ## Why it has not bitten yet, and when it will
 
@@ -71,7 +81,7 @@ terminated itself after about two seconds of spinning, which capped the damage b
 Two roadmap items remove that accident:
 
 - **M2's self-redraw** — the idle mascot line, transfer progress and index progress all repaint
-  *without* input. At 60 Hz, 412,040 B/frame is **24 MB/s** (it was 45 MB/s before 0.9.13).
+  *without* input. At 60 Hz, 77,568 B/frame is **4.7 MB/s** — down from 45 MB/s, and still unbounded.
 - **M4's transfer tray** — repaints continuously for the duration of a copy.
 
 There is a second, smaller leak on the same footing: `dh_setu_poll_event` (`lib/dhancha.cyr:2646`)
@@ -99,32 +109,43 @@ steps, roughly in value order:
    Mutation-verified: the naive variant fails `event_test` with exit 1.
    ⚠ A "one-line upstream fix" that a test in the upstream repo rejects is the shape of estimate that
    gets made from reading the caller and not the callee's suite.
-2. **Let `dh_surface_render` reuse a surface** rather than allocating a new `sd_surface` per call.
-   ⛔ **THIS IS NOT PURELY UPSTREAM, CONTRARY TO THE HEADING ABOVE.** A reused render target has to
-   hang off something that outlives the frame, and the natural home is the `DhSurface` — but
-   **`crab_render` builds a fresh `DhSurface` every frame** (`src/ui.cyr`, `dh_surface_new(w, h)`
-   just before the layout pass), so a dhancha-side cache keyed on the surface would save crab
-   **nothing**. Closing step 2 needs a matching crab change: hold one `DhSurface` across frames and
-   render into it. It also changes `dh_surface_render`'s contract from *returns a fresh surface* to
-   *may return the same surface as last time*, which a caller comparing two renders can observe —
-   crab's own `src/render_test.cyr` renders twice and dumps the first. ⇒ Operator decision, not a
-   drive-by.
+2. ✅ **DONE (dhancha 0.9.14 + crab) — `dh_surface_render` reuses its render target.** Measured
+   412,040 → **77,568 B/frame**. The target is cached on the `DhSurface` (`DH_S_SDS` at +40; the
+   struct grew 40 → 48 bytes) and reused whenever the dimensions still match.
+   ⛔ **AND IT WAS NOT PURELY UPSTREAM, WHICH THIS DOCUMENT ASSERTED.** A cached target has to hang
+   off something that outlives the frame, and `crab_render` was calling `dh_surface_new` **itself,
+   once per call** — so a cache on the DhSurface would have been thrown away every frame and saved
+   crab exactly nothing. The dhancha change is inert without the crab half. crab now creates **one
+   surface for the session** in `src/main.cyr` and passes it in; `crab_render` takes `surf` and reads
+   `w`/`h` back off it, so the signature got *shorter* (18 → 17 parameters) for gaining one.
+   ⚠ **It is a real contract change**: `dh_surface_render` used to return a fresh surface every call
+   and now returns the same one. A caller wanting two frames at once needs two `DhSurface`s —
+   `src/render_test.cyr` is exactly that caller and now creates two, with a `check(sds2 == sds, 0)`
+   guard so a future regression to a shared target cannot pass silently.
+   ⚠ Resize abandons the old target rather than freeing it (there is nothing to free with), so a
+   resize costs one screenful once. That is the right trade against one per frame.
+
 3. **Give dhancha an arena hook.** The stdlib already ships `arena_new` / `arena_alloc` /
    `arena_reset` (`lib/alloc.cyr:370-540`) documented for exactly this *"per-frame / per-emission
    reuse"* pattern — `arena_reset` is a bump-back-to-base with no free list. A widget tree built into
    a per-frame arena and reset each frame costs nothing to reclaim.
 
 crab's own share (~19 KB/frame) is fixable locally by hoisting the row and status scratch buffers out
-of the render path, but it is under 5 % of the problem and doing it first would be optimising the
-wrong end.
+of the render path. ⚠ **It was under 5 % of the problem and is now roughly a quarter of it** — the two
+pixel buffers were so much larger that everything else rounded to noise. It is still second to the
+widget tree (75 %), but it is no longer negligible.
 
 ## What a reader should take from this
 
 - **Do not add a continuously-repainting element** — an animation, a progress bar, a clock — until
-  the dhancha gate is closed. It will work in QEMU and exhaust memory on iron. ⚠ **Step 1 landing
-  does not lift this.** 412,040 B/frame at 60 Hz is still 24 MB/s; the rule was never about the
-  factor, it was about the absence of `free()`.
+  the dhancha gate is closed. It will work in QEMU and exhaust memory on iron. ⚠ **Steps 1 and 2
+  landing do not lift this.** 77,568 B/frame at 60 Hz is 4.7 MB/s, and the allocator still has no
+  `free()`, so the growth is still unbounded — the rule was never about the factor. ⭐ What HAS
+  changed is the margin: an element that repaints a few times a minute is now clearly affordable,
+  where at 750 KB a frame it was not.
 - **Do not "fix" this in crab** by caching the widget tree. Rebuilding it every frame is what makes
   the scroll-offset round-trip and the toolkit-owned selection work; the 0.4.10 port depends on it.
+  ⚠ Note this is about the **widget tree**, not the surface — hoisting the *surface* out of the frame
+  is exactly what step 2 did, and it is safe precisely because a surface carries no per-frame state.
 - The gate is tracked in [`../development/roadmap.md`](../development/roadmap.md) M2 and blocks every
   milestone after it.

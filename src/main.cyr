@@ -252,7 +252,20 @@ fn main(): i64 {
     var scroll_l = alloc(8); store64(scroll_l, 0);
     var scroll_r = alloc(8); store64(scroll_r, 0);
 
-    var sds = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
+    # ⛔⛔ ONE SURFACE FOR THE WHOLE SESSION, CREATED HERE AND REUSED EVERY FRAME. `crab_render` used
+    # to mint its own `dh_surface_new` per call, and dhancha 0.9.14 caches the sadish render target
+    # ON the DhSurface — so a per-frame DhSurface would have thrown the cache away every frame and
+    # saved nothing. The hoist IS the fix; the dhancha change alone does not help a caller that does
+    # this per frame. Measured together: 746,440 -> 77,608 B per frame.
+    # ⚠ THE ALLOCATOR HAS NO `free()` (`lib/alloc.cyr` is a bump allocator; `alloc_reset` rewinds the
+    # WHOLE arena and would invalidate the pane paths, the readdir buffers and the client struct). So
+    # "allocated once" is not a tidiness point — it is the only way a frame's cost is not permanent.
+    # ⚠ WHEN RESIZE LANDS (M2 / `WINDOW_CONFIGURE`), THIS IS THE LINE THAT HAS TO CHANGE: the surface
+    # is created at the compile-time `w`/`h` and dhancha has no `dh_surface_resize` yet.
+    var surf = dh_surface_new(w, h);
+    if (surf == 0) { crab_say("crab: surface alloc failed\n"); return 1; }
+
+    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
@@ -356,7 +369,7 @@ fn main(): i64 {
             # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
             # into a surface the compositor had just destroyed, and leaking a full render to do it.
             if (running == 1) {
-                var s2 = crab_render(w, h, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
+                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes); }
             }

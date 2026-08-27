@@ -65,7 +65,13 @@ fn main(): i64 {
     var w = 380; var h = 220;
     var sl = alloc(8); store64(sl, 0);
     var sr = alloc(8); store64(sr, 0);
-    var sds = crab_render(w, h, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr);
+    # ⛔ TWO SURFACES, DELIBERATELY. Since dhancha 0.9.14 a DhSurface owns and REUSES its sadish
+    # render target, so two renders into one surface return the same object and the second overwrites
+    # the first. This harness holds BOTH frames live — it asserts on `sds`, then renders `sds2` and
+    # asserts on that, and then dumps `sds` at the very end, AFTER `sds2` exists. One shared target
+    # would make the dump show the wrong picture, silently.
+    var surf1 = dh_surface_new(w, h);
+    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr);
 
     # ---- the ACTIVE pane's selection is accented, the inactive pane's is muted --------------
     # ⛔ THE ONE QUESTION A TWO-PANE FILE MANAGER MUST ANSWER ON SCREEN: which pane do my arrow keys
@@ -103,7 +109,12 @@ fn main(): i64 {
     # selected at all, and with a non-scrolling box it would be laid out below the viewport.
     var s2 = alloc(8); store64(s2, 0);
     var s3 = alloc(8); store64(s3, 0);
-    var sds2 = crab_render(w, h, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3);
+    var surf2 = dh_surface_new(w, h);
+    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3);
+    # ⚠ AND THE TWO REALLY ARE DISTINCT — the guard on the paragraph above. If a future change made
+    # `crab_render` share one target again, every assertion below would silently be reading `sds2`
+    # while the checks above had already passed against a picture that no longer exists.
+    check(sds2 == sds, 0);
     # ⚠ THE SCROLL OFFSET IS NONZERO — the proof that the list moved rather than silently truncating.
     check(load64(s2) > 0, 1);
     # ...and the accented selection is visible SOMEWHERE inside the pane's viewport.

@@ -1,8 +1,11 @@
 # crab 🦀
 
 **Sovereign Cyrius-native file manager for AGNOS.** A dual-pane GUI file browser
-on the native desktop stack, with AI-native organization backed by the same
-sovereign memory substrate the rest of the desktop rides.
+on the native desktop stack.
+
+⚠ The AI-native organization crab is *designed* around — semantic find, auto-tag and dedup on the
+same sovereign memory substrate the rest of the desktop rides — is a **design target and is not
+shipped**. Nothing in this README's § Architecture is a capability claim; § Status is.
 
 Written in [Cyrius](https://github.com/MacCracken/cyrius).
 
@@ -33,9 +36,9 @@ an idle-pane / `crab --about` deadpan roll-call, *"Bueller?… Bueller?…"* —
 crab is another **view onto the sovereign memory layer**, not app-with-its-own-AI:
 
 - **Dual-pane GUI** on the native desktop stack — `dhancha` (toolkit: widgets,
-  flexbox layout, events) drawing via `sadish` (2D vector) + `rekha` (TrueType
-  text), presented through `setu` to the `aethersafha` compositor. Same seam
-  `puka` (the terminal) uses — crab is another resident, not new plumbing.
+  flexbox layout, events) drawing via `sadish` (2D vector), presented through
+  `setu` to the `aethersafha` compositor. Same seam `puka` (the terminal) uses —
+  crab is another resident, not new plumbing.
   > ⛔ **Corrected 2026-08-03 — "the seam puka PROVED" is withdrawn, and the TCP transport is
   > RETIRED.** Two separate things, kept separate:
   > - **The withdrawal.** setu's transport was TCP on loopback:7700. **Before `net_src_for`
@@ -52,7 +55,22 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   >
   > The retirement is **architectural, not a failure verdict**: a local display protocol has
   > nothing to route, nothing to checksum, no window to negotiate, and no business owning a port.
-  > Replacement is the agnos socket (`anu`), agnos `docs/development/planning/ipc.md` §9/§10.
+  > The replacement is the agnos **channel band** — syscall **`#97 chan_op`**, `VFS_CHAN = 11`,
+  > kernel prefix `chan_*` (agnos `docs/development/planning/ipc.md` §9/§10). crab dials nothing:
+  > the compositor mints a channel, endows one end and spawns crab already connected, and
+  > `setu_connect` reads `AGNOS_CHAN`.
+  > ⛔ **This paragraph said "the agnos socket (`anu`)" until 2026-08-26. THE CODENAME IS RETIRED** —
+  > operator ruling 2026-08-05, *"a name is a distribution fact"*: a band that only ever appears as a
+  > prefix inside one kernel has no repo boundary to cross. **`anu` resolves to nothing in the
+  > kernel**, so a reader who searched for it found nothing and had no way to tell whether they were
+  > misreading the code or the document.
+
+  ⛔ **And separately, corrected 2026-08-26 — the text crab draws is `kashi`'s CP437 8×16 BITMAP
+  font, not `rekha` TrueType.** The bullet above named rekha as something crab drew with; it never
+  did. crab passes `font = 0` to `dh_draw_text`, which is dhancha's kashi bitmap path, and calls
+  **no `rekha_*` function anywhere**. ⚠ rekha remains a declared dependency (dhancha's `dist` bundle
+  references its symbols), and proportional text is a real roadmap item — **M5, gated on rekha plus
+  dhancha font plumbing**. It is not what ships.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to
@@ -61,20 +79,58 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
 
 ## Status
 
-**Scaffold.** Roadmap **Priority 1 — ship before beta** (agnosticos
-`docs/development/planning/roadmap.md` § File Manager). Retires the third-party
-interim (`yazi` TUI + Thunar GTK) that was never a first-party project.
+**Shipping, and read-only.**
 
-Planned scope: dual-pane GUI, thumbnail preview, batch rename, AI via the daimon
-vector store.
+⛔ **This section said "Scaffold." until 2026-08-26, and listed the dual-pane GUI under *Planned
+scope* — both false since 0.2.0 (2026-07-10), fifteen releases earlier.** It is called out rather
+than quietly overwritten because the README is the first thing a newcomer reads, and a status line
+that under-claims by fifteen releases is as misleading as one that over-claims.
+
+⭐ **Version, binary sizes, test counts and dependency versions are deliberately NOT here** — inlined
+state rots, and this repo has watched it happen twice. They live in
+[`docs/development/state.md`](docs/development/state.md), refreshed every release. **Picking the work
+up cold? Read [`docs/development/handoff.md`](docs/development/handoff.md) first** — what is verified
+versus merely built, the open items, and the hazards.
+
+**What works today**: two panes over real `readdir` + `stat`; keyboard navigation — switch pane,
+move the selection, Enter to descend, Backspace to ascend — on a scrolling `dh_list`. Each row is a
+**single line**: a 13-character name column (truncation marked with `~`) followed by `/` for a
+directory or a human-readable size for a file. The **status line** carries the active selection's
+name, size and modified date. ⚠ There are **no real columns and no headers** — NAME · SIZE · MODIFIED
+is roadmap M3, gated on a dhancha table widget — and no row shows a date. crab connects to the
+`aethersafha` compositor through `setu` and
+presents on a real agnos kernel, observed under QEMU at `-smp 4`.
+
+⚠ **crab has also run on iron, and both times it found a defect QEMU never reproduced** — an orphaned
+window holding one of only sixteen system-wide GPU buffer slots, and a directory listing that dropped
+82 of 114 entries in silence. QEMU is not a control for timing- or pressure-dependent behaviour.
+
+**What does not**:
+
+- **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
+  all, silently. (Roadmap M4.)
+- **The window is a compile-time 380×220 and crab is keyboard-only.** Resize is decoded by the
+  toolkit and dropped; every pointer event is ignored. (Roadmap M2.)
+- **None of the AI arc exists.** No index, no tags, no semantic find, no dedup — and `cyrius.cyml`
+  declares no daimon dependency. (Roadmap M7–M8.)
+
+Roadmap **Priority 1 — ship before beta** (agnosticos
+`docs/development/planning/roadmap.md` § File Manager). Retires the third-party
+interim (`yazi` TUI + Thunar GTK) that was never a first-party project. The eight milestones from
+here to 1.0 are sequenced in [`docs/development/roadmap.md`](docs/development/roadmap.md).
 
 ## Build
 
 ```sh
-cyrius deps                              # resolve stdlib deps
-cyrius build src/main.cyr build/crab     # compile
-cyrius test                              # run [build].test + tests/*.tcyr
+cyrius deps                                          # resolve stdlib + sibling deps
+cyrius build src/main.cyr build/crab                 # compile for the host
+cyrius build --agnos src/main.cyr build/crab_agnos   # for AGNOS — the real target
+cyrius test                                          # run [build].test + tests/*.tcyr
 ```
+
+⚠ **The host build is the convenience target, not the product.** Every `#ifdef CYRIUS_TARGET_AGNOS`
+region — the whole event loop included — is uncompiled without `--agnos`, and no host test can see
+it.
 
 ## License
 

@@ -1,7 +1,7 @@
-# Handoff — 0.5.0 is shipped. **dhancha 0.9.13 is published and consumed; crab's side is uncommitted.**
+# Handoff — 0.5.0 is shipped. **The allocation gate is 89.6 % closed; dhancha 0.9.14 is uncommitted.**
 
 > **Written 2026-08-26, at 0.5.0. Updated 2026-08-26** after the first cut at the dhancha per-frame
-> allocation gate, and again once dhancha 0.9.13 was published. Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
+> allocation gate, again once dhancha 0.9.13 was published, and again after step 2 landed. Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
 >
 > ⚠ **Refresh or delete this file when the next release ships. A stale handoff is worse than none.**
@@ -15,75 +15,104 @@
 
 | | |
 |---|---|
-| Version | **0.5.0**, committed as `cbac9d8 repair release`. ⚠ Working tree is **NOT** clean — `CLAUDE.md`, `cyrius.cyml`, `cyrius.lock`, `lib/dhancha.cyr` and four docs carry the gate work below. |
+| Version | **0.5.0** at `19c6e8c docs`. ⚠ Working trees are **NOT** clean in **either repo** — crab carries step 2 plus the README pass; `../dhancha` carries an untagged 0.9.14. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,536 B** · `--agnos` **381,592 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius tests` **37 / 0** · fuzz PASS · bench PASS · vet 0 untrusted · deny 0 · fmt clean |
+| Build | x86_64 **381,568 B** · `--agnos` **381,632 B** · `--win` fails (pre-existing, not crab's) |
+| Tests | `cyrius test` **45 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) · fmt clean |
 | Coverage | **14/26 fns (53 %)** — reference coverage, a floor not a proof |
-| Source | 941 lines: `main.cyr` 394 · `ui.cyr` 309 · `render_test.cyr` 134 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.13** · setu 0.8.7 — all six at their latest published tag |
-| Mid-arc work | ⚠ **Step 1 of the allocation gate is done and consumed** — see below. dhancha 0.9.13 is committed (`c273159`) and tagged; **crab's own working tree is not committed**. Next slot is still **M2 (v0.6.0)**. |
+| Source | 982 lines: `main.cyr` 407 · `ui.cyr` 326 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.13 declared, 0.9.14 compiled (unpublished)** · setu 0.8.7 |
+| Mid-arc work | ⛔ **YES.** Steps 1 and 2 of the allocation gate are done and measured; **dhancha 0.9.14 is uncommitted and untagged**, and crab compiles against it via `path`. Next slot is still **M2 (v0.6.0)**. |
 
 ---
 
-## Step 1 of the allocation gate — done, measured, and consumed
-
-**dhancha 0.9.13** (`c273159`, tagged and on the remote): `dh_surface_new` no longer allocates a
-`w*h*4` pixel buffer that nothing in the stack ever wrote or read.
+## ⛔ The allocation gate — steps 1 and 2 done, step 3 open, and half of it is uncommitted
 
 | | per `crab_render` frame |
 |---|---:|
-| before (dhancha 0.9.12) | **746,440 B** |
-| after (dhancha 0.9.13) | **412,040 B** |
-| saved | **334,400 B — 44.8 %** |
+| baseline (dhancha 0.9.12) | **746,440 B** |
+| + step 1 (dhancha 0.9.13, published `c273159`) | **412,040 B** |
+| + step 2 (dhancha **0.9.14, UNCOMMITTED** + crab) | **77,568 B** |
+| total | **−89.6 %** |
 
 Measured with a host probe taking `alloc_used()` deltas around five back-to-back `crab_render` calls
-at 380×220 with 114 entries per pane. `dh_surface_new(380,220)` itself: 334,440 B → **40 B**.
+at 380×220 with 114 entries per pane, into **one** surface — the lifetime `src/main.cyr` now uses.
 
-**Verified**: dhancha 10/10 `programs/*_test.cyr`, crab `cyrius test` 37/0, `src/render_test.cyr`
-0 failed checks, host and `--agnos` both build at unchanged sizes (381,536 / 381,592 B).
+**Step 1** — `dh_surface_new` no longer allocates a `w*h*4` pixel buffer that nothing in the stack
+ever wrote or read; the allocation is deferred into `dh_surface_pixels`. ⚠ Not "one line": storing 0
+breaks dhancha's `event_test` by downgrading `dh_surface_present`'s `_UNSUPPORTED` refusal to
+`_NO_SURFACE`. Mutation-verified.
 
-⚠ **It was NOT the "one line" three documents called it.** Storing 0 at `DH_S_PIXELS` breaks dhancha's
-`programs/event_test.cyr` S): `dh_surface_present` returns `_NO_SURFACE` when pixels are 0 and
-`_UNSUPPORTED` otherwise, so a permanently-zero field silently downgrades 0.9.5's "refuse loudly and
-diagnosably" contract into "bad surface". The shipped fix **defers** the allocation into
-`dh_surface_pixels` (allocate on first call, cache), so any external holder of the published accessor
-still gets an owned `w*h*4` buffer. Mutation-verified both ways: the naive variant exits 1.
+**Step 2** — `dh_surface_render` caches its sadish render target on the `DhSurface` (`DH_S_SDS` at
++40; the struct grew 40 → 48 B) and reuses it. ⛔ **This half was NOT purely upstream**, contrary to
+what two documents said: `crab_render` was minting a fresh `DhSurface` **every call**, so a
+per-DhSurface cache would have been thrown away each frame and saved crab nothing. crab now creates
+**one surface for the session** in `src/main.cyr` and passes it in; `crab_render` reads `w`/`h` back
+off the surface, so the signature went **18 → 17 parameters** for gaining one, and `w`/`h` can no
+longer disagree with the surface they describe.
 
-⭐ **The `path`-vs-`tag` check was done properly for once, and the fourth step is the one that matters.**
-`[deps.dhancha]` carries both `path` and `tag`, and `path` wins — so before moving the tag: sibling
-`VERSION` = 0.9.13; `git rev-parse 0.9.13` == HEAD, tree clean; `git ls-remote --tags` shows the tag at
-that commit; **and `path` was temporarily disabled so `cyrius deps` actually cloned the tag** — the
-resulting `lib/dhancha.cyr` had the identical SHA-256 (`0972d27b…`) as the `path` build. ⚠ Only that
-fourth step would have caught 0.4.13's manifest naming a library the build never compiled; the first
-three would all have passed it. **Deferral #19 (automate this) is still open** — this is the recipe.
+⚠ **Step 2 IS A CONTRACT CHANGE.** `dh_surface_render` used to return a fresh surface every call and
+now returns the same one. A caller wanting two frames at once needs two `DhSurface`s.
+`src/render_test.cyr` is exactly that caller — it asserts on frame 1, renders frame 2, then dumps
+frame 1 — so it now creates two, guarded by `check(sds2 == sds, 0)`.
 
-⚠ **`lib/` is tracked**, so `cyrius deps` re-vendored the new bundle into `lib/dhancha.cyr` (+43/−8)
-and `cyrius.lock` records its new hash. That is the tool's output, not a hand-edit of `lib/`.
+**Verified**: dhancha 10/10 `programs/*_test.cyr` (lint + fmt clean across `src/` and `programs/`),
+crab `cyrius test` **45/0**, `render_test` 0 failed checks, host **381,568 B** and `--agnos`
+**381,632 B**. No new lines over 120 chars (still 9 across `src/`, unchanged from HEAD).
 
-### ⚠ The gate is NARROWED, NOT CLOSED — the M2-onward ordering does not move
+### ⛔ Two things must happen together, and one is a trap
 
-1. **`dh_surface_render`'s own `sd_surface_new` — 334,432 B, now 81 % of the frame.** ⛔ **This one is
-   NOT purely upstream**, contrary to what `docs/architecture/001` said before today. A reused render
-   target has to outlive the frame, and `crab_render` builds a **fresh `DhSurface` every call**
-   (`src/ui.cyr`), so a dhancha-side cache keyed on the surface would save crab nothing. Closing it
-   needs a matching crab change, and it changes `dh_surface_render`'s contract from *returns a fresh
-   surface* to *may return the same surface twice* — which `src/render_test.cyr` (two renders, dumps
-   the first) can observe. **Operator decision, not a drive-by.**
-2. **The widget tree, ~58 KB/frame** (~236 records @ 248 B) — needs dhancha to take an arena hook.
-3. **crab's own scratch, ~19 KB/frame** — local, and under 5 % of the problem.
+1. **Commit and tag dhancha 0.9.14**, then bump crab's `[deps.dhancha] tag` to `0.9.14`.
+   `path` wins over `tag`, so **the local build already compiles 0.9.14 while the manifest declares
+   0.9.13**. The tag is left behind on purpose — an unpublished tag fails CI loudly, whereas the
+   alternative is CI silently resolving a different library than the local tree. There is a ⛔ block
+   at the tag in `cyrius.cyml`.
+   ⭐ When the tag moves, re-run the **four-way** check: sibling `VERSION`; `git rev-parse <tag>` ==
+   HEAD; `git ls-remote --tags`; **and disable `path` so `cyrius deps` actually resolves the tag**,
+   comparing `lib/dhancha.cyr`'s SHA-256. Only the fourth would have caught 0.4.13's manifest naming
+   a library the build never compiled. Deferral #19 (automate it) is still open; this is the recipe.
+2. ⛔ **`cyrius distlib` MUST be followed by `sh scripts/sync-deps-sidecar.sh` in dhancha.** distlib
+   rewrites `dist/dhancha.deps` and re-adds `kashi_font_data`, which is VENDORED, not stdlib — every
+   consumer then hard-fails `cyrius deps` with *"dep dhancha requires 'kashi_font_data' but it is not
+   in the cyrius stdlib"*. I hit this mid-session by running distlib alone. dhancha's CI gates it;
+   a local run does not.
 
-⚠ **Do not add a continuously-repainting element yet.** 412,040 B at 60 Hz is still 24 MB/s into an
-allocator with no `free()`. The rule was never about the factor.
+### ⚠ What is left — step 3, and it is now most of the problem
 
-⚠ **The 412,040 B figure is not re-derivable by anyone else.** The probe that produced it was a scratch
-harness, not a file in this repo. Its natural home is `tests/crab.bcyr`, which currently times
-`bench_noop` — that is roadmap deferral #13, and it now has a concrete first job.
+- **The widget tree: ~236 records @ 248 B = 58,528 B, now 75 % of the frame.** Needs an arena hook in
+  dhancha — the stdlib ships `arena_new`/`arena_reset` documented for exactly this "per-frame reuse"
+  pattern, but dhancha allocates via plain `alloc()` at 19 sites, so crab cannot redirect it.
+- **crab's own row/status scratch, ~19 KB** — local, and was under 5 % of the problem when the pixel
+  buffers dwarfed it. It is now roughly a quarter.
+- ⚠ **The repaint rule STILL STANDS.** 77,568 B at 60 Hz is 4.7 MB/s into an allocator with no
+  `free()`; the rule was never about the factor. ⭐ The margin has changed though — an element
+  repainting a few times a minute is now clearly affordable, where at 750 KB a frame it was not.
+
+### ⚠ Two test findings worth carrying forward
+
+1. **A residue check over an opaque full-surface tree cannot fail, and mutation testing is the only
+   thing that says so.** The first draft of both the dhancha and the crab reuse tests rendered trees
+   that repainted every pixel, so deleting `sd_clear` outright left both suites green. dhancha's
+   `draw_test` now uses a root that paints nothing (`bg = -1`) above a short child; crab's suite
+   scribbles a sentinel over the whole buffer instead.
+2. ⛔ **crab's sentinel check has TWO independent guarantors, so no single mutation fails it** —
+   deleting dhancha's `sd_clear` leaves it green (crab's opaque root still covers) and making crab's
+   root transparent leaves it green (the clear still covers); **only removing both fails**, at 7,744
+   surviving bytes. That is correct for a property test, but it means **a green crab suite is not
+   evidence that the toolkit still clears.** That is pinned in dhancha's own `draw_test`.
+
+⚠ **Owed at the 0.6.0 cut**: crab's CHANGELOG has no entry for any of this. `VERSION` is still 0.5.0
+and the work is mid-arc, so per CLAUDE.md's Process the CHANGELOG entry and version sync land with the
+release, not now. Do not let that be the reason it goes unrecorded.
+
+⚠ **The 77,568 B figure is still not re-derivable by anyone else.** The probe is a scratch harness,
+not a file in this repo. Its natural home is `tests/crab.bcyr`, which times `bench_noop` — roadmap
+deferral #13, with a concrete first job.
 
 ⚠ **Noticed in passing, NOT fixed** (out of scope, and nobody asked): `../dhancha/cyrius.cyml` pins
 `cyrius = "6.5.27"` while the installed `cycc` is **6.5.35**. dhancha's CI installs the toolchain from
 that pin, so its CI and every local dhancha build are on different compilers — the same drift crab's
-`state.md` documents for itself. `cyrius distlib` prints the warning and carries on.
+`state.md` documents for itself.
 
 ---
 
@@ -190,18 +219,17 @@ different). ⇒ **Compare with `cmp`, never with the size.**
 resize (`WINDOW_CONFIGURE` is decoded by dhancha and dropped on the floor), pointer input (dhancha
 synthesizes eight kinds; crab consumes none), key release, and routing through `dh_dispatch`.
 
-> ⛔ **The dhancha per-frame-allocation gate is HALF-CLOSED and still blocks every milestone after
-> M2.** Step 1 is done and consumed — see the section above: 746,440 → 412,040 B/frame. ⚠ It was **not**
-> the "one line" this file called it: storing 0 breaks dhancha's `event_test` by downgrading
-> `dh_surface_present`'s refusal code, so the fix defers the allocation into `dh_surface_pixels`
-> instead (mutation-verified both ways). **What is left is bigger than what was fixed** — step 2 is
-> 81 % of the remaining frame and needs a change on *both* sides. Full measurement, breakdown and the
-> corrected three-step fix in
+> ⚠ **The dhancha per-frame-allocation gate is 89.6 % CLOSED and still blocks every milestone after
+> M2.** Steps 1 and 2 are done — see the section above: **746,440 → 77,568 B/frame**. ⚠ Neither was
+> the "one line" this file called it, and step 2 was not purely upstream. **What is left is step 3,
+> the widget tree, now 75 % of the frame**, and it needs an arena hook in dhancha that crab cannot
+> supply. Full measurement, breakdown and the corrected three-step fix in
 > [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
 >
 > ⇒ **Do not add a continuously-repainting element** — the idle mascot line, transfer progress, index
-> progress — until it closes. At 60 Hz this is still **24 MB/s** after step 1. It will look fine in
-> QEMU and exhaust memory on iron.
+> progress — until it closes. At 60 Hz this is still **4.7 MB/s**, into an allocator with no `free()`.
+> It will look fine in QEMU and exhaust memory on iron. ⭐ But the margin has moved: something that
+> repaints a few times a minute is now clearly affordable.
 
 Other named upstream gates, per milestone, are in the roadmap: **rupa** (`on-accent`, without which a
 selected row cannot carry legible text), **setu** (`SETU_SURF_FULL_KEYS`), **agnos** (resumable
@@ -231,12 +259,17 @@ crab's roadmap. Filing them is an open, un-started task.
 
 ## Known-stale, and owned by nobody yet
 
-- `CLAUDE.md` still carries two `cyrius init` placeholders — the identity line (`**crab** — crab —
-  TODO`) and the whole `## Goal` section. **It needs the operator's mission statement**, which is why
-  0.5.0 left it.
-- `README.md` § Status still opens **"Scaffold."** and lists the dual-pane GUI under *Planned scope* —
-  stale since 0.2.0 (2026-07-10). It also names the retired `anu` codename and claims rekha TrueType
-  text crab does not render.
+- ✅ **CLOSED 2026-08-26 — `CLAUDE.md`'s two `cyrius init` placeholders.** The operator supplied the
+  mission statement; the identity line and `## Goal` are real. *Deferral #23.*
+- ✅ **CLOSED 2026-08-26 — `README.md` § Status**, which had opened **"Scaffold."** and listed the
+  dual-pane GUI under *Planned scope* since 0.2.0 (2026-07-10). It now says what works, what does not,
+  and defers every volatile number to `state.md`. The retired `anu` codename and the rekha-TrueType
+  claim went in the same pass. *Deferrals #24, #25, #26.*
+  ⚠ **The replacement text over-claimed once before it landed, and was caught by reading `crab_row`
+  rather than by a gate**: it said the panes had "size and modified columns". They do not — a row is
+  one LABEL (13-char name, `~` on truncation, then `/` or a size) and the mtime lives only in the
+  status line. ⇒ **Rewriting a stale claim is exactly when a new one gets introduced**; check the
+  replacement against the code, not against the old text.
 - CI runs only build + `cyrius test`. It **never builds `--agnos`** (the real target), never runs
   `render_test.cyr`'s ten pixel assertions, and runs no fuzz/bench/lint/fmt/vet/deny/coverage.
 - The fuzz harness reads **none** of its input; the bench harness times an empty function. Both are
