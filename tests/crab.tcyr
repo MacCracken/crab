@@ -536,6 +536,31 @@ fn main() {
     crab_size_str(sbb, load64(dsz));
     assert(t_streq(sbb, "-"), "...which the pane renders as '-'");
 
+    # --- M2: the resize policy ------------------------------------------------------------------
+    # ⛔ THE DECISION LIVES IN `app.cyr` SO THAT THESE LINES CAN EXIST. The syscall plumbing that
+    # acts on it — resize the surface, close and re-create the `#86` slot, re-ATTACH, re-COMMIT —
+    # is in `main.cyr` and remains unreachable from here; only a QEMU run covers that half.
+    assert_eq(crab_surface_bytes(380, 220), 334400, "the shipping extent sizes to 334,400 B");
+    assert_eq(crab_surface_bytes(1, 1), 4, "a 1x1 surface is four bytes");
+    assert_eq(crab_surface_bytes(0, 220), 0 - 1, "a zero width is refused, not clamped");
+    assert_eq(crab_surface_bytes(380, 0), 0 - 1, "...and a zero height");
+    assert_eq(crab_surface_bytes(0 - 4, 220), 0 - 1, "...and a negative one");
+    # ⛔ THE CAPS ARE WHAT MAKE OVERFLOW UNREACHABLE, so they are asserted at the boundary rather
+    # than trusted. `w * h * 4` runs on compositor-supplied numbers and then sizes a shm slot.
+    assert_eq(crab_surface_bytes(CRAB_DIM_MAX + 1, 8), 0 - 1, "an over-wide ask is refused");
+    assert_eq(crab_surface_bytes(8, CRAB_DIM_MAX + 1), 0 - 1, "...and an over-tall one");
+    assert_eq(crab_surface_bytes(4096, 4096), 0 - 1, "an in-axis extent past the BYTE cap is refused");
+    assert_eq(crab_surface_bytes(2048, 2048), CRAB_SURFACE_BYTES_MAX, "...and the cap itself is allowed");
+
+    assert_eq(crab_resize_wanted(380, 220, 800, 600), 1, "a real new extent is adopted");
+    # ⚠ THE NO-OP MATTERS AS MUCH AS THE ADOPT. A compositor may re-send CONFIGURE with the size we
+    # already have; adopting it would close and re-create one of 16 system-wide `#86` slots, discard
+    # the cached render target and re-ATTACH — every time, for no change on screen.
+    assert_eq(crab_resize_wanted(380, 220, 380, 220), 0, "an ask for the CURRENT size is ignored");
+    assert_eq(crab_resize_wanted(380, 220, 380, 221), 1, "...but a one-pixel change is not");
+    assert_eq(crab_resize_wanted(380, 220, 0, 600), 0, "a degenerate ask is refused, not clamped");
+    assert_eq(crab_resize_wanted(380, 220, 99999, 600), 0, "an absurd ask is refused");
+
     # --- readdir clamps to the cap ---------------------------------------------------------------
     # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
     # rather than the clamp. Stated because a green line here must not be read as covering the cap.

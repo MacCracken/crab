@@ -58,6 +58,48 @@ fn crab_surface_flags(): i64 {
     return SETU_SURF_PREMULTIPLIED;
 }
 
+# ⭐⭐ RESIZE POLICY (M2). The compositor ASKS via `WINDOW_CONFIGURE`; deciding whether to adopt the
+# ask is policy, and it lives here rather than in `main.cyr` for the reason this whole file exists —
+# nothing in `main.cyr` is reachable from a test. The plumbing (resize the surface, swap the shm
+# buffer, re-attach, re-commit) stays there because it is syscalls; the *decision* is here.
+enum CrabWindow {
+    CRAB_DIM_MAX = 4096;                 # per-axis sanity bound
+    CRAB_SURFACE_BYTES_MAX = 16777216;   # 2048x2048x4 — the framebuffer's own size
+}
+
+# Byte size of a `w` x `h` BGRA surface, or **-1** when the extent is not one we will honour.
+#
+# ⛔ THE CAPS ARE NOT DEFENSIVE PADDING, THEY ARE WHAT MAKES OVERFLOW UNREACHABLE. `w * h * 4` on
+# attacker-or-compositor-supplied dimensions is a multiplication crab then uses to size a shm slot
+# and to bound a `setu_buf_write`. Bounding each axis at 4096 caps the product at 67 MB — far inside
+# i64 — so there is no wrap to reason about, and the byte cap then bounds the slot itself.
+# ⚠ A `#86` GPU-visible slot is a scarce, system-wide resource: there are **16**. Honouring an absurd
+# ask would spend one on a surface nothing can composite.
+fn crab_surface_bytes(w, h): i64 {
+    if (w <= 0) { return 0 - 1; }
+    if (h <= 0) { return 0 - 1; }
+    if (w > CRAB_DIM_MAX) { return 0 - 1; }
+    if (h > CRAB_DIM_MAX) { return 0 - 1; }
+    var n = w * h * 4;
+    if (n > CRAB_SURFACE_BYTES_MAX) { return 0 - 1; }
+    return n;
+}
+
+# Should a `WINDOW_CONFIGURE` ask be adopted? -> 1 adopt, 0 ignore.
+#
+# ⛔ A DEGENERATE ASK IS REFUSED, NOT CLAMPED. The compositor asking is not the same as the ask being
+# usable, and a 0-wide pane is not a smaller pane — it is a divide-by-zero waiting in the layout.
+# ⚠ AND AN ASK FOR THE SIZE WE ALREADY HAVE IS IGNORED. A compositor is free to re-send CONFIGURE
+# with the current extent; adopting it would close and re-create a scarce `#86` shm slot, throw away
+# the cached render target, and re-ATTACH — every time, for no change on screen.
+fn crab_resize_wanted(cur_w, cur_h, ask_w, ask_h): i64 {
+    if (crab_surface_bytes(ask_w, ask_h) < 0) { return 0; }
+    if (ask_w == cur_w) {
+        if (ask_h == cur_h) { return 0; }
+    }
+    return 1;
+}
+
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").
 fn crab_log_cd(path): i64 {
     crab_say("crab: cd ");

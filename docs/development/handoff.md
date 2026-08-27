@@ -14,14 +14,14 @@
 
 | | |
 |---|---|
-| Version | **0.6.0** at `998341f 0.6.0 complete`. ⚠ `../dhancha` carries an **uncommitted, untagged 0.9.16**; crab's tree carries the docs for it. |
+| Version | **0.6.0** at `b42b4d6 m2 work started`. `../dhancha` is clean at **0.9.16** (`68c60f8`), tagged and consumed. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **381,592 B** · `--agnos` **381,656 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius test` **75 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
+| Build | x86_64 **381,632 B** · `--agnos` **381,848 B** · `--win` fails (pre-existing, not crab's) |
+| Tests | `cyrius test` **89 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
 | Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
 | Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.15 declared, 0.9.16 compiled (unpublished)** · setu 0.8.7 |
-| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** *Deferral #09* is done (dhancha 0.9.16, uncommitted). Resize, pointer, key-release and `dh_dispatch` are untouched. |
+| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.16 declared, 0.9.17 compiled (unpublished)** · setu 0.8.7 |
+| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 done + verified. **Resize BUILT but NOT VERIFIED — policy tested, plumbing unproven.** Pointer, key-release, `dh_dispatch` untouched. |
 
 ---
 
@@ -67,7 +67,7 @@ All three steps mutation-verified on both sides.
 
 ## M2 — started. *Deferral #09* is closed: the loop allocates nothing
 
-**dhancha 0.9.16** (uncommitted, untagged). `dh_setu_poll_event` opened with `setu_msg_new()` — an
+**dhancha 0.9.16** (`68c60f8`, tagged and consumed). `dh_setu_poll_event` opened with `setu_msg_new()` — an
 80-byte `alloc` — and only *then* asked whether a frame was pending. With no `free()` under it, an
 idle desktop grew the heap once per wakeup forever, and a client repainting without input grew it at
 the repaint rate: ~4.8 KB/s at 60 Hz.
@@ -106,6 +106,47 @@ behaviour**. It is evidence the poll change did not regress connect/present/clos
 "reused scratch is handed out clean" checks cannot fail — `dh_setu_map_input` maps `SETU_CLOSE` with a
 literal `a = 0`, and every kind that reads an arg has it guaranteed by `setu_decode`'s argc check. The
 zeroing is **unexercised defence**, measured not assumed, and both the test and the source say so.
+
+---
+
+## ⚠ Resize is BUILT and NOT VERIFIED — read this before recording it as done
+
+`WINDOW_CONFIGURE` has reached apps since dhancha 0.9.12 and crab dropped it for five releases, so a
+maximise grew the window and not the file manager. That is now handled end to end:
+
+- **dhancha 0.9.17** adds `dh_surface_resize` — the entry point that had been missing the whole time.
+  ⛔ It also closes **a latent buffer overflow 0.9.13 created and nothing could reach until now**:
+  `dh_surface_pixels` caches a `w*h*4` buffer on first ask, which was safe only while `w`/`h` were
+  immutable. Resize drops that cache; without it a grown surface hands back a short buffer.
+  ⭐ And it makes **0.9.14's dimension check live** — the branch written before anything could reach
+  it, documented and *measured* as unreachable, whose ⚠ said "when `dh_surface_resize` lands, add the
+  test then." It landed; deleting those four lines now fails three checks.
+- **crab** handles the event: refuse a degenerate ask, ignore an ask for the size we already have,
+  `dh_surface_resize`, close+recreate the `#86` slot **only when the byte size changed**, then
+  re-ATTACH + COMMIT after the next render. Layout reflows for free — `crab_render` reads `w`/`h` off
+  the surface.
+
+⛔⛔ **WHAT IS PROVEN AND WHAT IS NOT.** The **policy** — `crab_resize_wanted`, `crab_surface_bytes`,
+their caps and the same-extent no-op — is in `src/app.cyr` with 14 assertions, mutation-proven four
+ways. The **plumbing** — the surface resize, the slot swap, the re-ATTACH — is in `main.cyr`, which no
+host suite can reach, and **nothing has driven a real CONFIGURE**.
+⇒ A QEMU run today shows `puka-terminal-test.py` **PASS** (background exit 95, 2 presentations, crab
+presents and leaves cleanly) — that is **no regression**, nothing more. `crab: resized` appears **zero
+times** in that log, correctly: the harness never triggers a maximise.
+
+### ⇒ The next job, with the recipe already found
+
+`ae-resize-fault-test.py` does boot → `aethersafha` → **F2 → Enter → F5 (maximize)**, and F5 is what
+makes the compositor send CONFIGURE. Copy that skeleton, ensure **crab** is what the launcher spawns,
+and assert:
+
+1. `crab: resized` in serial — the ask was adopted;
+2. a keystroke sent **after** it is still answered with `crab: key received` — which incidentally
+   settles **the loop-lifetime question open since 0.5.0**, because no existing harness both starts
+   crab and leaves it running.
+
+⚠ That is *deferral #16* ("bring the agnos/iron harness into crab's own repo") arriving with a
+concrete first job, exactly as this file predicted at 0.5.0.
 
 ---
 

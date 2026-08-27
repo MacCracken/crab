@@ -117,6 +117,7 @@ fn main(): i64 {
     if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { crab_say("crab: attach_buf send failed\n"); return 1; }
     if (setu_send(fd, setu_commit(sid)) < 0) { crab_say("crab: commit send failed\n"); return 1; }
     crab_say("crab: dual-pane file-manager UI presented over setu\n");
+    var resized = 0;        # set by WINDOW_CONFIGURE, consumed by the re-ATTACH after the next render
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
     # switch the active pane; Up/Down (0x52/0x51) or k/j move its selection (clamped
@@ -180,6 +181,44 @@ fn main(): i64 {
                 crab_say("crab: compositor closed the window -- exiting\n");
                 running = 0;                     # fall out of the loop, then run the normal teardown
             }
+            # ⭐⭐ THE COMPOSITOR ASKS FOR A NEW SIZE (M2). `WINDOW_CONFIGURE` has reached apps since
+            # dhancha 0.9.12 and crab dropped it on the floor for five releases — so a maximise or a
+            # fullscreen grew the WINDOW and not the file manager, and aethersafha clamped its blit to
+            # the buffer crab last gave it. That is the 2026-08-19 iron report's shape exactly.
+            # ⛔ IT IS AN ASK, NOT A FACT. The surface is crab's — on agnos a `#86` slot crab owns —
+            # and only crab can grow it. Nothing changes until the re-ATTACH below lands.
+            # ⚠ The DECISION is `crab_resize_wanted` in `src/app.cyr`, where a test can reach it; what
+            # is here is the syscall plumbing that cannot be.
+            if (k == WINDOW_CONFIGURE) {
+                var aw = dh_event_a(ev);
+                var ah = dh_event_b(ev);
+                if (crab_resize_wanted(w, h, aw, ah) == 1) {
+                    var nb = crab_surface_bytes(aw, ah);
+                    if (dh_surface_resize(surf, aw, ah) == DHANCHA_OK) {
+                        # ⛔ CLOSE BEFORE CREATE, and only when the SIZE actually changed. A `#86`
+                        # GPU-visible slot is one of **16 system-wide**; leaking one per configure
+                        # during a window drag would exhaust the desktop, which is the same resource
+                        # the 2026-08-08 orphaned-client burn was about. This is setu's own pattern —
+                        # `setu_client_present` closes then recreates on a size change.
+                        if (nb != nbytes) {
+                            setu_buf_close(buf_id);
+                            buf_id = setu_buf_create(nb);
+                            if (buf_id < 0) {
+                                crab_say("crab: buf_create failed on resize -- exiting\n");
+                                running = 0;
+                            }
+                        }
+                        if (running == 1) {
+                            w = aw;
+                            h = ah;
+                            nbytes = nb;
+                            stride = w * 4;
+                            resized = 1;         # the ATTACH+COMMIT happens after the render below
+                            crab_say("crab: resized\n");
+                        }
+                    }
+                }
+            }
             if (k == KEY) {
                 var u = dh_event_a(ev);
                 crab_say("crab: key received\n");
@@ -208,7 +247,27 @@ fn main(): i64 {
             if (running == 1) {
                 var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                else { setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes); }
+                else {
+                    setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
+                    # ⛔ RE-ATTACH ONLY AFTER A RESIZE, AND ONLY AFTER THE PIXELS ARE WRITTEN. crab's
+                    # steady state is a LIVE buffer — write in place, no re-present — which is why
+                    # this is not in the normal path. But the compositor holds the OLD extent and the
+                    # OLD buffer id until an ATTACH says otherwise, so a resize that skipped this
+                    # would render at the new size into a buffer nothing reads at that size.
+                    # ⚠ ORDER: write, then ATTACH, then COMMIT — the same order `setu_client_present`
+                    # uses, because the compositor re-reads the id it holds on each commit.
+                    if (resized == 1) {
+                        resized = 0;
+                        if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) {
+                            crab_say("crab: re-attach failed after resize -- exiting\n");
+                            running = 0;
+                        }
+                        elif (setu_send(fd, setu_commit(sid)) < 0) {
+                            crab_say("crab: re-commit failed after resize -- exiting\n");
+                            running = 0;
+                        }
+                    }
+                }
             }
         }
         # ⛔⛔ `sys_pause` (#14), NOT `sys_sleep_ms` (#41). THIS EXACT LINE WAS A REGRESSION IN A
