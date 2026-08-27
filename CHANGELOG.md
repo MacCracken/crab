@@ -8,9 +8,9 @@ Two structural things, no user-visible features. crab looks and behaves exactly 
 
 ⚠ **This release took the version number the roadmap had reserved for M2** ("the window is real" —
 resize, pointer input, key release, `dh_dispatch`). **None of M2 shipped here**; what shipped is the
-gate that was blocking every milestone after it, plus the test floor that gate exposed. M2 is now
-v0.7.0 in [`docs/development/roadmap.md`](docs/development/roadmap.md) and the later milestone
-versions are marked indicative.
+gate that was blocking every milestone after it, plus the test floor that gate exposed. **M2 moves to
+v0.6.1** in [`docs/development/roadmap.md`](docs/development/roadmap.md) — a patch, absorbed inside
+the 0.6 line, so the ladder from M3 onward (v0.7.0 … v1.0.0) is unchanged.
 
 ### Fixed — every frame allocated ~750 KB and nothing was ever freed
 

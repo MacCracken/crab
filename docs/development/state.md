@@ -346,8 +346,9 @@ _None — top-level application._
 fifteen releases is gone. Eight milestones from here to 1.0, sequenced against the design canvas at
 the repo root, each carrying its named upstream gate.
 
-Immediately next is **M2 — the window is real** (**v0.7.0** — 0.6.0 was taken by the allocation
-gate and the test floor; see the roadmap's M1.5): resize, pointer input, key release, routing
+Immediately next is **M2 — the window is real** (**v0.6.1** — 0.6.0 was taken by the allocation
+gate and the test floor, and M2 is absorbed inside the 0.6 line rather than pushing the ladder down;
+see the roadmap's M1.5): resize, pointer input, key release, routing
 through `dh_dispatch`, and the event-driven wait. ✅ **Its dhancha gate — per-frame allocation — is
 CLOSED** (dhancha 0.9.13 / 0.9.14 / 0.9.15 plus the crab half): a rendered frame costs the global heap
 zero bytes, and nothing downstream is blocked by it any more.

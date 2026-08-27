@@ -21,7 +21,7 @@
 | Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
 | Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
 | Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.15** · setu 0.8.7 — all six at their latest published tag, verified four ways |
-| Mid-arc work | **None.** 0.6.0 is complete. Next slot is **M2 — the window is real (v0.7.0)**, now unblocked. |
+| Mid-arc work | **None.** 0.6.0 is complete. Next slot is **M2 — the window is real (v0.6.1)**, now unblocked. |
 
 ---
 
@@ -151,8 +151,9 @@ matching crab halves), and `src/app.cyr` was extracted so `main.cyr`'s contents 
 all. Full accounting in the [CHANGELOG](../../CHANGELOG.md).
 
 ⚠ **0.6.0 took the version number the roadmap had reserved for M2.** None of M2 shipped. M2 is now
-**v0.7.0**, and the roadmap notes that the later milestone versions are indicative — the
-milestone→version mapping has now been wrong once.
+**v0.6.1** — a patch, absorbed inside the 0.6 line, so the ladder from M3 onward (v0.7.0 … v1.0.0) is
+**unchanged**. Operator ruling 2026-08-27. ⛔ Re-derive the number at each cut rather than trusting a
+roadmap heading; the milestone→version mapping has now been wrong once and nothing gates it.
 
 ---
 
@@ -253,7 +254,7 @@ different). ⇒ **Compare with `cmp`, never with the size.**
 
 ---
 
-## Next slot — M2 (v0.7.0), with its gate already closed
+## Next slot — M2 (v0.6.1), with its gate already closed
 
 [`roadmap.md`](roadmap.md) sequences eight milestones to 1.0. Next is **M2 — the window is real**:
 resize (`WINDOW_CONFIGURE` is decoded by dhancha and dropped on the floor), pointer input (dhancha

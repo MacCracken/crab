@@ -91,11 +91,13 @@ version number M2 had reserved. No user-visible features.
   owns it, so there is no step left for `main()` to forget.
 - ✅ 37 → 75 assertions; reference coverage 53 % → 70 % against a v1.0 criterion of 80 %.
 
-⚠ **Version numbers below shifted by one minor and the later ones are INDICATIVE.** M2 was v0.6.0;
-this release took it. Re-derive the number at each cut rather than trusting the heading — the mapping
-from milestone to version has now been wrong once.
+⚠ **M2 was v0.6.0; this release took it, and M2 moves to v0.6.1 — a PATCH, not a minor.** Operator
+ruling 2026-08-27. The ladder from M3 onward is therefore **unchanged** (v0.7.0 … v1.0.0): only M2 was
+displaced, and it was absorbed inside the 0.6 line rather than pushing everything down.
+⛔ **Re-derive the number at each cut rather than trusting these headings.** The milestone→version
+mapping has now been wrong once, and nothing gates it.
 
-### M2 — The window is real (v0.7.0)
+### M2 — The window is real (v0.6.1)
 
 crab is a fixed 380×220 rectangle that only understands the keyboard. Everything in the canvas
 assumes otherwise.
@@ -147,7 +149,7 @@ assumes otherwise.
 > growth: four orders of magnitude better, still unbounded. **Closing *deferral #09* is now the
 > precondition for anything that repaints without input.**
 
-### M3 — A browser you would actually use (v0.8.0)
+### M3 — A browser you would actually use (v0.7.0)
 
 - **Sorting** by name / size / modified / kind, directories-first, dotfile handling — the pane
   currently renders raw readdir order, which is on-disk order. *Deferral #33.*
@@ -164,7 +166,7 @@ assumes otherwise.
   *Deferral #03.*
 - **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
 
-### M4 — File operations (v0.9.0)
+### M4 — File operations (v0.8.0)
 
 crab is a read-only browser. Enter on a file does nothing, silently.
 
@@ -178,7 +180,7 @@ crab is a read-only browser. Enter on a file does nothing, silently.
 - **Empty and permission-denied pane states** — also from the canvas's not-yet-drawn list.
 - **Ratify the small-window question** — one pane + switcher at 420px.
 
-### M5 — Views (v0.9.x)
+### M5 — Views (v0.9.0)
 
 - **Grid**, **Columns** (miller), **Gallery** — the canvas's four-way view switcher.
   **Gate: dhancha** GRID / COLUMNS widgets. Note `CANVAS` (0.9.9) exists and could carry app-drawn
