@@ -2,6 +2,51 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — upstream gate repairs
+
+### Fixed — the selected row's text was unreadable (the `on-accent` gate)
+
+The selected row is filled with `accent` and its label was drawn in the theme's primary `ink` — on
+MUDRA dark, `0xE7E9EF` on `0x00E5FF` is a contrast ratio of **1.27:1**. The one row the operator is
+looking at was the one row that could not be read.
+
+- **rupa 0.1.4 → 0.1.5** — publishes the `on-accent` token, plus `rupa_luminance` / `rupa_contrast` /
+  `rupa_ink_on`. All four grounds clear the WCAG AA floor (12.72 / 4.64 / 11.27 / 5.49 : 1).
+- **dhancha 0.9.18 → 0.9.20** — binds `dh_theme_on_accent()` and paints the focused selection's text
+  with it. Also fixes a second, older defect: the scalable-font path blitted hardcoded white and
+  ignored the theme entirely, so it was unreadable on both light grounds.
+- ⛔ **rupa >= 0.1.5 is a hard requirement**, not a freshness preference: dhancha 0.9.20 references
+  `rupa_theme_on_accent`, and crab pulls rupa's dist directly.
+- `src/render_test.cyr` gains pixel checks: the selected row carries on-accent ink and **not** the
+  primary ink, with the unselected pane as the control. Mutation-proven by removing the swap from
+  dhancha's **dist bundle** — ⚠ mutating dhancha's `src/` proves nothing, because crab compiles
+  `dist/dhancha.cyr`.
+
+### Added — real columns (*deferral #32*)
+
+- **NAME · SIZE · MODIFIED with headers**, on dhancha 0.9.20's shared column-width spec. The
+  **13-character name column is gone**: NAME is the remainder column and grows with the pane.
+- ⛔ **Columns that do not fit are dropped, not squeezed.** The default 380x220 window gives a ~187 px
+  pane — about 20 characters. A MODIFIED column is 153 px on its own, which would leave four
+  characters for the filename. The pane picks its column set from its own width.
+- ⛔ **The header sits outside the LIST**, so it neither scrolls away nor can ever be selected.
+- ⚠ Truncation still says it was truncated (`~`), now at the column's width rather than a
+  hardcoded 13.
+- New: `crab_cols_for_width`, `crab_col_chars`, `crab_name_cell`, `CRAB_COL_*`.
+
+### Added — directories larger than the cap (*deferral #02*)
+
+- **`CRAB_MAX_ENTRIES` 256 → 1024** (the design canvas asks for `812 items` in a pane), and listings
+  are read in 64-record batches through agnos 1.56.50's new **`#101 readdir_at`** cursor.
+- **The truncation warning now carries numbers**: `showing 1024 of 1200`, not `has more entries than
+  are shown`. Once the pane buffer fills crab keeps walking **without storing**, purely to count.
+- ⛔ **Falls back to `#81` when `#101` is absent.** On a kernel older than 1.56.50 the dispatcher
+  returns `-1` for the unknown syscall; without the fallback crab would show an empty pane.
+- New: `crab_listing_total()`, `CRAB_READDIR_BATCH`, `CRAB_SYS_READDIR_AT`.
+- ⚠ **No host test is possible** — the paged path is entirely inside `#ifdef CYRIUS_TARGET_AGNOS`.
+  Proven in QEMU against a seeded 1200-entry directory, and mutation-proven by deleting the counting
+  walk.
+
 ## [0.7.0] - 2026-08-28 — M3: a browser you would actually use
 
 **M3 — "a browser you would actually use"**. crab listed a directory in whatever order the filesystem

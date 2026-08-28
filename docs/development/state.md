@@ -227,8 +227,15 @@ that is *inconclusive*, not a failure; the tag SHAs were confirmed with `curl` a
   ⭐ **Proven in two harnesses**: `crab-listing-cap-test.py` now sees **zero** `stat-cost` lines (was
   six, ~230 ms), and `crab-resize-test.py` reports `deferred stat drain completed: True`. The first
   runs crab with no compositor so its drain never runs — one harness cannot show both halves.
-- **Next**: M3's remaining items are all gated. Real columns (*#32*) on dhancha, >256 entries (*#02*)
-  on agnos, `on-accent` on rupa.
+- ✅ **Real columns (*#32*)** — NAME · SIZE · MODIFIED with headers on dhancha 0.9.20's shared
+  column spec. The 13-character name column is gone; NAME is the remainder column.
+  ⛔ Columns that do not fit are **dropped, not squeezed** — a ~187 px pane cannot hold a date and a
+  usable filename.
+- ✅ **>1024 entries (*#02*)** — agnos 1.56.50's `#101 readdir_at`; the cap is 1024 and the warning
+  now counts (`showing 1024 of 1200`). Falls back to `#81` on an older kernel.
+- ✅ **`on-accent`** — rupa 0.1.5 + dhancha 0.9.20. The selected row's text was `ink` on `accent`:
+  **1.27:1** on MUDRA dark.
+- **Next**: **M4 — file operations (v0.8.0)**. All three M3 gates are closed; crab is still read-only.
 
 ## M2 — shipped as v0.6.1
 
@@ -342,9 +349,9 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **228 passed / 0 failed** (94 in M3 —
-  44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*; 55
-  mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **253 passed / 0 failed** (119 in M3 —
+  44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
+  columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
   Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render` (`a == 255` and
   `c <= a` across all 83,600 pixels, with negative controls); 0.5.0's repairs (bounded path helpers,

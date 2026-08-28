@@ -202,16 +202,63 @@ fn main() {
     # the marker from `crab_row` left the suite GREEN. A test that mirrors the code under test is
     # measuring itself; it is the same defect 0.4.14 records, where counting per-entry trace lines
     # made the diagnostic the thing being measured. Mutation-proven both ways.
+    # ⚠ THE NAME NOW LIVES IN A CELL, NOT ON THE ROW (*#32*, dhancha 0.9.20). A row is a BOX_H and
+    # its first child is the NAME column, so the assertion reads the cell — the row itself carries no
+    # text at all now. The width is the COLUMN's, not the retired hardcoded 13.
+    var tspec = dh_cols_new(2);
+    dh_cols_set_width(tspec, 0, 0);
+    dh_cols_set_width(tspec, 1, CRAB_COL_SIZE_W);
     var lst = dh_list_new(26);
-    crab_row(lst, nm, 0, 1234);
+    crab_row(lst, tspec, 2, 13, nm, 0, 1234, 0);
     var roww = dh_widget_first_child(lst);
     assert(roww != 0, "the row widget was built");
-    assert_eq(load8(dh_widget_text(roww) + 12), 126, "a name longer than the column ends in '~'");
+    var namecell = dh_widget_first_child(roww);
+    assert(namecell != 0, "...and it has a NAME cell");
+    assert_eq(load8(dh_widget_text(namecell) + 12), 126, "a name longer than the column ends in '~'");
     store8(nm + 13, 0);                              # exactly 13 characters — fits
     var lst2 = dh_list_new(26);
-    crab_row(lst2, nm, 0, 1234);
+    crab_row(lst2, tspec, 2, 13, nm, 0, 1234, 0);
     var roww2 = dh_widget_first_child(lst2);
-    assert(load8(dh_widget_text(roww2) + 12) != 126, "a name that exactly fits is NOT marked truncated");
+    var namecell2 = dh_widget_first_child(roww2);
+    assert(load8(dh_widget_text(namecell2) + 12) != 126, "a name that exactly fits is NOT marked truncated");
+    # ⭐ AND THE COLUMN WIDTH IS NOW WHAT DECIDES, which is the whole point of retiring the 13.
+    var lst3 = dh_list_new(26);
+    crab_row(lst3, tspec, 2, 30, nm, 0, 1234, 0);    # a WIDER column — the same name is not cut
+    var namecell3 = dh_widget_first_child(dh_widget_first_child(lst3));
+    assert(load8(dh_widget_text(namecell3) + 12) != 126, "a wider column does NOT truncate the same name");
+
+    test_group("crab — M3 #32: real columns, and columns that do not fit are DROPPED");
+    # ⛔ CRAB'S DEFAULT WINDOW IS 380x220, SO A PANE IS ~187 px — about 20 characters at the system
+    # font's 9 px advance. A MODIFIED column is `2026-08-28 11:04`, sixteen characters, 153 px on its
+    # own: showing it there would leave four characters for the filename, which is not a file manager.
+    assert_eq(crab_cols_for_width(187), 2, "the default pane earns NAME + SIZE");
+    assert_eq(crab_cols_for_width(400), 3, "a wide pane earns MODIFIED too");
+    assert_eq(crab_cols_for_width(100), 1, "a narrow pane keeps NAME alone");
+    # ⚠ Both sides of each threshold, because an off-by-one here silently drops a column or squeezes
+    # the name column below the floor that retired the 13-character one.
+    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W), 2, "exactly at the SIZE threshold");
+    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W - 1), 1, "...one px below it");
+    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W), 3, "exactly at the MODIFIED threshold");
+    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W - 1), 2, "...one px below it");
+    assert_eq(crab_cols_for_width(0), 1, "a zero-width pane still names one column");
+
+    # ⚠ FLOOR, NEVER ROUNDED UP. A column that reports one more character than it can draw is how
+    # text gets clipped with no truncation marker — the 0.5.0 defect, reintroduced by arithmetic.
+    assert_eq(crab_col_chars(90), 10, "90 px is ten 9-px characters");
+    assert_eq(crab_col_chars(98), 10, "...and 98 px is still ten, not eleven");
+    assert_eq(crab_col_chars(0), 0, "a zero-width column holds nothing");
+    assert_eq(crab_col_chars(0 - 20), 0, "a negative width holds nothing, and does not divide");
+
+    # `crab_name_cell` is the truncation itself, tested directly as well as through `crab_row`.
+    var ncell = alloc(80);
+    assert_eq(crab_name_cell(ncell, "abc", 10), 3, "a short name is copied whole");
+    assert(t_streq(ncell, "abc"), "...unchanged");
+    assert_eq(crab_name_cell(ncell, "abcdefghij", 10), 10, "a name that exactly fits is not cut");
+    assert(t_streq(ncell, "abcdefghij"), "...and keeps its last character");
+    assert_eq(crab_name_cell(ncell, "abcdefghijk", 10), 10, "a longer name is cut to the column");
+    assert_eq(load8(ncell + 9), 126, "...and the last character is '~'");
+    assert_eq(crab_name_cell(ncell, "abc", 0), 0, "a zero-width column yields the empty string");
+    assert_eq(load8(ncell), 0, "...NUL-terminated, not left as garbage");
 
     test_group("crab — 0.5.0: the path helpers are BOUNDED (the P1)");
     # ⛔⛔ THIS IS THE 0.5.0 P-1. `crab_strcpy` / `crab_join` took no destination size and checked
@@ -674,13 +721,26 @@ fn main() {
     # click lands in and not about a boundary pixel.
     var lx = (380 - 6) / 4;                  # a column inside the LEFT pane
     var rx2 = 380 - lx;                      # ...and inside the RIGHT one
-    assert_eq(crab_hit(lx, 41, hb), 1, "a click inside the left pane lands somewhere");
+    # ⚠ THE ROW ORIGIN IS READ FROM THE LAYOUT, NOT HARDCODED (*#32*). It used to be a literal 41,
+    # which encoded "path header 28 px, then rows" — adding the NAME/SIZE/MODIFIED column header
+    # moved every row down and that literal silently began testing the header instead. Reading the
+    # laid-out row is still a real assertion: it says `crab_hit` agrees with where the row actually
+    # IS, which is the whole job of a hit test.
+    var r0y = dh_widget_y(dh_list_row_at(crab_llst, 0)) + 5;
+    var r1y = dh_widget_y(dh_list_row_at(crab_llst, 1)) + 5;
+    assert(r1y > r0y, "the two rows are at different heights — the layout ran");
+    assert_eq(crab_hit(lx, r0y, hb), 1, "a click inside the left pane lands somewhere");
     assert_eq(load64(hb), 0, "...and reports the LEFT pane");
     assert_eq(load64(hb + 8), 0, "...on row 0");
-    assert_eq(crab_hit(rx2, 41, hb), 1, "a click inside the right pane lands");
+    assert_eq(crab_hit(rx2, r0y, hb), 1, "a click inside the right pane lands");
     assert_eq(load64(hb), 1, "...and reports the RIGHT pane");
-    assert_eq(crab_hit(lx, 67, hb), 1, "a click one row down lands");
+    assert_eq(crab_hit(lx, r1y, hb), 1, "a click one row down lands");
     assert_eq(load64(hb + 8), 1, "...and reports row 1 — the rows are distinguished, not lumped");
+    # ⛔ THE COLUMN HEADER IS NOT A ROW. It sits outside the LIST precisely so it cannot be selected;
+    # a click on "NAME" that selected a file would act on a file the operator never pointed at — the
+    # same class of defect as the status-line check below.
+    assert_eq(crab_hit(lx, r0y - 26, hb), 0, "a click on the NAME/SIZE header is not in a pane");
+    assert_eq(load64(hb + 8), 0 - 1, "...and reports no row");
     # ⛔ THE STATUS LINE IS NOT A PANE. It owns the bottom of the window; a click there that reported
     # a row would select a file the operator never pointed at.
     assert_eq(crab_hit(lx, 220 - 6, hb), 0, "a click on the status line is not in a pane");

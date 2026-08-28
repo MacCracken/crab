@@ -26,10 +26,37 @@ fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 # ⚠ 32 was not enough for a REAL root. Iron 2026-08-19: `/` held **114** entries after a few burns
 # (run outputs land there), so crab showed 32 and silently dropped 82 — a file the shell's `ls`
 # listed was simply absent from the pane, which reads as a filesystem fault rather than a cap.
-# Records are 64 B, so 256 entries is a 16 KB pane buffer.
+#
+# ⭐ 256 -> 1024 (M3 *#02*, agnos 1.56.50). The design canvas shows **812 items** in a pane, so 256
+# was below the number the design itself asks for. Records are 64 B, so 1024 entries is a 64 KB pane
+# buffer — two panes plus their size/mtime arrays is ~160 KB, against a bump allocator that never
+# frees, paid once at startup rather than per frame.
+# ⛔ RAISING THE CAP DOES NOT MAKE THE CAP HONEST, WHICH IS THE ACTUAL DEFECT. A directory bigger
+# than any cap still exists; what changed is that crab can now SAY how much it is not showing,
+# because `#101 readdir_at` lets the walk continue past the buffer without storing.
 enum CrabDir {
-    CRAB_MAX_ENTRIES = 256;
+    CRAB_MAX_ENTRIES = 1024;
+    # ⚠ Records per `readdir_at` call. Bounds the syscall's write to the pane buffer; it is not the
+    # pane cap. 64 records = 4 KB, which is also the counting scratch below.
+    CRAB_READDIR_BATCH = 64;
+    # ⚠ INTERIM, AND IT HAS AN EXPIRY. cyrius **6.5.36** ADDS `SYS_READDIR_AT` + `sys_readdir_at`
+    # — but 6.5.36 is UNRELEASED: no tag, local commit only (verified 2026-08-28, latest release is
+    # 6.5.35). CI installs releases, so the wrapper does not exist for any consumer yet.
+    # (`lib/syscalls_x86_64_agnos.cyr`), which is where this belongs — a consumer hard-coding a
+    # syscall number is the bug class agnos's roadmap tracks, and `#99`'s ticket names it outright.
+    # crab pins **6.5.35**, whose vendored `lib/` has no wrapper, and `lib/` must not be hand-edited.
+    # ⇒ SWITCH TO `sys_readdir_at(path, buf, max, &cur)` AND DELETE THIS CONSTANT the moment crab's
+    # toolchain pin moves to >= 6.5.36. Tickets, both sides:
+    #   agnos  docs/development/issues/2026-08-28-syscall-101-readdir-at.md
+    #   cyrius docs/development/issues/2026-08-28-cyrius-syscall-101-readdir-at-wrapper.md
+    CRAB_SYS_READDIR_AT = 101;
 }
+
+# True number of entries the last listing's directory holds, which is NOT the number stored when the
+# directory is bigger than the pane buffer. -1 when it was not determined.
+var crab_dir_total = 0 - 1;
+
+fn crab_listing_total(): i64 { return crab_dir_total; }
 
 # ⚠ `CRAB_REC_SZ` / `CRAB_REC_TYPE` / `CRAB_PATH_MAX` / `CRAB_NAME_MAX`, and the bounded path helpers
 # `crab_strcpy_n` / `crab_join_n`, live in `src/path.cyr` (pulled in via `src/ui.cyr` above). They are
@@ -519,20 +546,69 @@ fn crab_log_cd(path): i64 {
 # ⚠ A FULL BUFFER IS NOT A COMPLETE LISTING. `sys_readdir` returns what fit, so `n == max` cannot be
 # told apart from "there were more" — it is the only truncation signal there is. SAY SO: a pane that
 # quietly stops at the cap looks like the missing files do not exist.
+# ⭐⭐ PAGED LISTING (M3 *#02*, agnos 1.56.50 `#101 readdir_at`). `#81` always starts at the top and
+# stops at `max`, so a directory larger than the pane buffer was silently truncated. `#101` carries a
+# cursor — the byte offset into the directory file — so the walk resumes.
+# ⭐ AND WHEN THE BUFFER FILLS, THE WALK CONTINUES WITHOUT STORING, purely to count. That is what
+# turns "there are more entries than are shown" into "showing 1024 of 3891". The extra pass costs
+# nothing in the normal case because it only runs when the directory actually overflows the cap.
+# ⛔ THE #81 FALLBACK IS NOT OPTIONAL. Against a kernel older than 1.56.50, `#101` is an unknown
+# syscall and the dispatcher returns -1 — so without this, crab would show an EMPTY pane on every
+# older kernel and look like a filesystem fault. The fallback triggers on any negative from the
+# FIRST batch, which is exactly the "syscall not there" case.
 fn crab_readdir_into(path, buf): i64 {
-    var n = -1;
+    var n = 0;
+    crab_dir_total = 0 - 1;
     #ifdef CYRIUS_TARGET_AGNOS
-    n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
+    var cur[8];
+    store64(&cur, 0);                                # 0 = start at the top of the directory
+    var paged = 1;
+    while (load64(&cur) != (0 - 1)) {
+        if (n >= CRAB_MAX_ENTRIES) { break; }
+        var want = CRAB_MAX_ENTRIES - n;
+        if (want > CRAB_READDIR_BATCH) { want = CRAB_READDIR_BATCH; }
+        var k = syscall(CRAB_SYS_READDIR_AT, path, buf + n * CRAB_REC_SZ, want, &cur);
+        if (k < 0) {
+            if (n == 0) { paged = 0; }               # #101 unavailable — take the old path
+            break;
+        }
+        n = n + k;
+    }
+    if (paged == 0) {
+        n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
+        if (n < 0) { n = 0; }
+    }
+    if (paged == 1) {
+        crab_dir_total = n;
+        # ⚠ Only when the buffer actually filled AND the directory has more. `cur` is the oracle for
+        # "more remains", not `n >= cap` — a directory of exactly the cap is complete, not truncated.
+        if (load64(&cur) != (0 - 1)) {
+            var scratch[4096];                       # CRAB_READDIR_BATCH records, discarded
+            while (load64(&cur) != (0 - 1)) {
+                var k2 = syscall(CRAB_SYS_READDIR_AT, path, &scratch, CRAB_READDIR_BATCH, &cur);
+                if (k2 < 0) { crab_dir_total = 0 - 1; break; }
+                crab_dir_total = crab_dir_total + k2;
+            }
+        }
+    }
     #endif
     if (n < 0) { n = 0; }
-    # ⚠ Defence in depth, not a known defect: the #81 contract bounds the count by `max`, so this
+    # ⚠ Defence in depth, not a known defect: the #81/#101 contracts bound the count by `max`, so this
     # clamp is unreachable today. It is here because `n` is used as a loop bound over a buffer sized
     # from the SAME constant — if the kernel contract ever drifts, the failure is a silent read past
     # lbuf/rbuf, and a one-line clamp is cheaper than the burn that would find it.
     if (n > CRAB_MAX_ENTRIES) { n = CRAB_MAX_ENTRIES; }
     if (n >= CRAB_MAX_ENTRIES) {
         crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
-        crab_say(" has more entries than are shown\n");
+        if (crab_dir_total > n) {
+            if (crab_sdig != 0) {
+                crab_say(" showing "); crab_u2s(crab_sdig, n); crab_say(crab_sdig);
+                crab_say(" of "); crab_u2s(crab_sdig, crab_dir_total); crab_say(crab_sdig);
+                crab_say("\n");
+            }
+        } else {
+            crab_say(" has more entries than are shown\n");
+        }
     }
     # ⭐ ONE LINE PER LISTING, ALWAYS. This is the honest oracle for "did the pane see everything":
     # a COUNT, stated once. Inferring it by counting per-entry lines made the diagnostic itself the

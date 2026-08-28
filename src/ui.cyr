@@ -157,8 +157,69 @@ fn crab_mtime_str(dst, epoch): i64 {
 # One entry row: a 13-char name column, then "/" for a directory or a right-gapped
 # human size for a file. Highlighted when selected: BRIGHT in the active pane, DIM
 # in the inactive one.
-fn crab_row(col, name, is_dir, size): i64 {
-    var row = dh_widget_new(LABEL);
+# ⚠ DECLARED HERE, NOT IN `app.cyr`, AND THE REASON IS THE INCLUDE ORDER. `app.cyr` includes
+# `ui.cyr`, so the fold puts ui.cyr FIRST — an enum declared in app.cyr is invisible to every line
+# above it. `tests/crab.tcyr` includes `app.cyr`, so anything here is still reachable from a test.
+# ⭐⭐ REAL COLUMNS (M3 *#32*, dhancha 0.9.20). The 13-character name column is gone: NAME is now the
+# REMAINDER column, so it grows with the pane instead of being pinned at a width chosen in 2026-08.
+#
+# ⛔ COLUMNS THAT DO NOT FIT ARE DROPPED, NOT SQUEEZED. crab's default window is 380x220, so a pane
+# is ~187 px — at the system font's 9 px advance that is ~20 characters TOTAL. A MODIFIED column is
+# `2026-08-28 11:04`, sixteen characters, 144 px on its own: showing it at that width would leave
+# four characters for the filename, which is not a file manager. So the pane picks its column set
+# from its own width, and a wider window earns more columns.
+# ⚠ THE THRESHOLDS ARE THE COLUMNS' OWN COSTS PLUS A NAME FLOOR, not round numbers: a name column
+# narrower than ~10 characters cannot distinguish the files in a real directory, which is the same
+# argument that retired the 13-character column.
+enum CrabCol {
+    CRAB_COL_CHARW    = 9;      # kashi CP437 8x16 advance: 8 px glyph + 1 px gap
+    CRAB_COL_SIZE_W   = 54;     # 6 chars — "1023K" plus its gap
+    CRAB_COL_MTIME_W  = 153;    # 17 chars — "2026-08-28 11:04" plus its gap
+    CRAB_COL_NAME_MIN = 90;     # 10 chars — below this a name column cannot tell files apart
+}
+
+# How many columns a pane `panew` px wide can honestly show: 1 = NAME, 2 = +SIZE, 3 = +MODIFIED.
+fn crab_cols_for_width(panew): i64 {
+    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W)) { return 3; }
+    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W)) { return 2; }
+    return 1;
+}
+
+# Characters that fit in a `px`-wide column. ⚠ Floor, never rounded up — a column that reports one
+# more character than it can draw is how text gets clipped with no truncation marker.
+fn crab_col_chars(px): i64 {
+    if (px <= 0) { return 0; }
+    return px / CRAB_COL_CHARW;
+}
+
+# Copy `name` into `dst` truncated to `chars`, marking the cut with '~'. -> bytes written.
+# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives the column port). Names can be 62 bytes and any
+# column is narrower, so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one
+# identical row — two DIFFERENT files, with no indication either was truncated. In a file manager
+# that is not cosmetic: the operator selects, descends and acts on rows.
+# ⚠ '~' (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph.
+# ⚠ The width is now the COLUMN's, not a hardcoded 13 — that constant was the thing *#32* retired.
+fn crab_name_cell(dst, name, chars): i64 {
+    if (chars <= 0) { store8(dst, 0); return 0; }
+    var n = 0;
+    while (load8(name + n) != 0) { n = n + 1; }
+    if (n <= chars) {
+        var i = 0;
+        while (i < n) { store8(dst + i, load8(name + i)); i = i + 1; }
+        store8(dst + n, 0);
+        return n;
+    }
+    var j = 0;
+    while (j < chars - 1) { store8(dst + j, load8(name + j)); j = j + 1; }
+    store8(dst + chars - 1, 126);                      # '~' — this name was cut
+    store8(dst + chars, 0);
+    return chars;
+}
+
+# One row of the pane, as CELLS in the shared column spec (dhancha 0.9.20) rather than one
+# space-padded string. `ncols` is what the pane's width can honestly show.
+fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime): i64 {
+    var row = dh_table_row(spec);
     # ⭐ NO BACKGROUND (0.4.10). Rows used to paint their own selection — accent when the pane was
     # active, a muted line-tint when it was not — and dhancha 0.9.8 does exactly that from the LIST's
     # own `DH_W_SEL` and focus. ⛔ A row that keeps a background here paints OVER the highlight and
@@ -166,38 +227,29 @@ fn crab_row(col, name, is_dir, size): i64 {
     # through. This deletion is the point of the port: the rule lived in three apps, now it lives once.
     dh_widget_set_bg(row, 0 - 1);
     dh_widget_set_pref(row, 0, 26);
-    var disp = dh_falloc(48);   # ⛔ the widget POINTS at this — same lifetime, not a copy
-    var k = 0; var done = 0;                          # name column: 13 chars, space-padded
-    while (k < 13) {
-        var ch = 32;
-        if (done == 0) {
-            ch = load8(name + k);
-            if (ch == 0) { ch = 32; done = 1; }
-        }
-        store8(disp + k, ch);
-        k = k + 1;
-    }
-    # ⛔ SAY THAT IT WAS CUT (0.5.0). The column is 13 characters and names can be 62, so
-    # `agnos-kernel-build.log` and `agnos-kernel-build.tmp` both rendered as `agnos-kernel-` —
-    # two DIFFERENT files as one identical row, with no indication either was truncated. In a file
-    # manager that is not a cosmetic issue: the operator selects, descends and acts on rows.
-    # ⚠ '~' (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph.
-    if (done == 0) {
-        if (load8(name + 13) != 0) { store8(disp + 12, 126); }
-    }
-    var w = 13;
-    if (is_dir != 0) {
-        store8(disp + w, 47); w = w + 1;              # '/' marks a directory
-        store8(disp + w, 0);
-    } else {
-        store8(disp + w, 32); w = w + 1;              # gap before the size
+
+    # NAME — the remainder column. A directory keeps its trailing '/', which is why the marker is
+    # appended to the truncated text rather than being a column of its own.
+    var nm = dh_falloc(80);
+    var nchars = namew;
+    if (is_dir != 0) { nchars = nchars - 1; }          # leave room for the '/'
+    var used = crab_name_cell(nm, name, nchars);
+    if (is_dir != 0) { store8(nm + used, 47); store8(nm + used + 1, 0); }
+    dh_table_cell(row, spec, 0, nm);
+
+    # SIZE — a directory has no meaningful byte size; its "size" is the entry, not its contents.
+    if (ncols >= 2) {
         var ss = dh_falloc(24);
-        var sl = crab_size_str(ss, size);
-        var m = 0;
-        while (m < sl) { store8(disp + w, load8(ss + m)); w = w + 1; m = m + 1; }
-        store8(disp + w, 0);
+        if (is_dir != 0) { store8(ss, 45); store8(ss + 1, 0); }   # "-"
+        else { crab_size_str(ss, size); }
+        dh_table_cell(row, spec, 1, ss);
     }
-    dh_widget_set_text(row, disp);
+    # MODIFIED
+    if (ncols >= 3) {
+        var ds = dh_falloc(24);
+        crab_mtime_str(ds, mtime);
+        dh_table_cell(row, spec, 2, ds);
+    }
     # ⚠ `dh_list_add`, not `dh_widget_add_child` — it stamps the row height and pins flex to 0.
     dh_list_add(col, row);
     return 0;
@@ -211,7 +263,7 @@ fn crab_row(col, name, is_dir, size): i64 {
 # could tell. Every row is now added and the LIST scrolls, so the cap and the truncation are gone.
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
-fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
+fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -224,6 +276,35 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
     dh_widget_set_text(hdr, path);
     dh_widget_add_child(col, hdr);
 
+    # ⭐⭐ REAL COLUMNS (*#32*, dhancha 0.9.20). The 13-character name column is gone — NAME is the
+    # REMAINDER column, so it grows with the pane. ⛔ Columns that do not fit are DROPPED, not
+    # squeezed: at the default 380x220 a pane is ~187 px, and a MODIFIED column alone is 153 px.
+    # ⚠ ONE SPEC, READ BY THE HEADER AND EVERY ROW. That shared read is what makes the columns line
+    # up; rows laid out independently drift the moment one cell's text changes.
+    # ⛔ AND THE SPEC IS ALLOCATED ONCE AND RESET, NEVER BUILT PER FRAME. `alloc` is a bump allocator
+    # with no `free()`, so `dh_cols_new` inside the render path retained 40 B per pane per frame —
+    # measured at 1600 B over twenty frames, which is exactly the per-frame allocation dhancha
+    # 0.9.13-0.9.16 and crab 0.6.0 spent four releases driving to zero. The suite caught it.
+    crab_spec_init();
+    var ncols = crab_cols_for_width(panew);
+    var spec = crab_lspec;
+    if (which == 1) { spec = crab_rspec; }
+    dh_cols_reset(spec, ncols);
+    dh_cols_set_width(spec, 0, 0);                                    # NAME — the remainder
+    if (ncols >= 2) { dh_cols_set_width(spec, 1, CRAB_COL_SIZE_W); }
+    if (ncols >= 3) { dh_cols_set_width(spec, 2, CRAB_COL_MTIME_W); }
+    var namechars = crab_col_chars(panew - dh_cols_fixed_total(spec));
+    # ⛔ THE COLUMN HEADER SITS OUTSIDE THE LIST, which is what keeps it from scrolling away and from
+    # ever being a selectable row. A header the operator can select is a file that does not exist.
+    var chdr = dh_table_header(spec);
+    dh_widget_set_pref(chdr, 0, 18);
+    dh_widget_set_flex(chdr, 0);
+    dh_table_cell(chdr, spec, 0, "NAME");
+    if (ncols >= 2) { dh_table_cell(chdr, spec, 1, "SIZE"); }
+    if (ncols >= 3) { dh_table_cell(chdr, spec, 2, "MODIFIED"); }
+    dh_widget_add_child(col, chdr);
+
+
     var lst = dh_list_new(26);                 # row height matches crab_row's pref
     dh_widget_set_flex(lst, 1);                # the list takes the column's remaining height
     var i = 0;
@@ -231,7 +312,8 @@ fn crab_pane(root, panew, path, buf, count, sizes, sel, active): i64 {
         var rec = buf + i * CRAB_REC_SZ;        # name (NUL-terminated) at +0
         var is_dir = load8(rec + CRAB_REC_TYPE);  # type byte: 1 = dir
         var sz = load64(sizes + i * 8);         # per-entry byte size (-1 = dir/unknown)
-        crab_row(lst, rec, is_dir, sz);
+        var mt = load64(mtimes + i * 8);
+        crab_row(lst, spec, ncols, namechars, rec, is_dir, sz, mt);
         i = i + 1;
     }
     # ⛔ THE SELECTION IS SET, NOT PAINTED. dhancha draws it — accented when this list holds focus,
@@ -337,6 +419,17 @@ var crab_rlst = 0;
 # ⚠ A CLICK ON A PANE HEADER RETURNS 0 TODAY. The header is a sibling of the list, not inside it, so
 # the walk below never reaches a LIST and the click does nothing. Focusing a pane by its header is a
 # reasonable thing to want; it is simply not claimed here.
+# ⚠ ONE COLUMN SPEC PER PANE, ALLOCATED ONCE (*#32*). Built lazily so the allocation happens on the
+# first render rather than at module-init, and reset — not rebuilt — on every frame after that.
+var crab_lspec = 0;
+var crab_rspec = 0;
+
+fn crab_spec_init(): i64 {
+    if (crab_lspec == 0) { crab_lspec = dh_cols_new(DH_COLS_MAX); }
+    if (crab_rspec == 0) { crab_rspec = dh_cols_new(DH_COLS_MAX); }
+    return 0;
+}
+
 fn crab_hit(x, y, out16): i64 {
     store64(out16, 0 - 1);
     store64(out16 + 8, 0 - 1);
@@ -403,8 +496,8 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    var llst = crab_pane(panes, panew, lpath, lbuf, ln, lsizes, sel_l, la);
-    var rlst = crab_pane(panes, panew, rpath, rbuf, rn, rsizes, sel_r, ra);
+    var llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la);
+    var rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra);
     dh_widget_add_child(root, panes);
 
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;

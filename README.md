@@ -100,10 +100,12 @@ input, a mouse wheel, held-key repeat and compositor resize** (M2). `s` cycles f
 (name · size · modified · kind, directories always first) across both panes, and the selection
 **follows** you: Backspace lands on the directory you just left, and re-sorting keeps you on the same
 entry. Panes start at `/bin` and `/` unless you name them: `crab [LEFT] [RIGHT]`. Each row is a
-**single line**: a 13-character name column (truncation marked with `~`) followed by `/` for a
-directory or a human-readable size for a file. The **status line** carries the active selection's
-name, size and modified date. ⚠ There are **no real columns and no headers** — NAME · SIZE · MODIFIED
-is roadmap M3, gated on a dhancha table widget — and no row shows a date. crab connects to the
+**real columns with headers** — NAME · SIZE · MODIFIED — sharing one width spec so the header and
+every row line up. NAME is the **remainder** column, so it grows with the pane; a truncated name is
+still marked with `~`. ⚠ **Columns that do not fit are dropped, not squeezed**: at the default
+380x220 a pane is ~187 px, which cannot hold a `2026-08-28 11:04` date and a usable filename, so a
+wider window earns more columns. The **status line** carries the active selection's name, size and
+modified date. crab connects to the
 `aethersafha` compositor through `setu` and
 presents on a real agnos kernel, observed under QEMU at `-smp 4`.
 
@@ -115,11 +117,11 @@ window holding one of only sixteen system-wide GPU buffer slots, and a directory
 
 - **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
   all, silently. (Roadmap M4.)
-- **No real columns and no headers.** A row is one line with a 13-character name column; NAME · SIZE
-  · MODIFIED is roadmap M3, gated on a dhancha table widget.
-- **A pane shows at most 256 entries**, a compile-time ceiling. Beyond it the listing is truncated
-  with a warning — it is no longer silent, but it is still truncated. Needs a resumable `readdir`
-  from agnos. (Roadmap M3, *#02*.)
+- **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
+  mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
+- **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
+  but crab now says by how much (`showing 1024 of 1200`), because agnos 1.56.50's resumable
+  `#101 readdir_at` lets it keep counting past its own buffer.
 - **None of the AI arc exists.** No index, no tags, no semantic find, no dedup — and `cyrius.cyml`
   declares no daimon dependency. (Roadmap M7–M8.)
 

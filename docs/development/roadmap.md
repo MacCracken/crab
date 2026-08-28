@@ -44,9 +44,26 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 
 - **Does the second pane ever leave?** At 420px all three directions show one pane plus a Pane A/B
   switcher, so the canvas answers this in the affirmative — but it has not been ratified. Forced by M4.
-- **Which accent roles does the compositor hand over?** rupa publishes `accent`, `active`, `held`,
-  `faint` — but **no `on-accent`** (the ink colour to use *on* an accent fill). Until it does, a
-  selected row cannot carry guaranteed-legible text. **Gate: rupa.** Forced by M3.
+- ✅ **Which accent roles does the compositor hand over? — ANSWERED, gate closed.** rupa **0.1.5**
+  publishes **`on-accent`**, dhancha **0.9.20** binds it (`dh_theme_on_accent()`) and paints the
+  focused selection's *text* with it, and crab's `render_test` confirms it at the pixel.
+  ⛔ **THE HIGHLIGHT WAS ERASING THE ROW IT HIGHLIGHTED.** The selected row is filled with `accent`
+  and its label was drawn in the theme's primary `ink` — on MUDRA dark, `0xE7E9EF` on `0x00E5FF` is a
+  contrast ratio of **1.27:1**. The one row the operator is looking at was the one row that could not
+  be read.
+  ⭐ **All four grounds now clear the WCAG AA floor** (12.72 / 4.64 / 11.27 / 5.49 : 1), and rupa's
+  tests assert the *floor* rather than the numbers, plus that the no-token fallback — plain `ink` on
+  the accent — **fails** it, so the guarantee is not vacuous.
+  ⛔ **The obvious heuristic is wrong.** A 299/587/114 luma against a 128 threshold picks the LIGHT
+  ink for MUDRA light's `0x0090A6` accent, where the dark ink measures better (4.64 vs 3.57). rupa
+  ships `rupa_contrast` / `rupa_ink_on` comparing real contrast instead.
+  ⚠ **A second, older defect fell out of the same change**: dhancha's scalable-font path blitted
+  hardcoded white and ignored the theme, so it was unreadable on both light grounds and had been
+  since it was written. The bitmap path (what everything ships with) always honoured the theme, which
+  is why nothing caught it.
+  ⚠ **`on-accent` is deliberately the same value as `bg` on MUDRA dark** (`0x0B0C0E`) — the legible
+  ink on a bright cyan fill just *is* the carbon void. So "this pane has no on-accent pixels" cannot
+  be written as a pixel check; it finds background. `render_test` says so at the call site.
 
 ---
 
@@ -306,8 +323,40 @@ Both targets built and all 228 tests passed against that graph, and the resultin
   `crab_entry_cmp` fails no test, because -1 is the smallest value and both orders are descending, so
   it sinks on its own. Mutation showed that; an earlier comment claimed the opposite. It is kept for
   the smallest-first order that column headers (*#32*) will bring.
-- **Real columns** — NAME · SIZE · MODIFIED with headers, replacing the 13-character name column.
-  **Gate: dhancha** TABLE or column-header widget. *Deferral #32.*
+- ✅ **Real columns — DONE, gate closed.** NAME · SIZE · MODIFIED with headers. *Deferral #32.*
+  ⭐ **dhancha 0.9.20 adds `src/table.cyr`** — a **shared column-width spec** read by the header and
+  by every row. That sharing is the whole feature: dhancha could already draw a `BOX_H` of
+  fixed-width labels, but nothing made the header and the rows agree on where column 2 starts, and
+  rows laid out independently drift the moment one cell's text changes. A table whose columns drift
+  is worse than no columns — the reader trusts the alignment to say which value belongs to which
+  heading.
+  ⭐ **The 13-character name column is gone.** NAME is the **remainder** column, so it grows with the
+  pane instead of being pinned at a width chosen in 2026-08.
+  ⛔ **COLUMNS THAT DO NOT FIT ARE DROPPED, NOT SQUEEZED.** crab's default window is 380x220, so a
+  pane is ~187 px — about 20 characters at the system font's 9 px advance. MODIFIED is
+  `2026-08-28 11:04`, 153 px on its own: showing it there would leave four characters for the
+  filename, which is not a file manager. The pane picks its column set from its own width, so a wider
+  window earns more columns.
+  ⛔ **The header sits OUTSIDE the LIST**, which is what keeps it from scrolling away and from ever
+  being selectable. A header the operator can select is a file that does not exist.
+  ⚠ **Truncation still says it was truncated** — the `~` marker survives the port, now at the
+  COLUMN's width rather than a hardcoded 13. That was the 0.5.0 defect and it is not being re-earned.
+  ⭐ **dhancha also gained `DH_W_FG`** (per-widget text colour) so the header reads as a label.
+  ⛔ **It does not outrank the selection highlight**: a cell's colour is a preference, on-accent on a
+  selected row is a legibility guarantee — otherwise a table could reintroduce the unreadable-row
+  defect that had just been fixed. Mutation-proven.
+  ⭐ **253 host assertions** (was 228) and **12 dhancha RUN suites**; the alignment test asserts on
+  laid-out **bounds**, because a spec that stored the right numbers and laid out wrongly would pass
+  an accessor-only test and still be useless.
+  ⛔ **TWO REGRESSIONS THE EXISTING SUITE CAUGHT, both of which would have shipped.** Building the
+  column spec inside the render path allocated **1600 B over twenty frames** — reopening the
+  per-frame allocation gate that dhancha 0.9.13-0.9.16 and crab 0.6.0 spent four releases closing;
+  `dh_cols_reset` exists so a spec is allocated once and reused. And the new header shifted every row
+  down, which silently invalidated the **hardcoded pixel coordinates** in both the click test and
+  `render_test` — they now read the row's position from the layout instead.
+  ⚠ **And one test was fragile rather than wrong**: `rt_row_has` samples a single scan line, which is
+  fine for a filled rectangle and unreliable for text, since whether a glyph lights a given row
+  depends on the letterform. Text assertions scan the row's whole band.
 - ✅ **Selection memory on ascend — DONE.** Backspace lands on the directory you just left instead of
   at the top of the parent, and `s` now **follows** the selected entry through the re-sort rather than
   resetting it. *Deferral #34.*
@@ -342,9 +391,33 @@ Both targets built and all 228 tests passed against that graph, and the resultin
   The oracle is an **absence**, because a presence oracle would pass whether or not argv landed — and
   the bare-`crab` run in the same boot reports `/=7, /bin=45`, the exact shape that trips its FAIL
   branch, so the broken-argv output is on record in every run.
-- **Directories larger than the cap** — `CRAB_MAX_ENTRIES = 256` is a compile-time ceiling; the
-  canvas shows `812 items` in a pane and `41,208 files` indexed. Needs paged or streaming readdir.
-  **Gate: agnos** — a readdir that can resume. *Deferral #02.*
+- ✅ **Directories larger than the cap — DONE, gate closed.** *Deferral #02.*
+  ⭐ **agnos 1.56.50 adds `#101 readdir_at(path, buf, max, &cursor)`** — `#81` with a cursor, so a
+  directory bigger than the caller's buffer can be read in batches. The cursor is the **byte offset
+  into the directory file** (POSIX `telldir`'s cookie); an entry index would force a re-walk from the
+  top every call, which is the O(n²) resumability exists to avoid. `0` starts, `-1` means exhausted,
+  and passing `-1` back is a no-op rather than a restart.
+  ⛔ **A SEPARATE SYSCALL NUMBER, NOT A 4th ARGUMENT ON `#81`.** Its callers pass three; the 4th
+  register holds whatever they left there, and this argument is a **pointer the kernel writes
+  through**. agnos states the rule itself at `#55`: *"unused syscall argument registers are not
+  zeroed by the compiler, so arity is part of a syscall's ABI here."*
+  ⭐ **`CRAB_MAX_ENTRIES` 256 → 1024** — the canvas asks for `812 items` in a pane, so 256 was below
+  what the design itself wants. 64 KB per pane buffer, paid once at startup.
+  ⛔ **RAISING THE CAP DOES NOT MAKE THE CAP HONEST, which was the actual defect.** A directory
+  bigger than any cap still exists. What changed is that once the pane buffer fills, crab **keeps
+  walking without storing, purely to count** — so the warning is now `showing 1024 of 1200` instead
+  of `has more entries than are shown`.
+  ⛔ **THE `#81` FALLBACK IS NOT OPTIONAL.** Against a kernel older than 1.56.50, `#101` is an
+  unknown syscall and the dispatcher returns `-1` — without the fallback crab would show an **empty
+  pane** on every older kernel and read as a filesystem fault.
+  ⭐ **Kernel mutation-proven four ways**, each a full rebuild and boot: resuming at the block start
+  instead of mid-block (never terminates), the budget checked after the record is consumed (a batch
+  overruns `max`), exhaustion writing `0` instead of `-1`, and the alignment guard removed.
+  ⭐ **QEMU-proven end to end** against a seeded **1200-entry** directory: `crab /big /` reports
+  `showing 1024 of 1200`. Mutation-proven by deleting the counting walk — the harness then finds no
+  counted warning at all.
+  ⚠ **The paged path has NO host test and cannot have one** — it is entirely inside
+  `#ifdef CYRIUS_TARGET_AGNOS`. The QEMU arm is the only coverage it has.
 - ✅ **Got the stat storm off the keystroke path — DONE.** *Deferral #03.*
   ⭐ **MEASURED BEFORE BUILT, because this cost was misattributed once already.** The 2026-08-19 iron
   report ("responding slower from inputs") looked like the listing and was in fact the per-entry

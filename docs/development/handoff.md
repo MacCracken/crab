@@ -1,4 +1,4 @@
-# Handoff — **0.7.0 is cut: M3 shipped.** Sorting, selection memory, argv paths, deferred statting.
+# Handoff — **0.7.0 is cut, and all three M3 gates are now CLOSED upstream.** M3 is complete.
 
 > **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated across M2 and M3; cut at 0.7.0 on 2026-08-28.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
@@ -14,14 +14,53 @@
 
 | | |
 |---|---|
-| Version | **0.7.0** (2026-08-28). ⚠ Uncommitted — the operator handles all git operations. |
+| Version | **0.7.0** cut, plus **uncut gate-repair work** on top — see the CHANGELOG's `[Unreleased]`. ⚠ Uncommitted; the operator handles all git operations. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **394,248 B** · `--agnos` **398,648 B** · `--win` fails (pre-existing) |
-| Tests | `cyrius test` **228 / 0** · `render_test` 11 checks, 0 failed · fuzz + bench still scaffolds |
-| Coverage | ⭐ **44/54 fns (81 %)**, 6/6 files — re-derived at this cut with `cyrius coverage`, up from 27/36 (75 %) at 0.6.1. **First time above the v1.0 criterion of 80 %.** ⚠ It is *reference* coverage: a function is counted when something references it. That is a floor, not a correctness proof — `main.cyr` reports 1/1 because its one testable function is `main` itself. |
-| Source | 2,019 lines across **six** files: `app.cyr` 755 · `main.cyr` 562 · `ui.cyr` 453 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | agnos 1.56.49 · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha 0.9.18 · aethersafha 0.16.22 · sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 — all released, and **verified with `path` disabled** (see below) |
-| Mid-arc work | **None.** M3 shipped as 0.7.0. The three open M3 items are **gated upstream** (dhancha TABLE widget; resumable agnos readdir; rupa `on-accent`), not unfinished. |
+| Build | x86_64 **398,504 B** · `--agnos` **406,992 B** · `--win` fails (pre-existing) |
+| Tests | `cyrius test` **253 / 0** · `render_test` **15** checks, 0 failed · fuzz + bench still scaffolds |
+| Coverage | **47/60 fns (78 %)**, 6/6 files. ⚠ **DOWN from 81 % at the 0.7.0 cut, and that is arithmetic, not rot**: the gate work added six functions faster than it added references to them. Still reference coverage — a floor, not a correctness proof. |
+| Source | 2,220 lines across **six** files: `app.cyr` 824 · `main.cyr` 562 · `ui.cyr` 546 · `render_test.cyr` 184 · `path.cyr` 91 · `test.cyr` 13 |
+| Deps | agnos **1.56.50** · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha **0.9.20** · aethersafha 0.16.22 · sadish 0.5.2 · rupa **0.1.5** · rekha 0.3.5 · kashi 1.0.6. ⭐ **all released and pushed** (agnos `1.56.50`, dhancha `0.9.20`, rupa `0.1.5`). The four-way tag check was RE-RUN 2026-08-28 with every `path` override DISABLED: `cyrius deps` resolves **6 deps / 0 errors**, host **and** `--agnos` build, **253/0** tests. rupa and dhancha also moved their toolchain pin to **6.5.35**, matching crab. |
+| Mid-arc work | **The three M3 gates were repaired upstream and their crab-side items are done.** rupa **0.1.5** (`on-accent` + contrast primitives), dhancha **0.9.20** (columns, per-widget fg, the unreadable-selection fix), agnos **1.56.50** (`#101 readdir_at`). M3 is complete; next is **M4 — file operations (v0.8.0)**. |
+
+### ⛔ One deliberate interim, with an expiry
+
+**crab hard-codes syscall `101`** (`CRAB_SYS_READDIR_AT` in `src/app.cyr`). That is the bug class
+agnos's roadmap tracks, and it is temporary on purpose: cyrius **6.5.36** ADDS `SYS_READDIR_AT` +
+`sys_readdir_at`, but crab pins **6.5.35**, whose vendored `lib/` has no wrapper — and `lib/` must
+not be hand-edited. **Switch to the wrapper and delete the constant when crab's pin moves to
+>= 6.5.36.**
+⛔ **6.5.36 IS UNRELEASED — no tag, a local commit only** (verified 2026-08-28; the latest cyrius
+release is **6.5.35**). CI installs *releases*, so the pin CANNOT move there and the wrapper does not
+exist for any consumer. ⚠ Do not be misled by a local `~/.cyrius` that already carries it: on
+2026-08-28 the installed 6.5.35 stdlib snapshot had been overwritten with 6.5.36 content, so
+`lib/syscalls_x86_64_agnos.cyr` briefly showed `sys_readdir_at` here while a clean checkout had
+nothing. Re-check against the released tarball, not the local snapshot.
+Filed on both sides:
+`agnos/docs/development/issues/2026-08-28-syscall-101-readdir-at.md` and
+`cyrius/docs/development/issues/2026-08-28-cyrius-syscall-101-readdir-at-wrapper.md`.
+
+⚠ **The cyrius wrapper is asserted to exist and compile; it has never been CALLED.** agnos's
+`rdat.cyr` proves the kernel contract but uses the raw number. crab is the first consumer that will
+exercise the path through the wrapper, and it cannot until the pin moves.
+
+### ⛔ Read this before touching the column or listing code
+
+- **A column spec built per frame is a leak.** `alloc` is a bump allocator with no `free()`, so
+  `dh_cols_new` inside a render path retains 40 B per pane per frame. This was caught by the existing
+  zero-allocation assertion at **1600 B over twenty frames** — reopening the gate dhancha
+  0.9.13-0.9.16 and crab 0.6.0 spent four releases closing. Use `dh_cols_reset` on a spec allocated
+  once.
+- **Hardcoded pixel coordinates in tests encode the layout.** Adding the column header moved every
+  row down and silently invalidated the literals in both the click test and `render_test`; they now
+  read the row's position from the laid-out widget.
+- **`rt_row_has` samples ONE scan line.** Fine for a filled rectangle, unreliable for text — whether a
+  glyph lights a given row depends on the letterform. Text assertions use `rt_band_has`.
+- **A cross-repo mutation must target `dist/`, not `src/`.** crab compiles `dist/dhancha.cyr`;
+  mutating dhancha's `src/` without `cyrius distlib` changes nothing and the "mutation" silently
+  passes.
+- **`on-accent` is deliberately the same value as `bg` on MUDRA dark** (`0x0B0C0E`). "This pane has no
+  on-accent pixels" therefore cannot be written as a pixel check — it finds background.
 
 ### ⭐ The dep graph was verified four ways at this cut — only the fourth is evidence
 

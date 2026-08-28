@@ -33,6 +33,18 @@ fn rt_entry(buf, i, name, is_dir): i64 {
 }
 
 # Is any pixel on screen row `y`, scanning x in [x0, x1), equal to `col`?
+# ⚠ A BAND, NOT A SCAN LINE. `rt_row_has` samples ONE y, which is fine for a filled rectangle (the
+# selection highlight) and fragile for TEXT: whether a glyph has a lit pixel at one particular row
+# depends on the letterform, so a correct build can fail. Text assertions scan the row's whole band.
+fn rt_band_has(sds, y0, y1, x0, x1, col): i64 {
+    var y = y0;
+    while (y < y1) {
+        if (rt_row_has(sds, y, x0, x1, col) == 1) { return 1; }
+        y = y + 1;
+    }
+    return 0;
+}
+
 fn rt_row_has(sds, y, x0, x1, col): i64 {
     var x = x0;
     while (x < x1) {
@@ -82,11 +94,38 @@ fn main(): i64 {
     var line = dh_theme_line();
     var midl = (w - 6) / 4;                  # a column inside the left pane
     var midr = w - midl;                     # ...and inside the right one
-    # left pane, sel_l = 1 -> the second row (header 28px + row 26px, so y ~= 28+26+13 = 67)
-    check(rt_row_has(sds, 67, 4, midl + 40, accent), 1);
+    # ⚠ THE SCAN LINES ARE READ FROM THE LAYOUT, NOT HARDCODED (*#32*). They used to be literals —
+    # 67 and 41 — encoding "path header 28 px, then 26 px rows". Adding the NAME/SIZE/MODIFIED
+    # column header moved every row down, and those literals would have quietly begun sampling the
+    # header instead of the row they name. Reading the laid-out row keeps the assertion honest about
+    # WHICH row it is looking at.
+    var lsely = dh_widget_y(dh_list_row_at(crab_llst, 1)) + 13;   # left pane, sel_l = 1
+    var rsely = dh_widget_y(dh_list_row_at(crab_rlst, 0)) + 13;   # right pane, sel_r = 0
+    check(rt_row_has(sds, lsely, 4, midl + 40, accent), 1);
     # right pane, sel_r = 0 and NOT active -> muted, and NOT accented
-    check(rt_row_has(sds, 41, midr - 40, w - 4, line), 1);
-    check(rt_row_has(sds, 41, midr - 40, w - 4, accent), 0);
+    check(rt_row_has(sds, rsely, midr - 40, w - 4, line), 1);
+    check(rt_row_has(sds, rsely, midr - 40, w - 4, accent), 0);
+
+    # ---- ⭐⭐ AND THE ACCENTED ROW'S TEXT IS STILL READABLE (dhancha 0.9.20, rupa 0.1.5) --------
+    # ⛔ THE HIGHLIGHT USED TO ERASE THE ROW IT HIGHLIGHTED. The selected row is filled with `accent`
+    # and its label was drawn in the theme's primary `ink` — on MUDRA dark, 0xE7E9EF on 0x00E5FF is a
+    # contrast ratio of **1.27:1**. The one row the operator is looking at was the one row that could
+    # not be read. rupa now publishes `on-accent` and dhancha paints the focused selection's text
+    # with it; this is crab confirming it arrived, at the pixel.
+    # ⚠ Bare 0xRRGGBB: glyph pixels are stored with alpha 0xFF, but `sd_surface_pixel_at` rebuilds
+    # from b/g/r and drops the alpha byte.
+    var on_acc = dh_theme_on_accent();
+    var ink = dh_theme_ink();
+    check(rt_band_has(sds, lsely - 12, lsely + 12, 4, midl + 40, on_acc), 1);   # on-accent ink
+    check(rt_band_has(sds, lsely - 12, lsely + 12, 4, midl + 40, ink), 0);      # ...and NOT primary ink
+    # ⛔ THE CONTROL. Without it a build that painted EVERY row in on-accent would pass the pair
+    # above and be just as wrong — the unselected right pane must still use the primary ink.
+    check(rt_band_has(sds, rsely - 12, rsely + 12, midr - 40, w - 4, ink), 1);
+    # ⚠ AND THE MIRROR OF THAT CONTROL CANNOT BE WRITTEN HERE, WHICH IS WORTH SAYING RATHER THAN
+    # QUIETLY OMITTING. "the right pane has NO on-accent pixels" looks like the obvious companion
+    # check, but on MUDRA dark `on-accent` is 0x0B0C0E — the SAME value as `bg`, deliberately, since
+    # the legible ink on a bright cyan fill just is the carbon void. Scanning any pane for it finds
+    # background, so the check fails against correct code. The `ink` line above carries the control.
 
     # ---- ⛔ THE CASE THE OLD CODE COULD NOT REPRESENT: 12 entries, ~6 visible ---------------
     var big = alloc(16 * 64);
