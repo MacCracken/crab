@@ -207,8 +207,25 @@ so the bounded-join *refusal* path has host assertions only.
   ⚠ **Scroll wheel is NOT done** — setu has no wheel message kind. **Gate: setu.**
   ⚠ **Pane headers are not clickable** — the header is a sibling of the list, so the hit walk never
   reaches it.
-- **Untouched**: key release / `SETU_SURF_FULL_KEYS` (#06, **gate: setu**), routing through
-  `dh_dispatch` (#07 — ⚠ the KEY half is safe; adopting it wholesale is not, same ruling as above).
+- ✅ **Key release (*#06* first half) — `SETU_SURF_FULL_KEYS` requested and gated.** QEMU-proven
+  exactly: 6 keystrokes → **12 received / 6 acted**. The setu gate is cleared — the compositor
+  implements the flag end to end.
+  ⛔ Asking without gating makes every key act twice; the compositor measured that on its own chrome
+  (2026-08-18). The flag and the gate are coupled and live together in `src/app.cyr`.
+- ✅ **Held-key repeat (*#06* second half) — DONE, and NO kernel change was needed.**
+  ⛔ **This file previously said it was blocked on agnos for want of a bounded wait. That was wrong**,
+  and wrong for a specific reason worth keeping: the claim was made from syscall *signatures*
+  (`#14 pause` takes no timeout) without reading `#14`'s own comment, which says a device IRQ **or the
+  100 Hz timer** wakes it. Measured on a real kernel: `sys_pause()` returns in **0-4 ms**. Repeat is a
+  clock check in the idle path.
+  ⚠ Only Up/Down/j/k repeat — Enter and Backspace would walk the tree on a held key. 400 ms delay,
+  then 60 ms interval, both gates required.
+  ⭐ QEMU-proven: a QMP-held key repeats and **stops on release** (0 repeats after).
+  ⚠ **The observed rate is far below the configured interval** (~1 repeat per 1.6 s hold vs ~20
+  expected) and is **not diagnosed**. Each repeat re-renders and re-writes 334 KB of shm, so frame
+  cost is the likely bound — a hypothesis, not a finding.
+- **Untouched**: routing through `dh_dispatch` (#07 — ⚠ the KEY half is safe; adopting it wholesale is
+  not, same ruling as the pointer).
 
 ## Dependencies
 

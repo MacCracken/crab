@@ -55,7 +55,69 @@ enum CrabDir {
 # Nothing is conditional here, and there is no arm — the client states what its pixels ARE and the
 # compositor decides how to draw them.
 fn crab_surface_flags(): i64 {
-    return SETU_SURF_PREMULTIPLIED;
+    return SETU_SURF_PREMULTIPLIED | SETU_SURF_FULL_KEYS;
+}
+
+# ⭐⭐ `SETU_SURF_FULL_KEYS` (M2, *deferral #06*) — crab now asks for key RELEASES as well as presses.
+# The compositor honours it per surface: `win_set_keymode(win, flags & SETU_SURF_FULL_KEYS)` at
+# CREATE_SURFACE, and `setu_srv_forward_key` then sets `mods` to **1 = press / 0 = release**. A
+# press-only surface (the default) receives presses only, with `mods` always 0.
+#
+# ⛔⛔ ASKING FOR IT WITHOUT GATING ON IT MAKES EVERY KEY ACT TWICE, AND THAT IS NOT A GUESS — the
+# compositor carries the burn. aethersafha `src/main.cyr`: *"every key acted on BOTH edges. Measured
+# on the 2026-08-18 burn: three F3 presses produced SIX `theme switched` lines, and the launcher moved
+# its selection twice per keypress, which is what made choosing an app hard."* For crab that would be
+# two rows per Down, and Enter descending twice — the second descend landing wherever the first left
+# the selection.
+#
+# ⚠ THE GATE IS ONLY CORRECT BECAUSE THE FLAG IS REQUESTED, and the two must move together. On a
+# press-only surface `mods` is 0 for a PRESS, so a client that asked for press-only and then gated on
+# `mods == 1` would act on nothing at all. That coupling is why this predicate sits beside
+# `crab_surface_flags` rather than in the event loop.
+fn crab_key_acts(mods): i64 {
+    if (mods == 1) { return 1; }
+    return 0;
+}
+
+# ⭐⭐ HELD-KEY REPEAT (M2, *deferral #06* second half), AND IT NEEDED NO KERNEL CHANGE.
+# ⛔ AN EARLIER NOTE HERE CLAIMED IT WAS BLOCKED ON agnos FOR WANT OF A BOUNDED WAIT. THAT WAS WRONG,
+# and it was wrong because it read syscall SIGNATURES and stopped there: `#14 pause` takes no timeout
+# argument, so it looked unbounded. Its kernel comment says otherwise in as many words — *"Do ONE SAFE
+# (IF=1) hlt so a device IRQ (e.g. NIC RX) **or the 100 Hz timer** wakes it"* — and MEASURED on a real
+# kernel, `sys_pause()` returns in **0-4 ms**. It is already a bounded wait; nothing needed adding.
+# ⇒ Repeat is a clock check in the idle path, not a new primitive.
+#
+# ⚠ bhumi does not repeat FOR us and says so: *"forwarding a repeat as another press delivers a key
+# the user never pressed again. Repeat is policy, not drain."* On agnos it diffs HID reports into
+# edges, so a held key is exactly one press and one release. The policy is here.
+enum CrabRepeat {
+    CRAB_REPEAT_DELAY_MS = 400;      # hold this long before the first repeat
+    CRAB_REPEAT_INTERVAL_MS = 60;    # then this often
+}
+
+# Does this key repeat while held? -> 1 yes, 0 no.
+#
+# ⛔ ONLY MOVEMENT REPEATS. Enter descends and Backspace ascends: repeating those walks the operator
+# through the filesystem at 16 directories a second on one held key, and every step re-readdirs and
+# re-stats. A pane switch (Left/Right) repeating is merely useless — it lands on the same pane. The
+# keys where repeat is what the operator MEANT are the ones that move a selection one row at a time.
+fn crab_key_repeats(usage): i64 {
+    if (usage == 0x52) { return 1; }        # Up
+    if (usage == 0x51) { return 1; }        # Down
+    if (usage == 0x0E) { return 1; }        # k
+    if (usage == 0x0D) { return 1; }        # j
+    return 0;
+}
+
+# Is a repeat due? `held_ms` = how long the key has been down, `since_last` = since the last action.
+# -> 1 fire, 0 wait.
+#
+# ⚠ THE DELAY EXISTS SO A DELIBERATE SINGLE PRESS IS NOT A BURST. Without it every tap moves several
+# rows, which reads as the selection overshooting rather than as repeat working.
+fn crab_repeat_due(held_ms, since_last): i64 {
+    if (held_ms < CRAB_REPEAT_DELAY_MS) { return 0; }
+    if (since_last < CRAB_REPEAT_INTERVAL_MS) { return 0; }
+    return 1;
 }
 
 # ⭐⭐ RESIZE POLICY (M2). The compositor ASKS via `WINDOW_CONFIGURE`; deciding whether to adopt the

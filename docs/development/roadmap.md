@@ -151,17 +151,56 @@ assumes otherwise.
   ⛔ **crab's wheel moves the SELECTION, not the view.** `crab_render` restores each pane's scroll
   offset and then calls `dh_list_scroll_to_sel`, so a free-scrolled view is snapped back on the next
   frame by the machinery keyboard navigation depends on. A detached view-scroll is a separate change.
-  ⛔ **UNVERIFIED END TO END.** `aethersafha`'s `--agnos` build fails on `undefined function
-  'sys_execve'` — pre-existing, reproduced on a clean tree — so the compositor cannot be rebuilt and
-  no QEMU run can drive a scroll through to crab. Every layer is host-tested and mutation-proven; the
-  wire is not.
+  ⭐ **PROVEN TO THE COMPOSITOR; THE LAST HOP IS NOT.** QEMU, 2026-08-27: a QMP-injected wheel reaches
+  aethersafha — **agnos → bhumi → compositor is end-to-end proven**. crab logs no scroll, and the
+  compositor says why: `got a scroll with NO client window under the cursor`. QEMU's `usb-mouse` is
+  RELATIVE, so a harness cannot place the cursor on crab's window; **crab's silence is correct
+  behaviour, not a defect.** Closing it needs absolute pointing or reading the window placement.
+  ⛔ **The desktop was BLOCKED by sigil, not by aethersafha.** `cyrius deps` prefers a sibling
+  checkout, and sigil 3.12.11 added a pipe/fork/execve/waitpid helper with no target guard —
+  `SYS_FCNTL` and `WNOHANG` are Linux-only, and Cyrius treats an undefined **variable** as a hard
+  error regardless of reachability, so it failed the whole `--agnos` compile. ✅ **sigil 3.12.12**
+  guards it and returns `ENOSYS` on agnos; aethersafha builds again.
+  ⚠ **An earlier note here blamed a pre-existing `sys_execve` failure. That was wrong** — it was a
+  symptom of a `lib/` I had churned, because `cyrius build` re-resolves deps and `git stash` does not
+  isolate a tree whose `lib/` the build regenerates. A detached worktree at the same commit built fine.
   ⚠ **NOT DONE: focusing a pane by its header.** The header is a sibling of the list, not inside it,
   so `crab_hit`'s walk never reaches a LIST and the click does nothing. Reasonable to want; not
   claimed.
   ⚠ Row-level precision is asserted on the **host**, against the real rendered tree — the emulated
   mouse is `usb-mouse` (relative), so a harness cannot land on a chosen pixel and does not pretend to.
-- **Key release / held keys** — request `SETU_SURF_FULL_KEYS` so Down can repeat. Today one press
-  moves one row. *Deferral #06.* **Gate: setu** — confirm the compositor honours the flag.
+- **Key release** — ✅ **DONE.** crab requests `SETU_SURF_FULL_KEYS`; the compositor honours it per
+  surface (`win_set_keymode` at CREATE_SURFACE, `mods` = 1 press / 0 release). *Deferral #06, first
+  half.* ✅ **The setu gate is CLEARED** — the flag is implemented end to end, not just defined.
+  ⭐ **QEMU-proven, exactly**: 6 keystrokes → **12 `crab: key received` / 6 `crab: key press`**. The
+  first count proves releases are delivered; the second proves they are gated.
+  ⛔ **ASKING FOR IT WITHOUT GATING MAKES EVERY KEY ACT TWICE**, and the compositor carries that burn:
+  *"three F3 presses produced SIX `theme switched` lines, and the launcher moved its selection twice
+  per keypress"* (2026-08-18). For crab it is two rows per Down and Enter descending twice.
+  ⚠ The flag and the gate must move together: on a press-only surface `mods` is 0 for a **press**, so
+  dropping the flag while keeping the gate would act on nothing. Both live in `src/app.cyr`.
+- **Held-key repeat** — ✅ **DONE, and it needed NO kernel change.** *Deferral #06, second half.*
+  ⛔⛔ **I CLAIMED THIS WAS BLOCKED ON agnos FOR WANT OF A BOUNDED WAIT. THAT WAS WRONG.** The claim
+  came from reading syscall SIGNATURES — `#14 pause` takes no timeout argument, so it looked
+  unbounded — and stopping there. Its own kernel comment says the opposite in as many words: *"Do ONE
+  SAFE (IF=1) hlt so a device IRQ (e.g. NIC RX) **or the 100 Hz timer** wakes it."*
+  ⭐ **MEASURED on a real kernel before building anything: `sys_pause()` returns in 0-4 ms.** It is
+  already a bounded wait. An agnos 1.56.50 adding a timed-pause syscall would have duplicated
+  behaviour that shipped long ago.
+  ⇒ Repeat is a clock check in the idle path. bhumi does not repeat for us and says why —
+  *"forwarding a repeat as another press delivers a key the user never pressed again. Repeat is
+  policy, not drain."*
+  ⛔ **ONLY MOVEMENT REPEATS.** Enter descends and Backspace ascends; repeating those walks the
+  operator through the filesystem on one held key, re-readdir'ing and re-stat'ing every step.
+  ⚠ Two gates, not one: a 400 ms delay so a deliberate tap is not a burst, then a 60 ms interval.
+  ⭐ **QEMU-proven**: a QMP-held key (HMP `sendkey` cannot hold — it sends both edges) gives
+  `hold window: 1 press, 0 releases` → repeat fires → **0 repeats after the release**, so the latch is
+  cleared on the release edge rather than sticking.
+  ⚠ **The observed RATE is far below the configured interval** — about 1 repeat in a 1.6 s hold where
+  ~20 was expected. Not diagnosed. Each repeat re-renders and re-writes a 334 KB shm buffer, so the
+  rate is plausibly bounded by frame cost under QEMU rather than by the interval, but that is a
+  hypothesis and is recorded as one.
+
 - **Route through `dh_dispatch`** — crab still switches on raw keysyms while the 0.4.8→0.4.12 arc
   moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
   around it". *Deferral #07.*

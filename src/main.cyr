@@ -131,6 +131,13 @@ fn main(): i64 {
     var last_row = 0 - 1;
     var last_ms = 0;
     var hit = alloc(16);
+    # ⭐ HELD-KEY REPEAT (M2 *#06*). `SETU_SURF_FULL_KEYS` gives crab both edges, so it can know a key
+    # is still down — which is the whole reason the flag was worth requesting.
+    # ⚠ ONE held key, not a set. Two movement keys held at once is not a gesture a file manager owes
+    # anyone, and tracking a set would need a release to clear the right slot rather than just clear.
+    var held_key = 0;
+    var held_since = 0;
+    var held_last = 0;
 
     # LIVE (agnos): re-render on forwarded key input. Left/Right (0x50/0x4F) or h/l
     # switch the active pane; Up/Down (0x52/0x51) or k/j move its selection (clamped
@@ -313,6 +320,31 @@ fn main(): i64 {
             if (k == KEY) {
                 var u = dh_event_a(ev);
                 crab_say("crab: key received\n");
+                # ⛔⛔ PRESS ONLY. crab asks for `SETU_SURF_FULL_KEYS` (see `crab_surface_flags`), so
+                # every key now arrives TWICE — `mods` 1 on the press, 0 on the release. Acting on
+                # both edges moves the selection two rows per Down and descends twice on Enter, the
+                # second descend landing wherever the first left the selection. The compositor hit
+                # exactly this on its own chrome handlers and measured it on the 2026-08-18 burn.
+                # ⚠ `crab: key received` stays OUTSIDE the gate deliberately: it is the input-arrival
+                # oracle the QEMU harnesses read, and it should count every event the wire delivered.
+                # `crab: key press` below counts what crab ACTED on. The two together are what
+                # distinguish "releases are arriving" from "releases are being acted on".
+                # ⚠ TRACK THE EDGE BEFORE ACTING. A release must clear the latch even though it is
+                # not acted on, or the key repeats forever after the operator lets go — the stuck-key
+                # failure `SETU_SURF_FULL_KEYS` exists to make avoidable.
+                if (crab_key_acts(dh_event_b(ev)) == 1) {
+                    if (crab_key_repeats(u) == 1) {
+                        held_key = u;
+                        held_since = clock_now_ms();
+                        held_last = held_since;
+                    }
+                    else { held_key = 0; }
+                }
+                else {
+                    if (u == held_key) { held_key = 0; }      # release of the held key
+                }
+                if (crab_key_acts(dh_event_b(ev)) == 1) {
+                crab_say("crab: key press\n");
                 if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
                 if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
                 if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
@@ -330,6 +362,7 @@ fn main(): i64 {
                 if (u == 0x2A) {                                       # Backspace — ascend to the parent
                     if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
                     if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
+                }
                 }
             }
             # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run
@@ -383,6 +416,32 @@ fn main(): i64 {
         # still spins a core at poll speed. `pause` is yield-then-wait.
         #
         # Idle only. An event just handled means more may be queued — drain at full speed.
+        # ⭐⭐ THE REPEAT TICK. `sys_pause` (#14) is already a BOUNDED wait — measured 0-4 ms on a real
+        # kernel, because a device IRQ or the 100 Hz timer wakes its single `hlt`. So the idle path
+        # runs often enough to drive repeat with nothing but a clock check.
+        # ⛔ AND IT MUST NOT BECOME `sys_sleep_ms`. That syscall `preempt_disable()`s for its whole
+        # duration and froze the entire desktop — see the ⛔ below. `pause` disables preemption for
+        # ONE hlt, which is the difference.
+        if (running == 1) {
+            if (held_key != 0) {
+                var rnow = clock_now_ms();
+                if (crab_repeat_due(rnow - held_since, rnow - held_last) == 1) {
+                    held_last = rnow;
+                    if ((held_key == 0x52) || (held_key == 0x0E)) {          # Up / k
+                        if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                        if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                    }
+                    if ((held_key == 0x51) || (held_key == 0x0D)) {          # Down / j
+                        if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                        if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                    }
+                    crab_say("crab: key repeat\n");
+                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r);
+                    if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                    else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
+                }
+            }
+        }
         if ((running == 1) && (ev == 0)) { sys_pause(); }
     }
     #endif

@@ -467,8 +467,46 @@ fn main() {
 
     # ⭐ AE-6: the flag is UNCONDITIONAL — no arm, no env var, no #ifdef. `state.md` calls that out
     # as load-bearing, and until now nothing checked it.
-    assert_eq(crab_surface_flags(), SETU_SURF_PREMULTIPLIED,
-      "the surface flag is premultiplied, unconditionally");
+    assert_eq(crab_surface_flags() & SETU_SURF_PREMULTIPLIED, SETU_SURF_PREMULTIPLIED,
+      "the surface is premultiplied, unconditionally");
+    assert_eq(crab_surface_flags() & SETU_SURF_FULL_KEYS, SETU_SURF_FULL_KEYS,
+      "...and asks for key RELEASES too (FULL_KEYS, M2 #06)");
+
+    # ⛔⛔ ASKING FOR FULL_KEYS WITHOUT GATING ON IT MAKES EVERY KEY ACT TWICE. The compositor carries
+    # the burn for exactly this: "three F3 presses produced SIX `theme switched` lines, and the
+    # launcher moved its selection twice per keypress". For crab that is two rows per Down, and Enter
+    # descending twice — the second descend landing wherever the first left the selection.
+    assert_eq(crab_key_acts(1), 1, "a PRESS is acted on (mods = 1)");
+    assert_eq(crab_key_acts(0), 0, "a RELEASE is not (mods = 0)");
+    # ⚠ THE GATE AND THE FLAG MUST MOVE TOGETHER. On a press-only surface `mods` is 0 for a PRESS, so
+    # a client that dropped FULL_KEYS but kept this gate would act on nothing at all. That coupling is
+    # why they live side by side in `src/app.cyr` and why these assertions sit together here.
+    assert((crab_surface_flags() & SETU_SURF_FULL_KEYS) != 0,
+      "...so the gate above is only correct while FULL_KEYS is requested");
+
+    # --- M2 #06 second half: held-key repeat ------------------------------------------------------
+    # ⛔ ONLY MOVEMENT REPEATS. Enter descends and Backspace ascends; repeating those walks the
+    # operator through the filesystem at ~16 directories a second on one held key, re-readdir'ing and
+    # re-stat'ing every step. A pane switch repeating is merely useless — it lands on the same pane.
+    assert_eq(crab_key_repeats(0x52), 1, "Up repeats");
+    assert_eq(crab_key_repeats(0x51), 1, "Down repeats");
+    assert_eq(crab_key_repeats(0x0E), 1, "k repeats");
+    assert_eq(crab_key_repeats(0x0D), 1, "j repeats");
+    assert_eq(crab_key_repeats(0x28), 0, "Enter does NOT repeat — it would descend on every tick");
+    assert_eq(crab_key_repeats(0x2A), 0, "Backspace does NOT repeat — it would ascend on every tick");
+    assert_eq(crab_key_repeats(0x50), 0, "Left does not repeat");
+    assert_eq(crab_key_repeats(0x4F), 0, "Right does not repeat");
+
+    # ⚠ THE DELAY IS WHAT KEEPS A DELIBERATE TAP FROM BECOMING A BURST. Without it every press moves
+    # several rows, which reads as the selection overshooting rather than as repeat working.
+    assert_eq(crab_repeat_due(0, 0), 0, "a fresh press does not repeat");
+    assert_eq(crab_repeat_due(CRAB_REPEAT_DELAY_MS - 1, 9999), 0, "...nor one just short of the delay");
+    assert_eq(crab_repeat_due(CRAB_REPEAT_DELAY_MS, CRAB_REPEAT_INTERVAL_MS), 1, "both thresholds met -> fire");
+    assert_eq(crab_repeat_due(9999, CRAB_REPEAT_INTERVAL_MS - 1), 0, "held long enough, but too soon after the last");
+    assert_eq(crab_repeat_due(9999, 9999), 1, "held long, idle long -> fire");
+    # ⚠ BOTH gates, not either. Held-long-enough alone would fire every idle tick — ~250 rows a second
+    # at the measured 0-4 ms `sys_pause` latency.
+    assert_eq(crab_repeat_due(CRAB_REPEAT_DELAY_MS - 1, CRAB_REPEAT_INTERVAL_MS), 0, "the delay gate is not optional");
 
     # --- descend REFUSES rather than truncating, and that path had host assertions only ----------
     # ⛔ A truncated join names a DIFFERENT directory. Descending into it would readdir something the
