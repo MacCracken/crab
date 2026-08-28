@@ -201,15 +201,26 @@ assumes otherwise.
   rate is plausibly bounded by frame cost under QEMU rather than by the interval, but that is a
   hypothesis and is recorded as one.
 
-- **Route through `dh_dispatch`** — crab still switches on raw keysyms while the 0.4.8→0.4.12 arc
-  moved connect, close and input transport onto the toolkit. Last step of "through the toolkit, not
-  around it". *Deferral #07.*
-  ⚠ **The KEY half is safe; the rest is not.** `dh_dispatch` routes a KEY to `dh_focus_get()`, and
-  crab re-establishes focus every frame in `crab_pane`, so that path survives the arena rewind.
-  ⛔ **But adopting it wholesale would also hand the LIST its own key handling, and the selection it
-  would keep lives on a widget that is destroyed every frame** — which is precisely why `sel_l` /
-  `sel_r` are app state pushed in via `dh_list_select`, not toolkit state read back out. See the ⛔
-  under Pointer: the same ruling governs both.
+- **Route through `dh_dispatch`** — ⛔ **BLOCKED ON AN UPSTREAM TYPE CONFUSION, and adopting it today
+  would be actively WRONG rather than merely inert.** *Deferral #07.*
+  `dh_dispatch`'s only key-level action is Tab traversal, and it tests `dh_event_a(ev) == DH_KEY_TAB`
+  where `DH_KEY_TAB = 9`. dhancha's own enum header says those values are *"ASCII / Unicode
+  codepoints, matching the puka keymap's sym space"*. **crab's KEY events carry raw HID usages**, and
+  HID usage 9 is **`f`** — so a crab routed through `dh_dispatch` would Tab-traverse whenever the
+  operator typed `f`.
+  ⛔ **The confusion spans three repos and one number.** aethersafha sends `bhumi_key_usage(ev)` — an
+  HID usage. setu's protocol names the field **`keysym`**. dhancha maps it straight into `DhEvent.a`,
+  whose constants are **codepoints**. Three names, one field, two meanings, and nothing translates.
+  ⚠ puka already pays this toll explicitly — `setuwin__hid_to_evdev` exists precisely because HID
+  usages arrive and its engine speaks evdev. dhancha simply never added the equivalent.
+  ⇒ **Gate: dhancha** — either its setu mapper translates usage → codepoint, or `DH_KEY_*` moves into
+  HID-usage space. Until one happens, crab's own keysym switch is not "around the toolkit", it is the
+  only correct place for the mapping to live.
+  ⚠ **And the rest of #07 was never going to move anyway**: `dh_dispatch` delivers to the focused
+  widget via `dh_propagate`, and crab registers **no widget handlers** — its key semantics (descend,
+  ascend, pane switch, selection) are app-level by the same ruling that governs pointer state. Tab was
+  the whole prize, and Tab is what the mismatch takes away.
+
 - ✅ **CLOSED 2026-08-27 (dhancha 0.9.16) — the idle leak.** `dh_setu_poll_event` called
   `setu_msg_new()` (80 B) **before** it knew whether anything was pending; the message is pure scratch,
   so it is now one hoisted buffer per process. **200 idle polls move the global heap by 0 bytes**,

@@ -1,4 +1,4 @@
-# Handoff — 0.6.0 is cut; **M2 has started.** The render/input loop now allocates nothing at all.
+# Handoff — **0.6.1 is cut: M2 shipped.** The window answers pointer, wheel, releases and repeat.
 
 > **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated as M2 opened.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
@@ -14,14 +14,14 @@
 
 | | |
 |---|---|
-| Version | **0.6.0** at `dc3fc38 m2 surface resize work`. `../dhancha` is clean at **0.9.17** (`b297604`), tagged and consumed. |
+| Version | **0.6.1** (2026-08-27). ⚠ Uncommitted. Every dependency is released and current. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **385,760 B** · `--agnos` **385,976 B** · `--win` fails (pre-existing, not crab's) |
-| Tests | `cyrius test` **107 / 0** · `render_test` 11 checks, 0 failed · fuzz PASS · bench PASS (both scaffolds) |
-| Coverage | **19/27 fns (70 %)**, 6/6 files — up from 53 %; v1.0 wants 80 % |
-| Source | 1,054 lines across **six** files: `main.cyr` 244 · `app.cyr` 188 · `ui.cyr` 364 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 · **dhancha 0.9.17** · setu 0.8.7 — all six at their latest published tag, verified four ways |
-| Mid-arc work | ⚠ **M2 (v0.6.1) is OPEN.** #09 ✅ · resize ⚠ (refusal QEMU-proven, adopt unreachable here) · **pointer ✅ QEMU-proven**. Left: key-release (#06, gate: setu), `dh_dispatch` (#07), scroll wheel (gate: setu). |
+| Build | x86_64 **385,816 B** · `--agnos` **390,184 B** · `--win` fails (pre-existing) |
+| Tests | `cyrius test` **134 / 0** · `render_test` 11 checks, 0 failed · fuzz + bench still scaffolds |
+| Coverage | **27/36 fns (75 %)**, 6/6 files — v1.0 wants 80 % |
+| Source | 1,512 lines across **six** files: `main.cyr` 453 · `ui.cyr` 442 · `app.cyr` 368 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
+| Deps | agnos 1.56.49 · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha 0.9.18 · aethersafha 0.16.22 · sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 — all released |
+| Mid-arc work | **None.** M2 shipped as 0.6.1. The two open M2 items are **gated upstream** (dhancha keysym space; a GPU carveout), not unfinished. |
 
 ---
 

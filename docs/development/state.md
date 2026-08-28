@@ -24,7 +24,7 @@
 
 ## Version
 
-**0.6.0** (2026-08-27) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.6.1** (2026-08-27) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
 ⭐ Refreshed **in the same commit as the CHANGELOG entry**, which is the rule the header below
 demands and the one this file broke twice.
@@ -50,9 +50,9 @@ demands and the one this file broke twice.
 
 ## Source
 
-1054 lines across **six** files (five until 0.6.0).
+1512 lines across **six** files (five until 0.6.0).
 
-- `src/main.cyr` (244) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
+- `src/main.cyr` (453) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
   `_entry();`, so a test that included it would RUN THE APP — which is why everything testable was
   moved to `src/app.cyr`. **Do not add a function here.** What remains is the dhancha client
   lifecycle, the shm present path and the frame loop.
@@ -61,7 +61,7 @@ demands and the one this file broke twice.
   not a rename.
   ⚠ **No arena setup here any more** (0.6.0). It lived in `main()` and that was a gap: deleting it
   broke no test while restoring a 77 KB-per-frame leak. `crab_render` owns it.
-- `src/app.cyr` (241) — ⭐ **NEW at 0.6.0.** The application layer lifted out of `main.cyr`: the
+- `src/app.cyr` (368) — ⭐ **NEW at 0.6.0.** The application layer lifted out of `main.cyr`: the
   readdir parser (`crab_readdir_into` and its cap clamp), the stat layer, `crab_descend` /
   `crab_ascend`, `crab_surface_flags`, the serial logging.
   ⛔ It exists for the same reason `path.cyr` does — **none of it was reachable from any test** while
@@ -72,7 +72,7 @@ demands and the one this file broke twice.
 - `src/path.cyr` (91) — the #81 record layout and the **bounded** cstring/path helpers.
   ⛔ Extracted at 0.5.0 for the reason `app.cyr` was extracted at 0.6.0: a memory-safety fix that
   cannot be asserted on is a fix held on trust.
-- `src/ui.cyr` (373) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` (442) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
   ⛔ **`crab_render` OWNS THE PER-FRAME ARENA** (0.6.0) — creates it on first use, installs it, and
   calls `dh_frame_begin()`. Placed here rather than in `main.cyr` so every caller is correct without
@@ -96,7 +96,7 @@ demands and the one this file broke twice.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⭐ `cyrius coverage` reports **19/27 fns referenced (70 %)**, 6/6 files — up from 53 % at 0.5.0 and
+⭐ `cyrius coverage` reports **27/36 fns referenced (75 %)**, 6/6 files — up from 53 % at 0.5.0 and
 23 % at 0.4.15, against a v1.0 criterion of 80 %. Still a floor rather than a correctness proof; the
 jump is the `app.cyr` extraction making a whole layer reachable. `cyrius lint` is clean apart from **9** lines over 120 characters (8 in `main.cyr`, 1 in `ui.cyr`).
 
@@ -175,9 +175,10 @@ first. ⇒ **Any change to the agnos event loop needs a QEMU run before it is cl
 ⚠ **Not exercised on agnos:** `crab_descend` / `crab_ascend`. Neither harness drives navigation keys,
 so the bounded-join *refusal* path has host assertions only.
 
-## M2 in progress (v0.6.1)
+## M2 — shipped as v0.6.1
 
-⚠ **This section exists because `state.md` is what a cold start reads, and M2 is half-built.**
+⭐ **M2 shipped in 0.6.1.** Five of seven items are done and QEMU-proven; the two that are not are
+**gated upstream**, not unfinished — see the ⛔ entries below and the roadmap.
 
 - ✅ **Idle-poll allocation (*#09*)** — dhancha 0.9.16. The loop allocates nothing in steady state.
   Host-tested (200 idle polls, 0 bytes) and QEMU-confirmed for no regression.
@@ -286,7 +287,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **75 passed / 0 failed** (55 mid-0.6.0,
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **134 passed / 0 failed** (55 mid-0.6.0,
   37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
   Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render` (`a == 255` and
@@ -323,8 +324,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, 381,584 B                                       |
-| `--agnos`    | ✅ builds, 381,648 B — the real target                     |
+| x86_64 linux | ✅ builds, 385,816 B                                       |
+| `--agnos`    | ✅ builds, 390,184 B — the real target                     |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

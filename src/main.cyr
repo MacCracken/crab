@@ -344,25 +344,25 @@ fn main(): i64 {
                     if (u == held_key) { held_key = 0; }      # release of the held key
                 }
                 if (crab_key_acts(dh_event_b(ev)) == 1) {
-                crab_say("crab: key press\n");
-                if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
-                if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
-                if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                    if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                    if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
-                }
-                if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                    if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                    if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
-                }
-                if (u == 0x28) {                                       # Enter — descend into the selected dir
-                    if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
-                    if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
-                }
-                if (u == 0x2A) {                                       # Backspace — ascend to the parent
-                    if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
-                    if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
-                }
+                    crab_say("crab: key press\n");
+                    if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
+                    if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
+                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                        if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                        if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                    }
+                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                        if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                        if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                    }
+                    if (u == 0x28) {                                       # Enter — descend into the selected dir
+                        if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
+                        if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
+                    }
+                    if (u == 0x2A) {                                       # Backspace — ascend to the parent
+                        if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }
+                        if (active_pane == 1) { var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf); if (ar >= 0) { rn = ar; sel_r = 0; crab_log_cd(rpath); } }
+                    }
                 }
             }
             # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run

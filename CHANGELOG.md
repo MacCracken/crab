@@ -2,6 +2,110 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1] - 2026-08-27 — M2: the window answers the pointer, the wheel, and a held key
+
+**M2 — "the window is real"**. crab was a fixed 380x220 rectangle that understood one keypress at a
+time. It now takes pointer input, a mouse wheel, key releases and held-key repeat, and it acts on a
+compositor resize request instead of ignoring it.
+
+### Added — pointer input (*deferral #05*)
+
+Click to select, click to focus a pane, double-click to descend (400 ms, monotonic `clock_now_ms`).
+⭐ **QEMU-proven**: `crab: click` on a real kernel, a click resolved to a pane, keys still answered
+afterwards. crab is the **first client in the stack to decode `SETU_INPUT_PTR_MOVE`**.
+
+⛔ **crab OWNS ITS INTERACTION STATE — `dh_dispatch` is deliberately NOT used.** It tracks a press by
+storing a **widget pointer**, and `crab_render` opens with `dh_frame_begin()`, which rewinds the frame
+arena and clears exactly those pointers — so a press and its release are separated by a rebuild and
+the target no longer exists. dhancha 0.9.15 states the rule: *cross-frame widget identity and a
+per-frame arena are mutually exclusive by construction*, and press/release tracking **is** cross-frame
+widget identity. crab tracks **pane index + row index**; the toolkit supplies geometry via
+`dh_hit_test` only.
+⚠ `SETU_INPUT_PTR_BTN` carries **no coordinates**, so position comes from `PTR_MOVE`.
+
+### Added — the mouse wheel, across six repos
+
+`agnos 1.56.49` reads HID report byte [3] → `bhumi 1.4.3` carries `BHUMI_EV_SCROLL` →
+`setu 0.8.8` defines `SETU_INPUT_PTR_SCROLL` → `dhancha 0.9.18` maps `POINTER_SCROLL` →
+`aethersafha 0.16.21` forwards it → crab scrolls the pane under the cursor.
+
+⛔ **The chain was broken at the BOTTOM, not at setu.** The gate read "setu has no wheel message
+kind"; the real defect was that **agnos discarded the wheel byte** — `hid_process_mouse_report` read
+bytes [1] and [2] and left byte [3], documented in its own layout comment as `wheel (s8, optional)`,
+on the floor. `#98 ptrscan`'s record had no field for it and bhumi had no scroll concept. A setu patch
+alone would have been a fourth dead wire after `SETU_CLOSE` and `SETU_CONFIGURE`.
+⭐ The byte was **QEMU-measured before any layer above it was written**: `hid: wheel byte seen, b3=1`.
+
+⛔ **crab's wheel moves the SELECTION, not the view.** `crab_render` restores each pane's scroll
+offset and then calls `dh_list_scroll_to_sel`, so a free-scrolled view is snapped back on the next
+frame by the machinery keyboard navigation depends on. A detached view-scroll is a separate change.
+
+### Added — key releases and held-key repeat (*deferral #06*)
+
+crab requests `SETU_SURF_FULL_KEYS`; the compositor honours it per surface (`mods` = 1 press /
+0 release). ⭐ **QEMU-proven exactly: 6 keystrokes → 12 `key received` / 6 `key press`.**
+
+⛔ **Asking for the flag without gating on it makes every key act twice**, and the compositor carries
+that burn: *"three F3 presses produced SIX `theme switched` lines, and the launcher moved its
+selection twice per keypress"* (2026-08-18). For crab it is two rows per Down and Enter descending
+twice. ⚠ The flag and the gate are coupled — on a press-only surface `mods` is 0 for a **press** — so
+they live together in `src/app.cyr`.
+
+Held-key repeat: Up/Down/j/k only, 400 ms delay then 60 ms interval, both gates required.
+⛔ **Enter and Backspace do NOT repeat** — they would walk the operator through the filesystem on one
+held key, re-readdir'ing and re-stat'ing every step.
+⭐ QEMU-proven with a QMP-held key (HMP `sendkey` cannot hold — it sends both edges): repeat fires and
+**stops on release**.
+
+### Added — resize (*deferrals #01, #04*)
+
+`WINDOW_CONFIGURE` is handled: `dh_surface_resize` (dhancha 0.9.17), the `#86` shm slot **created
+before the old one is closed**, `w`/`h`/`stride` as state, re-ATTACH + COMMIT after the next render.
+Layout reflows for free — `crab_render` reads `w`/`h` off the surface.
+
+⛔ **A new harness found a real bug on its first run.** The draft closed its only shm buffer before
+knowing the replacement existed and exited. setu's own `setu_client_present` closes first, but it has
+an inline-pixel fallback to land on; crab's LIVE-buffer path has none.
+⛔ **And the byte cap was invented, not derived** — 16 MB from "the framebuffer's size", when agnos
+caps a `#71` pmm slot at **2 MB** and only a `#86` GPU carveout reaches 32 MB, chosen at runtime.
+⚠ **The refusal path is QEMU-proven; the ADOPT path is not** — QEMU has no carveout, so a
+2048x2018 ask cannot be backed. crab refuses, keeps its extent, and stays alive.
+
+### Fixed — the render/input loop allocates nothing (*deferral #09*)
+
+`dh_setu_poll_event` allocated an 80 B message **before** it knew whether anything was pending
+(dhancha 0.9.16). With 0.6.0's frame work, **crab's whole loop is allocation-free in steady state**,
+which is what makes a self-repainting element affordable.
+
+### Known — two M2 items are gated upstream
+
+- ⛔ **`dh_dispatch` routing (*#07*) is blocked on a type confusion spanning three repos.**
+  aethersafha sends an **HID usage**; setu's protocol calls the field a **`keysym`**; dhancha maps it
+  into `DhEvent.a`, whose `DH_KEY_*` constants are **ASCII codepoints**. `DH_KEY_TAB = 9`, and HID
+  usage 9 is **`f`** — so routing crab's keys through `dh_dispatch` would Tab-traverse whenever the
+  operator typed `f`. **Gate: dhancha.** puka already pays this toll explicitly
+  (`setuwin__hid_to_evdev`); dhancha never added the equivalent.
+- ⚠ **The wheel's last hop is unproven.** QEMU's `usb-mouse` is RELATIVE, so no harness can place the
+  cursor on crab's window; the compositor reports `got a scroll with NO client window under the
+  cursor`, so crab's silence there is correct behaviour, not a defect.
+- ⚠ **Repeat's observed RATE is far below its configured interval** (~1 per 1.6 s hold vs ~20
+  expected) and is **not diagnosed**. Each repeat re-renders and rewrites 334 KB of shm, so frame cost
+  is the likely bound — a hypothesis, recorded as one.
+
+### Testing
+
+**75 → 134 assertions**, reference coverage **70 % → 75 %** (27/36 fns, 6/6 files). New: the resize
+policy, the pointer policy and hit-test geometry against a real rendered tree, the wheel, the
+FULL_KEYS gate, and the repeat policy. Every group mutation-proven.
+
+⭐ **New harness `agnos/scripts/harness/crab-resize-test.py`** — the only one that both starts crab
+(F2 → **DOWN** → Enter picks `/bin/crab` specifically) and leaves it running. It found the resize bug
+on its first run, and it **settles the loop-lifetime question open since 0.5.0**: keystrokes answered
+long after launch, on a live desktop.
+⚠ It is flaky by nature and says so — QEMU drains HID once per frame, and the key-delivery probe
+measured 3/8 on one run and **0/8** on the next against the same image. It retries and returns
+**INCONCLUSIVE** rather than a verdict when nothing was delivered.
+
 ## [0.6.0] - 2026-08-27 — a rendered frame costs nothing, and `main.cyr` is testable
 
 Two structural things, no user-visible features. crab looks and behaves exactly as 0.5.0 did.
