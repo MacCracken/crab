@@ -251,6 +251,24 @@ fn main(): i64 {
                 ptr_x = dh_event_a(ev);
                 ptr_y = dh_event_b(ev);
             }
+            # ⭐⭐ THE WHEEL (M2, *deferral #05*). Five repos had to move for this event to exist:
+            # agnos 1.56.49 reads HID report byte [3] (documented and never read until then), bhumi
+            # 1.4.3 carries it as `BHUMI_EV_SCROLL`, setu 0.8.8 defines `SETU_INPUT_PTR_SCROLL`,
+            # dhancha 0.9.18 maps it to `POINTER_SCROLL`, and the compositor forwards it.
+            # ⚠ IT SCROLLS THE PANE UNDER THE CURSOR, not the focused one — that is what a wheel does
+            # everywhere else, and it does NOT steal focus. A wheel that also focused would make an
+            # accidental scroll-over change which pane the arrow keys drive.
+            if (k == POINTER_SCROLL) {
+                var sdel = dh_event_a(ev);
+                if (sdel != 0) {
+                    if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                        var sp = load64(hit);
+                        if (sp == 0) { sel_l = crab_scroll_sel(sel_l, ln, sdel); }
+                        if (sp == 1) { sel_r = crab_scroll_sel(sel_r, rn, sdel); }
+                        crab_say("crab: scroll\n");
+                    }
+                }
+            }
             # ⭐⭐ CLICK: focus the pane, select the row, and descend on a double-click.
             # ⚠ PRESS ONLY (`b == 1`). Acting on the release as well would double every click, and on
             # a double-click would descend twice — the second descend landing wherever the first left

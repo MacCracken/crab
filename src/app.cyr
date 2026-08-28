@@ -109,6 +109,26 @@ fn crab_surface_bytes(w, h): i64 {
 # because they are its own model rather than the toolkit's. The toolkit supplies geometry only.
 enum CrabPointer {
     CRAB_DOUBLECLICK_MS = 400;
+    CRAB_SCROLL_ROWS = 3;         # rows the selection moves per wheel detent
+}
+
+# Where the selection lands after a wheel delta, clamped to [0, count-1]. -> the new index.
+#
+# ⛔⛔ THE WHEEL MOVES THE SELECTION, NOT THE VIEW, AND THAT IS A DESIGN CHOICE WITH A REASON.
+# `crab_render` restores each pane's scroll offset and then calls `dh_list_scroll_to_sel`, which
+# enforces "the selection is visible" — so a free-scrolled view would be snapped back on the very next
+# frame by the machinery that makes keyboard navigation work. Decoupling them means revisiting the
+# scroll round-trip, which is load-bearing and heavily documented (`src/ui.cyr`).
+# ⇒ Moving the selection makes the view follow for free and fights nothing. ⚠ It is NOT what every
+# file manager does — a detached view-scroll is the other reasonable answer, and it is a separate
+# change rather than a tweak.
+# ⚠ SIGN: positive delta is wheel-UP (away from the user), which moves toward index 0.
+fn crab_scroll_sel(sel, count, delta): i64 {
+    if (count <= 0) { return 0; }
+    var n = sel - delta * CRAB_SCROLL_ROWS;
+    if (n < 0) { n = 0; }
+    if (n > count - 1) { n = count - 1; }
+    return n;
 }
 
 # Is this click the second half of a double-click? -> 1 double, 0 single.

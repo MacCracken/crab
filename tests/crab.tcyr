@@ -587,6 +587,29 @@ fn main() {
     # descend is indistinguishable from a misclick afterwards.
     assert_eq(crab_is_double(0, 3, 2000, 0, 3, 1000), 0, "a backwards clock is never a double-click");
 
+    # --- M2: the wheel (agnos 1.56.49 -> bhumi 1.4.3 -> setu 0.8.8 -> dhancha 0.9.18 -> crab) -----
+    # ⛔ THE WHEEL MOVES THE SELECTION, NOT THE VIEW. `crab_render` restores each pane's scroll offset
+    # and then calls `dh_list_scroll_to_sel`, so a free-scrolled view is snapped back on the next
+    # frame by the machinery keyboard navigation depends on. Moving the selection makes the view
+    # follow and fights nothing. ⚠ A detached view-scroll is the other reasonable answer and is a
+    # separate change, not a tweak.
+    # ⚠ SIGN: positive = wheel-up (away from the user) = toward index 0. A sign error here scrolls the
+    # wrong way, which is the single most noticeable way to get a wheel wrong.
+    assert_eq(crab_scroll_sel(10, 100, 1), 10 - CRAB_SCROLL_ROWS, "wheel-up moves toward index 0");
+    assert_eq(crab_scroll_sel(10, 100, 0 - 1), 10 + CRAB_SCROLL_ROWS, "wheel-down moves away from 0");
+    assert_eq(crab_scroll_sel(10, 100, 2), 10 - 2 * CRAB_SCROLL_ROWS, "two detents move twice as far");
+    # ⛔ CLAMPED AT BOTH ENDS. An unclamped index is read straight into arrays sized by
+    # `CRAB_MAX_ENTRIES` — the same class of out-of-range read the compositor's own titlebar guard
+    # exists to prevent one layer up.
+    assert_eq(crab_scroll_sel(1, 100, 5), 0, "a big wheel-up clamps at the top");
+    assert_eq(crab_scroll_sel(98, 100, 0 - 5), 99, "...and a big wheel-down at the last entry");
+    assert_eq(crab_scroll_sel(0, 100, 1), 0, "already at the top stays there");
+    assert_eq(crab_scroll_sel(99, 100, 0 - 1), 99, "already at the end stays there");
+    # ⚠ AN EMPTY PANE HAS NO SELECTION TO MOVE. `count - 1` would be -1, and -1 indexes before the
+    # readdir buffer.
+    assert_eq(crab_scroll_sel(0, 0, 1), 0, "an empty pane scrolls to 0, never to -1");
+    assert_eq(crab_scroll_sel(5, 0, 0 - 3), 0, "...in either direction");
+
     # ⭐ THE GEOMETRY, AGAINST A REAL RENDERED TREE — not against arithmetic that mirrors the layout.
     # `crab_hit` walks the widget tree `crab_render` just built, so this exercises the same structure
     # that reaches the screen. ⚠ It must run AFTER a render: the tree and the recorded root live for

@@ -122,6 +122,15 @@ path = "../dhancha"
 # ⭐ 0.9.17 — `dh_surface_resize`: the entry point `WINDOW_CONFIGURE` had waited five releases for.
 #            Also closes a latent overflow 0.9.13 created (a cached `w*h*4` pixel buffer, safe only
 #            while `w`/`h` were immutable) and makes 0.9.14's dormant dimension check live.
+# ⭐ 0.9.18 — `POINTER_SCROLL` (kind 14): the mouse wheel reaches apps. Mapped from setu 0.8.8's
+#            `SETU_INPUT_PTR_SCROLL`. Also adds `path = "../setu"` to dhancha's own manifest.
+# ⛔ THE DECLARED GRAPH MUST CARRY 0.9.18 OR THE REAL TARGET DOES NOT BUILD, AND CI CANNOT SEE IT.
+# `src/main.cyr` references `POINTER_SCROLL`, which 0.9.17 does not define. MEASURED 2026-08-27 with
+# `path` disabled and a fresh resolve against dhancha 0.9.17:
+#     host  build -> **PASS**   ·   agnos build -> **FAIL**: undefined variable 'POINTER_SCROLL'
+# crab's event loop is inside `#ifdef CYRIUS_TARGET_AGNOS` and CI builds only the host target
+# (roadmap *deferral #15*), so that state goes GREEN through CI while being unable to build what
+# ships. #15 is the gate that would have caught it.
 # ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins and a green local build proves
 # nothing about the declared graph: sibling `VERSION` = 0.9.17; `git rev-parse 0.9.17` == HEAD in
 # `../dhancha` (b297604); `git ls-remote --tags` shows `refs/tags/0.9.17` at that same commit; and —
@@ -134,7 +143,7 @@ path = "../dhancha"
 # `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
 # refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
 # "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
-tag    = "0.9.17"
+tag    = "0.9.18"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
@@ -143,5 +152,6 @@ git = "https://github.com/MacCracken/setu.git"
 # tag-only dep could not be built against it locally. ⛔ "Every other dep here carries both" was
 # FALSE — sadish and rekha are tag-only.
 path = "../setu"
-tag = "0.8.7"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40
+tag = "0.8.8"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40.
+                # 0.8.8 adds `SETU_INPUT_PTR_SCROLL` (kind 12) — the mouse wheel.
 modules = ["dist/setu.cyr"]

@@ -135,9 +135,26 @@ assumes otherwise.
   supplies geometry only, via `dh_hit_test` over the tree the last render built.
   ⚠ `SETU_INPUT_PTR_BTN` carries **no coordinates** — only button and state — so crab tracks position
   from `PTR_MOVE`. A client that ignores motion has nowhere to put a click.
-  ⚠ **NOT DONE: the scroll wheel.** setu has no wheel message kind — `SETU_INPUT_PTR_BTN` carries a
-  button code and X11's 4/5 convention is not in the protocol. Claiming it would be inventing a wire.
-  **Gate: setu** — needs a kind, or a ratified button encoding.
+  ⭐ **SCROLL WHEEL — BUILT ACROSS FIVE REPOS, and the chain was broken at the BOTTOM, not at setu.**
+  The gate read "setu has no wheel message kind"; the real defect was that **agnos discarded the wheel
+  byte**. `hid_process_mouse_report` read bytes [1] and [2] of the boot-mouse report and left byte [3]
+  — documented in its own layout comment as `wheel (s8, optional)` — on the floor, and `#98 ptrscan`'s
+  record had no field for it. bhumi had no scroll concept either. A setu patch alone would have been a
+  fourth dead wire, after `SETU_CLOSE` and `SETU_CONFIGURE`.
+  ⇒ **agnos 1.56.49** reads byte [3] and grows `#98`'s record to 20 bytes **opt-in per call** ·
+  **bhumi 1.4.3** carries `BHUMI_EV_SCROLL` and accepts a 16-byte record from an older kernel ·
+  **setu 0.8.8** defines `SETU_INPUT_PTR_SCROLL` (kind 12) · **dhancha 0.9.18** maps `POINTER_SCROLL`
+  · **aethersafha 0.16.21** forwards it · **crab** moves the selection of the pane under the cursor.
+  ⭐ **The wheel byte was QEMU-measured before any of the four layers above it were written**:
+  `hid: wheel byte seen, b3=1 resid=0`. `scripts/harness/hid-wheel-test.py` injects the event over
+  **QMP** (`input-send-event`) because HMP has no wheel verb.
+  ⛔ **crab's wheel moves the SELECTION, not the view.** `crab_render` restores each pane's scroll
+  offset and then calls `dh_list_scroll_to_sel`, so a free-scrolled view is snapped back on the next
+  frame by the machinery keyboard navigation depends on. A detached view-scroll is a separate change.
+  ⛔ **UNVERIFIED END TO END.** `aethersafha`'s `--agnos` build fails on `undefined function
+  'sys_execve'` — pre-existing, reproduced on a clean tree — so the compositor cannot be rebuilt and
+  no QEMU run can drive a scroll through to crab. Every layer is host-tested and mutation-proven; the
+  wire is not.
   ⚠ **NOT DONE: focusing a pane by its header.** The header is a sibling of the list, not inside it,
   so `crab_hit`'s walk never reaches a LIST and the click does nothing. Reasonable to want; not
   claimed.
@@ -281,6 +298,12 @@ crab is a read-only browser. Enter on a file does nothing, silently.
   *Deferral #14.*
 - ⛔ **CI never builds `--agnos`** — the target `state.md` calls "the real target". Every
   `#ifdef CYRIUS_TARGET_AGNOS` region is uncompiled by the gate. *Deferral #15.*
+  ⛔⛔ **THIS STOPPED BEING HYPOTHETICAL ON 2026-08-27.** With crab's `path` overrides disabled and a
+  fresh resolve against the DECLARED graph (dhancha 0.9.17, which predates `POINTER_SCROLL`):
+  **host build PASS · `--agnos` build FAIL — `undefined variable 'POINTER_SCROLL'`.** A commit in that
+  state goes green through CI and cannot build the thing that ships. ⇒ #15 is not a tidiness item; it
+  is the gate that would have caught a broken dependency graph, and it is the reason `path` currently
+  masks one.
 - CI runs neither `fuzz`, `bench`, `lint`, `fmt --check`, `vet`, `deny` nor `coverage`. *Deferral #36.*
 - **The fuzz harness reads none of its input** — `fuzz_main(data, len)` returns 0 without touching a
   byte, so `cyrius fuzz` would PASS against anything. crab parses untrusted readdir records.
