@@ -238,6 +238,196 @@ fn crab_resize_wanted(cur_w, cur_h, ask_w, ask_h): i64 {
     return 1;
 }
 
+# ============================================================================================
+# ⭐⭐ SORTING (M3, *deferral #33*) — the pane rendered raw readdir order, which is ON-DISK order
+# ============================================================================================
+# A directory listing in creation-or-wherever-ext2-put-it order is not a browser. This is the
+# comparison and the sort; `src/main.cyr` calls it after every listing.
+#
+# ⛔ DIRECTORIES FIRST, UNCONDITIONALLY, and it is a separate axis from the sort key rather than a
+# mode of it. Every file manager does this and the reason is navigational: directories are where you
+# GO, files are what you act on, and interleaving them by name means hunting for the one folder in a
+# hundred files. Making it optional would be a setting nobody turns off.
+#
+# ⛔⛔ DOTFILES ARE **NOT** HIDDEN, DELIBERATELY. Hiding them is the other half of what a file manager
+# usually does — and it is only safe when there is a way to reveal them. crab has no "show hidden"
+# affordance and no settings surface to put one on, so hiding would make files that exist
+# unreachable and unmentioned, with the operator given no reason to suspect it. ⚠ A file manager that
+# silently omits files is worse than one that shows too many. They sort naturally: `.` is 0x2E, ahead
+# of every letter, so they cluster at the top of their group.
+# ⚠ MODULE STATE, not a parameter threaded through every listing. `crab_descend` / `crab_ascend`
+# already take nine arguments each and are called from four places; adding a tenth for a value that
+# is global to the session buys nothing. It is read by the sort and written by one key.
+var crab_sort_mode = 0;                          # CRAB_SORT_NAME
+
+# Advance to the next sort mode, wrapping. -> the new mode.
+fn crab_sort_cycle(): i64 {
+    crab_sort_mode = crab_sort_mode + 1;
+    if (crab_sort_mode >= CrabSort.CRAB_SORT_MODES) { crab_sort_mode = 0; }
+    return crab_sort_mode;
+}
+
+fn crab_sort_mode_get(): i64 { return crab_sort_mode; }
+
+# The mode's name, for the serial log — a number alone cannot be checked by a harness reading a log.
+fn crab_sort_name(mode): i64 {
+    if (mode == CrabSort.CRAB_SORT_SIZE) { return "size"; }
+    if (mode == CrabSort.CRAB_SORT_MTIME) { return "modified"; }
+    if (mode == CrabSort.CRAB_SORT_KIND) { return "kind"; }
+    return "name";
+}
+
+enum CrabSort {
+    CRAB_SORT_NAME  = 0;     # A-Z, case-insensitive
+    CRAB_SORT_SIZE  = 1;     # largest first
+    CRAB_SORT_MTIME = 2;     # newest first
+    CRAB_SORT_KIND  = 3;     # by extension, then name
+    CRAB_SORT_MODES = 4;     # how many there are — the cycle wraps on this
+}
+
+# Fold one ASCII byte to lower case. Bytes outside A-Z pass through, so this is safe on UTF-8
+# continuation bytes (all >= 0x80) rather than corrupting them.
+fn crab_lower(c): i64 {
+    if (c >= 65) {
+        if (c <= 90) { return c + 32; }
+    }
+    return c;
+}
+
+# Compare two NUL-terminated names. -> <0, 0, >0.
+#
+# ⚠ CASE-INSENSITIVE FIRST, THEN CASE-SENSITIVE AS A TIEBREAK. `README.md` sorting a hundred rows
+# from `readme.md` is the thing byte-order gets wrong and operators notice immediately. The
+# second pass exists so the order is TOTAL: without it `a` and `A` compare equal, and a stable sort
+# would then leave them in readdir order — which is on-disk order, i.e. the thing this replaces.
+fn crab_name_cmp(a, b): i64 {
+    var i = 0;
+    var ca = crab_lower(load8(a));
+    var cb = crab_lower(load8(b));
+    while (ca == cb) {
+        if (ca == 0) { i = 0 - 1; }              # both names ended: equal when case-folded
+        if (i < 0) { ca = 0; cb = 0; break; }
+        i = i + 1;
+        ca = crab_lower(load8(a + i));
+        cb = crab_lower(load8(b + i));
+    }
+    if (ca != cb) { return ca - cb; }
+    # Case-folded equal — fall back to RAW bytes so the order is total. Without this `a` and `A` tie,
+    # and a stable sort then leaves them in readdir order, i.e. on-disk order — the thing this file
+    # exists to replace.
+    var j = 0;
+    var ra = load8(a);
+    var rb = load8(b);
+    while (ra == rb) {
+        if (ra == 0) { return 0; }
+        j = j + 1;
+        ra = load8(a + j);
+        rb = load8(b + j);
+    }
+    return ra - rb;
+}
+
+# The extension of a name: the offset just past the LAST '.', or the name length when there is none.
+# ⚠ A LEADING dot is not an extension. `.bashrc` is a dotfile named `bashrc`, not a file of type
+# `bashrc` — starting the scan at 1 is what keeps every dotfile from sorting into its own "kind".
+fn crab_ext_at(name): i64 {
+    var n = 0;
+    while (load8(name + n) != 0) { n = n + 1; }
+    var dot = n;
+    var i = 1;
+    while (i < n) {
+        if (load8(name + i) == 46) { dot = i + 1; }
+        i = i + 1;
+    }
+    return dot;
+}
+
+# Compare entries `i` and `j`. -> <0 if i sorts first, >0 if j does, 0 if genuinely tied.
+fn crab_entry_cmp(buf, sizes, mtimes, i, j, mode): i64 {
+    var ri = buf + i * CRAB_REC_SZ;
+    var rj = buf + j * CRAB_REC_SZ;
+    # ⛔ THE DIRECTORY AXIS RUNS FIRST AND OUTRANKS THE KEY. Sorting by size with directories mixed in
+    # is meaningless anyway — a directory's size is the entry itself, not its contents.
+    var di = 0; if (load8(ri + CRAB_REC_TYPE) == 1) { di = 1; }
+    var dj = 0; if (load8(rj + CRAB_REC_TYPE) == 1) { dj = 1; }
+    if (di != dj) { return dj - di; }              # 1 (dir) sorts before 0 (file)
+
+    if (mode == CRAB_SORT_SIZE) {
+        var si = load64(sizes + i * 8);
+        var sj = load64(sizes + j * 8);
+        # ⚠ THE -1 GUARD IS UNEXERCISED UNDER THE CURRENT ORDER, AND SAYING SO BEATS THE CONFIDENT
+        # CLAIM THAT WAS HERE. The first draft asserted it stopped unstattable entries leading a
+        # largest-first list. That is FALSE: -1 is the smallest value, so largest-first already sinks
+        # them. Mutation proved it — deleting these two lines fails nothing.
+        # ⇒ Kept, because the moment a smallest-first or oldest-first order exists (column headers,
+        # M3 *#32*) -1 leads the list and reads as a sorting bug. Explicit intent for the cost of two
+        # comparisons, labelled as defence rather than sold as a fix.
+        if (si < 0) { if (sj >= 0) { return 1; } }
+        if (sj < 0) { if (si >= 0) { return 0 - 1; } }
+        if (si != sj) {
+            if (si > sj) { return 0 - 1; }         # largest first
+            return 1;
+        }
+    }
+    if (mode == CRAB_SORT_MTIME) {
+        var mi = load64(mtimes + i * 8);
+        var mj = load64(mtimes + j * 8);
+        if (mi < 0) { if (mj >= 0) { return 1; } }
+        if (mj < 0) { if (mi >= 0) { return 0 - 1; } }
+        if (mi != mj) {
+            if (mi > mj) { return 0 - 1; }         # newest first
+            return 1;
+        }
+    }
+    if (mode == CRAB_SORT_KIND) {
+        var ei = crab_ext_at(ri);
+        var ej = crab_ext_at(rj);
+        var ce = crab_name_cmp(ri + ei, rj + ej);
+        if (ce != 0) { return ce; }
+    }
+    # NAME is the default and every other mode's tiebreak, so a tie is never left to readdir order.
+    return crab_name_cmp(ri, rj);
+}
+
+# Sort `count` entries in place, permuting the record, its size and its mtime together.
+#
+# ⛔ ALL THREE ARRAYS MOVE TOGETHER OR NONE DO. `sizes[i]` and `mtimes[i]` are parallel to record `i`;
+# permuting the records alone would leave every row showing another file's size and date — and the
+# status line reads the same index, so it would agree with the wrong answer confidently.
+# ⚠ INSERTION SORT, on purpose. `CRAB_MAX_ENTRIES` is 256, this runs once per listing rather than per
+# frame, and it is STABLE — which matters because `crab_entry_cmp` can return 0 only for two entries
+# that are identical on every axis including raw name bytes.
+fn crab_sort_entries(buf, sizes, mtimes, count, mode): i64 {
+    if (count < 2) { return 0; }
+    var scratch = alloc(CRAB_REC_SZ);
+    var i = 1;
+    while (i < count) {
+        var j = i;
+        while (j > 0) {
+            if (crab_entry_cmp(buf, sizes, mtimes, j - 1, j, mode) <= 0) { j = 0; }
+            else {
+                var a = buf + (j - 1) * CRAB_REC_SZ;
+                var b = buf + j * CRAB_REC_SZ;
+                var k = 0;
+                while (k < CRAB_REC_SZ) { store8(scratch + k, load8(a + k)); k = k + 1; }
+                k = 0;
+                while (k < CRAB_REC_SZ) { store8(a + k, load8(b + k)); k = k + 1; }
+                k = 0;
+                while (k < CRAB_REC_SZ) { store8(b + k, load8(scratch + k)); k = k + 1; }
+                var ts = load64(sizes + (j - 1) * 8);
+                store64(sizes + (j - 1) * 8, load64(sizes + j * 8));
+                store64(sizes + j * 8, ts);
+                var tm = load64(mtimes + (j - 1) * 8);
+                store64(mtimes + (j - 1) * 8, load64(mtimes + j * 8));
+                store64(mtimes + j * 8, tm);
+                j = j - 1;
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").
 fn crab_log_cd(path): i64 {
     crab_say("crab: cd ");
@@ -350,6 +540,8 @@ fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf)
     if (crab_strcpy_n(path, pathscr, CRAB_PATH_MAX) < 0) { return -1; }
     var n = crab_readdir_into(path, buf);
     crab_stat_all(path, buf, n, sizes, mtimes, pathscr, statbuf);
+    # ⚠ AFTER the stat, never before — SIZE and MTIME order read arrays `crab_stat_all` fills.
+    crab_sort_entries(buf, sizes, mtimes, n, crab_sort_mode);
     return n;
 }
 
@@ -364,5 +556,6 @@ fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
     var cnt = crab_readdir_into(path, buf);
     crab_stat_all(path, buf, cnt, sizes, mtimes, pathscr, statbuf);
+    crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
     return cnt;
 }

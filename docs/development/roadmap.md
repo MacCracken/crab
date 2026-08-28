@@ -267,8 +267,26 @@ assumes otherwise.
 
 ### M3 — A browser you would actually use (v0.7.0)
 
-- **Sorting** by name / size / modified / kind, directories-first, dotfile handling — the pane
-  currently renders raw readdir order, which is on-disk order. *Deferral #33.*
+- ✅ **Sorting — DONE.** Name (case-insensitive) / size (largest first) / modified (newest first) /
+  kind (extension, then name), **directories first on every key**, `s` cycles the mode and re-sorts
+  BOTH panes. Applied to the initial listings and to every descend and ascend. *Deferral #33.*
+  ⛔ **DOTFILES ARE NOT HIDDEN, DELIBERATELY.** Hiding them is only safe when there is a way to reveal
+  them, and crab has no such affordance and no settings surface to put one on — so hiding would make
+  files that exist unreachable and unmentioned. A file manager that silently omits files is worse than
+  one that shows too many. They sort naturally: `.` is 0x2E, ahead of every letter.
+  ⛔ **Directories-first is unconditional and outranks the key.** Interleaving them by name means
+  hunting for the one folder among a hundred files; a directory's "size" is the entry, not its
+  contents, so size order with them mixed in is meaningless anyway.
+  ⚠ **`s` resets the selection rather than following it** through the re-sort. Following the selected
+  entry to its new index is the right behaviour and is *#34*'s work; until then resetting is honest,
+  where leaving `sel` alone would silently select a **different** file.
+  ⭐ **Host-tested (44 assertions) and mutation-proven six ways**; QEMU confirms the key reaches crab
+  and all four modes cycle. ⚠ The **order itself** is asserted only on the host — crab does not log
+  entry names, deliberately, because the per-entry stat trace WAS the 2026-08-19 slowness.
+  ⚠ One guard is labelled as unexercised rather than sold as a fix: the `-1` (unstattable) handling in
+  `crab_entry_cmp` fails no test, because -1 is the smallest value and both orders are descending, so
+  it sinks on its own. Mutation showed that; an earlier comment claimed the opposite. It is kept for
+  the smallest-first order that column headers (*#32*) will bring.
 - **Real columns** — NAME · SIZE · MODIFIED with headers, replacing the 13-character name column.
   **Gate: dhancha** TABLE or column-header widget. *Deferral #32.*
 - **Selection memory on ascend** — Backspace returns you to the top of the parent instead of to the

@@ -686,6 +686,108 @@ fn main() {
     assert_eq(crab_hit(lx, 220 - 6, hb), 0, "a click on the status line is not in a pane");
     assert_eq(load64(hb), 0 - 1, "...and reports no pane");
 
+    # --- M3 #33: SORTING -------------------------------------------------------------------------
+    # ⛔ The pane rendered raw readdir order — ON-DISK order. Everything here is the replacement.
+
+    # Name comparison: case-insensitive, with a raw-byte tiebreak so the order is TOTAL.
+    assert(crab_name_cmp("alpha", "beta") < 0, "a sorts before b");
+    assert(crab_name_cmp("beta", "alpha") > 0, "...and the reverse");
+    assert_eq(crab_name_cmp("same", "same"), 0, "identical names tie");
+    # ⚠ CASE-FOLDING IS THE POINT. Byte order puts every capital ahead of every lowercase, so
+    # `README.md` lands a hundred rows from `readme.md` — the thing operators notice immediately.
+    assert(crab_name_cmp("README.md", "readme.md") != 0, "case still breaks the tie deterministically");
+    assert(crab_name_cmp("apple", "Banana") < 0, "lowercase a before uppercase B — folded, not byte order");
+    assert(crab_name_cmp("Apple", "banana") < 0, "...and the mirror case");
+    # ⚠ A prefix sorts before its extension.
+    assert(crab_name_cmp("doc", "document") < 0, "a prefix sorts first");
+
+    # Extension detection. ⛔ A LEADING dot is not an extension — `.bashrc` is a dotfile named
+    # `bashrc`, not a file of kind `bashrc`.
+    assert_eq(crab_ext_at("a.txt"), 2, "extension starts just past the last dot");
+    assert_eq(crab_ext_at("archive.tar.gz"), 12, "the LAST dot wins");
+    assert_eq(crab_ext_at("noext"), 5, "no dot -> the name length");
+    assert_eq(crab_ext_at(".bashrc"), 7, "a LEADING dot is not an extension");
+
+    # --- the sort itself, over a real record buffer -----------------------------------------------
+    var sbuf = alloc(8 * 64);
+    var ssz = alloc(8 * 8);
+    var smt = alloc(8 * 8);
+    # Deliberately worst-case readdir order: file first, dir last, mixed case, an unstattable entry.
+    t_entry(sbuf, 0, "zebra.txt", 0);  store64(ssz + 0,  100); store64(smt + 0,  500);
+    t_entry(sbuf, 1, "Alpha",     1);  store64(ssz + 8,  0 - 1); store64(smt + 8,  0 - 1);
+    t_entry(sbuf, 2, "beta.md",   0);  store64(ssz + 16, 900); store64(smt + 16, 100);
+    t_entry(sbuf, 3, "mid.txt",   0);  store64(ssz + 24, 0 - 1); store64(smt + 24, 0 - 1);
+    t_entry(sbuf, 4, "yak",       1);  store64(ssz + 32, 0 - 1); store64(smt + 32, 0 - 1);
+
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
+    # ⛔ DIRECTORIES FIRST, and it outranks the key. Interleaving them by name means hunting for the
+    # one folder among a hundred files.
+    assert_eq(load8(sbuf + 0 * 64 + 63), 1, "row 0 is a directory");
+    assert_eq(load8(sbuf + 1 * 64 + 63), 1, "row 1 is a directory");
+    assert_eq(load8(sbuf + 2 * 64 + 63), 0, "row 2 is a file — the dirs are exhausted");
+    assert(t_streq(sbuf + 0 * 64, "Alpha"), "...dirs sorted among themselves");
+    assert(t_streq(sbuf + 1 * 64, "yak"), "...case-folded");
+    assert(t_streq(sbuf + 2 * 64, "beta.md"), "files sorted among themselves");
+    assert(t_streq(sbuf + 4 * 64, "zebra.txt"), "...to the end");
+
+    # ⛔⛔ THE PARALLEL ARRAYS MOVED WITH THE RECORDS. If they did not, every row would show another
+    # file's size and date — and the status line reads the same index, so it would agree with the
+    # wrong answer confidently. `beta.md` carried size 900; it must still.
+    assert_eq(load64(ssz + 2 * 8), 900, "beta.md kept ITS size through the permutation");
+    assert_eq(load64(smt + 2 * 8), 100, "...and its mtime");
+    assert_eq(load64(ssz + 4 * 8), 100, "zebra.txt kept its size too");
+
+    # --- size order, and the -1 trap --------------------------------------------------------------
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_SIZE);
+    assert_eq(load8(sbuf + 0 * 64 + 63), 1, "directories still lead, whatever the key");
+    assert(t_streq(sbuf + 2 * 64, "beta.md"), "largest file first (900)");
+    assert(t_streq(sbuf + 3 * 64, "zebra.txt"), "...then 100");
+    # ⚠ THE UNSTATTABLE ENTRY SORTS LAST — but note WHY, because the reason is not the guard in
+    # `crab_entry_cmp`. -1 is the smallest value and this order is largest-first, so it sinks on its
+    # own; deleting that guard fails nothing here, which mutation testing showed and an earlier
+    # comment denied. The guard earns its keep only once a smallest-first order exists (M3 *#32*).
+    assert(t_streq(sbuf + 4 * 64, "mid.txt"), "the unstattable file sorts LAST");
+
+    # --- mtime order ------------------------------------------------------------------------------
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_MTIME);
+    assert(t_streq(sbuf + 2 * 64, "zebra.txt"), "newest file first (500)");
+    assert(t_streq(sbuf + 3 * 64, "beta.md"), "...then 100");
+    assert(t_streq(sbuf + 4 * 64, "mid.txt"), "undated sorts last");
+
+    # --- kind order -------------------------------------------------------------------------------
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_KIND);
+    assert(t_streq(sbuf + 2 * 64, "beta.md"), "by extension: .md before .txt");
+    # ⚠ `mid.txt` and `zebra.txt` share an extension, so NAME breaks the tie — never readdir order.
+    assert(t_streq(sbuf + 3 * 64, "mid.txt"), "same extension -> name decides");
+    assert(t_streq(sbuf + 4 * 64, "zebra.txt"), "...deterministically");
+
+    # --- degenerate inputs -------------------------------------------------------------------------
+    assert_eq(crab_sort_entries(sbuf, ssz, smt, 0, CRAB_SORT_NAME), 0, "an empty pane sorts fine");
+    assert_eq(crab_sort_entries(sbuf, ssz, smt, 1, CRAB_SORT_NAME), 0, "so does a single entry");
+    # ⚠ IDEMPOTENT. Sorting an already-sorted buffer must not permute it — that is what makes the
+    # sort safe to run after every listing rather than once.
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
+    var firstn = alloc(64);
+    crab_strcpy_n(firstn, sbuf, 64);
+    crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
+    assert(t_streq(sbuf, firstn), "sorting twice is the same as sorting once");
+
+    # --- the sort mode cycles and wraps -----------------------------------------------------------
+    # ⚠ Module state, so restore it: later assertions and `main` itself read the same cell.
+    var sm0 = crab_sort_mode_get();
+    assert_eq(crab_sort_mode_get(), CRAB_SORT_NAME, "name is the default order");
+    assert_eq(crab_sort_cycle(), CRAB_SORT_SIZE, "s -> size");
+    assert_eq(crab_sort_cycle(), CRAB_SORT_MTIME, "s -> modified");
+    assert_eq(crab_sort_cycle(), CRAB_SORT_KIND, "s -> kind");
+    # ⛔ IT MUST WRAP. Without the wrap the mode walks past the last valid value and every later sort
+    # falls through every branch to the NAME tiebreak — so the operator sees "name" forever while the
+    # counter climbs, which looks like the key stopped working rather than like an overflow.
+    assert_eq(crab_sort_cycle(), CRAB_SORT_NAME, "...and wraps back to name");
+    assert(t_streq(crab_sort_name(CRAB_SORT_SIZE), "size"), "the mode names itself for the log");
+    assert(t_streq(crab_sort_name(CRAB_SORT_NAME), "name"), "...for every mode");
+    assert(t_streq(crab_sort_name(CRAB_SORT_KIND), "kind"), "...including kind");
+    while (crab_sort_mode_get() != sm0) { crab_sort_cycle(); }
+
     # --- readdir clamps to the cap ---------------------------------------------------------------
     # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
     # rather than the clamp. Stated because a green line here must not be read as covering the cap.

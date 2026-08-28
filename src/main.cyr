@@ -45,8 +45,13 @@ fn main(): i64 {
     var statbuf = alloc(STAT_BUFSZ);        # scratch: stat struct, sized by the target's own contract
     var ln = crab_readdir_into(lpath, lbuf);   # readdir(path, buf, CRAB_MAX_ENTRIES) -> count (0 on host)
     crab_stat_all(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf);
+    # ⚠ THE INITIAL LISTINGS NEED SORTING TOO. `crab_descend`/`crab_ascend` sort their own results, so
+    # forgetting these two would leave the FIRST view crab ever shows in raw readdir order — and only
+    # the first, which is the shape of bug that gets reported as "sorting works after you navigate".
+    crab_sort_entries(lbuf, lsizes, lmtimes, ln, crab_sort_mode_get());
     var rn = crab_readdir_into(rpath, rbuf);
     crab_stat_all(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf);
+    crab_sort_entries(rbuf, rsizes, rmtimes, rn, crab_sort_mode_get());
 
     # ⛔ CORRECTED 2026-08-12. The paragraph here said "The path is advisory and always was — setu
     # ignores it. The transport behind this call is TCP on loopback:7700, RETIRED..." — three claims,
@@ -358,6 +363,23 @@ fn main(): i64 {
                     if (u == 0x28) {                                       # Enter — descend into the selected dir
                         if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf); if (nl >= 0) { ln = nl; sel_l = 0; crab_log_cd(lpath); } }
                         if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf); if (nr >= 0) { rn = nr; sel_r = 0; crab_log_cd(rpath); } }
+                    }
+                    if (u == 0x16) {                                       # s — cycle the sort mode
+                        # ⛔ RE-SORT BOTH PANES, not the active one. The mode is a property of the VIEW,
+                        # and two panes ordered differently is a display that cannot be reasoned about —
+                        # the operator would have to remember which pane they pressed `s` in.
+                        # ⚠ Selection is reset to 0 rather than followed. Following the selected entry
+                        # through a re-sort means finding its new index, which is the right behaviour and
+                        # is *#34*'s work (selection memory); resetting is honest and predictable until
+                        # then, where leaving `sel` alone would silently select a DIFFERENT file.
+                        var sm = crab_sort_cycle();
+                        crab_sort_entries(lbuf, lsizes, lmtimes, ln, sm);
+                        crab_sort_entries(rbuf, rsizes, rmtimes, rn, sm);
+                        sel_l = 0;
+                        sel_r = 0;
+                        crab_say("crab: sort ");
+                        crab_say(crab_sort_name(sm));
+                        crab_say("\n");
                     }
                     if (u == 0x2A) {                                       # Backspace — ascend to the parent
                         if (active_pane == 0) { var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf); if (al >= 0) { ln = al; sel_l = 0; crab_log_cd(lpath); } }

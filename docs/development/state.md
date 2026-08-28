@@ -175,6 +175,18 @@ first. ⇒ **Any change to the agnos event loop needs a QEMU run before it is cl
 ⚠ **Not exercised on agnos:** `crab_descend` / `crab_ascend`. Neither harness drives navigation keys,
 so the bounded-join *refusal* path has host assertions only.
 
+## M3 in progress (v0.7.0)
+
+- ✅ **Sorting (*#33*)** — name / size / modified / kind, **directories first on every key**, `s`
+  cycles and re-sorts both panes; applied to the initial listings and to every descend and ascend.
+  ⛔ **Dotfiles are NOT hidden** — crab has no reveal affordance, and silently omitting files is worse
+  than showing too many.
+  ⚠ `s` resets the selection rather than following it; following is *#34*'s work, and leaving `sel`
+  alone would silently select a different file.
+  ⚠ The **order** is host-asserted only — crab does not log entry names by design.
+- **Next**: selection memory on ascend (*#34*) and argv paths (*#11*) are both pure crab. Real columns
+  (*#32*) is gated on dhancha, >256 entries (*#02*) on agnos, `on-accent` on rupa.
+
 ## M2 — shipped as v0.6.1
 
 ⭐ **M2 shipped in 0.6.1.** Five of seven items are done and QEMU-proven; the two that are not are
