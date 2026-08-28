@@ -428,6 +428,81 @@ fn crab_sort_entries(buf, sizes, mtimes, count, mode): i64 {
     return 0;
 }
 
+# ⭐⭐ STARTING PATHS FROM argv (M3, *deferral #11*). `/bin` and `/` were hardcoded smoke-test
+# targets, and `args` sat declared in `[deps].stdlib` and never called.
+#
+# ⛔ AN UNUSABLE PATH IS REFUSED AND SAID OUT LOUD, not quietly swapped for the default. crab's
+# readdir takes absolute paths; a relative one silently lists NOTHING, and an empty pane with no
+# message reads as a broken filesystem rather than as a rejected argument. `src/main.cyr` logs the
+# refusal and falls back.
+# ⚠ THE LENGTH BOUND IS THE 0.5.0 P1's BOUND. `CRAB_PATH_MAX` sizes `lpath`/`rpath`/`pathscr`, and
+# every descent grows the path from here — so a starting path at the very limit leaves no room to
+# navigate. Refusing at the cap is the same discipline `crab_join_n` applies.
+fn crab_path_usable(p): i64 {
+    if (p == 0) { return 0; }
+    # The absolute check subsumes the empty one: "" cannot begin with '/'. An explicit empty guard
+    # was here and mutation testing showed it could not fail, so it is gone rather than decorative.
+    if (load8(p) != 47) { return 0; }             # must be absolute — '/' is 47
+    var n = 0;
+    while (load8(p + n) != 0) {
+        n = n + 1;
+        if (n >= CRAB_PATH_MAX) { return 0; }     # would not fit, or is unterminated
+    }
+    return 1;
+}
+
+# ⭐⭐ SELECTION MEMORY (M3, *deferral #34*) — Backspace used to land you at the TOP of the parent.
+# Ascending out of `/usr/local/bin` put the cursor on the parent's first entry, so the directory you
+# had just left was somewhere below and you had to find it again. Every file manager returns you to
+# it, and the reason is navigational: ascend-then-descend is how you move sideways between siblings.
+#
+# ⚠ TWO PURE HELPERS RATHER THAN A BIGGER `crab_ascend`. `crab_ascend` already takes six arguments and
+# returns a count; threading "and also tell me where to put the cursor" through it means a seventh
+# out-parameter and a second thing to get wrong. These are separately testable, and the second one is
+# reused to make the sort key follow the selection instead of resetting it.
+
+# Copy the last path segment of `path` into `out` (bounded by `cap`). -> its length, or -1.
+#
+# ⚠ THE ROOT HAS NO LEAF, and that is a real answer rather than an error. `/` is where ascending
+# stops, so there is nothing to return to and the caller must leave the selection alone.
+fn crab_leaf_name(path, out, cap): i64 {
+    var n = 0;
+    while (load8(path + n) != 0) { n = n + 1; }
+    if (n <= 1) { return 0 - 1; }                 # "" or "/" — no leaf
+    var last = 0;
+    var i = 0;
+    while (i < n) {
+        if (load8(path + i) == 47) { last = i; }
+        i = i + 1;
+    }
+    return crab_strcpy_n(out, path + last + 1, cap);
+}
+
+# Index of the entry named `name`, or -1 when it is not in the listing.
+#
+# ⚠ -1 IS THE HONEST ANSWER AND THE CALLER MUST HANDLE IT. The directory can genuinely be gone —
+# deleted, renamed, or on a filesystem that changed under us between the two readdirs. Falling back
+# to 0 there is right; guessing an index is not.
+fn crab_index_of(buf, count, name): i64 {
+    var i = 0;
+    while (i < count) {
+        var rec = buf + i * CRAB_REC_SZ;
+        var k = 0;
+        var same = 1;
+        while (1 == 1) {
+            var a = load8(rec + k);
+            var b = load8(name + k);
+            if (a != b) { same = 0; }
+            if (same == 0) { break; }
+            if (a == 0) { break; }
+            k = k + 1;
+        }
+        if (same == 1) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").
 fn crab_log_cd(path): i64 {
     crab_say("crab: cd ");
@@ -486,37 +561,155 @@ fn crab_stat_trace_init(): i64 {
     return 0;
 }
 
-fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
+# ⭐⭐ DEFERRED STATTING (M3, *deferral #03*) — "get the stat storm off the keystroke path".
+#
+# ⭐ MEASURED FIRST, BECAUSE THIS COST WAS MISATTRIBUTED ONCE ALREADY. The 2026-08-19 iron report
+# ("crab shows way more entries than before but is responding slower from inputs") looked like the
+# listing and was in fact the per-entry NARRATION (see the trace gate below). So before restructuring
+# anything, `crab_stat_all` was made to report its own cost on the one line per readdir that already
+# existed. On agnos under QEMU: **50 ms for 45 entries in /bin, 10 ms for 7 in /** — about **1.1 ms
+# per entry**, linear. At the `CRAB_MAX_ENTRIES` cap of 256 that is **~280 ms of blocking syscalls**
+# on the keystroke that descends or ascends.
+# ⚠ THOSE ARE QEMU FIGURES AND QEMU'S DISK EMULATION IS MUCH SLOWER THAN IRON. The per-entry
+# linearity is the durable finding; the absolute number is an upper bound, not an iron measurement.
+#
+# ⭐ WHAT MAKES THE DEFERRAL SAFE: **dir-ness comes from the readdir record, not from stat**
+# (`CRAB_REC_TYPE`). So directories-first ordering, the `/` row marker, NAME order and KIND order all
+# work with **no stat data at all**. Only the size column, the status line, and SIZE/MTIME ordering
+# need it. ⇒ The listing marks every entry pending and returns immediately; the event loop fills the
+# sizes in bounded batches; and a sort that genuinely needs every size forces the sweep itself.
+#
+# ⛔ PENDING (-2) IS NOT THE SAME AS UNSTATTABLE (-1), AND CONFLATING THEM WOULD HIDE A BUG. An entry
+# that is merely not reached yet would otherwise render identically to one whose stat FAILED — so an
+# entry stuck pending forever (a batch loop that never completes) would look like a filesystem fault
+# and be debugged as one.
+fn crab_sz_pending(): i64 { return 0 - 2; }
+
+# ⚠ 32 ENTRIES PER IDLE TICK IS A TRADE, AND BOTH SIDES ARE REAL. At the measured ~1.1 ms per entry
+# a batch is ~35 ms, so a full 256-entry directory fills over 8 ticks and delays event handling by at
+# most one batch. Smaller batches are more responsive but redraw more often — and each redraw is a
+# full surface render plus a buffer write, which is not free either.
+enum CrabStat {
+    CRAB_STAT_BATCH = 32;    # entries stat'd per idle tick
+}
+
+# Mark every entry as awaiting a stat. Cheap and O(count) with no syscalls — this is what the
+# keystroke path pays instead of the sweep.
+fn crab_stat_reset(sizes, mtimes, count): i64 {
     var i = 0;
     while (i < count) {
-        var rec = buf + i * CRAB_REC_SZ;
-        var sz = 0 - 1;                              # stat-failure default
-        var mt = 0 - 1;
-        # ⛔ A TRUNCATED JOIN IS NOT A PATH — it names a DIFFERENT file, so statting it would report
-        # someone else's size and mtime against this row. Unstattable is the honest answer.
-        var jl = crab_join_n(pathscr, CRAB_PATH_MAX, path, rec);
-        #ifdef CYRIUS_TARGET_AGNOS
-        if ((jl >= 0) && (sys_stat(pathscr, strlen(pathscr), statbuf) == 0)) {
-            sz = load64(statbuf + STAT_SIZE);        # agnos stat struct §4.1 — named, not a literal
-            mt = load64(statbuf + STAT_MTIME);       # unix seconds
-            # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
-            # This printed unconditionally for every entry and allocated 24 B for every entry — with
-            # the old 32-entry cap that was 32 lines; at 256 on a real `/` (114 entries on iron) it
-            # is 114 writes to a console THREE PROCESSES SHARE UNSERIALISED, on every readdir, i.e.
-            # every descend and every ascend. Iron 2026-08-19: "crab shows way more entries than
-            # before but is responding slower from inputs." The listing was not the cost; narrating
-            # it was.
-            # ⇒ Bounded, and off by default. `CRAB_STAT_TRACE=1` in the environment brings it back
-            # for a burn that actually needs the per-entry readout.
-            if (crab_stat_trace == 1) {
+        store64(sizes + i * 8, 0 - 2);
+        store64(mtimes + i * 8, 0 - 2);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Index of the next entry still awaiting a stat at or after `from`, or -1 when none remain.
+fn crab_stat_next_pending(sizes, count, from): i64 {
+    var i = from;
+    if (i < 0) { i = 0; }
+    while (i < count) {
+        if (load64(sizes + i * 8) == 0 - 2) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# ⛔ SIZE AND MTIME ORDER CANNOT BE COMPUTED FROM PARTIAL DATA. Sorting while entries are still
+# pending would order them by the -2 sentinel — every unstat'd file tying at the bottom, and the list
+# visibly reshuffling as batches land. NAME and KIND read only the record, so they are free.
+fn crab_sort_needs_stats(mode): i64 {
+    if (mode == CRAB_SORT_SIZE) { return 1; }
+    if (mode == CRAB_SORT_MTIME) { return 1; }
+    return 0;
+}
+
+# stat ONE entry into sizes[i] / mtimes[i]. A stat failure — or a join that would not fit — stores -1
+# in both, which is the honest "unstattable" answer and is distinct from the -2 pending marker.
+fn crab_stat_one(path, buf, i, sizes, mtimes, pathscr, statbuf): i64 {
+    var rec = buf + i * CRAB_REC_SZ;
+    var sz = 0 - 1;                                  # stat-failure default
+    var mt = 0 - 1;
+    # ⛔ A TRUNCATED JOIN IS NOT A PATH — it names a DIFFERENT file, so statting it would report
+    # someone else's size and mtime against this row. Unstattable is the honest answer.
+    var jl = crab_join_n(pathscr, CRAB_PATH_MAX, path, rec);
+    #ifdef CYRIUS_TARGET_AGNOS
+    if ((jl >= 0) && (sys_stat(pathscr, strlen(pathscr), statbuf) == 0)) {
+        sz = load64(statbuf + STAT_SIZE);            # agnos stat struct §4.1 — named, not a literal
+        mt = load64(statbuf + STAT_MTIME);           # unix seconds
+        # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
+        # This printed unconditionally for every entry and allocated 24 B for every entry — with
+        # the old 32-entry cap that was 32 lines; at 256 on a real `/` (114 entries on iron) it
+        # is 114 writes to a console THREE PROCESSES SHARE UNSERIALISED, on every readdir, i.e.
+        # every descend and every ascend. Iron 2026-08-19: "crab shows way more entries than
+        # before but is responding slower from inputs." The listing was not the cost; narrating
+        # it was.
+        # ⇒ Bounded, and off by default. `CRAB_STAT_TRACE=1` in the environment brings it back
+        # for a burn that actually needs the per-entry readout.
+        if (crab_stat_trace == 1) {
+            if (crab_sdig != 0) {
                 crab_u2s(crab_sdig, sz);
                 crab_say("crab: stat "); crab_say(rec); crab_say(" "); crab_say(crab_sdig); crab_say("\n");
             }
         }
-        #endif
-        store64(sizes + i * 8, sz);
-        store64(mtimes + i * 8, mt);
+    }
+    #endif
+    store64(sizes + i * 8, sz);
+    store64(mtimes + i * 8, mt);
+    return sz;
+}
+
+# stat at most `budget` still-pending entries, cheapest-index first. Returns how many were stat'd, so
+# the caller knows whether a redraw is worth issuing and whether the sweep is finished.
+# ⚠ THE BUDGET BOUNDS SYSCALLS, NOT ENTRIES SCANNED. The scan itself is a pointer walk over an array
+# that is at most 256 long; the ~1.1 ms cost is entirely in `sys_stat`.
+fn crab_stat_batch(path, buf, count, sizes, mtimes, pathscr, statbuf, budget): i64 {
+    var done = 0;
+    var i = 0;
+    while ((done < budget) && (i < count)) {
+        if (load64(sizes + i * 8) == 0 - 2) {
+            crab_stat_one(path, buf, i, sizes, mtimes, pathscr, statbuf);
+            done = done + 1;
+        }
         i = i + 1;
+    }
+    return done;
+}
+
+# stat EVERY entry, synchronously. This is the storm, and it is now paid only where it is genuinely
+# required: a SIZE or MTIME sort, which cannot order anything without all of the data.
+fn crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf): i64 {
+    var t0 = clock_now_ms();
+    var i = 0;
+    while (i < count) {
+        crab_stat_one(path, buf, i, sizes, mtimes, pathscr, statbuf);
+        i = i + 1;
+    }
+    # ⚠ ONE LINE PER SWEEP, NOT PER ENTRY — the per-entry trace is exactly the cost that made crab
+    # feel slow on iron, so the measurement must not reintroduce it. On the host this reads 0 ms
+    # because the stat body is `#ifdef CYRIUS_TARGET_AGNOS` and does nothing here.
+    # ⚠ "stat-cost", NOT "stat" — `crab-listing-cap-test.py` counts per-entry trace lines with
+    # `startswith("crab: stat ")` and asserts that count is 0 by default. A summary line sharing that
+    # prefix would be counted as a per-entry trace and break an oracle that is currently honest.
+    # ⛔ `crab_sdig` IS LAZILY ALLOCATED AND IS 0 UNTIL `crab_stat_trace_init` RUNS. The test suite
+    # calls into here without it, so an unguarded `crab_u2s` writes to address 0 and faults — which
+    # is exactly what the first version of this line did.
+    if (crab_sdig == 0) { return 0; }
+    crab_u2s(crab_sdig, clock_now_ms() - t0);
+    crab_say("crab: stat-cost "); crab_say(crab_sdig); crab_say(" ms for ");
+    crab_u2s(crab_sdig, count);
+    crab_say(crab_sdig); crab_say(" entries in "); crab_say(path); crab_say("\n");
+    return 0;
+}
+
+# ⭐ WHAT A LISTING PAYS. The keystroke path calls THIS, not `crab_stat_all`: pending marks are free,
+# and the sweep happens only for an order that cannot be computed without it.
+fn crab_stat_for_listing(path, buf, count, sizes, mtimes, pathscr, statbuf, mode): i64 {
+    crab_stat_reset(sizes, mtimes, count);
+    if (crab_sort_needs_stats(mode) == 1) {
+        crab_stat_all(path, buf, count, sizes, mtimes, pathscr, statbuf);
+        return 1;
     }
     return 0;
 }
@@ -539,8 +732,9 @@ fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf)
     }
     if (crab_strcpy_n(path, pathscr, CRAB_PATH_MAX) < 0) { return -1; }
     var n = crab_readdir_into(path, buf);
-    crab_stat_all(path, buf, n, sizes, mtimes, pathscr, statbuf);
-    # ⚠ AFTER the stat, never before — SIZE and MTIME order read arrays `crab_stat_all` fills.
+    # ⚠ AFTER the stat marks, never before — SIZE and MTIME order read arrays the stat fills, and
+    # `crab_stat_for_listing` performs the full sweep for exactly those two modes.
+    crab_stat_for_listing(path, buf, n, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, n, crab_sort_mode);
     return n;
 }
@@ -555,7 +749,7 @@ fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
     if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
     var cnt = crab_readdir_into(path, buf);
-    crab_stat_all(path, buf, cnt, sizes, mtimes, pathscr, statbuf);
+    crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
     return cnt;
 }

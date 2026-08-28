@@ -58,6 +58,11 @@ fn crab_u2s(dst, n): i64 {
 # front of it — and it disagreed with `crab_status_str`, which already printed "-" for the same file.
 # One unstattable file, two different renderings, is worse than either.
 fn crab_size_str(dst, size): i64 {
+    # ⛔ PENDING IS NOT UNSTATTABLE, AND THE ROW MUST NOT SAY IT IS. -2 means "not stat'd yet" (the
+    # deferred sweep of *#03* has not reached this row); -1 means the stat FAILED. Rendering both as
+    # "-" would make an entry stuck pending forever — a batch drain that never completes — read as a
+    # filesystem fault, and it would be debugged as one.
+    if (size == 0 - 2) { store8(dst, 63); store8(dst + 1, 0); return 1; }   # "?" — awaiting its stat
     if (size < 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }   # "-"
     var val = size;
     var unit = 0;                                     # 0 = bytes, 1 = K, 2 = M, 3 = G, 4 = T
@@ -117,6 +122,12 @@ fn crab_pad4(dst, n): i64 {
 # Format a unix epoch (seconds) into dst as "YYYY-MM-DD HH:MM". epoch <= 0 yields
 # "-" (unknown). Civil date via Howard Hinnant's days->(y,m,d) algorithm (z>=0).
 fn crab_mtime_str(dst, epoch): i64 {
+    # ⛔ PENDING IS NOT UNKNOWN — same distinction `crab_size_str` makes, for the same reason. -2 is
+    # "the deferred sweep (*#03*) has not reached this row yet"; anything else <= 0 is genuinely no
+    # date. ⚠ The status line is where this shows longest, because it reads the SELECTED row and the
+    # drain is idle-driven — so after a descend it can read "?" until the first idle tick, which is
+    # milliseconds. Marking it honestly beats showing a "-" that claims the mtime is unavailable.
+    if (epoch == 0 - 2) { store8(dst, 63); store8(dst + 1, 0); return 1; }   # "?" — awaiting its stat
     if (epoch <= 0) { store8(dst, 45); store8(dst + 1, 0); return 1; }   # "-"
     var days = epoch / 86400;
     var sod = epoch - days * 86400;

@@ -92,8 +92,14 @@ state rots, and this repo has watched it happen twice. They live in
 up cold? Read [`docs/development/handoff.md`](docs/development/handoff.md) first** — what is verified
 versus merely built, the open items, and the hazards.
 
-**What works today**: two panes over real `readdir` + `stat`; keyboard navigation — switch pane,
-move the selection, Enter to descend, Backspace to ascend — on a scrolling `dh_list`. Each row is a
+**What works today**: two panes over real `readdir` + `stat` — the stat sweep is **deferred off the
+keystroke path** and fills in from the idle loop, so descending costs no syscalls (it cost ~1.1 ms per
+entry, ~280 ms at the 256-entry cap, measured under QEMU); keyboard navigation — switch pane,
+move the selection, Enter to descend, Backspace to ascend — on a scrolling `dh_list`, plus **pointer
+input, a mouse wheel, held-key repeat and compositor resize** (M2). `s` cycles four **sort** modes
+(name · size · modified · kind, directories always first) across both panes, and the selection
+**follows** you: Backspace lands on the directory you just left, and re-sorting keeps you on the same
+entry. Panes start at `/bin` and `/` unless you name them: `crab [LEFT] [RIGHT]`. Each row is a
 **single line**: a 13-character name column (truncation marked with `~`) followed by `/` for a
 directory or a human-readable size for a file. The **status line** carries the active selection's
 name, size and modified date. ⚠ There are **no real columns and no headers** — NAME · SIZE · MODIFIED
@@ -109,8 +115,11 @@ window holding one of only sixteen system-wide GPU buffer slots, and a directory
 
 - **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
   all, silently. (Roadmap M4.)
-- **The window is a compile-time 380×220 and crab is keyboard-only.** Resize is decoded by the
-  toolkit and dropped; every pointer event is ignored. (Roadmap M2.)
+- **No real columns and no headers.** A row is one line with a 13-character name column; NAME · SIZE
+  · MODIFIED is roadmap M3, gated on a dhancha table widget.
+- **A pane shows at most 256 entries**, a compile-time ceiling. Beyond it the listing is truncated
+  with a warning — it is no longer silent, but it is still truncated. Needs a resumable `readdir`
+  from agnos. (Roadmap M3, *#02*.)
 - **None of the AI arc exists.** No index, no tags, no semantic find, no dedup — and `cyrius.cyml`
   declares no daimon dependency. (Roadmap M7–M8.)
 
@@ -127,6 +136,16 @@ cyrius build src/main.cyr build/crab                 # compile for the host
 cyrius build --agnos src/main.cyr build/crab_agnos   # for AGNOS — the real target
 cyrius test                                          # run [build].test + tests/*.tcyr
 ```
+
+```sh
+crab /usr/local /home            # start the panes where you want them; defaults are /bin and /
+```
+
+⚠ **A start path must be absolute and must fit `CRAB_PATH_MAX`.** One that is not is **refused and
+said so on the console**, and the default is used — it is never silently substituted, because an
+empty pane with no message reads as a broken filesystem rather than a rejected argument.
+⚠ **On the AGNOS desktop the defaults are what you get**: the compositor spawns crab through the
+launcher with a path and no arguments.
 
 ⚠ **The host build is the convenience target, not the product.** Every `#ifdef CYRIUS_TARGET_AGNOS`
 region — the whole event loop included — is uncompiled without `--agnos`, and no host test can see

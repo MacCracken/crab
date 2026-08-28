@@ -94,6 +94,7 @@ version number M2 had reserved. No user-visible features.
 ⚠ **M2 was v0.6.0; this release took it, and M2 moves to v0.6.1 — a PATCH, not a minor.** Operator
 ruling 2026-08-27. The ladder from M3 onward is therefore **unchanged** (v0.7.0 … v1.0.0): only M2 was
 displaced, and it was absorbed inside the 0.6 line rather than pushing everything down.
+⭐ **Re-derived at the 0.7.0 cut and the ladder held**: M3 shipped as **v0.7.0**, a minor, as mapped.
 ⛔ **Re-derive the number at each cut rather than trusting these headings.** The milestone→version
 mapping has now been wrong once, and nothing gates it.
 
@@ -265,7 +266,25 @@ assumes otherwise.
 > ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle, and bounded by how fast
 > a human types.
 
-### M3 — A browser you would actually use (v0.7.0)
+### M3 — A browser you would actually use (v0.7.0) — ⭐ **SHIPPED 2026-08-28**
+
+⭐ **Four of seven items shipped in 0.7.0**: sorting (*#33*), selection memory (*#34*), argv start
+paths (*#11*), and deferred statting (*#03*). Each is host-tested and mutation-proven, and each was
+confirmed on a real agnos kernel under QEMU.
+⛔ **THE OTHER THREE ARE GATED UPSTREAM, NOT UNFINISHED** — real columns (*#32*) on a dhancha TABLE
+widget, directories past the 256-entry cap (*#02*) on a resumable agnos `readdir`, and `on-accent` on
+rupa. They are listed below with their gates, and none of them is crab-side work being deferred.
+⚠ **This mirrors M2, which shipped 5 of 7 with 2 gated.** A milestone closing with gated items is the
+normal shape here, and calling it "done" would be the lie; calling it "not shipped" would be another.
+
+⭐ **The dependency graph was verified four ways at this cut, not three.** crab's manifest sets
+`path = "../X"` for rupa, kashi, dhancha and setu, and **`path` wins over `tag`** — so a green local
+build is not evidence the declared tags resolve. Beyond matching sibling `VERSION`s, `git rev-parse
+<tag> == HEAD`, and the tags existing on the remote (checked with `curl` against the GitHub API —
+`git ls-remote` cannot authenticate in the sandbox, which is *inconclusive*, not a failure), the
+manifest was copied with **every `path` line disabled** so `cyrius deps` actually cloned the tags.
+Both targets built and all 228 tests passed against that graph, and the resulting binaries are
+**byte-identical** to the path-resolved ones. Only that last check is evidence.
 
 - ✅ **Sorting — DONE.** Name (case-insensitive) / size (largest first) / modified (newest first) /
   kind (extension, then name), **directories first on every key**, `s` cycles the mode and re-sorts
@@ -277,9 +296,9 @@ assumes otherwise.
   ⛔ **Directories-first is unconditional and outranks the key.** Interleaving them by name means
   hunting for the one folder among a hundred files; a directory's "size" is the entry, not its
   contents, so size order with them mixed in is meaningless anyway.
-  ⚠ **`s` resets the selection rather than following it** through the re-sort. Following the selected
-  entry to its new index is the right behaviour and is *#34*'s work; until then resetting is honest,
-  where leaving `sel` alone would silently select a **different** file.
+  ⭐ **`s` now follows the selection** through the re-sort — that was *#34*'s work and it has landed.
+  It reset the selection at first, which was honest but lossy; leaving `sel` alone would have silently
+  selected a **different** file.
   ⭐ **Host-tested (44 assertions) and mutation-proven six ways**; QEMU confirms the key reaches crab
   and all four modes cycle. ⚠ The **order itself** is asserted only on the host — crab does not log
   entry names, deliberately, because the per-entry stat trace WAS the 2026-08-19 slowness.
@@ -289,15 +308,76 @@ assumes otherwise.
   the smallest-first order that column headers (*#32*) will bring.
 - **Real columns** — NAME · SIZE · MODIFIED with headers, replacing the 13-character name column.
   **Gate: dhancha** TABLE or column-header widget. *Deferral #32.*
-- **Selection memory on ascend** — Backspace returns you to the top of the parent instead of to the
-  directory you just left. *Deferral #34.*
-- **Start where the operator chose** — argv paths; `/bin` and `/` are hardcoded smoke-test targets.
-  `args` is declared in `[deps].stdlib` and never called. *Deferral #11.*
+- ✅ **Selection memory on ascend — DONE.** Backspace lands on the directory you just left instead of
+  at the top of the parent, and `s` now **follows** the selected entry through the re-sort rather than
+  resetting it. *Deferral #34.*
+  ⛔ **THE LEAF IS CAPTURED BEFORE THE ASCEND, NOT AFTER.** `crab_ascend` rewrites `path` **in place**,
+  so reading the leaf afterwards reads the parent's name. Likewise both panes' selected names are read
+  **before either sort**, because `crab_sort_entries` permutes in place and the first sort invalidates
+  the second pane's index.
+  ⛔ **A MISSING NAME REPORTS -1 AND THE CALLER FALLS BACK TO ROW 0.** The directory can genuinely be
+  gone — deleted or renamed between the two readdirs. Guessing a nearby row would select a *different*
+  file silently.
+  ⭐ **Mutation-proven three ways**: root reporting a leaf (2 failures), prefix matching in
+  `crab_index_of` (1), and a missing name returning 0 instead of -1 (4).
+- ✅ **Start where the operator chose — DONE.** `crab [LEFT] [RIGHT]`. `/bin` and `/` were hardcoded
+  smoke-test targets and `args` sat declared in `[deps].stdlib` and never called. *Deferral #11.*
+  ⛔ **AN UNUSABLE PATH IS REFUSED AND SAID OUT LOUD, not quietly swapped for the default.**
+  `crab_readdir_into` takes absolute paths; a relative one lists **nothing**, and an empty pane with no
+  message reads as a broken filesystem rather than as a rejected argument.
+  ⚠ **THE DEFAULTS STAY, and they are the normal case**: on agnos the compositor spawns crab through
+  the launcher with a path and no arguments, so the desktop always takes the fallback. Every existing
+  QEMU harness is unaffected for the same reason.
+  ⚠ **argv on agnos is not the Linux mechanism.** `lib/args_agnos.cyr` reads the init rsp that cycc
+  parks in **r15** at entry (the kernel caps argc at 8); on the host it parses `/proc/self/cmdline`.
+  That is compiler plumbing, so a green host test says nothing about the agnos target — it was proven
+  separately in QEMU.
+  ⭐ **Host-tested (10 assertions, both sides of the length boundary) and mutation-proven three ways**:
+  dropping the absolute check (2 failures), dropping the null guard (the binary faults), and `>` for
+  `>=` on the cap (1). ⛔ A **fourth** mutation deleted the explicit empty-path guard and **nothing
+  failed** — `""` cannot begin with `/`, so the absolute check already subsumed it. The dead line was
+  removed rather than kept as decoration.
+  ⭐ **QEMU-proven on agnos** (`agnos/scripts/harness/crab-listing-cap-test.py`): `crab /bin /bin`
+  lists `/bin` twice and `/` **not at all**, and `crab relative` announces the refusal on the console.
+  The oracle is an **absence**, because a presence oracle would pass whether or not argv landed — and
+  the bare-`crab` run in the same boot reports `/=7, /bin=45`, the exact shape that trips its FAIL
+  branch, so the broken-argv output is on record in every run.
 - **Directories larger than the cap** — `CRAB_MAX_ENTRIES = 256` is a compile-time ceiling; the
   canvas shows `812 items` in a pane and `41,208 files` indexed. Needs paged or streaming readdir.
   **Gate: agnos** — a readdir that can resume. *Deferral #02.*
-- **Get the stat storm off the keystroke path** — one synchronous `sys_stat` per entry per listing.
-  *Deferral #03.*
+- ✅ **Got the stat storm off the keystroke path — DONE.** *Deferral #03.*
+  ⭐ **MEASURED BEFORE BUILT, because this cost was misattributed once already.** The 2026-08-19 iron
+  report ("responding slower from inputs") looked like the listing and was in fact the per-entry
+  **narration**. So `crab_stat_all` was first made to report its own cost on the one line per readdir
+  that already existed: **50 ms for 45 entries in `/bin`, 10 ms for 7 in `/`** — about **1.1 ms per
+  entry**, linear, i.e. **~280 ms of blocking syscalls** at the 256-entry cap, on the keystroke that
+  descends. ⚠ QEMU figures; its disk emulation is far slower than iron. The **per-entry linearity** is
+  the durable finding, the absolute number is an upper bound.
+  ⭐ **What makes the deferral safe: dir-ness comes from the READDIR RECORD, not from stat**
+  (`CRAB_REC_TYPE`). Directories-first, the `/` row marker, NAME order and KIND order therefore need
+  **no stat data at all**. Only the size column, the status line, and SIZE/MTIME ordering do.
+  ⇒ A listing marks every entry pending and returns; the event loop drains bounded batches (32/tick,
+  idle only); and a sort to SIZE or MTIME forces the sweep itself, because those orders cannot be
+  computed from partial data without visibly reshuffling as batches land.
+  ⛔ **PENDING (-2) IS NOT UNSTATTABLE (-1)**, and both the size and date columns render them
+  differently (`?` vs `-`). Conflating them would make a drain that never completes look like a
+  filesystem fault and get debugged as one.
+  ⭐ **Host-tested (28 assertions) and mutation-proven five ways**: a batch ignoring its budget (4
+  failures), a batch re-statting settled entries (6), `crab_stat_reset` running one past `count` (1),
+  NAME wrongly declared to need stats (3), and the negative-start clamp (1).
+  ⛔ That fifth one **passed at first** — the obvious assert read whatever the arena left in front of
+  the array, found no `-2`, and walked forward to the right answer anyway. The array is now placed
+  eight entries into a block whose front is filled with the pending marker, so a missing clamp returns
+  a **negative index**. A test that passes when the code is broken is worthless.
+  ⭐ **QEMU-proven on agnos, in two harnesses, because one cannot show both halves.**
+  `crab-listing-cap-test.py` sees **zero `stat-cost` lines where it previously saw six** totalling
+  ~230 ms — but it runs crab with no compositor, so crab exits before the event loop and the drain
+  never runs there at all. `crab-resize-test.py` runs the real desktop and reports **`deferred stat
+  drain completed: True`**. ⚠ Reporting only the missing `stat-cost` lines would have shown that crab
+  stopped statting, not that it moved the work — and those look identical right up until the sizes
+  never arrive.
+  ⚠ In the desktop run the sort to SIZE cost **nothing**: the idle drain had already finished, so the
+  forced sweep found nothing pending. That is the design working, not the sweep failing to fire.
 - **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
 
 ### M4 — File operations (v0.8.0)
@@ -428,7 +508,8 @@ puts it exactly where the mascot doc asks: **one quiet home, the status bar**. *
 
 - Long idle / empty pane → `Bueller…` · pause · `Bueller…` · pause · `Bueller…?` — needs M2's
   self-redraw (an event-driven-only loop cannot animate).
-- `crab --about` closing on `…anyone? …anyone?` — needs M3's argv handling.
+- `crab --about` closing on `…anyone? …anyone?` — M3's argv handling has landed (*#11*), so this is
+  now unblocked; crab parses positional paths only and has no flag surface yet.
 - ⚠ **Discipline, from the mascot doc: subtle and infrequent.** "The whole thing dies if it's trying
   too hard." This is a constraint on the implementation, not colour commentary.
 

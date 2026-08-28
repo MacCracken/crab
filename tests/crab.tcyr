@@ -772,6 +772,38 @@ fn main() {
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
     assert(t_streq(sbuf, firstn), "sorting twice is the same as sorting once");
 
+    # --- M3 #34: SELECTION MEMORY -----------------------------------------------------------------
+    # ⛔ Backspace used to land at the TOP of the parent, so the directory you had just left was
+    # somewhere below and you had to find it again. Ascend-then-descend is how you move sideways
+    # between siblings, which is what made that expensive.
+    var leaf = alloc(CRAB_NAME_MAX);
+    assert_eq(crab_leaf_name("/usr/local/bin", leaf, CRAB_NAME_MAX), 3, "the leaf of a deep path");
+    assert(t_streq(leaf, "bin"), "...is its last segment");
+    assert_eq(crab_leaf_name("/bin", leaf, CRAB_NAME_MAX), 3, "one level down");
+    assert(t_streq(leaf, "bin"), "...same answer");
+    # ⛔ THE ROOT HAS NO LEAF, and -1 is a real answer rather than an error. `/` is where ascending
+    # stops, so there is nothing to return to and the caller must leave the selection alone.
+    assert_eq(crab_leaf_name("/", leaf, CRAB_NAME_MAX), 0 - 1, "the root has no leaf");
+    assert_eq(crab_leaf_name("", leaf, CRAB_NAME_MAX), 0 - 1, "nor does the empty path");
+    # ⚠ The bound is the same one the 0.5.0 P1 was about — a leaf longer than the cap REFUSES.
+    assert_eq(crab_leaf_name("/bin", leaf, 2), 0 - 1, "a leaf that will not fit is refused, not truncated");
+
+    var ibuf = alloc(4 * 64);
+    t_entry(ibuf, 0, "alpha", 1);
+    t_entry(ibuf, 1, "bin", 1);
+    t_entry(ibuf, 2, "zulu", 0);
+    assert_eq(crab_index_of(ibuf, 3, "bin"), 1, "the remembered directory is found");
+    assert_eq(crab_index_of(ibuf, 3, "alpha"), 0, "...wherever it sits");
+    assert_eq(crab_index_of(ibuf, 3, "zulu"), 2, "...including the last row");
+    # ⛔ -1 IS THE HONEST ANSWER AND THE CALLER HANDLES IT. The directory can genuinely be gone —
+    # deleted or renamed between the two readdirs. Falling back to row 0 is right; guessing is not.
+    assert_eq(crab_index_of(ibuf, 3, "missing"), 0 - 1, "an absent name reports -1");
+    assert_eq(crab_index_of(ibuf, 0, "bin"), 0 - 1, "an empty listing reports -1");
+    # ⚠ PREFIXES MUST NOT MATCH. `bi` is not `bin`, and a prefix match would return you to the wrong
+    # directory — silently, and only for names that happen to share a stem.
+    assert_eq(crab_index_of(ibuf, 3, "bi"), 0 - 1, "a prefix does NOT match");
+    assert_eq(crab_index_of(ibuf, 3, "binary"), 0 - 1, "...nor does a longer name");
+
     # --- the sort mode cycles and wraps -----------------------------------------------------------
     # ⚠ Module state, so restore it: later assertions and `main` itself read the same cell.
     var sm0 = crab_sort_mode_get();
@@ -787,6 +819,127 @@ fn main() {
     assert(t_streq(crab_sort_name(CRAB_SORT_NAME), "name"), "...for every mode");
     assert(t_streq(crab_sort_name(CRAB_SORT_KIND), "kind"), "...including kind");
     while (crab_sort_mode_get() != sm0) { crab_sort_cycle(); }
+
+    # --- M3 #11: STARTING PATHS FROM argv ---------------------------------------------------------
+    # ⛔ AN UNUSABLE PATH IS REFUSED, NOT REPAIRED. `crab_readdir_into` takes absolute paths; a
+    # relative one lists NOTHING, and a pane that is empty with no message reads as a broken
+    # filesystem rather than as a rejected argument. `main` announces the refusal and falls back.
+    assert_eq(crab_path_usable("/"), 1, "the root is usable");
+    assert_eq(crab_path_usable("/bin"), 1, "so is a normal absolute path");
+    assert_eq(crab_path_usable("/usr/local/share"), 1, "...at any depth");
+    assert_eq(crab_path_usable("bin"), 0, "a relative path is refused");
+    assert_eq(crab_path_usable("./bin"), 0, "...including an explicitly relative one");
+    # ⚠ Empty is refused by the ABSOLUTE check, not by a guard of its own — "" cannot start with '/'.
+    # The assert pins the behaviour; it does not pin a separate line, and there is not one.
+    assert_eq(crab_path_usable(""), 0, "the empty path is refused");
+    # ⛔ A NULL POINTER IS A REAL INPUT HERE. `argv(n)` past the end yields 0, and the guard runs
+    # before the count is trusted — dereferencing it would fault on the operator's first typo.
+    assert_eq(crab_path_usable(0), 0, "a null argument is refused, not dereferenced");
+    # ⚠ THE CAP IS THE 0.5.0 P1's CAP. `lpath` is CRAB_PATH_MAX bytes and every descent grows the
+    # path from the starting one, so a path at the limit cannot be navigated out of.
+    var longp = alloc(CRAB_PATH_MAX + 64);
+    store8(longp, 47);
+    var lpi = 1;
+    while (lpi < CRAB_PATH_MAX + 40) { store8(longp + lpi, 97); lpi = lpi + 1; }
+    store8(longp + lpi, 0);
+    assert_eq(crab_path_usable(longp), 0, "a path past the cap is refused, not truncated");
+    # ⚠ And the boundary itself: CRAB_PATH_MAX-1 bytes plus the terminator is exactly the buffer.
+    # ⛔ THE BOUNDARY IS OFF-BY-ONE TERRITORY. CRAB_PATH_MAX bytes of text needs CRAB_PATH_MAX+1
+    # with the terminator, so it does NOT fit; one byte less does. Both sides are pinned because a
+    # `>` for a `>=` here would overrun `lpath` by exactly the terminator.
+    store8(longp + CRAB_PATH_MAX, 0);
+    assert_eq(crab_path_usable(longp), 0, "a path of exactly the cap does not fit — the terminator");
+    store8(longp + CRAB_PATH_MAX - 1, 0);
+    assert_eq(crab_path_usable(longp), 1, "...but one byte less exactly fits, and is accepted");
+
+    # --- M3 #03: DEFERRED STATTING ---------------------------------------------------------------
+    # ⭐ MEASURED BEFORE BUILT: ~1.1 ms per entry on agnos under QEMU (50 ms / 45 in /bin, 10 ms / 7
+    # in /), so a full sweep at the 256-entry cap was ~280 ms of blocking syscalls on the keystroke
+    # that descends. The listing now marks entries pending and the event loop drains batches.
+    # ⛔ PENDING (-2) IS A DIFFERENT ANSWER FROM UNSTATTABLE (-1). An entry not yet reached must not
+    # render as one whose stat FAILED, or a drain that never completes looks like a filesystem fault.
+    assert_eq(crab_sz_pending(), 0 - 2, "pending is -2, distinct from -1 (stat failed)");
+    var psz = alloc(8 * 8);
+    var pmt = alloc(8 * 8);
+    var pi = 0;
+    while (pi < 8) { store64(psz + pi * 8, 77); store64(pmt + pi * 8, 77); pi = pi + 1; }
+    crab_stat_reset(psz, pmt, 5);
+    assert_eq(load64(psz), 0 - 2, "reset marks sizes pending");
+    assert_eq(load64(pmt), 0 - 2, "...and mtimes too");
+    assert_eq(load64(psz + 4 * 8), 0 - 2, "...through the last entry in range");
+    # ⚠ AND NOT ONE BYTE PAST THE COUNT. `sizes` is allocated for CRAB_MAX_ENTRIES; writing past
+    # `count` would clobber whatever the arena handed out next.
+    assert_eq(load64(psz + 5 * 8), 77, "reset stops at count — entry 5 is untouched");
+
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 0, "the first pending entry is found");
+    store64(psz, 100);
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 1, "...and the scan skips one already stat'd");
+    assert_eq(crab_stat_next_pending(psz, 5, 3), 3, "the scan honours its start index");
+    # ⛔ A NEGATIVE START MUST CLAMP RATHER THAN READ BEHIND THE ARRAY — and proving that needs the
+    # memory in front of it to be CONTROLLED. The obvious version of this assert (`psz`, start -4)
+    # passed with the clamp deleted: it read whatever the arena happened to leave in front of `psz`,
+    # found no -2 there, and walked forward to the same answer. A test that passes when the code is
+    # broken is worthless, so the array here is placed 8 entries INTO a block whose front is filled
+    # with the pending marker. Without the clamp the scan finds a -2 behind the array and returns a
+    # NEGATIVE index, which would then be used to address a record.
+    var gsz = alloc(16 * 8);
+    var gmt = alloc(16 * 8);
+    var gi = 0;
+    while (gi < 16) { store64(gsz + gi * 8, 0 - 2); store64(gmt + gi * 8, 0 - 2); gi = gi + 1; }
+    var gs = gsz + 8 * 8;
+    var gm = gmt + 8 * 8;
+    crab_stat_reset(gs, gm, 5);
+    store64(gs, 100);
+    assert_eq(crab_stat_next_pending(gs, 5, 0 - 4), 1, "a negative start clamps — it does not scan behind the array");
+    crab_stat_reset(psz, pmt, 5);
+    store64(psz, 1); store64(psz + 8, 1); store64(psz + 16, 1);
+    store64(psz + 24, 1); store64(psz + 32, 1);
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 0 - 1, "a fully stat'd listing reports -1");
+    assert_eq(crab_stat_next_pending(psz, 0, 0), 0 - 1, "an empty listing reports -1");
+
+    # ⛔ ONLY SIZE AND MTIME NEED THE SWEEP. Dir-ness comes from the READDIR RECORD, not from stat, so
+    # directories-first, the `/` marker, NAME order and KIND order all work with no stat data at all.
+    # That is the whole reason the deferral is safe, so it is asserted rather than assumed.
+    assert_eq(crab_sort_needs_stats(CRAB_SORT_SIZE), 1, "size order needs every size");
+    assert_eq(crab_sort_needs_stats(CRAB_SORT_MTIME), 1, "mtime order needs every mtime");
+    assert_eq(crab_sort_needs_stats(CRAB_SORT_NAME), 0, "name order needs none");
+    assert_eq(crab_sort_needs_stats(CRAB_SORT_KIND), 0, "kind order needs none either");
+
+    # ⚠ ON THE HOST `crab_stat_one` HAS NO SYSCALL, so it resolves every entry to -1 (unstattable).
+    # That is exactly what makes the BATCHING testable here: the pending -> resolved transition is
+    # observable even though the sizes themselves are not.
+    var bbuf = alloc(8 * 64);
+    t_entry(bbuf, 0, "a", 0);
+    t_entry(bbuf, 1, "b", 0);
+    t_entry(bbuf, 2, "c", 0);
+    t_entry(bbuf, 3, "d", 0);
+    t_entry(bbuf, 4, "e", 0);
+    var bscr = alloc(CRAB_PATH_MAX);
+    var bstat = alloc(STAT_BUFSZ);
+    crab_stat_reset(psz, pmt, 5);
+    # ⛔ THE BUDGET MUST BOUND THE WORK — that is the entire point of batching. A batch that ignored
+    # its budget would restore the 280 ms keystroke while looking like it had been fixed.
+    assert_eq(crab_stat_batch("/bin", bbuf, 5, psz, pmt, bscr, bstat, 2), 2, "a batch stops at its budget");
+    assert_eq(load64(psz), 0 - 1, "...and the entries it reached are resolved");
+    assert_eq(load64(psz + 8), 0 - 1, "...both of them");
+    assert_eq(load64(psz + 16), 0 - 2, "...while the rest stay pending");
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 2, "the drain resumes at the first still-pending row");
+    assert_eq(crab_stat_batch("/bin", bbuf, 5, psz, pmt, bscr, bstat, 99), 3, "an over-budget batch does what is left");
+    # ⛔ AND THEN IT MUST REPORT ZERO. The idle drain redraws when a batch does work; a batch that
+    # kept re-statting settled entries would redraw forever and spin the loop on an idle desktop.
+    assert_eq(crab_stat_batch("/bin", bbuf, 5, psz, pmt, bscr, bstat, 99), 0, "a settled listing needs no work");
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 0 - 1, "...and nothing is left pending");
+
+    # ⚠ A listing whose order needs no stats must not sweep — that is the saving. On the host the
+    # sweep is a no-op either way, so the ORACLE IS THE RETURN VALUE, and it is labelled as such.
+    crab_stat_reset(psz, pmt, 5);
+    assert_eq(crab_stat_for_listing("/bin", bbuf, 5, psz, pmt, bscr, bstat, CRAB_SORT_NAME), 0,
+              "a name-ordered listing does NOT sweep");
+    assert_eq(load64(psz), 0 - 2, "...so every entry is still pending after it");
+    assert_eq(crab_stat_for_listing("/bin", bbuf, 5, psz, pmt, bscr, bstat, CRAB_SORT_SIZE), 1,
+              "a size-ordered listing DOES sweep");
+    assert_eq(load64(psz), 0 - 1, "...and leaves nothing pending");
+    assert_eq(crab_stat_next_pending(psz, 5, 0), 0 - 1, "...for any entry");
 
     # --- readdir clamps to the cap ---------------------------------------------------------------
     # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract

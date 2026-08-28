@@ -2,6 +2,76 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-08-28 — M3: a browser you would actually use
+
+**M3 — "a browser you would actually use"**. crab listed a directory in whatever order the filesystem
+handed it back, forgot where you had been the moment you pressed Backspace, always started in the same
+two hardcoded directories, and blocked the keystroke that descended on one synchronous `stat` per
+entry. All four are fixed.
+
+⚠ **Four of M3's seven items shipped. The other three are gated upstream, not unfinished**: real
+columns (*#32*) needs a dhancha TABLE widget, directories past the 256-entry cap (*#02*) needs a
+resumable `readdir` from agnos, and `on-accent` needs rupa.
+
+### Added — sorting (*deferral #33*)
+
+- **`s` cycles four sort modes** across BOTH panes and re-sorts them: name (case-insensitive) · size
+  (largest first) · modified (newest first) · kind (extension, then name). Applied to the initial
+  listings and to every descend and ascend.
+- **Directories sort first under every mode**, unconditionally.
+- Dotfiles are **not** hidden. `.` is 0x2E, so they sort ahead of every letter.
+
+### Added — selection memory (*deferral #34*)
+
+- **Backspace lands on the directory you just left**, not at the top of the parent.
+- **`s` follows the selected entry** through the re-sort instead of resetting the selection.
+- A name that is no longer present reports `-1` and the caller falls back to row 0.
+
+### Added — starting paths from argv (*deferral #11*)
+
+- **`crab [LEFT] [RIGHT]`**. `/bin` and `/` were hardcoded; `args` was declared in `[deps].stdlib` and
+  never called. Both defaults remain, and the agnos desktop always uses them — the compositor spawns
+  crab through the launcher with a path and no arguments.
+- **A path that is not absolute, or that does not fit `CRAB_PATH_MAX`, is refused and announced on the
+  console**, then the default is used. It is not silently substituted.
+- argv on agnos comes from `lib/args_agnos.cyr` (the init rsp parked in **r15** at entry, argc capped
+  at 8 by the kernel); on the host it comes from `/proc/self/cmdline`.
+
+### Changed — deferred statting (*deferral #03*)
+
+- **A listing no longer stats anything.** It marks every entry pending and returns; the event loop
+  drains **32 entries per idle tick**. Measured cost of the old behaviour on agnos under QEMU: **1.1
+  ms per entry** (50 ms for 45 entries in `/bin`, 10 ms for 7 in `/`) — **~280 ms** at the
+  `CRAB_MAX_ENTRIES` cap of 256, paid on the keystroke that descends or ascends.
+- **A sort to size or modified forces the full sweep**, because those orders cannot be computed from
+  partial data. Name and kind order need no stat data at all — dir-ness comes from the readdir record
+  (`CRAB_REC_TYPE`), not from stat.
+- **`-2` (pending) is distinct from `-1` (stat failed)** and renders differently: `?` versus `-`, in
+  both the size column and the date.
+- New: `crab_sz_pending`, `crab_stat_reset`, `crab_stat_next_pending`, `crab_sort_needs_stats`,
+  `crab_stat_one`, `crab_stat_batch`, `crab_stat_for_listing`. `crab_stat_all` is now the full sweep
+  only. `CRAB_STAT_BATCH = 32`.
+- New console lines, one per sweep and one per drain: `crab: stat-cost <ms> ms for <n> entries in
+  <path>` and `crab: stat-drain complete`. ⚠ Named `stat-cost`, not `stat`, so they are not counted as
+  per-entry trace lines by `crab-listing-cap-test.py`.
+
+### Testing
+
+- **The dependency graph was verified with every `path` override disabled.** crab's manifest sets
+  `path = "../X"` for rupa, kashi, dhancha and setu, and **`path` wins over `tag`**, so a local build
+  proves nothing about the declared tags. With the paths disabled `cyrius deps` cloned the tags, both
+  targets built, all 228 tests passed, and the binaries came out **byte-identical** to the
+  path-resolved ones. Tag SHAs were confirmed against the GitHub API with `curl`.
+- **Reference coverage 44/54 fns (81 %)**, 6/6 files — up from 27/36 (75 %) at 0.6.1, and the first
+  time crab is above the v1.0 criterion of 80 %. ⚠ Reference coverage counts a function as covered
+  when something references it: a floor, not a correctness proof.
+- 228 host assertions pass. `crab /bin /bin` and `crab relative` are QEMU-proven against agnos in
+  `agnos/scripts/harness/crab-listing-cap-test.py`, which also now records **zero** `stat-cost` lines
+  where it previously saw six. `agnos/scripts/harness/crab-resize-test.py` reports `deferred stat
+  drain completed: True` — the drain needs a compositor, so the two halves are proven separately.
+
+---
+
 ## [0.6.1] - 2026-08-27 — M2: the window answers the pointer, the wheel, and a held key
 
 **M2 — "the window is real"**. crab was a fixed 380x220 rectangle that understood one keypress at a

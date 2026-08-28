@@ -1,6 +1,6 @@
-# Handoff — **0.6.1 is cut: M2 shipped.** The window answers pointer, wheel, releases and repeat.
+# Handoff — **0.7.0 is cut: M3 shipped.** Sorting, selection memory, argv paths, deferred statting.
 
-> **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated as M2 opened.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
+> **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated across M2 and M3; cut at 0.7.0 on 2026-08-28.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
 >
 > ⚠ **Refresh or delete this file when the next release ships. A stale handoff is worse than none.**
@@ -14,14 +14,31 @@
 
 | | |
 |---|---|
-| Version | **0.6.1** (2026-08-27). ⚠ Uncommitted. Every dependency is released and current. |
+| Version | **0.7.0** (2026-08-28). ⚠ Uncommitted — the operator handles all git operations. |
 | Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
-| Build | x86_64 **385,816 B** · `--agnos` **390,184 B** · `--win` fails (pre-existing) |
-| Tests | `cyrius test` **134 / 0** · `render_test` 11 checks, 0 failed · fuzz + bench still scaffolds |
-| Coverage | **27/36 fns (75 %)**, 6/6 files — v1.0 wants 80 % |
-| Source | 1,512 lines across **six** files: `main.cyr` 453 · `ui.cyr` 442 · `app.cyr` 368 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
-| Deps | agnos 1.56.49 · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha 0.9.18 · aethersafha 0.16.22 · sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 — all released |
-| Mid-arc work | **None.** M2 shipped as 0.6.1. The two open M2 items are **gated upstream** (dhancha keysym space; a GPU carveout), not unfinished. |
+| Build | x86_64 **394,248 B** · `--agnos` **398,648 B** · `--win` fails (pre-existing) |
+| Tests | `cyrius test` **228 / 0** · `render_test` 11 checks, 0 failed · fuzz + bench still scaffolds |
+| Coverage | ⭐ **44/54 fns (81 %)**, 6/6 files — re-derived at this cut with `cyrius coverage`, up from 27/36 (75 %) at 0.6.1. **First time above the v1.0 criterion of 80 %.** ⚠ It is *reference* coverage: a function is counted when something references it. That is a floor, not a correctness proof — `main.cyr` reports 1/1 because its one testable function is `main` itself. |
+| Source | 2,019 lines across **six** files: `app.cyr` 755 · `main.cyr` 562 · `ui.cyr` 453 · `render_test.cyr` 145 · `path.cyr` 91 · `test.cyr` 13 |
+| Deps | agnos 1.56.49 · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha 0.9.18 · aethersafha 0.16.22 · sadish 0.5.2 · rupa 0.1.4 · rekha 0.3.5 · kashi 1.0.6 — all released, and **verified with `path` disabled** (see below) |
+| Mid-arc work | **None.** M3 shipped as 0.7.0. The three open M3 items are **gated upstream** (dhancha TABLE widget; resumable agnos readdir; rupa `on-accent`), not unfinished. |
+
+### ⭐ The dep graph was verified four ways at this cut — only the fourth is evidence
+
+crab's manifest sets `path = "../X"` for **rupa, kashi, dhancha and setu**, and **`path` wins over
+`tag`**. So a green local build says nothing about whether the declared tags resolve — this has been
+the dominant recurring hazard across this stack.
+
+1. Sibling `VERSION` == declared tag — all six ✅
+2. `git rev-parse <tag>` == that sibling's HEAD — all six ✅
+3. The tag exists on the remote with the same SHA — all six ✅, checked with **`curl` against the
+   GitHub API**. ⚠ `git ls-remote` fails on SSH auth in the sandbox; that is **inconclusive, not a
+   failure**, and reading it as "tag missing" would have been wrong for all six.
+4. ⭐ **The manifest copied with every `path` line disabled, so `cyrius deps` actually cloned the
+   tags.** Both targets built, all 228 tests passed, and the binaries came out **byte-identical** to
+   the path-resolved ones.
+
+⛔ **Checks 1–3 can all pass while the declared graph is broken.** Only 4 exercises it.
 
 ---
 
@@ -208,7 +225,7 @@ widget destroyed each frame — which is why `sel_l`/`sel_r` are app state.
 
 ---
 
-## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
+## ✅ And `src/main.cyr` is testable — the gap that hid two of the above
 
 `main.cyr` ends in `_entry();`, so a suite that included it would run the app. Everything in it was
 therefore **unreachable from any test**: the readdir parser, the stat layer, `crab_descend`,
@@ -405,7 +422,30 @@ different). ⇒ **Compare with `cmp`, never with the size.**
 
 ---
 
-## Next slot — M2 (v0.6.1), with its gate already closed
+## ⭐ M3 (v0.7.0) — SHIPPED. Four items in, and the rest are gated upstream
+
+**Done and QEMU-proven**: sorting (*#33*), selection memory (*#34*), argv start paths (*#11*), and
+deferred statting (*#03*). Details and the mutation evidence are in [`roadmap.md`](roadmap.md).
+
+⭐ **The one finding worth carrying**: *#03* was **measured before it was built**, and that mattered.
+The 2026-08-19 iron slowness had already been misattributed once — it looked like the listing and was
+the per-entry narration. So the sweep was made to report its own cost first: **~1.1 ms per entry**
+(50 ms for 45 in `/bin`), i.e. ~280 ms at the 256 cap on the keystroke that descends. ⚠ QEMU numbers;
+the per-entry **linearity** is the durable finding, not the absolute figure.
+
+⛔ **And the saving and the drain had to be proven in DIFFERENT harnesses.**
+`crab-listing-cap-test.py` runs crab with no compositor, so crab exits before the event loop — it can
+show the listing no longer sweeps (**zero** `stat-cost` lines, was six) but **cannot** show the sizes
+ever arrive. `crab-resize-test.py` runs the real desktop and reports `deferred stat drain completed`.
+Reporting only the first would have shown that crab stopped statting, not that it moved the work —
+and those are indistinguishable right up until the sizes never come.
+
+⚠ **`main.cyr`'s event loop is `#ifdef CYRIUS_TARGET_AGNOS`, so the drain has no host test at all.**
+The policy helpers around it do (28 assertions, five mutations); the loop wiring is QEMU-only.
+
+---
+
+## Superseded — M2 (v0.6.1), shipped
 
 [`roadmap.md`](roadmap.md) sequences eight milestones to 1.0. Next is **M2 — the window is real**:
 resize (`WINDOW_CONFIGURE` is decoded by dhancha and dropped on the floor), pointer input (dhancha
