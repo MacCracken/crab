@@ -1,4 +1,6 @@
-# Handoff — **0.7.0 is cut, and all three M3 gates are now CLOSED upstream.** M3 is complete.
+# Handoff — **0.7.0 cut; all three M3 gates CLOSED and RELEASED upstream.** M3 is complete.
+
+> ⛔ **Five reviewed-but-unfixed defects are listed below. Read that section before writing code.**
 
 > **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated across M2 and M3; cut at 0.7.0 on 2026-08-28.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
@@ -14,14 +16,96 @@
 
 | | |
 |---|---|
-| Version | **0.7.0** cut, plus **uncut gate-repair work** on top — see the CHANGELOG's `[Unreleased]`. ⚠ Uncommitted; the operator handles all git operations. |
-| Toolchain | cyrius pin **6.5.35**, installed `cycc` 6.5.35 — no drift |
+| Version | **0.7.0** cut, plus gate-repair work **committed at `c8f8952`** — see the CHANGELOG's `[Unreleased]`. The operator handles all git operations; **never bump `VERSION`, write a `## [x.y.z]` heading, tag, commit or push.** |
+| Toolchain | cyrius pin **6.5.35** (the latest *release*). ⛔ **THE LOCAL `~/.cyrius` SNAPSHOT IS NOT TRUSTWORTHY** — see *Verifying anything in this stack* below. |
 | Build | x86_64 **398,504 B** · `--agnos` **406,992 B** · `--win` fails (pre-existing) |
 | Tests | `cyrius test` **253 / 0** · `render_test` **15** checks, 0 failed · fuzz + bench still scaffolds |
 | Coverage | **47/60 fns (78 %)**, 6/6 files. ⚠ **DOWN from 81 % at the 0.7.0 cut, and that is arithmetic, not rot**: the gate work added six functions faster than it added references to them. Still reference coverage — a floor, not a correctness proof. |
-| Source | 2,220 lines across **six** files: `app.cyr` 824 · `main.cyr` 562 · `ui.cyr` 546 · `render_test.cyr` 184 · `path.cyr` 91 · `test.cyr` 13 |
+| Source | 2,227 lines across **six** files: `app.cyr` 831 · `main.cyr` 562 · `ui.cyr` 546 · `render_test.cyr` 184 · `path.cyr` 91 · `test.cyr` 13 |
 | Deps | agnos **1.56.50** · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha **0.9.20** · aethersafha 0.16.22 · sadish 0.5.2 · rupa **0.1.5** · rekha 0.3.5 · kashi 1.0.6. ⭐ **all released and pushed** (agnos `1.56.50`, dhancha `0.9.20`, rupa `0.1.5`). The four-way tag check was RE-RUN 2026-08-28 with every `path` override DISABLED: `cyrius deps` resolves **6 deps / 0 errors**, host **and** `--agnos` build, **253/0** tests. rupa and dhancha also moved their toolchain pin to **6.5.35**, matching crab. |
 | Mid-arc work | **The three M3 gates were repaired upstream and their crab-side items are done.** rupa **0.1.5** (`on-accent` + contrast primitives), dhancha **0.9.20** (columns, per-widget fg, the unreadable-selection fix), agnos **1.56.50** (`#101 readdir_at`). M3 is complete; next is **M4 — file operations (v0.8.0)**. |
+
+### ⛔⛔ FIVE OPEN DEFECTS — reviewed 2026-08-28, **none fixed**
+
+Found by a full review of the M3 gate work. All five are in code that **builds and passes 253/0**, so
+the suite will not find them for you. Ranked.
+
+1. **Neither `#101` loop terminates on a stalled cursor — a hang, not a crash.**
+   `src/app.cyr:566` (the listing walk) and `src/app.cyr:587` (the counting walk) both loop
+   `while (load64(&cur) != -1)` and break only on `k < 0`. But the kernel's I/O-error paths —
+   `agnos/kernel/core/ext2.cyr:2329` and `:2333` — `store64(cursor_uva, pos)` with **`pos`
+   unchanged** and `return count`, which may be `0` and is **not negative**. A persistent
+   block-read failure therefore spins crab forever in a syscall loop, silently. Neither loop bounds
+   its iterations. ⇒ Break when a call returns `k == 0` with the cursor unmoved, and cap the
+   iteration count.
+
+2. **The cap went 256 → 1024 and re-broke the keystroke path that M3 *#03* existed to fix.**
+   `crab_sort_entries` (`src/app.cyr:427`) is insertion sort — O(n²) with a 64-byte record swap done
+   byte-at-a-time. **Measured on native x86_64** (agnos under QEMU is far slower):
+
+   | n | random order | reverse-sorted |
+   |---:|---:|---:|
+   | 256 | 6 ms | 14 ms |
+   | 1024 | **100 ms** | **200 ms** |
+
+   It runs once per listing — i.e. on every descend/ascend keypress. *#03* treated ~280 ms there as
+   unacceptable and restructured statting to remove it; this quietly put it back. ⛔ The comment at
+   `src/app.cyr:424` still reads *"`CRAB_MAX_ENTRIES` is 256"* — the justification was never
+   re-derived at the new size.
+
+3. **A directory of exactly 1024 entries reports a false truncation.** `src/app.cyr:601` guards the
+   warning on `n >= CRAB_MAX_ENTRIES`, but the comment directly above it says the oracle is `cur`,
+   not `n` — *"a directory of exactly the cap is complete, not truncated"*. With exactly 1024
+   entries the walk ends with `cur == -1` and `crab_dir_total == n`, so the `crab_dir_total > n`
+   branch is false and it prints `has more entries than are shown`. Guard on `cur`.
+
+4. **Three stale cost comments the cap bump invalidated.** `src/app.cyr:424` ("is 256", above);
+   `src/app.cyr:647` — *"at the cap of 256 that is ~280 ms of blocking syscalls"*, now ~1.1 s at
+   1024; `src/ui.cyr:385` — *"256 entries per pane"* for the 256 KiB arena sizing. The arena is
+   GROWable so it degrades safely, but the measurement is no longer the one stated.
+
+5. **`crab_name_cell` scans kernel data with an unbounded `strlen`.** `src/ui.cyr:205`:
+   `while (load8(name + n) != 0) { n = n + 1; }`, over a readdir record. It is safe *today* only
+   because the kernel NUL-terminates at ≤ 62 bytes — an invariant asserted nowhere at that call
+   site. `src/path.cyr`'s own header exists because unbounded copies over exactly this data caused
+   the 0.5.0 P-1. Bound it by `CRAB_NAME_MAX` like `crab_strcpy_n` does.
+
+⚠ **Not a defect, but know it:** at the shipped default 380x220 a pane is ~187 px, so
+`crab_cols_for_width` returns **2** — NAME + SIZE. The MODIFIED column never appears at the default
+window size, though the README/CHANGELOG headline is "NAME · SIZE · MODIFIED". It is disclosed in
+the ⚠ lines; just do not expect to see a date on first run.
+
+### ⛔⛔ Verifying anything in this stack — the traps that cost a whole session (2026-08-28)
+
+1. **`cyrfmt` is NOT `cyrius fmt`.** The raw `~/.cyrius/versions/<v>/bin/cyrfmt` **silently ignores
+   `--check`**: it prints the file and exits **0**, so every file "passes" vacuously. CI runs the
+   `cyrius` *wrapper*. Always `cyrius fmt <f> --check`, never the raw binary. And never run bare
+   `cyrius fmt <f>` while diagnosing — it rewrites in place.
+2. **A versioned wrapper still delegates to whatever is first on `PATH`.** Calling
+   `~/.cyrius/versions/6.5.27/bin/cyrius` does **not** give you 6.5.27's formatter; it gives you the
+   PATH one. Formatter rules genuinely differ — 6.5.27 wants continuation lines at the **statement's
+   own indent**, 6.5.35 wants **+2 per open paren**. Getting this backwards produced a "fix" that
+   failed CI.
+3. **The only faithful reproduction is the released tarball.**
+   `curl -sSfL https://github.com/MacCracken/cyrius/releases/download/<v>/cyrius-<v>-x86_64-linux.tar.gz`,
+   extract, then `CYRIUS_HOME=$D PATH=$D/bin:$PATH $D/bin/cyrius …` (create `$D/versions/<v>/{lib,bin}`
+   symlinks or `cyrius deps` refuses).
+4. ⛔ **`~/.cyrius`'s 6.5.35 stdlib snapshot was overwritten with 6.5.36 content** (2026-08-28
+   08:25). The released 6.5.35 tarball has **0** hits for `v6.5.36` and **0** for `SYS_READDIR_AT`;
+   the local copy has both. **Consequence: every `cyrius build` / `cyrius test` here re-vendors
+   6.5.36 stdlib into crab's tracked `lib/` and rewrites `cyrius.lock`.** After any build, check
+   `git status lib/` and `grep -c SYS_READDIR_AT lib/syscalls_x86_64_agnos.cyr` (must be **0**);
+   `git checkout -- lib/ cyrius.lock` to undo. Fix the root cause with
+   `curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | CYRIUS_VERSION=6.5.35 sh`
+   — **ask the operator first**, they may be developing 6.5.36 deliberately.
+5. **Ground truth for "is this state CI-canonical" is the GitHub Actions API**, not a local run:
+   `curl -sS https://api.github.com/repos/MacCracken/<repo>/actions/runs?per_page=5` gives
+   sha/conclusion, and `…/runs/<id>/jobs` gives per-step outcomes. Find the last **green** run and
+   diff against its SHA. ⚠ Job *logs* need admin auth (403); run and step conclusions are public.
+   ⚠ Do **not** use the `gh` CLI — `curl` only.
+6. **`git ls-remote` works fine here.** An older note in this file called it "inconclusive due to SSH
+   auth in the sandbox" — that was not true on 2026-08-28; it resolved every tag. Use
+   `sed 's|.*refs/tags/||' | sort -V` — **`sort -V`, not lexical**, or `1.56.9` outranks `1.56.50`.
 
 ### ⛔ One deliberate interim, with an expiry
 
@@ -70,14 +154,27 @@ the dominant recurring hazard across this stack.
 
 1. Sibling `VERSION` == declared tag — all six ✅
 2. `git rev-parse <tag>` == that sibling's HEAD — all six ✅
-3. The tag exists on the remote with the same SHA — all six ✅, checked with **`curl` against the
-   GitHub API**. ⚠ `git ls-remote` fails on SSH auth in the sandbox; that is **inconclusive, not a
-   failure**, and reading it as "tag missing" would have been wrong for all six.
+3. The tag exists on the remote with the same SHA — checked with `git ls-remote --tags` (**which
+   works**; an older revision of this file claimed it fails on SSH auth in the sandbox — it did not
+   on 2026-08-28) or `curl` against the GitHub API. ⚠ Sort with **`sort -V`**, never lexically.
 4. ⭐ **The manifest copied with every `path` line disabled, so `cyrius deps` actually cloned the
    tags.** Both targets built, all 228 tests passed, and the binaries came out **byte-identical** to
    the path-resolved ones.
 
 ⛔ **Checks 1–3 can all pass while the declared graph is broken.** Only 4 exercises it.
+
+⭐ **RE-RUN 2026-08-28, and this time check 4 was the one that mattered.** Between the 0.7.0 cut and
+that date the manifest named **`rupa 0.1.5` and `dhancha 0.9.20`, neither of which existed on any
+remote** — both were local-only. Checks 1–3 looked fine locally because `path` wins; check 4 failed
+outright: `fatal: Remote branch 0.1.5 not found in upstream origin`, `4 deps resolved, 2 errors`.
+dhancha 0.9.20 was broken the same way (it pinned the same phantom `rupa 0.1.5`), so **no consumer
+could resolve it either**. After the operator released rupa `0.1.5` (`27e8385`) and dhancha `0.9.20`
+(`61a1e39`), check 4 was re-run with every `path` line disabled: **6 deps / 0 errors, host and
+`--agnos` both build, 253/0 tests.** That is the current evidence.
+
+⚠ **A `## [x.y.z]` CHANGELOG heading is not a release, and neither is a local tag.** Four repos
+carried headings for versions that had never been pushed. The only proof is
+`git ls-remote --tags <url> | sed 's|.*refs/tags/||' | sort -V | tail`.
 
 ---
 

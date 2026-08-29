@@ -4,6 +4,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — upstream gate repairs
 
+### Fixed — the declared dependency graph did not resolve (release-plumbing repair, 2026-08-28)
+
+The M3 gate work shipped green locally while naming two dependency tags that **existed on no remote**.
+`path = "../X"` wins over `tag`, so every local build resolved against sibling working trees and said
+nothing. With the `path` lines disabled — the only check that is evidence:
+
+```
+fatal: Remote branch 0.1.5 not found in upstream origin
+fatal: Remote branch 0.9.20 not found in upstream origin
+4 deps resolved, 2 errors
+```
+
+- **rupa `0.1.5` and dhancha `0.9.20` are now genuinely released** (`27e8385`, `61a1e39`). dhancha
+  0.9.20 had been unusable by *any* consumer, because it pinned the same phantom `rupa 0.1.5`.
+- **Re-verified with every `path` override disabled**: `cyrius deps` → **6 deps / 0 errors**, host and
+  `--agnos` both build, **253 / 0** tests.
+- **`dhancha 0.9.19` never existed** — no tag, no CHANGELOG entry, no commit. `dh_theme_on_accent`
+  landed in **0.9.20**. Corrected in `cyrius.cyml`, `CHANGELOG.md`, `docs/development/roadmap.md` and
+  `src/render_test.cyr`.
+- **cyrius `6.5.36` is unreleased** — the docs claimed it "ships" `sys_readdir_at`. It has no tag; the
+  latest release is `6.5.35`, and CI installs releases. `CRAB_SYS_READDIR_AT = 101` therefore stays
+  hardcoded, and the expiry note now says why the pin *cannot* move yet.
+- **`lib/` decontaminated.** The local `~/.cyrius` 6.5.35 stdlib snapshot had been overwritten with
+  6.5.36 content, and `cyrius deps` vendored it into crab's tracked `lib/` — `SYS_READDIR_AT` and
+  `sys_readdir_at` appeared in a 6.5.35-pinned project. Restored from the released tarball;
+  `cyrius.lock` now differs from 0.7.0 by exactly the two dep-bundle hashes.
+- ⚠ **rupa and dhancha also moved their toolchain pin to `6.5.35`.** The rest of the desktop stack
+  stays on `6.5.27` deliberately.
+
+### Documented — five open defects, none fixed
+
+A full review of the M3 gate work found five defects in code that builds and passes 253/0. They are
+recorded with line numbers in [`docs/development/handoff.md`](docs/development/handoff.md) and
+summarised in [`docs/development/state.md`](docs/development/state.md): a non-terminating `#101`
+readdir loop, an O(n²) sort regression put back on the keystroke path by the 256 → 1024 cap bump
+(**measured 6 ms → 100 ms native**), a false truncation warning at exactly the cap, three stale cost
+comments, and an unbounded `strlen` over kernel-supplied data.
+
 ### Fixed — the selected row's text was unreadable (the `on-accent` gate)
 
 The selected row is filled with `accent` and its label was drawn in the theme's primary `ink` — on

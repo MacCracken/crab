@@ -457,6 +457,14 @@ Both targets built and all 228 tests passed against that graph, and the resultin
 
 crab is a read-only browser. Enter on a file does nothing, silently.
 
+⛔ **CLEAR THE FIVE M3 DEFECTS FIRST — they are cheap now and expensive after M4.** Reviewed
+2026-08-28, none fixed; full detail with line numbers in [`handoff.md`](handoff.md). Two are
+load-bearing for M4 specifically: the **non-terminating `#101` readdir loop** (`src/app.cyr:566`,
+`:587`) becomes a hang *while a write is in flight*, and the **O(n²) sort back on the keystroke path**
+(256 → 1024 cap; **measured 6 ms → 100 ms native**) is the same latency budget the transfer tray will
+compete for. The other three: a false truncation warning at exactly the cap, three stale cost
+comments, and an unbounded `strlen` over kernel data in `crab_name_cell`.
+
 - Copy · move · rename · delete · mkdir · open. **Gate: agnos** write syscalls. *Deferral #10.*
 - **Transfer tray** (1c) — active operations with progress, rate and ETA.
   **Gate: dhancha** PROGRESS widget.

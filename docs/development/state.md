@@ -42,6 +42,16 @@ demands and the one this file broke twice.
   The binary is **377,288 B on both 6.5.28 and 6.5.35 — the same SIZE** — but **240,284 of those bytes
   differ (63.7 %)**, from the .35 linear-scan register-allocator rework. ⚠ An identical size is exactly
   the shape of evidence that gets mistaken for "nothing changed". It is not.
+- ⛔⛔ **THE LOCAL `~/.cyrius` 6.5.35 SNAPSHOT IS POISONED (2026-08-28)** — overwritten with 6.5.36
+  stdlib. The **released** 6.5.35 tarball has **0** hits for `v6.5.36` and **0** for `SYS_READDIR_AT`;
+  the local copy has both. ⇒ **Every `cyrius build` / `cyrius test` re-vendors 6.5.36 stdlib into
+  crab's tracked `lib/` and rewrites `cyrius.lock`.** After any build:
+  `grep -c SYS_READDIR_AT lib/syscalls_x86_64_agnos.cyr` must be **0**, and `git status lib/` should be
+  clean; `git checkout -- lib/ cyrius.lock` undoes it. Root fix (ask the operator first — they may be
+  developing 6.5.36 on purpose):
+  `curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | CYRIUS_VERSION=6.5.35 sh`
+- ⚠ **6.5.36 is UNRELEASED** — no tag; latest cyrius release is **6.5.35**. CI installs *releases*, so
+  the pin cannot move to 6.5.36 and `sys_readdir_at` does not exist for any consumer.
 - `lib/` is vendored from the pinned snapshot by `cyrius lib sync`, **not** by `cyrius deps` — a
   toolchain bump without a `lib sync` leaves the stdlib behind. ⚠ The sync walks the **declared**
   `[deps].stdlib` set: **29 leaves**, while crab actually vendors **30**. The odd one out is
@@ -292,16 +302,33 @@ that is *inconclusive*, not a failure; the tag SHAs were confirmed with `curl` a
 
 ## Dependencies
 
-Declared in `cyrius.cyml`, **all six at their latest published tag as of 2026-08-27**:
+Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-08-28: every declared tag equals that repo's highest
+tag ON ITS REMOTE**, and the declared graph resolves with all `path` overrides disabled (**6 deps / 0
+errors**, host and `--agnos` both build, **253/0**).
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
 | sadish  | 0.5.2  | no      | 2D vector — the surface everything else draws into   |
-| rupa    | 0.1.4  | yes     | shared desktop theme tokens (`RupaMotion` since .3)  |
+| rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.17 | yes     | widgets, `dh_client_poll_event`, `dh_theme_*`        |
-| setu    | 0.8.7  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
+| dhancha | 0.9.20 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
+
+⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
+manifest named `rupa 0.1.5` and `dhancha 0.9.20` while **neither existed on any remote** — both were
+local-only, and rupa's was not even committed. Every local build was green because `path` wins;
+`cyrius deps` on the declared graph gave `4 deps resolved, 2 errors`. dhancha 0.9.20 was unusable by
+*anyone* for the same reason (it pinned the same phantom `rupa 0.1.5`). Both are now genuinely
+released — rupa `27e8385`, dhancha `61a1e39`.
+⚠ **A `## [x.y.z]` CHANGELOG heading is not a release. A local tag is not a release.** Only
+`git ls-remote --tags <url> | sed 's|.*refs/tags/||' | sort -V | tail` proves it — **`sort -V`**, or
+`1.56.9` outranks `1.56.50`.
+⚠ **`dhancha 0.9.19` never existed** — no tag, no CHANGELOG entry, no commit. `dh_theme_on_accent`
+landed in **0.9.20**. Four crab files cited the phantom version and were corrected on 2026-08-28.
+⚠ rupa and dhancha moved their **toolchain** pin to `6.5.35` (matching crab) as part of that repair.
+sadish, rekha, kashi and setu remain on `6.5.27` and agnos on `6.5.28` — the operator's call: bump
+them only when a repair lands in that repo.
 
 ⭐ **dhancha 0.9.13 / 0.9.14 / 0.9.15 are the per-frame allocation gate, 0.9.16 is the per-poll half
 (together the render/input loop allocates nothing in steady state), and 0.9.17 is M2's
@@ -405,6 +432,27 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 ⭐ **All of these are now sequenced in [`roadmap.md`](roadmap.md) with named upstream gates** — 0.5.0
 harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
 only what a cold start must know *before touching the code*; the roadmap is the full inventory.
+
+- ⛔⛔ **FIVE OPEN DEFECTS, reviewed 2026-08-28, NONE FIXED.** Full detail with line numbers in
+  [`handoff.md`](handoff.md). All are in code that builds and passes **253/0**, so the suite will not
+  find them:
+  1. **Hang risk** — neither `#101` loop (`src/app.cyr:566`, `:587`) bounds iterations or checks
+     cursor progress; agnos `ext2.cyr:2329`/`:2333` return `count >= 0` with the cursor **unmoved** on
+     an I/O error, so a persistent block-read failure spins crab forever.
+  2. **Sort regression** — `CRAB_MAX_ENTRIES` 256 → 1024 without re-deriving the insertion-sort
+     justification at `src/app.cyr:424` (it still says "is 256"). **Measured native x86_64: random
+     order 6 ms → 100 ms; reverse-sorted 14 ms → 200 ms**, once per listing, on the keystroke path —
+     re-opening exactly what M3 *#03* restructured statting to remove.
+  3. **False truncation warning** at exactly 1024 entries — `src/app.cyr:601` guards on
+     `n >= CRAB_MAX_ENTRIES` when its own comment says the oracle is `cur`.
+  4. **Three stale cost comments** the cap bump invalidated: `src/app.cyr:424`, `src/app.cyr:647`
+     ("~280 ms at the cap of 256" → now ~1.1 s), `src/ui.cyr:385` ("256 entries per pane").
+  5. **Unbounded `strlen` over kernel data** — `src/ui.cyr:205` in `crab_name_cell`; safe only via an
+     invariant asserted nowhere at that site, in the file family whose header records the 0.5.0 P-1
+     caused by exactly that.
+- ⚠ **The MODIFIED column never shows at the default window size.** 380x220 gives a ~187 px pane, so
+  `crab_cols_for_width` returns 2 (NAME + SIZE). Correct behaviour, disclosed — but the
+  README/CHANGELOG headline is "NAME · SIZE · MODIFIED".
 
 - ✅ **CLOSED 2026-08-27 — a rendered frame now costs the global heap ZERO bytes.** It was 746,440 B
   per `crab_render`, permanently, into a bump allocator with no `free()`. Three steps, each measured
