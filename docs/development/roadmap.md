@@ -535,28 +535,24 @@ oracle, not the cursor.
   **Gate: dhancha** PROGRESS widget.
 - **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
   **Gate: dhancha** context menu + modal sheet.
-- ⛔⛔ **Drag between panes — BLOCKED UPSTREAM, and this line's "gated on nothing" was wrong.**
-  dhancha does ship `DRAG_START`/`DRAG_MOVE`/`DRAG_DROP`/`DRAG_END`, but **its drag API and its
-  frame-arena API are mutually exclusive**: `dh_frame_begin` calls `dh_reset_input()`, which zeroes
-  `_dh_drag_src`, **every frame**. A drag spans press → move → release, i.e. many frames, so any app
-  using the frame arena can receive `DRAG_START` and then never `MOVE`, `DROP` or `END`.
-  ⚠ **The clear is correct and must not simply be removed** — after an arena rewind that pointer
-  addresses memory about to be handed out again. The conflict is structural: drag identity must
-  outlive a frame, and it is stored as a pointer that cannot.
-  ⇒ Filed: [`2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md`](issues/2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md),
-  and **fixed upstream in dhancha 0.9.21** — a press on a draggable widget under a frame arena is now
-  simply a click, and `dh_drag_available()` answers the question up front. Nothing half-fires.
-  ⛔⛔ **THAT FIX DOES NOT UNBLOCK THIS ITEM, AND THE REASON IS A STANDING RULING, NOT A GAP.** Drag
-  is synthesized inside `dh_dispatch`, and **crab does not use `dh_dispatch`** — operator ruling
-  2026-08-27, recorded at `src/app.cyr:215`, for this same cross-frame-identity reason. dhancha
-  0.9.21 makes the toolkit honest; it does not give crab events crab never asked for.
-  ⇒ **The remaining choice is crab-side and needs a ruling**: implement drag in crab's own
-  `(pane, row)` model — which is exactly what crab already does for double-click and the wheel, and
-  which works today with no dependency — or drop drag from M4. Adopting `dh_dispatch` to get it is
-  the one option the 2026-08-27 ruling forecloses.
-  ⚠ **If crab implements it**: press on a row, track with the pointer state crab already owns,
-  release over the other pane, then reuse `crab_fs_copy` / `crab_fs_move`. The plumbing is ~30 lines
-  because the hit-testing and the file operations both already exist.
+- ⭐⭐ **Drag between panes — DONE (2026-08-31), in crab's own model.** Press a row, drag past a
+  4 px Manhattan threshold, release over the other pane; the file **moves** (matching the `m` key,
+  and `crab_fs_move` already picks rename-or-copy+delete). Both panes re-list, the status line says
+  what happened.
+  ⛔ **crab does NOT use dhancha's `DRAG_*` events, and that is the same decision it already made
+  twice.** dhancha synthesizes drag inside `dh_dispatch`, which tracks a press as a **widget
+  pointer** — and crab rebuilds its whole tree every frame with the arena rewinding underneath it
+  (ruling 2026-08-27, `src/app.cyr:215`). Double-click hit that wall first and was solved with
+  **pane index + row index**; the wheel likewise. Drag is the third gesture and takes the same
+  shape: the toolkit supplies geometry via `crab_hit`, crab supplies identity that survives a frame.
+  ⚠ **This is not a workaround for the dhancha bug** — it is the architecture crab already had. The
+  dhancha side was fixed separately in **0.9.21** (drag no longer half-fires under a frame arena),
+  which is correct for dhancha and simply not the path crab takes.
+  ⛔ **A drop inside the SOURCE pane is not a transfer.** Dragging within a pane is how an operator
+  changes their mind; acting on it would refuse noisily or touch a same-named file. The destination
+  is the other pane's **directory**, not the row under the pointer — a row-targeted drop is a
+  different gesture with a different meaning, and guessing wrong moves a file somewhere nobody
+  pointed at. Folders are refused for the same reason `c`/`m` refuse them: recursion needs the tray.
 - ⛔ **The genuinely gated part of M4 is the transfer tray** (dhancha PROGRESS), and it is what
   blocks recursive copy and recursive delete: neither may go behind a keypress without a surface
   that shows what is happening and a way to stop it.

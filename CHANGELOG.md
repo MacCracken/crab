@@ -180,7 +180,28 @@ still hit-test.
 two panes side by side, and at 380 there is now only one. `render_test` gained checks for the solo
 layout at 380 in exchange.
 
-### Blocked upstream — drag between panes
+### Added — M4: drag between panes
+
+⭐⭐ Press a row, drag past a 4 px Manhattan threshold, release over the other pane — the file
+**moves**, matching the `m` key. Both panes re-list and the status line reports the result. crab had
+no pointer-release arm at all before this; a press did everything and the button coming back up was
+ignored.
+
+⛔ **crab does not use dhancha's `DRAG_*` events, and this is not a workaround — it is the
+architecture crab already had.** dhancha synthesizes drag inside `dh_dispatch`, which tracks a press
+as a **widget pointer**, and crab rebuilds its whole tree every frame with the arena rewinding
+underneath it (operator ruling 2026-08-27). Double-click hit that wall first and was solved with
+**pane index + row index**; the wheel likewise. Drag is the third gesture and takes the same shape:
+the toolkit supplies geometry through `crab_hit`, crab supplies identity that survives a frame.
+
+⛔ **A drop inside the source pane is not a transfer** — dragging within a pane is how an operator
+changes their mind. The destination is the other pane's *directory*, not the row under the pointer:
+a row-targeted drop is a different gesture, and guessing wrong moves a file somewhere nobody pointed
+at. Folders are refused, for the same reason `c` / `m` refuse them.
+⚠ **A drag consumes the double-click pair**, or the release ending a drag would pair with the next
+press and descend.
+
+### Fixed upstream — dhancha 0.9.21, drag stopped half-working
 
 ⛔⛔ **dhancha's drag API and its frame-arena API are mutually exclusive**, and the roadmap's
 "gated on nothing" was wrong. `dh_frame_begin` calls `dh_reset_input()`, which zeroes
@@ -192,7 +213,7 @@ cannot. Filed as `docs/development/issues/2026-08-30-dhancha-drag-api-cannot-sur
 
 ### Added — tests, and a benchmark that measures something
 
-**253 -> 462 passing**, plus `render_test` **14 -> 26** pixel checks, and reference coverage
+**253 -> 476 passing**, plus `render_test` **14 -> 26** pixel checks, and reference coverage
 **81 % -> 80 %** (74/92) after a dip to 73 % — recovered by testing `crab_entry_cmp` directly (it had
 only ever been exercised *through* `crab_sort_entries`, so every ordering rule was asserted in
 aggregate and none of them separately), plus the result messages, the notice channel, the case

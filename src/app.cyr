@@ -223,6 +223,44 @@ fn crab_surface_bytes(w, h): i64 {
 enum CrabPointer {
     CRAB_DOUBLECLICK_MS = 400;
     CRAB_SCROLL_ROWS = 3;         # rows the selection moves per wheel detent
+    # ⚠ Manhattan pointer travel before a press becomes a DRAG rather than a click. Same idea as
+    # dhancha's `DH_DRAG_THRESHOLD`, and the same value — a hand resting on a mouse jitters by a
+    # pixel or two, and a drag that triggers on jitter would move files on an intended click.
+    CRAB_DRAG_THRESHOLD = 4;
+}
+
+# @public — has a press travelled far enough to be a drag? 1 = drag, 0 = still a click.
+#
+# ⭐⭐ crab IMPLEMENTS DRAG ITSELF, AND THAT IS NOT A WORKAROUND — IT IS THE SAME DECISION crab
+# ALREADY MADE FOR EVERY OTHER POINTER GESTURE. dhancha synthesizes `DRAG_START`/`_MOVE`/`_DROP`/
+# `_END` inside `dh_dispatch`, which crab does not use (ruling 2026-08-27, see the ⛔ above): the
+# toolkit tracks a press as a **widget pointer**, and crab rebuilds its whole tree every frame with
+# the arena rewinding underneath it. Double-click hit that wall first and was solved by tracking
+# **pane index + row index**; the wheel likewise. Drag is the third gesture and takes the same shape.
+# ⇒ The toolkit supplies geometry (`dh_hit_test` via `crab_hit`); crab supplies identity that
+# survives a frame. dhancha 0.9.21 made its own drag refuse to half-fire under an arena, which is
+# correct for dhancha and simply not the path crab takes.
+fn crab_drag_started(x0, y0, x, y): i64 {
+    var dx = x - x0;
+    if (dx < 0) { dx = 0 - dx; }
+    var dy = y - y0;
+    if (dy < 0) { dy = 0 - dy; }
+    if ((dx + dy) >= CRAB_DRAG_THRESHOLD) { return 1; }
+    return 0;
+}
+
+# @public — is this drop a real cross-pane transfer? 1 = do it, 0 = ignore.
+#
+# ⛔ A DROP INSIDE THE SOURCE PANE IS NOT A TRANSFER, and must not be treated as one. Dragging a row
+# a few pixels within its own pane is how an operator scrubs a selection or changes their mind; a
+# copy or move there would either refuse with `CRAB_FS_ESAME` (noise) or, worse, act on a
+# same-named file. The destination has to be the OTHER pane.
+# ⚠ `-1` is `crab_hit`'s "no pane here" answer, and it must not compare equal to anything.
+fn crab_drag_targets(frompane, topane): i64 {
+    if (frompane < 0) { return 0; }
+    if (topane < 0) { return 0; }
+    if (frompane == topane) { return 0; }
+    return 1;
 }
 
 # Where the selection lands after a wheel delta, clamped to [0, count-1]. -> the new index.

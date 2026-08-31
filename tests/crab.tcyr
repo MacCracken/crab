@@ -260,6 +260,30 @@ fn main() {
     assert_eq(crab_name_cell(ncell, "abc", 0), 0, "a zero-width column yields the empty string");
     assert_eq(load8(ncell), 0, "...NUL-terminated, not left as garbage");
 
+    # --- M4: drag between panes -------------------------------------------------------------------
+    # ⭐⭐ crab IMPLEMENTS DRAG ITSELF. dhancha synthesizes drag inside `dh_dispatch`, which crab does
+    # not use — the toolkit tracks a press as a widget pointer and crab rebuilds its tree every frame.
+    # Double-click hit that wall first and was solved with pane+row indices; the wheel likewise; drag
+    # is the third gesture and takes the same shape. These are the two decisions in it.
+    assert_eq(crab_drag_started(100, 100, 100, 100), 0, "a press that has not moved is a click");
+    assert_eq(crab_drag_started(100, 100, 102, 101), 0, "...and so is one that jittered under the threshold");
+    assert_eq(crab_drag_started(100, 100, 104, 100), 1, "four pixels of travel is a drag");
+    assert_eq(crab_drag_started(100, 100, 102, 102), 1, "...and the metric is MANHATTAN, so 2+2 counts");
+    # ⚠ Direction must not matter — a drag up-left is a drag.
+    assert_eq(crab_drag_started(100, 100, 96, 100), 1, "leftward travel is travel");
+    assert_eq(crab_drag_started(100, 100, 100, 96), 1, "...and so is upward");
+    assert_eq(crab_drag_started(100, 100, 98, 98), 1, "...and diagonally back");
+    # ⛔ A DROP INSIDE THE SOURCE PANE IS NOT A TRANSFER. Dragging within a pane is how an operator
+    # changes their mind; acting on it would either refuse noisily or touch a same-named file.
+    assert_eq(crab_drag_targets(0, 1), 1, "left to right is a transfer");
+    assert_eq(crab_drag_targets(1, 0), 1, "...and so is right to left");
+    assert_eq(crab_drag_targets(0, 0), 0, "a drop in the SOURCE pane is not a transfer");
+    assert_eq(crab_drag_targets(1, 1), 0, "...in either pane");
+    # ⚠ -1 is `crab_hit`'s "no pane here", and it must never compare equal to anything.
+    assert_eq(crab_drag_targets(0 - 1, 1), 0, "a drag that began nowhere drops nowhere");
+    assert_eq(crab_drag_targets(0, 0 - 1), 0, "a drop outside both panes is not a transfer");
+    assert_eq(crab_drag_targets(0 - 1, 0 - 1), 0, "...and two nowheres are not each other");
+
     # --- M4: the small-window ratification --------------------------------------------------------
     # ⭐⭐ THE CANVAS'S OPEN QUESTION, ANSWERED: the second pane DOES leave, below the width at which
     # both panes could honestly show the full column set. ⛔ The threshold is DERIVED from crab's own

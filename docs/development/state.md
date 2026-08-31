@@ -135,7 +135,7 @@ tests for all of it.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⭐ `cyrius coverage` reports **76/94 fns referenced (80 %)** at 0.7.1, 6/6 files — **the v1.0
+⭐ `cyrius coverage` reports **78/96 fns referenced (81 %)** at 0.7.1, 6/6 files — **the v1.0
 criterion, met.** It dipped to 73 % mid-cut as M4's write layer landed faster than its tests, and was
 recovered by writing the assertions that were genuinely missing (`crab_entry_cmp` directly, the
 result messages, the notice channel, `crab_lower`, the listing accessors) rather than by naming
@@ -414,7 +414,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **462 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **476 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.

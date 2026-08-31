@@ -174,6 +174,15 @@ fn main(): i64 {
     var last_row = 0 - 1;
     var last_ms = 0;
     var hit = alloc(16);
+    # ⭐⭐ DRAG BETWEEN PANES (M4), IN crab's OWN MODEL. Pane index + row index + the press origin —
+    # never a widget pointer, for the same reason double-click and the wheel do it this way: the
+    # tree is rebuilt every frame and the arena rewinds underneath it. See `crab_drag_started`.
+    # ⚠ `drag_pane` is -1 when no button is down; that doubles as "nothing to drop".
+    var drag_pane = 0 - 1;
+    var drag_row = 0 - 1;
+    var drag_x = 0;
+    var drag_y = 0;
+    var dragging = 0;
     # ⭐ HELD-KEY REPEAT (M2 *#06*). `SETU_SURF_FULL_KEYS` gives crab both edges, so it can know a key
     # is still down — which is the whole reason the flag was worth requesting.
     # ⚠ ONE held key, not a set. Two movement keys held at once is not a gesture a file manager owes
@@ -300,6 +309,17 @@ fn main(): i64 {
             if (k == POINTER_MOVE) {
                 ptr_x = dh_event_a(ev);
                 ptr_y = dh_event_b(ev);
+                # ⭐ PROMOTE AN ARMED PRESS TO A DRAG once the pointer has travelled far enough.
+                # ⚠ The notice is set ONCE, on the transition — setting it every motion event would
+                # rebuild the status line on a dedupe-free stream for no change in what it says.
+                if (drag_pane >= 0) {
+                    if (dragging == 0) {
+                        if (crab_drag_started(drag_x, drag_y, ptr_x, ptr_y) == 1) {
+                            dragging = 1;
+                            crab_set_notice("drag to the other pane to move");
+                        }
+                    }
+                }
             }
             # ⭐⭐ THE WHEEL (M2, *deferral #05*). Five repos had to move for this event to exist:
             # agnos 1.56.49 reads HID report byte [3] (documented and never read until then), bhumi
@@ -367,7 +387,62 @@ fn main(): i64 {
                             }
                         }
                         crab_say("crab: click\n");
+                        # ⭐ ARM THE DRAG. Recorded on every press on a row; it only becomes a drag
+                        # once the pointer travels past the threshold, so this costs a click nothing.
+                        if (hr >= 0) {
+                            drag_pane = hp;
+                            drag_row = hr;
+                            drag_x = ptr_x;
+                            drag_y = ptr_y;
+                            dragging = 0;
+                        }
                     }
+                }
+                # ⭐⭐ RELEASE — THE DROP. crab had no release arm at all before M4; a press did
+                # everything and the button coming back up was ignored.
+                if (dh_event_b(ev) == 0) {
+                    if (dragging == 1) {
+                        var dropped = 0;
+                        if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                            var tp = load64(hit);
+                            # ⛔ THE DESTINATION IS THE OTHER PANE'S DIRECTORY, NOT THE ROW UNDER THE
+                            # POINTER. Dropping "onto" a folder row would be a different gesture with
+                            # a different meaning, and getting it wrong moves a file somewhere the
+                            # operator did not point at. Row-targeted drops can come later; the pane
+                            # is the unambiguous target and the one the dual-pane layout implies.
+                            if (crab_drag_targets(drag_pane, tp) == 1) {
+                                var sp2 = lpath; var dp2 = rpath; var sb2 = lbuf; var sc2 = ln;
+                                if (drag_pane == 1) { sp2 = rpath; dp2 = lpath; sb2 = rbuf; sc2 = rn; }
+                                if (drag_row < sc2) {
+                                    var srec2 = sb2 + drag_row * CRAB_REC_SZ;
+                                    if (load8(srec2 + CRAB_REC_TYPE) != 0) {
+                                        crab_set_notice("folders cannot be dragged yet — files only");
+                                    } else {
+                                        crab_strcpy_n(namescr, srec2, CRAB_NAME_MAX);
+                                        var rcd2 = crab_fs_move(sp2, namescr, dp2, pathscr, pathscr2, statbuf);
+                                        crab_set_notice(crab_fs_msg(rcd2));
+                                        crab_say("crab: drag-move "); crab_say(namescr);
+                                        crab_say(" -> "); crab_say(crab_fs_msg(rcd2)); crab_say("\n");
+                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                        lstate = crab_pane_state(ln, crab_listing_err());
+                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                        rstate = crab_pane_state(rn, crab_listing_err());
+                                        if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                        if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                    }
+                                    dropped = 1;
+                                }
+                            }
+                        }
+                        if (dropped == 0) { crab_set_notice("dropped nowhere — drag to the other pane"); }
+                        # ⛔ A DRAG IS NOT A CLICK. Consume the double-click pair, or the release that
+                        # ended a drag would pair with the next press and descend.
+                        last_pane = 0 - 1;
+                        last_row = 0 - 1;
+                    }
+                    drag_pane = 0 - 1;
+                    drag_row = 0 - 1;
+                    dragging = 0;
                 }
             }
             if (k == KEY) {
