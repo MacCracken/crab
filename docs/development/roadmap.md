@@ -453,11 +453,21 @@ Both targets built and all 228 tests passed against that graph, and the resultin
   forced sweep found nothing pending. That is the design working, not the sweep failing to fire.
 - **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
 
-### M4 — File operations (v0.8.0)
+### M4 — File operations (v0.8.0) — ⭐ **STARTED in v0.7.1**, completes at v0.8.0
+
+⭐ **Shipped in 0.7.1**: copy, move and delete (keys `c` / `m` / `d`, the last behind a `y`
+confirmation), the empty-pane states, and the whole `crab_fs_*` write layer with its per-target
+syscall shim. `crab_fs_rename` / `crab_fs_mkdir` are implemented and asserted but **not key-bound**.
+⚠ **Those features rode a PATCH number by operator ruling** (2026-08-30), the same way M2 rode
+0.6.1. The milestone→version ladder below is unchanged; 0.7.1 is not M4's number.
+⛔ **Still open for v0.8.0**: rename/mkdir key bindings (need dhancha `TEXTINPUT` wired into the
+event loop's focus and escape routing — the widget exists, since 0.9.7), the transfer tray
+(**genuinely gated** on a dhancha PROGRESS widget, and it is what blocks recursive copy and delete),
+context menu, batch-rename sheet, drag between panes, and the small-window ratification.
 
 crab is a read-only browser. Enter on a file does nothing, silently.
 
-⭐ **ALL FIVE M3 DEFECTS ARE CLEARED (2026-08-30)** — see the CHANGELOG's `[Unreleased]`. The two
+⭐ **ALL FIVE M3 DEFECTS ARE CLEARED in v0.7.1 (2026-08-30)** — see the CHANGELOG. The two
 that were load-bearing for M4 are the two that mattered: the **non-terminating `#101` readdir walk**
 (both loops, now guarded on a stalled cursor *and* capped) would have become a hang *while a write
 was in flight*, and the **O(n²) sort on the keystroke path** is now a bottom-up merge over an index

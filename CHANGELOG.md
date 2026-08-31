@@ -2,7 +2,18 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — upstream gate repairs, the five M3 defects, M4's first slice, and the 6.5.36 pin
+## [0.7.1] - 2026-08-30 — the hang no test could reach, and crab starts writing
+
+### Verified at the cut
+
+- **The declared dependency graph resolves** — check 4 re-run with all four `path = "../X"` overrides
+  disabled, which is the only one of the four checks that is evidence: **6 deps / 0 errors**, both
+  targets build, **408 / 0** tests, and both binaries **byte-identical** to the path-resolved ones.
+  (`cyrius.lock` going 2 → 6 commit-pinned is the tell that the overrides were genuinely off.)
+- **`fmt --check` clean** on all eight sources under the pinned toolchain, `lint` at or below the
+  0.7.0 baseline, and `lib/` verified **byte-identical to the released 6.5.36 tarball**.
+- ⚠ **Reference coverage FELL, 81 % → 73 % (65/89 fns)** — arithmetic, not rot: 29 functions were
+  added faster than references to them. The v1.0 criterion is 80 %, so this moved away from target.
 
 ### Changed — toolchain pin 6.5.35 -> 6.5.36, and the hardcoded syscall number is retired
 
