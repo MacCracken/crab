@@ -159,6 +159,26 @@ the render call sites the deferred-stat drain added.
 
 ## Proven
 
+### As of 0.7.5 — what is actually verified, and how
+
+| claim | evidence | where |
+|---|---|---|
+| the write layer works | **real syscalls against a real filesystem** — mkdir, unlink, rename, open, read, write all exist on the host, so refusals, the bounded join, the overwrite guard and multi-chunk copying are exercised for real | `tests/crab.tcyr` |
+| the recursive walk works | ⭐ `crab_walk_readdir` has a host arm over `getdents64`, whose `d_off` is a seek cookie with **exactly** `#101`'s semantics — so the tree state machine runs against real directories | `tests/crab.tcyr` |
+| the render is correct at the pixel | 26 `check()` assertions over the production `crab_render` | `src/render_test.cyr` ⛔ **run by no gate** |
+| a frame costs the global heap nothing | `alloc_used()` deltas across back-to-back renders | dhancha `arena_test` + crab's own |
+| the sort is off the keystroke path | measured: 182.9 ms → 414 µs at the cap, reverse-sorted | `tests/crab.bcyr` |
+| the declared dep graph resolves | check 4 — every `path` override disabled, **byte-identical binaries** | re-run at 0.7.4 |
+
+⛔ **What is NOT proven: anything since 0.7.0 on iron.** See *Next*.
+⛔ **And the agnos-only paths are proven only under QEMU** — the `#101` walk, the event loop, the
+idle tick, spawn. Every `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by
+construction; that is why the decisions inside them (`crab_readdir_stalled`, `crab_walk_cursor_for`,
+`crab_truncation_note`) are lifted out as predicates the suite *can* assert.
+
+### The historical retractions — kept because they warn against re-deriving a wrong answer
+
+
 ⛔ **The transport every pre-2026-08-03 agnos claim rested on is RETIRED — as the WRONG PRIMITIVE for
 local display IPC, not as something that never worked.** A local display protocol has nothing to route,
 nothing to checksum, no window to negotiate, and no business owning a port.
@@ -235,114 +255,19 @@ first. ⇒ **Any change to the agnos event loop needs a QEMU run before it is cl
 ⚠ **Not exercised on agnos:** `crab_descend` / `crab_ascend`. Neither harness drives navigation keys,
 so the bounded-join *refusal* path has host assertions only.
 
-## M3 — shipped as v0.7.0
+## Shipped
 
-⭐ **M3 shipped in 0.7.0.** Four of seven items are done and QEMU-proven; the three that are not are
-**gated upstream, not unfinished** — real columns (*#32*) on a dhancha TABLE widget, >256 entries
-(*#02*) on a resumable agnos `readdir`, and `on-accent` on rupa.
-⭐ **The dep graph was verified with every `path` override disabled** at this cut: `cyrius deps`
-cloned the declared tags, both targets built, all 228 tests passed, and the binaries were
-**byte-identical** to the path-resolved ones. ⚠ `git ls-remote` cannot authenticate in the sandbox —
-that is *inconclusive*, not a failure; the tag SHAs were confirmed with `curl` against the GitHub API.
+| milestone | version | headline |
+|---|---|---|
+| M1 | 0.5.0 | the P-1 sweep; `src/path.cyr` extracted so the suite could reach it |
+| M1.5 | 0.6.0 | **a rendered frame costs the global heap zero bytes**; `src/app.cyr` extracted |
+| M2 | 0.6.1 | resize, pointer, wheel, held-key repeat |
+| M3 | 0.7.0 | sorting, selection memory, argv paths, deferred statting, columns, `#101 readdir_at`, `on-accent` |
+| M4 | 0.7.1 – 0.7.5 | the whole write layer: copy · move · delete · open · mkdir · rename, recursion, multi-select, the transfer tray, drag, the context menu, the batch sheet |
 
-- ✅ **Sorting (*#33*)** — name / size / modified / kind, **directories first on every key**, `s`
-  cycles and re-sorts both panes; applied to the initial listings and to every descend and ascend.
-  ⛔ **Dotfiles are NOT hidden** — crab has no reveal affordance, and silently omitting files is worse
-  than showing too many.
-  ⚠ The **order** is host-asserted only — crab does not log entry names by design.
-- ✅ **Selection memory (*#34*)** — Backspace lands on the directory you just left, and `s` follows the
-  selected entry through the re-sort instead of resetting it.
-  ⛔ **The leaf is captured BEFORE the ascend** — `crab_ascend` rewrites `path` in place. Both panes'
-  names are likewise read **before either sort**, since `crab_sort_entries` permutes in place.
-  ⚠ A name that has vanished between readdirs reports `-1`; the caller falls back to row 0 rather than
-  guessing a nearby row and selecting a different file.
-- ✅ **argv paths (*#11*)** — `crab [LEFT] [RIGHT]`. Defaults stay and are the normal case: the agnos
-  compositor spawns crab through the launcher with **no arguments**, so the desktop always falls back
-  and every existing harness is unaffected.
-  ⛔ **A path that is not absolute, or does not fit `CRAB_PATH_MAX`, is refused and ANNOUNCED**, then
-  the default is used. `crab_readdir_into` needs absolute paths; a relative one lists nothing, and a
-  silent empty pane reads as a broken filesystem rather than a rejected argument.
-  ⚠ **argv on agnos is compiler plumbing, not a syscall** — `lib/args_agnos.cyr` reads the init rsp
-  that cycc parks in **r15** at entry (kernel caps argc at 8). A green host test says nothing about
-  the agnos target, so it was proven separately in QEMU.
-  ⭐ **QEMU-proven**: `crab /bin /bin` lists `/bin` twice and `/` not at all; `crab relative` announces
-  the refusal. The oracle is an **absence** — a presence oracle would pass either way, since `/bin` is
-  also the default left pane.
-- ✅ **Deferred statting (*#03*)** — the listing marks entries pending and returns; the event loop
-  drains 32 per idle tick; a sort to SIZE/MTIME forces the sweep because those orders cannot be
-  computed from partial data.
-  ⭐ **Measured first**: ~1.1 ms per entry on agnos under QEMU (50 ms / 45 in `/bin`), so ~280 ms at
-  the 256 cap on the keystroke that descends. ⚠ QEMU figures — the per-entry linearity is the durable
-  finding, not the absolute number.
-  ⭐ **Safe because dir-ness comes from the readdir record, not stat** — directories-first, the `/`
-  marker, NAME and KIND order all need no stat data.
-  ⛔ **Pending (-2) renders as `?`, unstattable (-1) as `-`.** Conflating them would make a stalled
-  drain look like a filesystem fault.
-  ⭐ **Proven in two harnesses**: `crab-listing-cap-test.py` now sees **zero** `stat-cost` lines (was
-  six, ~230 ms), and `crab-resize-test.py` reports `deferred stat drain completed: True`. The first
-  runs crab with no compositor so its drain never runs — one harness cannot show both halves.
-- ✅ **Real columns (*#32*)** — NAME · SIZE · MODIFIED with headers on dhancha 0.9.20's shared
-  column spec. The 13-character name column is gone; NAME is the remainder column.
-  ⛔ Columns that do not fit are **dropped, not squeezed** — a ~187 px pane cannot hold a date and a
-  usable filename.
-- ✅ **>1024 entries (*#02*)** — agnos 1.56.50's `#101 readdir_at`; the cap is 1024 and the warning
-  now counts (`showing 1024 of 1200`). Falls back to `#81` on an older kernel.
-- ✅ **`on-accent`** — rupa 0.1.5 + dhancha 0.9.20. The selected row's text was `ink` on `accent`:
-  **1.27:1** on MUDRA dark.
-- **Next**: **M4 — file operations (v0.8.0)**. All three M3 gates are closed; crab is still read-only.
-
-## M2 — shipped as v0.6.1
-
-⭐ **M2 shipped in 0.6.1.** Five of seven items are done and QEMU-proven; the two that are not are
-**gated upstream**, not unfinished — see the ⛔ entries below and the roadmap.
-
-- ✅ **Idle-poll allocation (*#09*)** — dhancha 0.9.16. The loop allocates nothing in steady state.
-  Host-tested (200 idle polls, 0 bytes) and QEMU-confirmed for no regression.
-- ⚠ **Resize (*#01/#04*) — built; REFUSAL path QEMU-proven, ADOPT path not reachable under QEMU.**
-  `dh_surface_resize` (dhancha 0.9.17), the `#86` slot **created before the old is closed**,
-  `w`/`h`/`stride` as state, re-ATTACH + COMMIT after the next render. Layout reflows for free.
-  ⛔ **A new harness (`agnos/scripts/harness/crab-resize-test.py`) found a real bug on its first
-  run**: crab closed its only shm buffer before knowing the replacement existed and exited. setu's
-  `setu_client_present` closes first but has an inline-pixel fallback; crab's LIVE-buffer path has
-  none, so that order was fatal here.
-  ⛔ **And the byte cap was invented, not derived** — 16 MB from "the framebuffer's size", when agnos
-  caps a `#71` pmm slot at **2 MB** and only a `#86` GPU carveout reaches 32 MB, chosen at runtime.
-  The cap is now the absurdity bound; the kernel is the arbiter.
-  ⭐ **Measured**: crab launches via F2→DOWN→Enter, receives a CONFIGURE for **2048x2018**, refuses it
-  (no carveout under QEMU), stays at its old extent, and **answers 6 keystrokes afterwards** — which
-  also settles the loop-lifetime question open since 0.5.0.
-  ⭐ **And the harness is proven to go red**: with the `WINDOW_CONFIGURE` branch removed it reports
-  FAIL (no CONFIGURE line at all) against PARTIAL for the real build, so "crab refused the ask" and
-  "crab ignored the ask" are distinguishable. Without that the QEMU result would mean nothing.
-- ✅ **Pointer (*#05*) — click to select, click to focus a pane, double-click to descend.**
-  QEMU-proven (`crab: click`, then 5 keystrokes answered). crab is the **first client to decode
-  `SETU_INPUT_PTR_MOVE`**.
-  ⛔ **crab owns the interaction state; `dh_dispatch` is deliberately NOT used** — it tracks a press
-  by widget pointer, and `dh_frame_begin` clears those between a press and its release. crab tracks
-  pane + row index; dhancha supplies geometry via `dh_hit_test`. Operator ruling 2026-08-27.
-  ⚠ `SETU_INPUT_PTR_BTN` carries no coordinates, so position comes from `PTR_MOVE`.
-  ⚠ **Scroll wheel is NOT done** — setu has no wheel message kind. **Gate: setu.**
-  ⚠ **Pane headers are not clickable** — the header is a sibling of the list, so the hit walk never
-  reaches it.
-- ✅ **Key release (*#06* first half) — `SETU_SURF_FULL_KEYS` requested and gated.** QEMU-proven
-  exactly: 6 keystrokes → **12 received / 6 acted**. The setu gate is cleared — the compositor
-  implements the flag end to end.
-  ⛔ Asking without gating makes every key act twice; the compositor measured that on its own chrome
-  (2026-08-18). The flag and the gate are coupled and live together in `src/app.cyr`.
-- ✅ **Held-key repeat (*#06* second half) — DONE, and NO kernel change was needed.**
-  ⛔ **This file previously said it was blocked on agnos for want of a bounded wait. That was wrong**,
-  and wrong for a specific reason worth keeping: the claim was made from syscall *signatures*
-  (`#14 pause` takes no timeout) without reading `#14`'s own comment, which says a device IRQ **or the
-  100 Hz timer** wakes it. Measured on a real kernel: `sys_pause()` returns in **0-4 ms**. Repeat is a
-  clock check in the idle path.
-  ⚠ Only Up/Down/j/k repeat — Enter and Backspace would walk the tree on a held key. 400 ms delay,
-  then 60 ms interval, both gates required.
-  ⭐ QEMU-proven: a QMP-held key repeats and **stops on release** (0 repeats after).
-  ⚠ **The observed rate is far below the configured interval** (~1 repeat per 1.6 s hold vs ~20
-  expected) and is **not diagnosed**. Each repeat re-renders and re-writes 334 KB of shm, so frame
-  cost is the likely bound — a hypothesis, not a finding.
-- **Untouched**: routing through `dh_dispatch` (#07 — ⚠ the KEY half is safe; adopting it wholesale is
-  not, same ruling as the pointer).
+⚠ **Per-release detail lives in [`../../CHANGELOG.md`](../../CHANGELOG.md), not here.** This file had
+109 lines of shipped-milestone prose when it was cleaned at 0.7.5; a state file that grows a section
+per release stops being readable exactly when a cold start needs it most.
 
 ## Dependencies
 
@@ -473,95 +398,62 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 
 ## Known gaps
 
-⭐ **All of these are now sequenced in [`roadmap.md`](roadmap.md) with named upstream gates** — 0.5.0
-harvested 39 deferrals out of comment prose and folded them into eight milestones. This section lists
-only what a cold start must know *before touching the code*; the roadmap is the full inventory.
+> ⛔⛔ **THIS SECTION HAD ROTTED A THIRD TIME WHEN IT WAS REWRITTEN AT 0.7.5.** It still claimed
+> *"five open defects, none fixed"* (all five closed at 0.7.1), *"crab is read-only — no copy, move,
+> rename, delete or mkdir"* (the entire M4 write layer had shipped), *"the window is a compile-time
+> 380×220 and crab is keyboard-only"* (resize and pointer shipped in **M2**, two milestones earlier),
+> and *"the MODIFIED column never shows at the default window size"* (fixed at 0.7.2).
+> ⚠ The file's own header has warned about this twice before. **It is not neglect — it is that
+> "known gaps" is written when a gap is found and never revisited when it closes.** Re-read this
+> section at every cut and delete what is no longer true; a closed gap left here sends the next
+> session to fix something that already works.
 
-- ⛔⛔ **FIVE OPEN DEFECTS, reviewed 2026-08-28, NONE FIXED.** Full detail with line numbers in
-  [`handoff.md`](handoff.md). ⭐ **ALL FIVE ARE NOW FIXED (2026-08-30)** — this line described them as
-  open. They were in code that built and passed **253/0**, so the suite did not
-  find them:
-  1. **Hang risk** — neither `#101` loop (`src/app.cyr:566`, `:587`) bounds iterations or checks
-     cursor progress; agnos `ext2.cyr:2329`/`:2333` return `count >= 0` with the cursor **unmoved** on
-     an I/O error, so a persistent block-read failure spins crab forever.
-  2. **Sort regression** — `CRAB_MAX_ENTRIES` 256 → 1024 without re-deriving the insertion-sort
-     justification at `src/app.cyr:424` (it still says "is 256"). **Measured native x86_64: random
-     order 6 ms → 100 ms; reverse-sorted 14 ms → 200 ms**, once per listing, on the keystroke path —
-     re-opening exactly what M3 *#03* restructured statting to remove.
-  3. **False truncation warning** at exactly 1024 entries — `src/app.cyr:601` guards on
-     `n >= CRAB_MAX_ENTRIES` when its own comment says the oracle is `cur`.
-  4. **Three stale cost comments** the cap bump invalidated: `src/app.cyr:424`, `src/app.cyr:647`
-     ("~280 ms at the cap of 256" → now ~1.1 s), `src/ui.cyr:385` ("256 entries per pane").
-  5. **Unbounded `strlen` over kernel data** — `src/ui.cyr:205` in `crab_name_cell`; safe only via an
-     invariant asserted nowhere at that site, in the file family whose header records the 0.5.0 P-1
-     caused by exactly that.
-- ⚠ **The MODIFIED column never shows at the default window size.** 380x220 gives a ~187 px pane, so
-  `crab_cols_for_width` returns 2 (NAME + SIZE). Correct behaviour, disclosed — but the
-  README/CHANGELOG headline is "NAME · SIZE · MODIFIED".
+### Real, and open right now
 
-- ✅ **CLOSED 2026-08-27 — a rendered frame now costs the global heap ZERO bytes.** It was 746,440 B
-  per `crab_render`, permanently, into a bump allocator with no `free()`. Three steps, each measured
-  with a host probe taking `alloc_used()` deltas around back-to-back renders:
-
-  | | per steady-state frame |
-  |---|---:|
-  | baseline (dhancha 0.9.12) | 746,440 B |
-  | + step 1 (0.9.13) — `dh_surface_new`'s dead pixel buffer, deferred | 412,040 B |
-  | + step 2 (0.9.14 + crab) — the sadish render target, reused | 77,568 B |
-  | + step 3 (0.9.15 + crab) — the widget tree, arena'd | **0 B** |
-
-  Identical at 114 entries per pane (the 2026-08-19 iron count for `/`; it is **122** as of
-  2026-08-30) and at 256 — which was `CRAB_MAX_ENTRIES` when this was measured and is now **1024**.
-  ⚠ **Zero is per-frame, not total** — crab pays a one-time **~597 KB** (334,432 B render target +
-  262,144 B arena chunk), allocated on the first frame and reused for the process's life.
-  ⚠ Neither step 1 nor step 2 was the "one line" two documents claimed, and step 2 was not purely
-  upstream. All three are mutation-verified on both sides.
-  ⛔ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`** — a single
-  plain `alloc()` in `crab_render` reintroduces a per-frame leak. `tests/crab.tcyr` asserts twenty
-  rendered frames move the global heap by exactly 0 bytes, so the suite will say so.
-  ⛔ **`dh_frame_begin` also clears dhancha's retained widget pointers** (`_dh_focus` and friends) and
-  the two halves cannot be separated — never call `arena_reset` on a frame arena directly. It follows
-  that crab **must re-establish focus every frame**, which `crab_pane` does. Full accounting in
-  [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
-- ✅ **CLOSED 2026-08-27 — the "no continuously-repainting element" rule is LIFTED OUTRIGHT.** It had
-  two halves and both are now zero: the frame (dhancha 0.9.13–0.9.15, see above) and the **poll**
-  (dhancha 0.9.16 — `dh_setu_poll_event` called `setu_msg_new()` for 80 B before it knew whether
-  anything was pending; the message is pure scratch and is now one hoisted buffer per process).
-  **crab's render/input loop allocates nothing in steady state.** 200 idle polls move the global heap
-  by exactly 0 bytes, asserted in dhancha's `poll_test`. *Deferral #09.*
-  ⇒ The idle mascot line (#29), M4's transfer tray and M7's index progress are unblocked.
-  ⚠ **An EVENT still costs 56 B** (`dh_event_new`) — that is per input, not per cycle, and bounded by
-  how fast a human types. Only the idle path is free.
-- ⚠ **`lib/` IS NOT WHAT COMPILES, and that sharpens the `path`-wins hazard considerably.** Measured
-  2026-08-27: appending garbage to `lib/dhancha.cyr` leaves the build green, while appending it to
-  `../dhancha/dist/dhancha.cyr` fails it — the `path` override compiles the **sibling's `dist/`**
-  directly, and crab's vendored copy is a committed record that `cyrius deps` refreshes and
-  `cyrius.lock` hashes. Appending garbage to `lib/alloc.cyr` is also harmless: the stdlib comes from
-  the **installed toolchain**, not `lib/`. ⇒ This file's Toolchain note that "a toolchain bump without
-  a `lib sync` leaves the stdlib behind" describes the snapshot, not the compiler input, and the
-  stdlib's arena internals **cannot be mutation-tested from this repo**.
-- ⛔ **`src/render_test.cyr`'s NINETEEN pixel assertions run under NEITHER CI NOR `cyrius test`**,
-  and CI **never builds
-  `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is
-  uncompiled by the gate. CI also runs no fuzz, bench, lint, `fmt --check`, vet, deny or coverage.
-- ⛔ **The fuzz and bench harnesses are both scaffolds** that measure nothing — see Tests above.
+- ⛔ **No security audit exists, and crab now writes.** `docs/audit/` is empty. Since 0.7.1 crab
+  creates, renames, copies, moves, **deletes recursively**, and **spawns processes**. That is the
+  v1.0 criterion that moved furthest while nobody was looking at it.
+- ⛔ **`src/render_test.cyr`'s 26 pixel assertions run under NEITHER CI NOR `cyrius test`.**
+  `cyrius.cyml` sets `test = "src/test.cyr"`, which `cyrius test` does not run, and auto-discovery
+  covers `tests/*.tcyr` only. It is crab's strongest test and no gate executes it. *Deferral #14.*
+- ⛔ **CI never builds `--agnos`** — the target that ships. Every `#ifdef CYRIUS_TARGET_AGNOS` region
+  is unguarded by the gate, and 0.7.5 proved the cost: a brace error there compiled clean on the host
+  and failed only on `--agnos`. *Deferral #15.*
+- ⛔ **The fuzz harness reads none of its input** — `fuzz_main(data, len)` returns 0 without touching
+  a byte, so `cyrius fuzz` passes against anything. crab parses untrusted readdir records **and now
+  acts on them destructively**. *Deferral #12.*
 - ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
-  description, the `[deps]` comment and the README all commit to semantic find / auto-tag / dedup on
-  daimon's vector store; `cyrius.cyml` declares no daimon dependency. daimon 2.1.0 exists locally.
-- ⚠ **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
-  all, silently — the return is discarded. (Roadmap M4.)
-- ⚠ **The window is a compile-time 380×220 and crab is keyboard-only.** `WINDOW_CONFIGURE` is decoded
-  by dhancha and dropped on the floor; the eight pointer event kinds dhancha synthesizes are all
-  ignored. (Roadmap M2.)
-- ✅ **CLOSED 2026-08-26 — the `cyrius init` placeholders and the stale README.** `CLAUDE.md` now
-  carries a real identity line and `## Goal`; `README.md` § Status no longer says **"Scaffold."** (it
-  had, since before the dual-pane GUI shipped in 0.2.0) and no longer lists that GUI under *Planned
-  scope*. The retired `anu` codename and the rekha-TrueType claim are corrected — crab passes
-  `font = 0` and draws with kashi's CP437 8×16 bitmap, calling no `rekha_*` function.
-  ⚠ **The README's own replacement text over-claimed once before it landed** and was corrected against
-  the code: there are **no per-row SIZE/MODIFIED columns**. A row is a single LABEL — 13-char name
-  (truncation marked `~`) plus `/` for a directory or a size for a file — and the mtime appears only in
-  the status line. Columns with headers are M3, gated on a dhancha table widget.
+  description, the `[deps]` comment and the README all commit to daimon; `cyrius.cyml` declares no
+  daimon dep, and **daimon 2.1.2 exists locally**. *Deferral #18.*
+- ⚠ **`crab_render` takes 33 parameters.** Each arrived for a good reason and follows the rule that
+  state flows *down* rather than being reached *up* for — but 33 is past where a struct reads better,
+  and every new panel adds two or three. First cleanup of the next slot.
+- ⚠ **The idle-tick wiring is untested and structurally untestable on the host.** The walk, the copy
+  stepper and the queue are all driven by hand in the suite; that they are *called* from the tick is
+  agnos-only event-loop code. Same irreducible gap `main.cyr` has always had.
+- ⚠ **Shift is not on the wire.** `mods` carries press/release, so typed names are lower-case until
+  the compositor forwards modifiers. `crab_key_char` already takes the flag.
+- ⚠ **crab cannot recreate a symlink.** A recursive copy copies whatever `open`+`read` yields through
+  one. `sys_symlink` exists but crab cannot *learn* a source is a link without `readlink`'s ambiguous
+  negative. Moves when agnos `lstat`#102 gets its cyrius peer.
+- ⛔ **`README.md` § Status is wrong in the opposite direction** — it says *"Shipping, and
+  read-only"*, which M4 falsified, and still quotes the retired 256-entry cap. See the roadmap's
+  *Documentation debt*.
+- ⚠ **Focusing a pane by its header does not work** — the header is a sibling of the list, so
+  `crab_hit` resolves a header click to no pane. Clicking a row is correct.
+
+### Hazards that are permanent, not gaps
+
+- ⛔ **`path` wins over `tag`**, and four of six deps carry an override. A green local build is not
+  evidence the declared graph resolves — only a resolve with every `path` line disabled is.
+  **sadish and rekha are tag-only**, which makes them the only two whose remote resolution a local
+  build genuinely exercises. Do not add overrides for them.
+- ⛔ **`lib/` is not what compiles** while a `path` override is set — the sibling's `dist/` is. A
+  cross-repo change must be followed by `cyrius distlib` in that repo, and for dhancha by
+  `sh scripts/sync-deps-sidecar.sh` after it.
+- ⛔ **Build both targets, every time.** See the `--agnos` gap above.
+- ⛔ **`src/ui.cyr` is below `src/app.cyr`.** The render path must never call up; `render_test`
+  includes `ui.cyr` alone. This was violated three times during M4.
 
 ## Consumers
 
@@ -569,20 +461,37 @@ _None — top-level application._
 
 ## Next
 
-⭐ **[`roadmap.md`](roadmap.md) is now a real plan** — the `cyrius init` template it had been through
-fifteen releases is gone. Eight milestones from here to 1.0, sequenced against the design canvas at
-the repo root, each carrying its named upstream gate.
+**M4 is complete.** The next slot is **M5 — Views**, and its shape is unusual: two of its four items
+are gated on dhancha, and the other two are available today.
 
-✅ **M2 shipped as v0.6.1 and M3 as v0.7.0.** Immediately next is **M4 — file operations (v0.8.0)**:
-crab is still **read-only** — no copy, move, rename, delete or mkdir, and Enter on a *file* does
-nothing at all, silently.
-⛔ **M4 is the first milestone that can destroy data**, which makes it a different kind of work from
-everything shipped so far: every item before it was recoverable by pressing another key.
-✅ Both of M2's memory gates are CLOSED and stayed closed (dhancha 0.9.13–0.9.16 plus the crab half):
-a rendered frame costs the global heap zero bytes and the render/input loop is allocation-free in
-steady state, so nothing about memory blocks anything downstream.
+**Start here, in this order:**
 
-Two decisions are settled and recorded, and both shape everything downstream:
+1. ⭐ **Thumbnails, because the gate on that line was FALSE.** The roadmap read *"Gate: an image
+   decoder; none exists in the stack today."* **chitra 1.0.0 is released** — a pure-Cyrius CPU raster
+   decoder for PNG, JPEG, GIF and BMP, each with an `_rgba` entry point, a `dist/chitra.cyr` fold
+   ready to declare, and a `chitra_image_decode_budget` that is exactly the shape a thumbnailer wants.
+   ⚠ What it genuinely needs is a **decode budget and a cache policy** — a directory of 8192×5464
+   images cannot decode on the keystroke path. **M4's stepped-copy pattern is the answer**: bounded
+   work per idle tick, driven by the same tick, with the tray already there to show it.
+2. **The preview pane** — ungated, and it is where a decoded thumbnail has somewhere to go.
+3. **The `crab_render` parameter list**, before M5 adds three more. See *Known gaps*.
+4. Then the gated pair (grid/columns on dhancha widgets, proportional text on rekha).
+
+⛔ **Before believing any gate, re-derive it.** This project has now recorded **three false gates**:
+M4's *"Gate: agnos write syscalls"* (every arm real since agnos 1.41.3), drag's *"gated on nothing"*
+(it was gated, just not where the line said), and thumbnails' *"no image decoder"*. A gate is a claim
+about another repository, and claims about other repositories go stale silently.
+⇒ [`roadmap.md`](roadmap.md) now carries **one table of everything gated**, with the date each claim
+was last checked.
+
+⛔ **And burn before building much more.** The last iron run was **2026-08-30 against the 0.7.0 tree**.
+Everything since — the entire write layer, the tray, recursion, the menu, the edit field — has run
+only on the host and under QEMU. Both defects crab has ever shipped were iron-only, and 0.7.1–0.7.5
+is the largest untested-on-iron stretch in the project's history. ⚠ agnos has also moved 1.56.53 →
+1.56.55 underneath, including a rewrite of `is_user_range`, the validator on crab's only kernel-facing
+hot path.
+
+Two decisions are settled and shape everything downstream:
 [ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no
 palette) and [ADR 0002](../adr/0002-semantic-find-is-a-mode.md) (semantic find is a mode over any
 view, not a view of its own).
