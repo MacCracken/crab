@@ -48,6 +48,10 @@ fn t_entry(buf, i, name, is_dir): i64 {
 # ⚠ Deliberately the production entry point, not a hand-built buffer: a fixture that painted its own
 # pixels would assert something about the fixture.
 fn t_render(w, h): i64 {
+    # ⭐ ONE RENDER-STATE RECORD FOR THE WHOLE HARNESS, re-`reset` and refilled before each
+    # render below — the record is a carrier, not a scenario, so reusing it is correct and it keeps
+    # every scenario's setup visible at its own call site.
+    var rs = crab_rs();
     var lbuf = alloc(16 * 64);
     var rbuf = alloc(16 * 64);
     var a0 = "aethersafha"; t_entry(lbuf, 0, a0, 0);
@@ -80,7 +84,10 @@ fn t_render(w, h): i64 {
     # own surface. Sharing one here would make two `t_render()` results alias and any test comparing
     # them would be comparing a frame with itself.
     var surf = dh_surface_new(w, h);
-    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmt, CRAB_PANE_OK, 0, 1, sl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmt, CRAB_PANE_OK, 0, 0, sr);
+    return crab_render(surf, 0, rs);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -109,6 +116,10 @@ fn t_scan_premul(pix, n): i64 {
 }
 
 fn main() {
+    # ⭐ ONE RENDER-STATE RECORD FOR THE WHOLE HARNESS, re-`reset` and refilled before each
+    # render below — the record is a carrier, not a scenario, so reusing it is correct and it keeps
+    # every scenario's setup visible at its own call site.
+    var rs = crab_rs();
     alloc_init();
 
     test_group("crab — AE-6: the #92 premultiplied precondition holds for every pixel");
@@ -449,7 +460,10 @@ fn main() {
     var rb = alloc(8); store64(rb, 0);
 
     # Frame A: left pane active, selection 0.
-    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, rl, 3, "/bin", rlz, rlm, CRAB_PANE_OK, 0, 0, ra);
+    crab_rs_pane(rs, 1, rr, 3, "/", rrz, rrm, CRAB_PANE_OK, 0, 0, rb);
+    var fa = crab_render(rsurf, 0, rs);
     assert(fa != 0, "frame A rendered into the caller's surface");
     var nbytes = rw * rh * 4;
     var snap = alloc(nbytes);
@@ -459,7 +473,11 @@ fn main() {
 
     # Frame B: the OTHER pane active, a different selection — a visibly different picture.
     store64(ra, 0); store64(rb, 0);
-    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, rl, 3, "/bin", rlz, rlm, CRAB_PANE_OK, 0, 2, ra);
+    crab_rs_pane(rs, 1, rr, 3, "/", rrz, rrm, CRAB_PANE_OK, 0, 1, rb);
+    crab_rs_chrome(rs, 1, 0, 0, 0, 0, 0, "");
+    var fb = crab_render(rsurf, 0, rs);
     assert_eq(fb, fa, "the surface hands back the SAME render target — this is the reuse");
     var diff = 0;
     bi = 0;
@@ -473,7 +491,10 @@ fn main() {
 
     # Frame A again, into the same reused target. Every byte must match the snapshot.
     store64(ra, 0); store64(rb, 0);
-    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, rl, 3, "/bin", rlz, rlm, CRAB_PANE_OK, 0, 0, ra);
+    crab_rs_pane(rs, 1, rr, 3, "/", rrz, rrm, CRAB_PANE_OK, 0, 0, rb);
+    var fa2 = crab_render(rsurf, 0, rs);
     assert_eq(fa2, fa, "...still the same target on the third render");
     var residue = 0;
     bi = 0;
@@ -487,7 +508,10 @@ fn main() {
     bi = 0;
     while (bi < nbytes) { store8(apix + bi, 0x5A); bi = bi + 1; }
     store64(ra, 0); store64(rb, 0);
-    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, rl, 3, "/bin", rlz, rlm, CRAB_PANE_OK, 0, 0, ra);
+    crab_rs_pane(rs, 1, rr, 3, "/", rrz, rrm, CRAB_PANE_OK, 0, 0, rb);
+    crab_render(rsurf, 0, rs);
     var survived = 0;
     bi = 0;
     while (bi < nbytes) {
@@ -499,7 +523,11 @@ fn main() {
     # ⚠ AND TWO SURFACES STILL GIVE TWO PICTURES — the escape hatch `src/render_test.cyr` depends on.
     var rsurf2 = dh_surface_new(rw, rh);
     store64(ra, 0); store64(rb, 0);
-    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, rl, 3, "/bin", rlz, rlm, CRAB_PANE_OK, 0, 2, ra);
+    crab_rs_pane(rs, 1, rr, 3, "/", rrz, rrm, CRAB_PANE_OK, 0, 1, rb);
+    crab_rs_chrome(rs, 1, 0, 0, 0, 0, 0, "");
+    var fc = crab_render(rsurf2, 0, rs);
     assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
     # ================================================================
@@ -519,7 +547,11 @@ fn main() {
     var ah = 220;
     var asurf = dh_surface_new(aw, ah);
     var al = alloc(16 * 64); var ar2 = alloc(16 * 64);
-    t_entry(al, 0, "aethersafha", 0); t_entry(al, 1, "puka", 0); t_entry(al, 2, "crab", 0);
+    # ⚠ THE THIRD ENTRY IS AN IMAGE NAME ON PURPOSE. `crab_is_image` returns early on a name with no
+    # dot, so a fixture of extension-less names never reaches `crab_ext_eq` — and a mutation putting
+    # a scratch `alloc` back into that comparison SURVIVED the whole suite until this entry existed.
+    # A zero-allocation gate only covers the code its fixture actually runs.
+    t_entry(al, 0, "aethersafha", 0); t_entry(al, 1, "puka", 0); t_entry(al, 2, "shot.png", 0);
     t_entry(ar2, 0, "bin", 1);        t_entry(ar2, 1, "boot", 1); t_entry(ar2, 2, "readme.md", 0);
     var alz = alloc(16 * 8); var arz = alloc(16 * 8);
     var alm = alloc(16 * 8); var arm = alloc(16 * 8);
@@ -539,7 +571,10 @@ fn main() {
     dh_frame_arena_set(0);
     assert_eq(dh_frame_arena_get(), 0, "the frame arena can be uninstalled");
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(asurf, 0, rs);
     assert(dh_frame_arena_get() != 0, "a render installs one BY ITSELF — no step for main() to forget");
     assert_eq(dh_frame_arena_get(), crab_frame_arena(), "...crab's own, not some other arena");
 
@@ -553,10 +588,16 @@ fn main() {
     assert(tiny != 0, "a deliberately tiny arena is created");
     dh_frame_arena_set(tiny);
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(asurf, 0, rs);
     var n0 = alloc_used();
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(asurf, 0, rs);
     assert(alloc_used() - n0 > 0,
       "a frame that cannot fit its arena SPILLS to the global heap instead of failing");
 
@@ -574,7 +615,10 @@ fn main() {
 
     # Warm-up: the first arena'd frame establishes what one frame costs.
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(asurf, 0, rs);
     var one_frame = arena_used(farena);
     assert(one_frame > 0, "the frame really landed in the arena");
     var cap0 = arena_capacity_total(farena);
@@ -583,7 +627,10 @@ fn main() {
     var af = 0;
     while (af < 20) {
         store64(asl, 0); store64(asr, 0);
-        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+        crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+        crab_render(asurf, 0, rs);
         af = af + 1;
     }
     # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
@@ -597,10 +644,96 @@ fn main() {
     assert_eq(arena_used(farena), one_frame, "the arena holds ONE frame after twenty renders");
     assert_eq(arena_capacity_total(farena), cap0, "...and the chunk chain never had to extend");
 
+    # ⛔⛔ THE SAME CLAIM WITH THE OVERLAY AND THE PREVIEW OPEN — AND THIS ARM EXISTS BECAUSE THE
+    # LOOP ABOVE MISSED A REAL, SHIPPED LEAK. `crab_overlay` allocated its placement rect with
+    # `alloc(32)` rather than `dh_falloc(32)`, on both the menu branch and the sheet branch — 32 B
+    # per frame, on an allocator with no `free()`, for as long as either was open. Twenty frames of
+    # the DEFAULT state never entered either branch, so the gate was green for it from 0.7.5 until
+    # 2026-08-31.
+    # ⛔ THE LESSON IS BIGGER THAN THE 32 BYTES: a zero-allocation gate that renders one state
+    # proves that state. Every branch the render path can take needs an arm here, and a new panel
+    # that does not add one is a new blind spot rather than a covered feature.
+    # ⚠ THE PREVIEW IS IN THIS LOOP FOR THE SAME REASON — it is the newest render-path branch, and
+    # its first draft lowercased a file extension into an `alloc(8)` scratch buffer.
+    # ⚠ AND THE SELECTION IS ROW 2, "shot.png" — the preview describes the SELECTED entry, so a
+    # fixture whose image sits at row 2 while the selection sits at row 0 exercises none of the
+    # image path. That is how the `crab_ext_eq` mutation survived its first run.
+    # ⚠ A WIDE SURFACE, because `crab_preview_fit` refuses below 303 px and a refused preview would
+    # make this arm silently test the default state again — the very failure it exists to correct.
+    var ovsurf = dh_surface_new(760, 400);
+    assert(ovsurf != 0, "the overlay/preview probe surface is created");
+    # ⚠ WARM UP FIRST, exactly as the default-state loop above does. The first render into a new
+    # surface allocates its sadish render target (760x400x4 = 1,216,000 B) and the tight 8 KiB arena
+    # extends its chain to hold a frame this size — both ONE-TIME costs that `arena_reset` then
+    # reuses forever. Measuring across them would report a leak that is really a first-frame cost,
+    # which is the mirror of the bug this arm exists to catch and just as misleading.
+    store64(asl, 0); store64(asr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_rs_preview(rs, 1);
+    crab_rs_chrome(rs, 0, 1, 40, 60, 2, 0, 0);
+    crab_render(ovsurf, 0, rs);
+    var ov0 = alloc_used();
+    var ovf = 0;
+    while (ovf < 20) {
+        store64(asl, 0); store64(asr, 0);
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+        crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+        crab_rs_preview(rs, 1);
+        crab_rs_chrome(rs, 0, 1, 40, 60, 2, 0, 0);       # the context menu, open
+        crab_render(ovsurf, 0, rs);
+        ovf = ovf + 1;
+    }
+    assert_eq(alloc_used() - ov0, 0,
+      "TWENTY frames with the MENU and the PREVIEW open cost the global heap 0 bytes");
+
+    store64(asl, 0); store64(asr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_rs_preview(rs, 1);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 1, "Rename");
+    crab_render(ovsurf, 0, rs);                          # warm-up — see the ⚠ above
+    var sh0 = alloc_used();
+    var shf = 0;
+    while (shf < 20) {
+        store64(asl, 0); store64(asr, 0);
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+        crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+        crab_rs_preview(rs, 1);
+        crab_rs_chrome(rs, 0, 0, 0, 0, 0, 1, "Rename");  # the rename SHEET, open
+        crab_render(ovsurf, 0, rs);
+        shf = shf + 1;
+    }
+    assert_eq(alloc_used() - sh0, 0,
+      "TWENTY frames with the rename SHEET open cost the global heap 0 bytes");
+
+    # ⚠ NON-VACUITY: prove the two loops above really entered the branches they claim to cover.
+    # A `crab_rs_chrome` argument in the wrong slot would leave both overlays closed and both
+    # assertions would pass for the wrong reason — the shape of the three tests 0.6.0 found could
+    # not fail at all.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_rs_chrome(rs, 0, 1, 40, 60, 2, 0, 0);
+    crab_render(ovsurf, 0, rs);
+    assert(crab_menu_list() != 0, "...and the menu branch really was entered");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 2, asl);   # sel 2 = "shot.png"
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(ovsurf, 0, rs);
+    assert_eq(crab_menu_list(), 0, "...and a closed menu really builds no list");
+
     # ⛔ AND THE PIXELS ARE STILL RIGHT. A frame whose widgets were freed mid-render would still
     # produce *a* surface; this is the check that it produces the right one.
     store64(asl, 0); store64(asr, 0);
-    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 1, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    var asds = crab_render(asurf, 0, rs);
     assert(asds != 0, "an arena'd frame still renders");
     t_bad_alpha = 0; t_bad_premul = 0;
     assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
@@ -823,7 +956,10 @@ fn main() {
     }
     var hsl = alloc(8); store64(hsl, 0);
     var hsr = alloc(8); store64(hsr, 0);
-    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, hl, 3, "/bin", hlz, hlm, CRAB_PANE_OK, 0, 0, hsl);
+    crab_rs_pane(rs, 1, hrr, 3, "/", hrz, hrm, CRAB_PANE_OK, 0, 0, hsr);
+    crab_render(hsurf, 0, rs);
 
     var hb = alloc(16);
     # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
@@ -2193,7 +2329,487 @@ fn main() {
     assert_eq(crab_fs_delete(m4deep, longname, 0, sc1), CRAB_FS_ETOOLONG,
       "a join past CRAB_PATH_MAX is refused rather than truncated");
 
+
+    # ⛔⛔ THESE THREE GROUPS LIVE IN THEIR OWN FUNCTIONS, AND THAT IS A BUG FIX, NOT TIDINESS.
+    # `main()` had grown to 2,517 lines and **279 local variables**, and adding the image-dimension
+    # group pushed its stack frame past what the process could touch: the suite SEGFAULTED (exit
+    # 139) part-way through the JPEG block, having printed the group header. Every assertion before
+    # it had already passed, so the failure looked like a bug in the new parser — which ran fine
+    # standalone. ⇒ A monolithic test `main` has a ceiling, and it is reached silently.
+    # ⚠ Anything added from here on gets its own function. Nothing is lost by it: `test_group`,
+    # `assert` and `assert_eq` all write to file-scope counters, so a group reads identically.
+    t_img_dims();
+    t_preview();
+    t_preview_dims();
+
+    # ================================================================================
+    test_group("crab — M5: the render-state record, and the defaults it owns");
+    # ⛔⛔ THIS GROUP EXISTS BECAUSE A MUTATION SURVIVED. Deleting the three `0 - 1` stores from
+    # `crab_rs_reset` — i.e. making it a plain memset — left BOTH `cyrius test` (757/0) and
+    # `render_test` (26 checks, 0 failed) completely green. The sentinels are the entire reason
+    # `crab_rs_reset` is a function rather than a loop, and nothing pinned them.
+    # ⛔ WHY 0 IS THE WRONG DEFAULT AND NOT MERELY A DIFFERENT ONE: the tray reads `optotal`,
+    # `oprate` and `opeta` as **-1 = cannot be said yet**. A zeroed record therefore does not mean
+    # "no transfer" — it means "a transfer whose total is 0 bytes, moving at 0 B/s, arriving in 0
+    # seconds", and `crab_tray_pct` would divide by that total.
+    var rst = alloc(CRAB_RS_SZ);
+    var rsi = 0;
+    while (rsi < CRAB_RS_SZ) { store8(rst + rsi, 255); rsi = rsi + 1; }
+    crab_rs_reset(rst);
+    assert_eq(load64(rst + CRAB_RS_OPTOTAL), 0 - 1, "reset: optotal is -1, not 0 — the total is UNKNOWN");
+    assert_eq(load64(rst + CRAB_RS_OPRATE), 0 - 1, "reset: oprate is -1 — a rate of 0 B/s is a claim, not a default");
+    assert_eq(load64(rst + CRAB_RS_OPETA), 0 - 1, "reset: opeta is -1 — an ETA of 0 would read as 'now'");
+    assert_eq(load64(rst + CRAB_RS_OPNAME), 0, "reset: no operation name, so the tray costs no pixels");
+    assert_eq(load64(rst + CRAB_RS_OPDONE), 0, "reset: nothing done — and 0 here IS the right default");
+    assert_eq(load64(rst + CRAB_RS_ACTIVE), 0, "reset: the left pane is active");
+    assert_eq(load64(rst + CRAB_RS_MENUOPEN), 0, "reset: no menu");
+    assert_eq(load64(rst + CRAB_RS_EDITOPEN), 0, "reset: no edit field");
+    assert_eq(load64(rst + CRAB_RSP_N), 0, "reset: the left pane is empty");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_N), 0, "reset: ...and so is the right");
+
+    # ⛔ THE TWO PANE BLOCKS MUST NOT ALIAS. Two mutations of this refactor — `crab_rs_pane`
+    # ignoring `which`, and `crab_render` reading the right pane's selection out of the left block —
+    # were caught ONLY by `src/render_test.cyr`, which no gate runs (roadmap *deferral #14*). These
+    # assertions put the same property in front of the gate that CI actually executes.
+    crab_rs_pane(rst, 0, 1001, 11, 1002, 1003, 1004, CRAB_PANE_OK, 1005, 7, 1006);
+    crab_rs_pane(rst, 1, 2001, 22, 2002, 2003, 2004, CRAB_PANE_GONE, 2005, 9, 2006);
+    assert_eq(load64(rst + CRAB_RSP_BUF), 1001, "pane 0 keeps its own buffer");
+    assert_eq(load64(rst + CRAB_RSP_N), 11, "pane 0 keeps its own count");
+    assert_eq(load64(rst + CRAB_RSP_SEL), 7, "pane 0 keeps its own selection");
+    assert_eq(load64(rst + CRAB_RSP_STATE), CRAB_PANE_OK, "pane 0 keeps its own state");
+    assert_eq(load64(rst + CRAB_RSP_SCROLL), 1006, "pane 0 keeps its own scroll cell");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_BUF), 2001, "pane 1 did not land in pane 0's block");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_N), 22, "...nor its count");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_SEL), 9, "...nor its selection");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_STATE), CRAB_PANE_GONE,
+      "...nor its state — the two panes report DIFFERENT listing outcomes and must not share one");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_SCROLL), 2006, "...nor its scroll cell");
+
+    # ⚠ AN OUT-OF-RANGE PANE INDEX WRITES NOTHING. The record is two blocks wide; a `which` of 2
+    # would store 72 bytes past `CRAB_RS_MENUSEL` and silently corrupt the overlay state, which is
+    # the kind of fault that surfaces as a menu that opens by itself.
+    assert_eq(crab_rs_pane(rst, 2, 3001, 33, 0, 0, 0, 0, 0, 0, 0), 0, "pane index 2 is refused");
+    assert_eq(crab_rs_pane(rst, 0 - 1, 3001, 33, 0, 0, 0, 0, 0, 0, 0), 0, "...and so is -1");
+    assert_eq(load64(rst + CRAB_RSP_BUF), 1001, "a refused write left pane 0 untouched");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_BUF), 2001, "...and pane 1 untouched");
+
+    crab_rs_op(rst, "moving", 4096, 8192, 512, 8);
+    assert_eq(load64(rst + CRAB_RS_OPDONE), 4096, "op: bytes done round-trip");
+    assert_eq(load64(rst + CRAB_RS_OPTOTAL), 8192, "op: total round-trips");
+    assert_eq(load64(rst + CRAB_RS_OPRATE), 512, "op: rate round-trips");
+    assert_eq(load64(rst + CRAB_RS_OPETA), 8, "op: eta round-trips");
+    crab_rs_chrome(rst, 1, 1, 40, 60, 3, 0, 0);
+    assert_eq(load64(rst + CRAB_RS_ACTIVE), 1, "chrome: the right pane is active");
+    assert_eq(load64(rst + CRAB_RS_MENUX), 40, "chrome: the menu's x");
+    assert_eq(load64(rst + CRAB_RS_MENUY), 60, "chrome: the menu's y");
+    assert_eq(load64(rst + CRAB_RS_MENUSEL), 3, "chrome: the menu's selected item");
+    # ⚠ AND A SECOND RESET PUTS THE SENTINELS BACK — the record is reused for the process's life, so
+    # a reset that only cleared what the LAST frame set would leak state between frames.
+    crab_rs_reset(rst);
+    assert_eq(load64(rst + CRAB_RS_OPTOTAL), 0 - 1, "a second reset restores the -1 total");
+    assert_eq(load64(rst + CRAB_RS_ACTIVE), 0, "...and clears the active pane the last frame set");
+    assert_eq(load64(rst + CRAB_RSP_SZ + CRAB_RSP_BUF), 0, "...and clears pane 1's buffer");
+
+    # ⚠ A NULL RECORD IS A CALLER ERROR AND IS REFUSED, exactly as a null surface is. Rendering a
+    # zeroed record would draw two empty panes, which looks like an empty directory rather than a bug.
+    assert_eq(crab_rs_pane(0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1), 0, "a null record takes no pane");
+    assert_eq(crab_rs_op(0, 0, 0, 0, 0, 0), 0, "...no operation");
+    assert_eq(crab_rs_chrome(0, 0, 0, 0, 0, 0, 0, 0), 0, "...and no chrome");
+    var nsurf = dh_surface_new(120, 80);
+    assert_eq(crab_render(nsurf, 0, 0), 0, "crab_render refuses a null record rather than drawing an empty app");
+
     return assert_summary();
+}
+
+# M5 — the header-only image dimension parser. See the ⛔ on `t_preview` for why this is not inline in `main`.
+fn t_img_dims(): i64 {
+    test_group("crab — M5: image dimensions from the header, with no decoder at all");
+    # ⛔ THIS PARSER READS A FILE, which is the most untrusted input crab handles — the bytes are
+    # chosen by whoever wrote the file. Every assertion below that ends in "is refused" is a bounds
+    # check, not a nicety: `src/path.cyr` exists because an unbounded read over readdir data caused
+    # the 0.5.0 P-1, and a file is strictly worse input than a readdir record.
+    var idb = alloc(256);
+    var ido = alloc(CRAB_IMG_SZ);
+
+    # ⛔ THE BYTE-ORDER READERS, ASSERTED DIRECTLY. They are covered indirectly by every format
+    # below, but "the PNG came out right" cannot distinguish a big-endian reader from a
+    # little-endian one on a palindromic test value — and PNG is big-endian while GIF and BMP are
+    # little-endian in the SAME parser. Getting the pair swapped is the most likely bug here and the
+    # least visible, so each is pinned on a value whose reversal is a different number.
+    var eb = alloc(8);
+    store8(eb, 0x12); store8(eb + 1, 0x34); store8(eb + 2, 0x56); store8(eb + 3, 0x78);
+    assert_eq(crab_be16(eb), 0x1234, "crab_be16 reads most-significant byte first");
+    assert_eq(crab_le16(eb), 0x3412, "crab_le16 reads least-significant first — the REVERSE, not the same");
+    assert_eq(crab_be32(eb), 0x12345678, "crab_be32");
+    assert_eq(crab_le32(eb), 0x78563412, "crab_le32");
+    # ⚠ THE HIGH BIT MUST NOT SIGN-EXTEND. `load8` is unsigned, and a signed load would make PNG's
+    # own 0x89 signature byte compare as -119 and reject every PNG in existence.
+    store8(eb, 0xFF); store8(eb + 1, 0xFF); store8(eb + 2, 0xFF); store8(eb + 3, 0xFF);
+    assert_eq(crab_be16(eb), 65535, "a 0xFFFF pair is 65535, not -1");
+    assert_eq(crab_be32(eb), 4294967295, "...and 0xFFFFFFFF is 4294967295, not -1");
+
+    # ⛔ `crab_dims_ok` IS THE ONLY GATE BETWEEN A HEADER AND THE OPERATOR'S SCREEN, so its bounds
+    # are asserted here rather than only through the four format paths that happen to reach it.
+    var dob = alloc(CRAB_IMG_SZ);
+    assert_eq(crab_dims_ok(dob, 100, 50), 1, "an ordinary size is accepted");
+    assert_eq(load64(dob + CRAB_IMG_W), 100, "...and stored as width");
+    assert_eq(load64(dob + CRAB_IMG_H), 50, "...and height, in that order");
+    assert_eq(crab_dims_ok(dob, 0, 50), 0, "a zero width is refused");
+    assert_eq(crab_dims_ok(dob, 100, 0), 0, "a zero height is refused");
+    assert_eq(crab_dims_ok(dob, 0 - 1, 50), 0, "a negative width is refused");
+    assert_eq(crab_dims_ok(dob, CRAB_IMG_DIM_MAX, CRAB_IMG_DIM_MAX), 1, "the bound itself is INSIDE it");
+    assert_eq(crab_dims_ok(dob, CRAB_IMG_DIM_MAX + 1, 50), 0, "...and one past it is not");
+    assert_eq(crab_dims_ok(dob, 50, CRAB_IMG_DIM_MAX + 1), 0, "...in either dimension");
+
+    # --- PNG: 8-byte signature, IHDR chunk, big-endian width then height.
+    var idpi = 0;
+    while (idpi < 256) { store8(idb + idpi, 0); idpi = idpi + 1; }
+    store8(idb, 137); store8(idb + 1, 80); store8(idb + 2, 78); store8(idb + 3, 71);
+    store8(idb + 4, 13); store8(idb + 5, 10); store8(idb + 6, 26); store8(idb + 7, 10);
+    store8(idb + 12, 73); store8(idb + 13, 72); store8(idb + 14, 68); store8(idb + 15, 82);
+    store8(idb + 18, 32); store8(idb + 19, 0);      # width  = 0x00002000 = 8192
+    store8(idb + 22, 21); store8(idb + 23, 88);     # height = 0x00001558 = 5464
+    assert_eq(crab_img_dims(idb, 24, ido), 1, "a PNG header is recognised");
+    assert_eq(load64(ido + CRAB_IMG_W), 8192, "PNG width — the canvas's own 8192");
+    assert_eq(load64(ido + CRAB_IMG_H), 5464, "PNG height — ...x 5464");
+    # ⛔ TRUNCATION IS REFUSED, NOT GUESSED. 23 bytes cannot contain a 24-byte IHDR, and reading the
+    # 24th would be a one-byte overrun of whatever buffer the caller supplied.
+    assert_eq(crab_img_dims(idb, 23, ido), 0, "a PNG header one byte short is refused");
+    assert_eq(crab_img_dims(idb, 10, ido), 0, "...and a badly truncated one too");
+    # ⛔ THE CHUNK TYPE IS CHECKED. IHDR must be first; a file that breaks that is exactly the file
+    # this must not read four arbitrary bytes out of.
+    store8(idb + 12, 116);                          # 'I' -> 't', making it a tEXt chunk
+    assert_eq(crab_img_dims(idb, 24, ido), 0, "a PNG whose first chunk is not IHDR is refused");
+    store8(idb + 12, 73);
+    # ⚠ A ZERO DIMENSION IS NOT A SIZE. It passes every bounds check and is still nonsense.
+    store8(idb + 18, 0); store8(idb + 19, 0);
+    assert_eq(crab_img_dims(idb, 24, ido), 0, "a PNG claiming zero width is refused");
+    store8(idb + 16, 255); store8(idb + 17, 255); store8(idb + 18, 255); store8(idb + 19, 255);
+    assert_eq(crab_img_dims(idb, 24, ido), 0, "...and one claiming 4 billion pixels wide is refused");
+
+    # --- GIF: "GIF89a", little-endian screen size at 6 and 8.
+    var idgi = 0;
+    while (idgi < 256) { store8(idb + idgi, 0); idgi = idgi + 1; }
+    store8(idb, 71); store8(idb + 1, 73); store8(idb + 2, 70);
+    store8(idb + 3, 56); store8(idb + 4, 57); store8(idb + 5, 97);
+    store8(idb + 6, 64); store8(idb + 7, 1);        # width  = 0x0140 = 320
+    store8(idb + 8, 200); store8(idb + 9, 0);       # height = 0x00C8 = 200
+    assert_eq(crab_img_dims(idb, 10, ido), 1, "a GIF89a header is recognised");
+    assert_eq(load64(ido + CRAB_IMG_W), 320, "GIF width is LITTLE-endian, unlike PNG's");
+    assert_eq(load64(ido + CRAB_IMG_H), 200, "GIF height");
+    # ⚠ THE VERSION DIGIT IS AT INDEX **4**, NOT 3 — "GIF" then '8' then '7'/'9' then 'a'. The first
+    # draft of this test wrote '7' into index 3 and reported the parser broken; the parser was right.
+    store8(idb + 4, 55);                            # "GIF87a"
+    assert_eq(crab_img_dims(idb, 10, ido), 1, "...and GIF87a is the same layout");
+    assert_eq(load64(ido + CRAB_IMG_W), 320, "...with the same width");
+    store8(idb + 4, 56);                            # "GIF88a" — a version that does not exist
+    assert_eq(crab_img_dims(idb, 10, ido), 0, "an unknown GIF version is refused");
+    store8(idb + 4, 57);
+    store8(idb + 5, 98);                            # "GIF89b"
+    assert_eq(crab_img_dims(idb, 10, ido), 0, "...and so is a signature that does not end in 'a'");
+    store8(idb + 5, 97);
+    store8(idb + 3, 55);                            # "GIF79a"
+    assert_eq(crab_img_dims(idb, 10, ido), 0, "...and one whose first digit is not 8");
+
+    # --- BMP: "BM", a DIB header whose SIZE field selects the layout.
+    var idbi = 0;
+    while (idbi < 256) { store8(idb + idbi, 0); idbi = idbi + 1; }
+    store8(idb, 66); store8(idb + 1, 77);
+    store8(idb + 14, 40);                           # BITMAPINFOHEADER
+    store8(idb + 18, 4); store8(idb + 19, 3);       # width  = 0x0304 = 772
+    store8(idb + 22, 0); store8(idb + 23, 2);       # height = 0x0200 = 512
+    assert_eq(crab_img_dims(idb, 26, ido), 1, "a BMP with a BITMAPINFOHEADER is recognised");
+    assert_eq(load64(ido + CRAB_IMG_W), 772, "BMP width");
+    assert_eq(load64(ido + CRAB_IMG_H), 512, "BMP height");
+    # ⚠ A NEGATIVE HEIGHT IS A ROW-ORDER FLAG IN THE SIGN BIT, not a negative size — the magnitude
+    # is the real height. Without this, every top-down BMP would be refused as absurd.
+    store8(idb + 22, 0); store8(idb + 23, 254); store8(idb + 24, 255); store8(idb + 25, 255);
+    assert_eq(crab_img_dims(idb, 26, ido), 1, "a top-down BMP (negative height) is still a BMP");
+    assert_eq(load64(ido + CRAB_IMG_H), 512, "...and its height is the MAGNITUDE, 512");
+    store8(idb + 22, 0); store8(idb + 23, 2); store8(idb + 24, 0); store8(idb + 25, 0);
+    # ⚠ BITMAPCOREHEADER is 12 bytes with 16-bit dimensions. Reading it at the modern 32-bit offsets
+    # returns palette entries dressed up as a size.
+    store8(idb + 14, 12);
+    store8(idb + 18, 100); store8(idb + 19, 0);     # width  = 100
+    store8(idb + 20, 50); store8(idb + 21, 0);      # height = 50
+    assert_eq(crab_img_dims(idb, 26, ido), 1, "a BITMAPCOREHEADER BMP is recognised");
+    assert_eq(load64(ido + CRAB_IMG_W), 100, "...with 16-bit dimensions at their own offsets");
+    assert_eq(load64(ido + CRAB_IMG_H), 50, "...height too");
+    store8(idb + 14, 39);                           # a DIB size that is neither 12 nor >= 40
+    assert_eq(crab_img_dims(idb, 26, ido), 0, "a BMP with an unknown DIB header size is refused");
+
+    # --- JPEG: SOI, then a bounded marker walk to the first SOF.
+    var idji = 0;
+    while (idji < 256) { store8(idb + idji, 0); idji = idji + 1; }
+    store8(idb, 255); store8(idb + 1, 216);         # SOI
+    store8(idb + 2, 255); store8(idb + 3, 224);     # APP0
+    store8(idb + 4, 0); store8(idb + 5, 16);        # ...16 bytes long
+    store8(idb + 20, 255); store8(idb + 21, 192);   # SOF0
+    store8(idb + 22, 0); store8(idb + 23, 17);
+    store8(idb + 24, 8);                            # precision
+    store8(idb + 25, 4); store8(idb + 26, 0);       # height = 0x0400 = 1024
+    store8(idb + 27, 6); store8(idb + 28, 0);       # width  = 0x0600 = 1536
+    assert_eq(crab_img_dims(idb, 40, ido), 1, "a JPEG's SOF0 is found past an APP0 segment");
+    # ⛔ HEIGHT COMES FIRST IN AN SOF SEGMENT. Getting this pair backwards is the single most likely
+    # bug in a JPEG header reader, and it is invisible on a square test image.
+    assert_eq(load64(ido + CRAB_IMG_W), 1536, "JPEG width — and it is the SECOND field, not the first");
+    assert_eq(load64(ido + CRAB_IMG_H), 1024, "JPEG height — the FIRST field");
+    # ⚠ 0xC4 (DHT), 0xC8 (JPG) and 0xCC (DAC) SIT INSIDE THE 0xC0-0xCF RANGE AND ARE NOT FRAMES.
+    # Treating one as SOF reads a Huffman table's bytes as a picture size.
+    store8(idb + 21, 196);                          # SOF0 -> DHT
+    assert_eq(crab_img_dims(idb, 40, ido), 0, "0xC4 is a Huffman table, not a frame header");
+    store8(idb + 21, 204);                          # -> DAC
+    assert_eq(crab_img_dims(idb, 40, ido), 0, "...and 0xCC is an arithmetic-coding table");
+    store8(idb + 21, 200);                          # -> JPG
+    assert_eq(crab_img_dims(idb, 40, ido), 0, "...and 0xC8 is reserved");
+    store8(idb + 21, 193);                          # SOF1 — a real frame marker
+    assert_eq(crab_img_dims(idb, 40, ido), 1, "0xC1 IS a frame header, so the range check is not too wide");
+    # ⛔ SOS MEANS THE FRAME HEADER IS BEHIND US AND WAS NEVER FOUND. Scanning on would walk into
+    # entropy-coded data, where 0xFF bytes are compressed output rather than markers.
+    store8(idb + 21, 218);                          # -> SOS
+    assert_eq(crab_img_dims(idb, 40, ido), 0, "a JPEG whose frame header never arrives is refused");
+    # ⛔⛔ A SEGMENT LENGTH OF ZERO CANNOT ADVANCE THE WALK, so a crafted file would spin forever.
+    # This is the same failure class as the stalled `#101` readdir cursor: not a crash, a HANG.
+    store8(idb + 21, 224);                          # APP0 again
+    store8(idb + 4, 0); store8(idb + 5, 0);         # ...claiming length 0
+    assert_eq(crab_img_dims(idb, 40, ido), 0, "a zero-length JPEG segment is refused, not looped on");
+    store8(idb + 4, 0); store8(idb + 5, 16);
+    # ⚠ FILL BYTES before a marker are legal and must be skipped. ⛔ The first draft of that skip
+    # signalled its exit by assigning `p = len + len` and subtracting it back, which restored `p` to
+    # 0 and restarted the walk at the SOI — it compiled, and never ran on a JPEG without fill bytes.
+    store8(idb + 20, 255); store8(idb + 21, 255); store8(idb + 22, 255); store8(idb + 23, 192);
+    store8(idb + 24, 0); store8(idb + 25, 17); store8(idb + 26, 8);
+    store8(idb + 27, 1); store8(idb + 28, 0);       # height = 256
+    store8(idb + 29, 2); store8(idb + 30, 0);       # width  = 512
+    assert_eq(crab_img_dims(idb, 40, ido), 1, "fill bytes before a marker are skipped");
+    assert_eq(load64(ido + CRAB_IMG_W), 512, "...and the frame behind them is read correctly");
+
+    # --- what is not an image at all
+    var idni = 0;
+    while (idni < 256) { store8(idb + idni, 65); idni = idni + 1; }
+    assert_eq(crab_img_dims(idb, 256, ido), 0, "a buffer of plain text is not an image");
+    assert_eq(crab_img_dims(idb, 0, ido), 0, "an empty buffer is refused");
+    assert_eq(crab_img_dims(idb, 9, ido), 0, "fewer than ten bytes cannot identify any format");
+    assert_eq(crab_img_dims(0, 24, ido), 0, "a null buffer is refused");
+    assert_eq(crab_img_dims(idb, 24, 0), 0, "a null output record is refused");
+    # ⚠ A NEGATIVE LENGTH IS A CALLER BUG AND MUST NOT BE TREATED AS "plenty of bytes". Every bound
+    # in the parser is `< len`, so a negative would fail them all — this pins that it stays so.
+    assert_eq(crab_img_dims(idb, 0 - 1, ido), 0, "a negative length is refused");
+
+    return 0;
+}
+
+# M5 — the preview column and the width rule that earns it.
+fn t_preview(): i64 {
+    test_group("crab — M5: the preview column, and the width rule that earns it");
+    # ⛔ THE THRESHOLD IS DERIVED, NOT CHOSEN — and these assertions pin the DERIVATION, not a
+    # number someone liked. The rule is "the preview may not cost a pane its SIZE column", so the
+    # boundary is wherever `crab_cols_for_width` drops below 2 for the width the panes are left.
+    # ⚠ Re-derive rather than re-read if the font advance or the column set moves: the numbers below
+    # are consequences of `CRAB_COL_*`, and a change there SHOULD break them.
+    #   solo:  panew = w - CRAB_PV_W - CRAB_PANE_GAP = w - 159; needs >= 144  =>  w >= 303
+    assert_eq(crab_preview_fit(303, 1), 1, "303 px is the narrowest window that can hold the preview");
+    assert_eq(crab_preview_fit(302, 1), 0, "...and one pixel narrower cannot, because a pane would lose SIZE");
+    assert_eq(crab_preview_fit(380, 1), 1, "the shipped default 380x220 CAN show the preview");
+    assert_eq(crab_preview_fit(2560, 1), 1, "a wide window certainly can");
+    # ⚠ THE TOGGLE IS THE OPERATOR'S WANT AND IT OUTRANKS NOTHING. `want == 0` is off at any width.
+    assert_eq(crab_preview_fit(2560, 0), 0, "a window wide enough still shows nothing unless asked");
+    assert_eq(crab_preview_fit(380, 0), 0, "...at the default size too");
+    # ⚠ DEGENERATE WIDTHS REFUSE RATHER THAN GOING NEGATIVE. A window narrower than the column
+    # itself would compute a negative pane width, and `crab_cols_for_width` would answer 1 for it —
+    # correct by accident. The explicit guard is what makes it correct on purpose.
+    assert_eq(crab_preview_fit(CRAB_PV_W, 1), 0, "a window exactly as wide as the column refuses");
+    assert_eq(crab_preview_fit(0, 1), 0, "...and a zero-width window refuses");
+    # ⭐ THE PREVIEW CAN COLLAPSE TWO PANES INTO ONE, and that is the ratified small-window rule
+    # answering a narrower pane area rather than a second behaviour. At 640 crab shows two panes;
+    # taking 153 px for the preview leaves 487, which `crab_two_panes_fit` refuses.
+    assert_eq(crab_two_panes_fit(640), 1, "at 640 px crab shows two panes");
+    assert_eq(crab_two_panes_fit(640 - CRAB_PV_W), 0, "...and with the preview open it shows one");
+    assert_eq(crab_two_panes_fit(753 - CRAB_PV_W), 1, "at 753 px there is room for two panes AND the preview");
+
+    # ⛔ THE IMAGE SET IS chitra's FOUR FORMATS, and naming a fifth here would promise a preview the
+    # stack cannot produce. `chitra_image_decode` sniffs PNG, JPEG, BMP and GIF and REJECTS anything
+    # else with no fall-through to a default decoder.
+    assert_eq(crab_is_image("shot.png"), 1, "png");
+    assert_eq(crab_is_image("shot.jpg"), 1, "jpg");
+    assert_eq(crab_is_image("shot.jpeg"), 1, "jpeg — the four-letter spelling too");
+    assert_eq(crab_is_image("shot.gif"), 1, "gif");
+    assert_eq(crab_is_image("shot.bmp"), 1, "bmp");
+    # ⚠ CASE-INSENSITIVE, because `.JPG` straight off a camera is the common case, not the odd one.
+    assert_eq(crab_is_image("DSC_0001.JPG"), 1, "an upper-case extension is the camera's default");
+    assert_eq(crab_is_image("Shot.PnG"), 1, "...and mixed case");
+    assert_eq(crab_is_image("notes.txt"), 0, "a text file is not an image");
+    assert_eq(crab_is_image("archive.tar.gz"), 0, "the LAST extension decides, and gz is not an image");
+    assert_eq(crab_is_image("shot.png.bak"), 0, "...so a backup of a png is not a png");
+    assert_eq(crab_is_image("README"), 0, "no extension at all");
+    assert_eq(crab_is_image("crab"), 0, "...nor a bare binary name");
+    assert_eq(crab_is_image(0), 0, "a null name is not an image");
+    # ⚠ A NAME THAT IS *ONLY* AN EXTENSION IS A DOTFILE, NOT AN IMAGE. `.png` is a hidden file whose
+    # whole name is ".png"; treating the leading dot as a separator would give it an empty basename.
+    # ⛔ DOTFILES ARE NOT HIDDEN IN crab, deliberately — so this file is listed, and it is listed as
+    # a file rather than silently promoted to an image crab would then try to decode.
+    assert_eq(crab_is_image(".png"), 0, "a leading dot is a dotfile marker, not an extension separator");
+    assert_eq(crab_is_image(".gitignore"), 0, "...and an ordinary dotfile is not an image either");
+    # ⚠ TWO-CHARACTER AND FIVE-CHARACTER EXTENSIONS ARE REJECTED BEFORE THE COMPARE, which is what
+    # keeps the loop bounded without a scratch buffer.
+    assert_eq(crab_is_image("a.pn"), 0, "a two-letter extension matches nothing");
+    assert_eq(crab_is_image("a.jpegg"), 0, "...and a five-letter one is past the longest name");
+
+    # ⚠ THREE KINDS AND DELIBERATELY NOT MORE — an extension-to-kind table is the small language the
+    # batch-rename sheet refused, for the same reason: every row is a claim about a file crab has
+    # not opened, and the table only ever grows.
+    assert(t_streq(crab_kind_str("bin", 1), "Folder") == 1, "a directory is a Folder whatever it is called");
+    assert(t_streq(crab_kind_str("shot.png", 1), "Folder") == 1, "...even one named like an image");
+    assert(t_streq(crab_kind_str("shot.png", 0), "Image") == 1, "a png file is an Image");
+    assert(t_streq(crab_kind_str("notes.txt", 0), "File") == 1, "everything else is a File");
+    assert(t_streq(crab_kind_str("crab", 0), "File") == 1, "...including an extension-less binary");
+
+    # ⚠ THE TOGGLE IS A PREFERENCE, NOT PER-FRAME CHROME, and `crab_rs_reset` clears it like
+    # everything else — `src/main.cyr` re-asserts it from `pv_open` before every render, which is
+    # what makes the record a carrier rather than a second copy of the app's state.
+    var pvr = alloc(CRAB_RS_SZ);
+    crab_rs_reset(pvr);
+    assert_eq(load64(pvr + CRAB_RS_PVOPEN), 0, "the preview starts closed");
+    assert_eq(crab_rs_preview(pvr, 1), 1, "the toggle is accepted");
+    assert_eq(load64(pvr + CRAB_RS_PVOPEN), 1, "...and recorded");
+    assert_eq(crab_rs_preview(0, 1), 0, "a null record takes no toggle");
+
+    return 0;
+}
+
+# M5 — the preview's dimension read, against REAL files written to `build/`.
+#
+# ⭐⭐ REAL FILES, NOT A BUFFER. `t_img_dims` proves the parser; this proves the half that opens,
+# reads and caches — the open/read/close, the budget, the extension gate and the memo. Everything
+# here exists on the host, so none of it is taken on trust.
+# ⚠ `build/` is gitignored, so the debris of a failed run is never committed — the same scratch the
+# M4 write-layer group uses.
+fn t_preview_dims(): i64 {
+    test_group("crab — M5: the preview's dimension read, against REAL files");
+    var scr = alloc(CRAB_PATH_MAX);
+    var out = alloc(CRAB_IMG_SZ);
+    var hdr = alloc(64);
+    var dir = "build";
+
+    # A real 137x42 PNG header, written through crab's own write layer.
+    var hi = 0;
+    while (hi < 64) { store8(hdr + hi, 0); hi = hi + 1; }
+    store8(hdr, 137); store8(hdr + 1, 80); store8(hdr + 2, 78); store8(hdr + 3, 71);
+    store8(hdr + 4, 13); store8(hdr + 5, 10); store8(hdr + 6, 26); store8(hdr + 7, 10);
+    store8(hdr + 12, 73); store8(hdr + 13, 72); store8(hdr + 14, 68); store8(hdr + 15, 82);
+    store8(hdr + 18, 0); store8(hdr + 19, 137);     # width  = 137
+    store8(hdr + 22, 0); store8(hdr + 23, 42);      # height = 42
+    crab_fs_path(scr, dir, "pvtest.png");
+    var fd = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd >= 0, "the PNG fixture is created");
+    sys_write(fd, hdr, 32);
+    sys_close(fd);
+
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "a real PNG on disk reports dimensions");
+    assert_eq(load64(out + CRAB_IMG_W), 137, "...its width");
+    assert_eq(load64(out + CRAB_IMG_H), 42, "...and its height");
+    # ⚠ THE SECOND CALL IS A CACHE HIT and must give the same answer — a memo that returns something
+    # different from the read it stands in for is worse than no memo.
+    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the memoised second call still answers");
+    assert_eq(load64(out + CRAB_IMG_W), 137, "...with the same width");
+
+    # ⛔ THE EXTENSION IS A GATE ON *OPENING*, NOT A CLAIM ABOUT THE FILE. A text file with a `.png`
+    # name gets opened and then REFUSED by the signature check — which is the correct order: the
+    # extension decides what is worth a syscall, the bytes decide what it is.
+    crab_fs_path(scr, dir, "pvfake.png");
+    var fd2 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd2 >= 0, "the impostor fixture is created");
+    sys_write(fd2, "this is not a png at all, not even close", 40);
+    sys_close(fd2);
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvfake.png", out, scr), 0,
+      "a text file NAMED .png is refused by its bytes, not trusted by its name");
+    assert_eq(load64(out + CRAB_IMG_W), 0, "...and reports no width");
+
+    # ⚠ A NON-IMAGE EXTENSION IS NOT EVEN OPENED — the cheap gate that keeps a file read off the
+    # arrow-key path for the directory full of source files crab is usually looking at.
+    crab_fs_path(scr, dir, "pvtest.txt");
+    var fd3 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    sys_write(fd3, hdr, 32);                        # real PNG bytes, wrong name
+    sys_close(fd3);
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvtest.txt", out, scr), 0,
+      "a .txt is not opened at all, even holding a valid PNG header");
+
+    # ⚠ A FILE THAT IS NOT THERE reports nothing rather than failing the frame.
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvmissing.png", out, scr), 0, "a missing file reports no dimensions");
+    # ⚠ AND A FILE TOO SHORT TO HOLD A HEADER. `got <= 0` and a truncated parse are different paths.
+    crab_fs_path(scr, dir, "pvshort.png");
+    var fd4 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    sys_write(fd4, hdr, 12);
+    sys_close(fd4);
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvshort.png", out, scr), 0, "a truncated PNG reports nothing");
+    crab_fs_path(scr, dir, "pvempty.png");
+    var fd5 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    sys_close(fd5);
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvempty.png", out, scr), 0, "an EMPTY file reports nothing");
+
+    # ⛔⛔ THE CACHE IS KEYED ON A NAME, AND crab MAKES NAMES REFER TO DIFFERENT FILES. This is the
+    # assertion that the invalidation is real: read `pvtest.png` (137x42), then overwrite that name
+    # with a DIFFERENT image, and the answer must change. Without `crab_pv_forget` in `crab_relist`
+    # the preview would keep reporting the old file's size next to the new file's name.
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the original is read");
+    assert_eq(load64(out + CRAB_IMG_W), 137, "...at 137 wide");
+    store8(hdr + 18, 1); store8(hdr + 19, 0);       # width  = 256
+    store8(hdr + 22, 0); store8(hdr + 23, 100);     # height = 100
+    crab_fs_path(scr, dir, "pvtest.png");
+    # ⛔ `crab_fs_open_w` REFUSES AN EXISTING FILE ON THE HOST — it is `O_WRONLY|O_CREAT|O_EXCL`, the
+    # overwrite guard M4 shipped — so the name has to be freed before it can be re-created. A first
+    # draft of this test omitted the delete, got `fd < 0`, wrote nothing, and then reported the
+    # invalidation broken when the file had simply never changed.
+    # ⛔⛔ AND THE TWO TARGETS DISAGREE HERE: the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with no
+    # `AO_EXCL`, so on agnos the same call TRUNCATES an existing file instead of refusing it. The
+    # host guard is the intended behaviour; agnos does not have it. Flagged, not changed — altering
+    # write semantics is not this slot's business.
+    assert_eq(crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX)), 0 - 17,
+      "the host write-open REFUSES an existing file (EEXIST) — the M4 overwrite guard");
+    crab_fs_delete(dir, "pvtest.png", 0, scr);
+    crab_fs_path(scr, dir, "pvtest.png");
+    var fd6 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd6 >= 0, "...and the name can be re-created once it is freed");
+    sys_write(fd6, hdr, 32);
+    sys_close(fd6);
+    # ⚠ WITHOUT the invalidation the stale answer stands — this asserts the STALENESS exists, so
+    # that the assertion after it is not vacuous.
+    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the cache still answers for that name");
+    assert_eq(load64(out + CRAB_IMG_W), 137, "...and it is STALE, which is exactly why forgetting matters");
+    crab_pv_forget();
+    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "after forgetting, the file is re-read");
+    assert_eq(load64(out + CRAB_IMG_W), 256, "...and the NEW width is reported");
+    assert_eq(load64(out + CRAB_IMG_H), 100, "...with the new height");
+
+    # ⚠ Null arguments are refused rather than dereferenced, as everywhere else in this codebase.
+    assert_eq(crab_preview_dims(0, "a.png", out, scr), 0, "a null directory is refused");
+    assert_eq(crab_preview_dims(dir, 0, out, scr), 0, "a null name is refused");
+    assert_eq(crab_preview_dims(dir, "a.png", 0, scr), 0, "a null output record is refused");
+    assert_eq(crab_preview_dims(dir, "a.png", out, 0), 0, "a null path scratch is refused");
+
+    # ⚠ THE TWO SCRATCH BUFFERS ARE ALLOCATED ONCE FOR THE PROCESS, like the sort scratch and the
+    # copy buffer — `alloc` has no `free()`, so a buffer minted per call would be a 64 KiB leak per
+    # keystroke. "Allocated once" is asserted as pointer identity, which is the only observable form
+    # the property has.
+    assert(crab_pv_hdr_buf() != 0, "the header buffer is created");
+    assert_eq(crab_pv_hdr_buf(), crab_pv_hdr_buf(), "...and the SAME buffer is returned every time");
+    assert(crab_pv_key_buf() != 0, "the cache-key buffer is created");
+    assert_eq(crab_pv_key_buf(), crab_pv_key_buf(), "...and it is a singleton too");
+
+    # Tidy up — `build/` is gitignored but a test that leaves debris makes the next run ambiguous.
+    crab_fs_delete(dir, "pvtest.png", 0, scr);
+    crab_fs_delete(dir, "pvfake.png", 0, scr);
+    crab_fs_delete(dir, "pvtest.txt", 0, scr);
+    crab_fs_delete(dir, "pvshort.png", 0, scr);
+    crab_fs_delete(dir, "pvempty.png", 0, scr);
+    return 0;
 }
 
 # --- 0.5.0 test helpers ---

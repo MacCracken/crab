@@ -1538,6 +1538,16 @@ fn crab_descend(path, buf, sel, count, namescr, pathscr, sizes, mtimes, statbuf)
 # sort. Kept as its own function rather than a flag on ascend, because "go up" and "look again" are
 # different intentions and only one of them may move the pane.
 fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
+    # ⛔⛔ THE PREVIEW'S DIMENSION CACHE IS INVALIDATED HERE, AND HERE IS THE RIGHT PLACE. This
+    # function runs after every write crab makes — rename, delete, copy, move, mkdir and the batch
+    # sheet all end in a relist — so one call covers all of them, where invalidating at each call
+    # site means six chances to forget and no gate that would notice.
+    # ⚠ A NAVIGATION does not need it: the cache key is the full PATH, so descending or ascending
+    # changes the key by construction and a stale entry cannot be hit.
+    # ⛔ WHY IT MATTERS AT ALL: the cache is keyed on a NAME, and crab is a program that makes names
+    # refer to different files. Renaming `b.png` over `a.png` leaves `a.png` gone and the cache
+    # still holding its size.
+    crab_pv_forget();
     var cnt = crab_readdir_into(path, buf);
     crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
@@ -1585,6 +1595,106 @@ var crab_elfbuf = 0;
 fn crab_elf_magic_buf(): i64 {
     if (crab_elfbuf == 0) { crab_elfbuf = alloc(CRAB_ELF_MAGIC_LEN); }
     return crab_elfbuf;
+}
+
+# ⭐⭐ THE PREVIEW'S IMAGE DIMENSIONS (M5) — a bounded header read, memoised on the entry it
+# describes. `crab_img_dims` does the parsing and lives in `ui.cyr`; this is the half that needs a
+# syscall and therefore cannot.
+#
+# ⛔⛔ MEMOISED BECAUSE THE RENDER PATH ASKS EVERY FRAME AND THE ANSWER COSTS AN open/read/close.
+# crab re-renders after every handled event, so recomputing per frame would put a file read on the
+# arrow-key path — which is precisely what M3 *#03* restructured the whole listing to remove, and
+# for a much smaller saving than this. The cache key is (directory, name), so moving the selection
+# to a different file invalidates it and moving it back re-reads.
+# ⚠ IT IS A ONE-ENTRY CACHE, DELIBERATELY. The operator looks at one file at a time and the preview
+# describes exactly one; an N-entry cache would need an eviction policy to serve a caller that does
+# not exist. Same reasoning as the single operation record.
+#
+# ⛔ THE READ IS CAPPED AT `CRAB_PV_HDR_BUDGET`, AND THE CAP IS THE POINT. PNG, GIF and BMP put
+# their dimensions in the first 26 bytes; only JPEG needs a scan, and its SOF sits past whatever
+# EXIF the camera wrote. A budget answers "most JPEGs, cheaply" instead of "every JPEG, at the cost
+# of reading a 40 MB raw file on a keystroke" — and a file whose header does not fit reports no
+# dimensions rather than stalling the UI. ⚠ That is the same shape as the transfer tray's stepping
+# and the deferred stat sweep: bounded work, and an honest "not known" when the bound is reached.
+enum CrabPv {
+    # ⚠ 64 KiB — one read syscall, and enough for the EXIF block a phone or camera writes ahead of
+    # the JPEG frame header. Raising it buys rarer files at a linear cost on the selection path.
+    CRAB_PV_HDR_BUDGET = 65536;
+}
+
+var crab_pv_buf = 0;
+var crab_pv_key = 0;
+var crab_pv_have = 0;
+var crab_pv_w = 0;
+var crab_pv_h = 0;
+
+# ⚠ Allocated once for the process — the same rule the sort scratch, the copy buffer and the ELF
+# magic buffer follow, and for the same reason: `alloc` has no `free()`.
+fn crab_pv_hdr_buf(): i64 {
+    if (crab_pv_buf == 0) { crab_pv_buf = alloc(CRAB_PV_HDR_BUDGET); }
+    return crab_pv_buf;
+}
+
+fn crab_pv_key_buf(): i64 {
+    if (crab_pv_key == 0) { crab_pv_key = alloc(CRAB_PATH_MAX + CRAB_NAME_MAX + 4); }
+    return crab_pv_key;
+}
+
+# @public — forget the cached dimensions. Call after anything that can change what a name refers to:
+# a rename, a delete, a copy into the pane, or a re-listing.
+# ⛔ A CACHE KEYED ON A NAME IS STALE THE MOMENT THE NAME MEANS A DIFFERENT FILE. crab renames and
+# overwrites files itself, so this is not a theoretical staleness — it is a consequence of the write
+# layer, and the invalidation is the write layer's job to call.
+fn crab_pv_forget(): i64 {
+    crab_pv_have = 0;
+    crab_pv_w = 0;
+    crab_pv_h = 0;
+    var k = crab_pv_key_buf();
+    if (k != 0) { store8(k, 0); }
+    return 0;
+}
+
+# @public — the selected entry's pixel dimensions, or 0 if it has none crab can read.
+# On 1, width is at `out + CRAB_IMG_W` and height at `out + CRAB_IMG_H`.
+fn crab_preview_dims(dir, name, out, pathscr): i64 {
+    if (out == 0) { return 0; }
+    store64(out + CRAB_IMG_W, 0);
+    store64(out + CRAB_IMG_H, 0);
+    if (dir == 0) { return 0; }
+    if (name == 0) { return 0; }
+    # ⚠ THE EXTENSION IS ONLY A HINT, and it is used here to avoid OPENING every file the operator
+    # arrows past — not to decide what the file is. `crab_img_dims` reads the signature bytes and
+    # has the final say, so a `.png` full of JPEG is reported as the JPEG it is.
+    if (crab_is_image(name) == 0) { return 0; }
+    var key = crab_pv_key_buf();
+    if (key == 0) { return 0; }
+    var scr = pathscr;
+    if (scr == 0) { return 0; }
+    if (crab_fs_path(scr, dir, name) < 0) { return 0; }
+    if (crab_streq_n(key, scr, CRAB_PATH_MAX) == 1) {
+        # A cache hit, including the remembered NEGATIVE answer — re-reading a file crab already
+        # failed to parse costs the same syscalls as reading one it can.
+        if (crab_pv_have == 0) { return 0; }
+        store64(out + CRAB_IMG_W, crab_pv_w);
+        store64(out + CRAB_IMG_H, crab_pv_h);
+        return 1;
+    }
+    crab_strcpy_n(key, scr, CRAB_PATH_MAX);
+    crab_pv_have = 0;
+    crab_pv_w = 0;
+    crab_pv_h = 0;
+    var buf = crab_pv_hdr_buf();
+    if (buf == 0) { return 0; }
+    var fd = crab_fs_open_r(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    if (fd < 0) { return 0; }
+    var got = sys_read(fd, buf, CRAB_PV_HDR_BUDGET);
+    sys_close(fd);
+    if (got <= 0) { return 0; }
+    if (crab_img_dims(buf, got, out) == 0) { return 0; }
+    crab_pv_have = 1;
+    crab_pv_w = load64(out + CRAB_IMG_W);
+    crab_pv_h = load64(out + CRAB_IMG_H);
+    return 1;
 }
 
 # @public — OPEN the selected entry (M4). -> CRAB_FS_OK or a CRAB_FS_* error.

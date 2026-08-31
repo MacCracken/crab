@@ -117,13 +117,37 @@ not quietly lose them.
   but an empty poll still costs a buffer. **Gate: dhancha** — hoist it, or accept a caller-owned one.
 - **The idle mascot line** (*deferral #29*) — unblocked since the allocation gate closed.
 
-### M5 — Views (v0.9.0) — **the next slot**
+### M5 — Views (v0.9.0) — **STARTED; the two ungated items are in**
+
+> ⭐ **Landed (unreleased, on top of 0.7.5)**: the **preview pane** with real metadata, **image
+> dimensions read from headers with no decoder at all**, and the `crab_render` parameter cleanup
+> that preceded them. Detail in [`../../CHANGELOG.md`](../../CHANGELOG.md).
+>
+> ⛔⛔ **AND THE THUMBNAIL GATE WAS FALSE IN A NEW WAY — chitra EXISTS, AND IT COSTS 528 KB.** The
+> line below was corrected once already (from *"no image decoder"* to *"chitra 1.0.0 ships one"*).
+> **Measured 2026-08-31**: declaring `chitra 1.0.0` takes crab from **453,304 → 981,992 B on the
+> host (+116.6 %)** and **474,944 → 1,001,520 on agnos (+110.9 %)**, and `CYRIUS_DCE=1` reclaims
+> **none** — it NOPs and the byte count does not move. **~399 KB of it is the `sankoch` inflate leaf
+> PNG's IDAT requires**, pulled in transitively; chitra's own fold is ~113 KB.
+> ⇒ **A gate can be false in both directions.** "No decoder exists" was wrong; "therefore it is
+> ungated" is also wrong. The dependency is available and the *price* is the obstacle — which is an
+> operator ruling, not a technical block. Precedent: kashi's library face was refused at **+50 %**.
+> ⭐ **The metadata half shipped without paying it**, and the preview pane, the format sniffing, the
+> budget's shape and the cache policy are the common prefix of both futures — so the ruling can be
+> made late and cheaply.
 
 - **Grid**, **Columns** (miller), **Gallery** — the canvas's four-way view switcher.
   ⛔ **Gate: dhancha** GRID / COLUMNS widgets — verified absent (`grep '^fn dh_grid_new' → 0`).
   ⚠ `CANVAS` (0.9.9) exists and could carry app-drawn grids, but the toolkit is the right home:
   *"the rule lived in three apps, now it lives once."*
-- **Preview pane** with real metadata (`42.8 MB · 8192 × 5464`, camera, shot). **Ungated.**
+- ✅ **Preview pane** with real metadata — **SHIPPED (unreleased)**. `p` toggles a right-hand
+  inspector: NAME · KIND · SIZE · MODIFIED · DIMENSIONS.
+  ⛔ **Its width rule is DERIVED from crab's own column rule** (*the preview may not cost a pane its
+  SIZE column* → **303 px**), not lifted from the canvas — the same discipline that produced
+  `crab_two_panes_fit`'s 600. ⚠ Opening it can collapse two panes into one, which is the ratified
+  small-window rule answering a narrower pane area rather than a second behaviour.
+  ⚠ **Not yet**: camera and shot metadata. That is EXIF, and EXIF is a second parser over untrusted
+  bytes — worth its own slot with the fuzz harness pointed at it, not a bullet appended to this one.
 - ⭐⭐ **Thumbnails — THE GATE ON THIS LINE WAS FALSE AND IS NOW CORRECTED.** It read *"Gate: an image
   decoder; none exists in the stack today."* **chitra 1.0.0 exists, is released, and is a
   pure-Cyrius CPU raster decoder** — PNG, JPEG, GIF and BMP, each with an `_rgba` entry point, a
@@ -184,9 +208,10 @@ not quietly lose them.
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| Grid / Columns views | M5 | **dhancha** GRID + COLUMNS widgets — absent | 2026-08-31 |
+| Grid / Columns views | M5 | **dhancha** GRID + COLUMNS widgets — absent (`dh_grid_new`, `dh_columns_new`: 0 hits in `dist/`) | 2026-08-31 ⭐ re-derived |
+| **Thumbnail PIXELS** | M5 | **not a dependency gate — a COST one.** chitra 1.0.0 exists and works; declaring it is **+528,688 B (+116.6 %)** host / **+526,576 (+110.9 %)** agnos, DCE reclaims 0. **Operator ruling.** | 2026-08-31 ⭐ measured |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
-| Sidebar | M6 | **dhancha** TREE widget + a drawer overlay for the small window | 2026-08-31 |
+| Sidebar | M6 | **dhancha** TREE widget (`dh_tree_new`: 0 hits) + a drawer overlay for the small window | 2026-08-31 ⭐ re-derived |
 | Menu bar | M6 | **dhancha** MENU BAR — ⚠ *not* the popup MENU, which shipped in 0.9.23 | 2026-08-31 |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
 | Duplicate detection | M7 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
@@ -194,8 +219,11 @@ not quietly lose them.
 | The idle poll's per-cycle buffer | M2 residue | **dhancha** — hoist it or take a caller-owned one | 2026-08-31 |
 
 **Ungated and available now**, listed because a gated table invites the assumption that everything is:
-preview pane (M5) · thumbnails (M5, chitra 1.0.0) · the 🦀 menu (M6) · smart-folder *plumbing*
-without the index (M7) · every item under *Small, cheap, unblocked*.
+~~preview pane (M5)~~ **shipped** · the 🦀 menu (M6) · smart-folder *plumbing* without the index (M7)
+· every item under *Small, cheap, unblocked*.
+⚠ **Thumbnails have moved OUT of this list** — not because a dependency is missing, but because the
+one that exists costs **+117 %** of the binary. That is a decision, and a decision is not the same
+kind of thing as a gate. It has its own row in the table above so it stops being read as free.
 
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
 and **daimon 2.1.2 exists locally** with vector/RAG stores. *Deferral #18* has been open since the
@@ -239,9 +267,14 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
 
 ### Testing and CI — the gate is thinner than it looks
 
-- ⛔ **`src/render_test.cyr`'s ten pixel assertions never run in CI.** It is crab's strongest test,
-  mutation-proven against four regressions, and CI runs `cyrius test` which does not discover it.
-  *Deferral #14.*
+- ⛔ **`src/render_test.cyr`'s pixel assertions never run in CI** — **35** of them now, not ten.
+  It is crab's strongest test and CI runs `cyrius test`, which does not discover it. *Deferral #14.*
+  ⛔⛔ **THIS STOPPED BEING THEORETICAL IN THE UNRELEASED WORK.** Of the seven mutations planted
+  against the render-state record and the preview column, **four were caught ONLY by `render_test`**
+  — the suite CI runs was green for all four. A refactor that swapped the two pane blocks, or a
+  preview column painted over panes that never gave up their width, both ship through CI today.
+  ⭐ It at least **reports its own check count now**, so a run that silently skipped assertions is
+  visible; it used to exit 0 whether it ran 26 checks or none.
 - ⛔ **CI never builds `--agnos`** — the target `state.md` calls "the real target". Every
   `#ifdef CYRIUS_TARGET_AGNOS` region is uncompiled by the gate. *Deferral #15.*
   ⛔⛔ **THIS STOPPED BEING HYPOTHETICAL ON 2026-08-27.** With crab's `path` overrides disabled and a
@@ -251,11 +284,19 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
   is the gate that would have caught a broken dependency graph, and it is the reason `path` currently
   masks one.
 - CI runs neither `fuzz`, `bench`, `lint`, `fmt --check`, `vet`, `deny` nor `coverage`. *Deferral #36.*
-- **The fuzz harness reads none of its input** — `fuzz_main(data, len)` returns 0 without touching a
-  byte, so `cyrius fuzz` would PASS against anything. crab parses untrusted readdir records.
-  *Deferral #12.*
-- **The bench harness times an empty function.** crab has had exactly one performance regression and
-  it was reported from iron by an operator, not caught here. *Deferral #13.*
+- ✅ **CLOSED (unreleased) — the fuzz harness reads its input.** *Deferral #12.* 60,000 deterministic
+  rounds over mutated format headers, random bytes, degenerate and negative lengths, and arbitrary
+  bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len`. It asserts an invariant, not just
+  the absence of a crash, and it caught a real segfault in `crab_img_dims` the day it was written.
+  ⛔⛔ **ITS OWN FIRST DRAFT WAS VACUOUS, AND ONLY A PLANTED BUG SAID SO.** An LCG's low bits have
+  period 2^k, so the format selector returned **only two of four values across 20,000 rounds** — PNG
+  and JPEG were never seeded and the JPEG walk ran **zero** times while it printed `fuzz: ok`.
+  ⇒ **Plant a known bug in a new fuzzer and watch it fail before believing its green.**
+  ⚠ Still uncovered: `crab_readdir_into` (agnos-only), the write layer's joins, `crab_batch_name`.
+- ⚠ **The bench harness no longer times an empty function** — this line was stale from 0.7.0.
+  `tests/crab.bcyr` measures the sort: merge **88.6 µs** vs insertion **5.66 ms** at 256 scrambled,
+  and **38.3 µs** vs **1.28 ms** at the real iron 122. ⛔ **What is still missing is the half the
+  v1.0 criterion names**: nothing writes `docs/benchmarks.md` from it. *Deferral #13, half open.*
 - **Bring the agnos/iron harness into this repo** — both real defects crab shipped were agnos-runtime
   behaviour no host test can see. *Deferral #16.*
 - ✅ **CLOSED 0.6.0 — nothing in `src/main.cyr` was reachable from a test.** `src/app.cyr` carries the
@@ -284,15 +325,17 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
   ⚠ **A third over-claim was found while writing it and is also fixed**: the draft said the panes had
   "size and modified columns". They do not — a row is one LABEL holding a 13-char name plus `/` or a
   size, and the mtime appears only in the status line. Real columns are M3.
-- ⛔⛔ **`README.md` § Status IS WRONG AGAIN, IN THE OPPOSITE DIRECTION.** *Deferral #24* closed on
-  2026-08-26 by making it say **"Shipping, and read-only — no copy, move, rename, delete or mkdir;
-  Enter on a file does nothing"** and *"380x220 … keyboard-only"*. Every one of those was true then
-  and **all of them are false now**: M2 shipped resize and the pointer, and M4 shipped the entire
-  write layer including recursive delete. It also still quotes the retired **256-entry cap** and a
-  **~280 ms** stat figure that the cap bump made ~1.1 s.
-  ⚠ **This is the same rot as `state.md`'s, one file over, and it has the same cause**: § Status was
-  written once, correctly, and never re-read at a cut. ⇒ **Re-read § Status at every release**, or
-  make it defer to `state.md` the way its volatile numbers already do.
+- ✅ **CLOSED (unreleased) — `README.md` § Status, for the second time and in the opposite
+  direction.** *Deferral #24.* It had said **"Shipping, and read-only — no copy, move, rename,
+  delete or mkdir; Enter on a file does nothing"** and quoted a retired **256-entry cap** and a
+  **~280 ms** stat figure the cap bump had made ~1.1 s. Every one of those was true when written and
+  all were false by M4. It now states the write layer, the preview column, and what is genuinely
+  absent — including thumbnails, with the reason (**size, not capability**).
+  ⛔⛔ **THE SECTION HAS NOW BEEN WRONG IN BOTH DIRECTIONS AND THE CAUSE IS IDENTICAL BOTH TIMES**:
+  written once, correctly, and never re-read at a cut. The new text says so in its own body, so the
+  next reader is warned by the file itself rather than by this one. ⇒ **Re-read § Status at every
+  release.** Nothing gates it — the same absence that let `state.md` rot twice.
+
 - `docs/architecture/` and `docs/adr/` are empty indexes. The ⛔ invariants live only in comments,
   which means they die with the line they annotate. *Deferral #28.*
 - `docs/examples/`, `docs/benchmarks.md`, `docs/audit/` — declared, absent, and two are v1.0

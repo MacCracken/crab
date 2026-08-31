@@ -135,6 +135,11 @@ fn main(): i64 {
     if (buf_id < 0) { crab_say("crab: buf_create failed\n"); return 1; }
 
     var active_pane = 0;   # 0 = left, 1 = right
+    # ⭐ THE PREVIEW COLUMN'S TOGGLE (M5). ⚠ OFF BY DEFAULT, and that is the conservative choice
+    # rather than the timid one: crab's shipped window is 380x220, where opening the preview costs
+    # the panes their MODIFIED column. A view that reflows the moment the app starts is a view the
+    # operator did not ask for.
+    var pv_open = 0;
     var sel_l = 0;
     var sel_r = 0;
     # ⭐ Scroll offsets are APP state (0.4.10). The widget tree is rebuilt every frame, so the LIST
@@ -157,11 +162,47 @@ fn main(): i64 {
     var surf = dh_surface_new(w, h);
     if (surf == 0) { crab_say("crab: surface alloc failed\n"); return 1; }
 
+    # ⭐ THE RENDER-STATE RECORD (M5) — allocated once, refilled before each of the five renders
+    # below. It replaced a 32-argument `crab_render` call that appeared here five times, identically,
+    # where a single miscounted comma would have shifted every argument after it and still compiled.
+    # ⚠ REFILLED, NOT MUTATED IN PLACE BY THE KEY HANDLERS: the loop's locals stay the source of
+    # truth and the record is written from them immediately before each render, so there is no second
+    # copy of the app's state to keep in step.
+    var rs = crab_rs();
+    if (rs == 0) { crab_say("crab: render state alloc failed\n"); return 1; }
+    # ⚠ The preview's dimension out-record, allocated once beside the render state it feeds.
+    var pvdims = alloc(CRAB_IMG_SZ);
+    if (pvdims == 0) { crab_say("crab: preview dims alloc failed\n"); return 1; }
+    store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0);
+
     # ⚠ NO ARENA SETUP HERE ANY MORE (0.6.0). It lived in this function and that was a gap: nothing
     # in `main.cyr` is reachable from `tests/crab.tcyr`, so deleting the install broke no test while
     # restoring a 77 KB-per-frame leak. `crab_render` now owns and installs it — see `src/ui.cyr`.
 
-    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+    # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
+    var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
+    if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+    crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+
+    crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+
+    crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+
+    crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+    crab_rs_preview(rs, pv_open);
+    # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
+    # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
+    # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
+    # the frame after the selection actually moves to a new image pays an open/read/close.
+    # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
+    if (pv_open == 1) {
+        if (acount > 0) {
+            crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
+        } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
+    }
+    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+
+    var sds = crab_render(surf, 0, rs);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
@@ -965,6 +1006,20 @@ fn main(): i64 {
                                 crab_say(crab_sort_name(sm));
                                 crab_say("\n");
                             }
+                            if (u == 0x13) {                                       # p — the preview column
+                                # ⛔ THE TOGGLE FLIPS EVEN WHEN THE WINDOW CANNOT HONOUR IT, and the
+                                # refusal is reported rather than swallowed. Storing the operator's
+                                # WANT separately from what fits means a window later resized wide
+                                # enough shows the preview without a second keypress — and a key
+                                # that silently does nothing is indistinguishable from a broken one.
+                                # ⚠ Same discipline as `crab_resize_wanted`: refuse out loud.
+                                if (pv_open == 0) { pv_open = 1; } else { pv_open = 0; }
+                                if (pv_open == 1) {
+                                    if (crab_preview_fit(w, 1) == 0) {
+                                        crab_set_notice("preview needs a wider window");
+                                    } else { crab_clear_notice(); crab_say("crab: preview on\n"); }
+                                } else { crab_clear_notice(); crab_say("crab: preview off\n"); }
+                            }
                             if (u == 0x2A) {                                       # Backspace — ascend to the parent
                                 # ⭐ SELECTION MEMORY (*#34*). Capture the leaf BEFORE the ascend — the ascend rewrites
                                 # `path` in place, so afterwards there is nothing left to look for.
@@ -1004,7 +1059,26 @@ fn main(): i64 {
             # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
             # into a surface the compositor had just destroyed, and leaking a full render to do it.
             if (running == 1) {
-                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
+                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
+                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                crab_rs_preview(rs, pv_open);
+                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
+                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
+                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
+                # the frame after the selection actually moves to a new image pays an open/read/close.
+                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
+                if (pv_open == 1) {
+                    if (acount > 0) {
+                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
+                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
+                }
+                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                var s2 = crab_render(surf, 0, rs);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
                     setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
@@ -1071,7 +1145,26 @@ fn main(): i64 {
                         if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                     }
                     crab_say("crab: key repeat\n");
-                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                    # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
+                    var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
+                    if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+                    crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                    crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                    crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                    crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                    crab_rs_preview(rs, pv_open);
+                    # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
+                    # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
+                    # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
+                    # the frame after the selection actually moves to a new image pays an open/read/close.
+                    # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
+                    if (pv_open == 1) {
+                        if (acount > 0) {
+                            crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
+                        } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
+                    }
+                    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                    var s3 = crab_render(surf, 0, rs);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
                 }
@@ -1119,7 +1212,26 @@ fn main(): i64 {
                 }
                 # ⚠ REDRAW EVERY STEP, not only on completion — the bar moving IS the point, and a
                 # tray that updates once at the end is the blocking copy with extra steps.
-                var s5 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
+                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
+                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                crab_rs_preview(rs, pv_open);
+                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
+                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
+                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
+                # the frame after the selection actually moves to a new image pays an open/read/close.
+                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
+                if (pv_open == 1) {
+                    if (acount > 0) {
+                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
+                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
+                }
+                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                var s5 = crab_render(surf, 0, rs);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
             }
@@ -1140,7 +1252,26 @@ fn main(): i64 {
                         crab_say("crab: stat-drain complete\n");
                     }
                 }
-                var s4 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
+                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
+                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                crab_rs_preview(rs, pv_open);
+                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
+                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
+                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
+                # the frame after the selection actually moves to a new image pays an open/read/close.
+                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
+                if (pv_open == 1) {
+                    if (acount > 0) {
+                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
+                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
+                }
+                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                var s4 = crab_render(surf, 0, rs);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }
             }

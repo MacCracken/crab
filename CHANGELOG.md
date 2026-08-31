@@ -2,6 +2,158 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — M5's first slice: the render-state record, the preview column, and a fuzz harness that reads its input
+
+⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
+M5 is *started*, not done: the preview pane is in and thumbnails are held behind a measured decision
+(below). The two dhancha-gated items — grid/columns and the sidebar — are unchanged and still gated.
+
+### Changed — `crab_render` takes ONE record instead of 32 positional parameters
+
+⛔ **THE FAILURE THIS PREVENTS IS A MISCOUNTED COMMA.** At 32 positional `i64` arguments — nine of
+them `0`, four of them `0 - 1`, six of them bare pointers — dropping or adding one shifted every
+argument after it and still compiled. There were **twenty-three such call sites** at the time of the change — thirteen in
+`tests/crab.tcyr`, five in `src/main.cyr`, five in `src/render_test.cyr` — and thirty-one now that
+M5's own tests are in.
+⭐ `crab_render(surf, font, rs)`; the record is filled by `crab_rs_pane` (11 params, indexed by pane
+so there is no left copy and right copy to drift), `crab_rs_op`, `crab_rs_chrome`, `crab_rs_preview`
+and `crab_rs_dims`. Max arity 11, and the compiler's arity check catches what commas hid.
+
+⛔ **THE DEFAULTS NOW LIVE IN ONE PLACE, AND THAT IS THE OTHER HALF OF THE POINT.** `optotal`,
+`oprate` and `opeta` are **-1 = cannot be said yet**, never 0 — 0 means "measured, and it is zero",
+which the tray would render as a real `0 B/s`. A zeroed record is therefore *wrong*, and
+`crab_rs_reset` is the single place that knows it. Every one of those call sites used to spell
+`0 - 1` by hand, three times each.
+⚠ **`main.cyr` keeps its locals and refills the record before each render** rather than mutating the
+record from the key handlers. The loop's variables stay the source of truth, so there is no second
+copy of the app's state to keep in step — and the event loop is `#ifdef CYRIUS_TARGET_AGNOS`, where
+no host test could see a copy going stale.
+
+### Added — the preview column (M5, ungated)
+
+`p` toggles a right-hand inspector showing the ACTIVE pane's selected entry: **NAME · KIND · SIZE ·
+MODIFIED · DIMENSIONS**.
+
+⛔ **THE WIDTH RULE IS DERIVED FROM crab's OWN COLUMN RULE, not copied from the canvas.** The rule is
+*the preview may not cost a pane its SIZE column* — so the threshold falls out of
+`crab_cols_for_width` and is **303 px**, re-derivable when the font or the column set moves. This is
+the same discipline `crab_two_panes_fit` records, and the same reason its 600 px was derived rather
+than lifted from the mockup's 420.
+⚠ **OPENING THE PREVIEW CAN COLLAPSE TWO PANES INTO ONE**, and that is the ratified small-window rule
+answering a narrower pane area rather than a second behaviour: the column takes its width first and
+the panes then divide what is left, so no layout rule needs an "unless the preview is open" clause.
+⛔ **A WINDOW TOO NARROW REFUSES OUT LOUD** — `crab_set_notice`, the same discipline as
+`crab_resize_wanted`. The operator's *want* is stored separately from what fits, so a window later
+made wider shows the preview without a second keypress.
+⚠ **THE SIZE AND DATE COME FROM THE SAME ARRAYS AND THE SAME FORMATTERS THE PANE USES.** A preview
+that formatted its own size would be a second answer to a question the row two inches away already
+answers — which is exactly the disagreement 0.5.0 fixed in `crab_status_str`.
+⚠ **A pending stat stays pending here too**, so opening the preview does not put a synchronous stat
+back on the keystroke path that M3 *#03* restructured the listing to clear.
+
+### Added — image dimensions from the header alone, with no decoder
+
+`crab_img_dims` reads PNG, JPEG, GIF and BMP dimensions out of header bytes. **Verified against real
+files**: 137×42, 1×1 and 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real
+384×288 JPEG whose frame header sits past an APP0 block — every one matching `identify`.
+
+⛔⛔ **THIS IS DELIBERATELY NOT chitra, AND THE REASON IS A MEASURED 528 KB.** Declaring
+`chitra 1.0.0` takes the host binary from **453,304 B to 981,992 B (+116.6 %)** and the agnos binary
+from **474,944 to 1,001,520 (+110.9 %)**, and `CYRIUS_DCE=1` reclaims **none** of it — it NOPs the
+unreachable functions and the byte count does not move. Decomposed:
+
+| added | host bytes | delta |
+|---|---:|---:|
+| (baseline, 0.7.5) | 453,304 | — |
+| + stdlib `thread` | 461,608 | +8,304 |
+| + stdlib `flags` | 461,624 | +8,320 |
+| + stdlib `thread` + `sankoch` | 860,784 | +407,480 |
+| + all three + chitra's own fold | 981,992 | **+528,688** |
+
+⇒ **~399 KB of it is `sankoch`**, the RFC 1950/1951 inflate leaf PNG's IDAT needs, pulled in
+transitively; chitra's own decoder fold is only ~113 KB. crab does not choose that — PNG does.
+⚠ And crab need not *declare* the extra leaves: `cyrius deps` re-creates them from chitra's
+`dist/chitra.deps` sidecar, so the cost arrives whether or not the manifest names them.
+⇒ **Dimensions need none of it.** PNG, GIF and BMP put width and height at fixed offsets inside the
+first 26 bytes, and JPEG's sit in an SOF segment a bounded marker walk reaches. The metadata half of
+the preview is free; the **pixel** half — thumbnails — is now a decision with a price tag on it, and
+it is the operator's to make. See *Still open* in `docs/development/state.md`.
+
+⛔ **THE READ IS MEMOISED AND CAPPED.** `crab_preview_dims` caches on (directory, name) — one entry,
+because the operator looks at one file at a time — and reads at most **64 KiB**. Recomputing per
+frame would put an open/read/close on the arrow-key path, which is what *#03* existed to remove.
+A closed preview reads no files at all, and a non-image extension is never opened.
+⛔ **THE CACHE IS INVALIDATED IN `crab_relist`**, which runs after every write crab makes. One call
+covers rename, delete, copy, move, mkdir and the batch sheet; invalidating at each call site would
+be six chances to forget with no gate that would notice. A cache keyed on a name is stale the moment
+the name means a different file — and crab is a program that makes names mean different files.
+
+### Fixed — a per-frame allocation leak in `crab_overlay`, shipped in 0.7.5
+
+⛔ `crab_overlay` allocated its placement rect with **`alloc(32)` rather than `dh_falloc(32)`**, on
+both the menu branch and the sheet branch. That is 32 B per frame on an allocator with no `free()`,
+for as long as either was open — and crab re-renders after every handled event, so arrowing down a
+six-item menu leaked 32 B **per keystroke, permanently**.
+⛔⛔ **THE GATE COULD NOT SEE IT, AND THAT IS THE LARGER FINDING.** crab's zero-allocation assertion
+rendered twenty frames with **no overlay open**, so neither branch ever ran under it. A gate that
+covers one state proves one state. The suite now runs the twenty-frame loop with the menu open, with
+the sheet open, and with the preview open, plus a non-vacuity arm proving those branches were really
+entered. Reverting either `dh_falloc` fails at exactly 640 B = 32 × 20.
+
+### Fixed — `tests/crab.fcyr` is a real fuzz harness (roadmap *deferral #12*)
+
+⛔ **It read none of its input.** `fuzz_main(data, len)` returned 0 without touching a byte, so
+`cyrius fuzz` reported **PASS against any input whatsoever** — a green gate that could not go red. It
+stood while crab grew a readdir parser, a write layer that deletes trees, and now a header parser.
+⭐ It now drives **60,000 rounds** over mutated format headers, wholly random bytes, degenerate and
+negative lengths, and arbitrary byte sequences through `crab_name_ok`, `crab_is_image` and
+`crab_cstr_len` — deterministically, from a fixed seed, because a fuzz failure nobody can reproduce
+is a rumour. It asserts an invariant, not just the absence of a crash: when the parser answers
+*yes*, the dimensions must be inside the bounds it promises.
+
+⛔⛔ **AND ITS FIRST DRAFT WAS ITSELF VACUOUS, WHICH IS THE POINT OF THE ENTRY.** An LCG modulo a
+power of two has period 2^k in its low k bits, so `v % 4` cycles with period four; combined with the
+stride between draws, the format selector returned **only 1 and 2 across all 20,000 rounds**. PNG and
+JPEG were never seeded, `crab_jpeg_dims` was entered **zero times**, and the harness printed
+`fuzz: ok`. It was caught by planting the known JPEG bug and watching the fuzzer pass. Sampling the
+high bits fixes it. ⇒ **A fuzzer must be shown to catch a bug you plant on purpose** — the 0.6.0
+"three tests could not fail in their first draft" lesson in a new costume.
+
+### Fixed — `src/render_test.cyr` reports how many checks it ran
+
+⛔ It returned `g_fails` and printed only its dump line, so it exited **0** whether it ran 26 checks
+or none — and the handoff has quoted a check count for three cuts that nothing in the program
+printed. It now prints `N checks, M failed`. **35 checks, 0 failed** at this cut (26 before the
+preview's nine).
+
+### Two defects found in this work, recorded because the reasoning outlives them
+
+1. ⛔ **`crab_jpeg_dims` dereferenced its cursor as an ABSOLUTE ADDRESS** — `load8(p)` for
+   `load8(buf + p)` — and segfaulted on the first marker. **Not one bounds check would have caught
+   it**: `p` was compared against `len` correctly throughout, so the arithmetic was right and only
+   the base was missing. A bounds check proves an index is in range; it says nothing about which
+   buffer the index is used against. This is the bug the fuzzer now catches.
+2. ⛔ **The fill-byte skip signalled its exit by assigning `p = len + len` and subtracting it back**,
+   which restored `p` to **0** and restarted the walk at the SOI. It compiled, and on a JPEG without
+   fill bytes it never ran. The loop carries an explicit flag now.
+
+### Also
+
+- ⚠ **`crab_is_image`'s first draft lowercased an extension into an `alloc(8)` scratch buffer** — on
+  a path `crab_preview` reaches every frame. It is allocation-free now, and the fixture that would
+  have caught it (a selection sitting on an image name) is in the zero-allocation loop.
+- ⛔ **The test suite's `main` has a ceiling and it is reached silently.** At 2,517 lines and **279
+  locals**, adding one group pushed its frame past what the process could touch and the suite
+  **segfaulted** part-way through, after every prior assertion had passed. New groups get their own
+  functions.
+- ⛔ **`crab_fs_open_w` behaves differently on the two targets, and this is a flag rather than a
+  fix.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — the M4 overwrite guard, which refuses an
+  existing file — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with **no `AO_EXCL`**, so on
+  the target that ships, the same call truncates instead of refusing. Pinned by an assertion on the
+  host side; changing write semantics is not this slot's business.
+- Tests **757 → 925**, `render_test` **26 → 35** checks, reference coverage **86 % → 87 %**
+  (161/183). Host **466,056 B**, `--agnos` **491,856 B**.
+
 ## [0.7.5] - 2026-08-31 — the context menu, inline rename, and the batch sheet
 
 **M4's last three items**, unblocked by dhancha 0.9.23's MENU, overlay layer and SHEET.

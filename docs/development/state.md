@@ -26,6 +26,13 @@
 
 **0.7.5** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
+⛔ **THERE IS UNRELEASED WORK ON TOP OF 0.7.5 AND `VERSION` DELIBERATELY DOES NOT SAY SO.** M5's
+first slice — the render-state record, the preview column, header-only image dimensions, a real fuzz
+harness and a per-frame leak fix — is in the tree under `[Unreleased]` in the CHANGELOG. **The
+operator drives version and toolchain bumps**; nothing here is committed or tagged.
+⚠ Every number below marked *(unreleased)* is the working tree's, not 0.7.5's. Re-derive rather than
+trust: `wc -l src/*.cyr`, `cyrius test`, `stat -c%s build/crab`.
+
 ⭐ M4 is now substantially in: `open`, the small-window ratification, and drag between panes, on top
 of 0.7.1's write layer. ⚠ **Semver would normally make new user-facing features a MINOR**; this is
 the third time this project has put feature work in a patch by operator ruling (M2 shipped in 0.6.1,
@@ -85,14 +92,14 @@ demands and the one this file broke twice.
 
 ## Source
 
-**5,368 lines** across **six** files (five until 0.6.0) at 0.7.5; 2,227 at the 0.7.0 cut; 2,227 at the 0.7.0 cut.
+**6,320 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +925 since the cut: the two P0 repairs, the merge sort, M4's pane states and write layer, and the
-tests for all of it.
+⚠ +952 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
-- `src/main.cyr` (675) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
+- `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
   `_entry();`, so a test that included it would RUN THE APP — which is why everything testable was
   moved to `src/app.cyr`. **Do not add a function here.** What remains is the dhancha client
   lifecycle, the shm present path and the frame loop.
@@ -101,7 +108,7 @@ tests for all of it.
   not a rename.
   ⚠ **No arena setup here any more** (0.6.0). It lived in `main()` and that was a gap: deleting it
   broke no test while restoring a 77 KB-per-frame leak. `crab_render` owns it.
-- `src/app.cyr` (1,417) — ⭐ **NEW at 0.6.0**, and M3's centre of gravity; M4's write layer lives
+- `src/app.cyr` (2,484) — ⭐ **NEW at 0.6.0**, and M3's centre of gravity; M4's write layer lives
   here too (`crab_fs_*`, the per-target syscall shim, `crab_name_ok`). The application layer lifted out of `main.cyr`: the
   readdir parser (`crab_readdir_into` and its cap clamp), the stat layer, `crab_descend` /
   `crab_ascend`, `crab_surface_flags`, the serial logging.
@@ -114,7 +121,7 @@ tests for all of it.
   (`crab_cstr_len`, `crab_streq_n`, `crab_strcpy_n`, `crab_join_n`).
   ⛔ Extracted at 0.5.0 for the reason `app.cyr` was extracted at 0.6.0: a memory-safety fix that
   cannot be asserted on is a fix held on trust.
-- `src/ui.cyr` (695) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` (2,067) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
   ⛔ **`crab_render` OWNS THE PER-FRAME ARENA** (0.6.0) — creates it on first use, installs it, and
   calls `dh_frame_begin()`. Placed here rather than in `main.cyr` so every caller is correct without
@@ -130,9 +137,11 @@ tests for all of it.
   ⚠ **A row sets no background at all.** dhancha paints selection and focus from the list's own state;
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
-- `src/render_test.cyr` (221) — a standalone harness: renders the production surface at 380×220
-  and dumps BGRA to `build/crab-render.bin`, **26** `check()` assertions (11 was three cuts stale;
-  14 at the 0.7.0 cut, then M4's empty-pane notice and its solo-layout checks).
+- `src/render_test.cyr` — a standalone harness: renders the production surface and dumps BGRA to
+  `build/crab-render.bin`. **35** `check()` assertions *(unreleased; 26 at 0.7.5)*.
+  ⭐ **IT NOW PRINTS ITS OWN CHECK COUNT.** It returned `g_fails` and printed only its dump line, so
+  it exited **0** whether it ran 26 checks or none — while this file and the handoff quoted a count
+  for three cuts that nothing in the program printed. `crab render_test: 35 checks, 0 failed`.
   ⚠ **It renders at 640x220, not 380** — every assertion in it is about two panes side by side, and
   below 600 crab now draws one. The solo layout has its own checks at 380.
   ⚠ It creates **two** `DhSurface`s on purpose — it holds two frames live and dumps the first, and
@@ -345,7 +354,13 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **757 passed / 0 failed** at 0.7.5 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **925 passed / 0 failed**
+  *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
+  ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
+  more group pushed its stack frame past what the process could touch: the suite **segfaulted**
+  (exit 139) part-way through, having printed the group header, with every prior assertion passed.
+  It looked exactly like a bug in the code under test. `t_img_dims`, `t_preview` and
+  `t_preview_dims` are separate functions; anything added from here on should be too. (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -374,17 +389,29 @@ separate change, not bundled into a version bump.
   ⚠ **`main()` itself remains uncovered and that is irreducible** — a suite that included `main.cyr`
   would run the app. It is now down to the event loop alone; every other line moved to `app.cyr`, and
   the one setup step `main()` used to own (the frame arena) moved into `crab_render`.
-- `tests/crab.bcyr` — ⛔ benchmark **scaffold**: it times `bench_noop`, i.e. nothing about crab.
-- `tests/crab.fcyr` — ⛔ fuzz **scaffold**: `fuzz_main(data, len)` returns 0 without reading a byte
-  of `data`, so `cyrius fuzz` would PASS against any input.
-- `vet` 1 dep / 0 untrusted / 0 missing · `deny` 0 violations · `fmt --check` clean.
+- `tests/crab.bcyr` — ⚠ **measures the sort**, not `bench_noop` (that note was stale from 0.7.0).
+  Current: merge **88.6 µs** vs insertion **5.66 ms** at 256 scrambled; merge **38.3 µs** vs
+  insertion **1.28 ms** at the real iron 122. ⛔ Still nothing writes `docs/benchmarks.md` from it —
+  that is the v1.0 criterion, and it is the half that is missing.
+- `tests/crab.fcyr` — ✅ **A REAL FUZZ HARNESS as of the unreleased work (*deferral #12* CLOSED).**
+  It was a scaffold that read none of its input, so `cyrius fuzz` PASSED against anything. It now
+  drives **60,000 rounds** over mutated format headers, random bytes, degenerate/negative lengths,
+  and arbitrary bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len` — deterministic
+  from a fixed seed, asserting an invariant rather than only the absence of a crash.
+  ⛔⛔ **ITS OWN FIRST DRAFT WAS VACUOUS AND THAT IS THE LESSON.** An LCG's low bits have period 2^k,
+  so the format selector returned **only 1 and 2 across 20,000 rounds** — PNG and JPEG were never
+  seeded and `crab_jpeg_dims` was entered **zero** times while it printed `fuzz: ok`. Caught only by
+  planting a known bug and watching the fuzzer pass. ⇒ **Plant a bug in a new fuzzer before
+  believing it.**
+- `vet` / `deny` take a source argument (`cyrius vet src/main.cyr`), not a bare invocation —
+  ⚠ the old row here implied otherwise. `fmt --check` clean across `src/` and `tests/`.
 
 ## Targets
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **453,304 B** at 0.7.5 (398,504 B at the 0.7.0 cut) |
-| `--agnos`    | ✅ builds, **474,944 B** at 0.7.5 (406,992 B at the cut) — the real target |
+| x86_64 linux | ✅ builds, **466,056 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **491,856 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -419,15 +446,18 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⛔ **CI never builds `--agnos`** — the target that ships. Every `#ifdef CYRIUS_TARGET_AGNOS` region
   is unguarded by the gate, and 0.7.5 proved the cost: a brace error there compiled clean on the host
   and failed only on `--agnos`. *Deferral #15.*
-- ⛔ **The fuzz harness reads none of its input** — `fuzz_main(data, len)` returns 0 without touching
-  a byte, so `cyrius fuzz` passes against anything. crab parses untrusted readdir records **and now
-  acts on them destructively**. *Deferral #12.*
+- ✅ **CLOSED (unreleased) — the fuzz harness now reads its input.** *Deferral #12.* 60,000 rounds
+  over mutated headers, random bytes and degenerate lengths, deterministic from a fixed seed. It
+  caught a real segfault in `crab_img_dims` the day it was written.
+  ⚠ **What it still does NOT cover**: `crab_readdir_into` (agnos-only, needs a syscall), the write
+  layer's path joins, and `crab_batch_name`'s pattern expansion. Those are the next targets.
 - ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
   description, the `[deps]` comment and the README all commit to daimon; `cyrius.cyml` declares no
   daimon dep, and **daimon 2.1.2 exists locally**. *Deferral #18.*
-- ⚠ **`crab_render` takes 33 parameters.** Each arrived for a good reason and follows the rule that
-  state flows *down* rather than being reached *up* for — but 33 is past where a struct reads better,
-  and every new panel adds two or three. First cleanup of the next slot.
+- ✅ **CLOSED (unreleased) — `crab_render` takes one record, not 32 positional parameters.** (The
+  count here said 33; it was 32.) `crab_rs_pane` / `_op` / `_chrome` / `_preview` / `_dims` fill it,
+  max arity 11, and `crab_rs_reset` owns the three `-1`-means-unknown defaults that 23 call sites
+  used to spell by hand.
 - ⚠ **The idle-tick wiring is untested and structurally untestable on the host.** The walk, the copy
   stepper and the queue are all driven by hand in the suite; that they are *called* from the tick is
   agnos-only event-loop code. Same irreducible gap `main.cyr` has always had.
@@ -436,11 +466,31 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⚠ **crab cannot recreate a symlink.** A recursive copy copies whatever `open`+`read` yields through
   one. `sys_symlink` exists but crab cannot *learn* a source is a link without `readlink`'s ambiguous
   negative. Moves when agnos `lstat`#102 gets its cyrius peer.
-- ⛔ **`README.md` § Status is wrong in the opposite direction** — it says *"Shipping, and
-  read-only"*, which M4 falsified, and still quotes the retired 256-entry cap. See the roadmap's
-  *Documentation debt*.
+- ✅ **CLOSED (unreleased) — `README.md` § Status.** It said *"Shipping, and read-only"*, which M4
+  falsified, and quoted the retired 256-entry cap. Now states the write layer, the preview column,
+  and what is genuinely absent. ⚠ **It has been wrong in both directions now**; the replacement text
+  carries that warning itself.
 - ⚠ **Focusing a pane by its header does not work** — the header is a sibling of the list, so
   `crab_hit` resolves a header click to no pane. Clicking a row is correct.
+- ⛔⛔ **`crab_fs_open_w` BEHAVES DIFFERENTLY ON THE TWO TARGETS, AND THE TARGET THAT SHIPS IS THE
+  PERMISSIVE ONE.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, which refuses
+  an existing file and returns `EEXIST` — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with
+  **no `AO_EXCL`**, so on agnos the same call TRUNCATES an existing file. Every host assertion about
+  "crab will not overwrite" is therefore a claim about the host only. Found (unreleased) while
+  testing the preview's dimension cache; pinned by a host assertion, **not changed** — altering
+  write semantics is an operator decision, and a recursive copy is what would notice.
+- ⛔ **Thumbnails have a price and the operator has not ruled on it.** Declaring `chitra 1.0.0` costs
+  **+528,688 B (+116.6 %)** on the host and **+526,576 (+110.9 %)** on agnos, of which ~399 KB is the
+  `sankoch` inflate leaf PNG needs; `CYRIUS_DCE=1` reclaims none of it. The *metadata* half of the
+  preview is already shipped without it. See the CHANGELOG's decomposition table.
+- ⚠ **The preview's dimension read is on the selection path, not the idle tick.** It is memoised on
+  (directory, name) and capped at 64 KiB, so it costs one open/read/close per newly-selected image
+  and nothing otherwise — but a directory of huge JPEGs arrowed through quickly still pays per
+  entry. The idle-tick stepping that thumbnails will need is the same machinery that would move it.
+- ⚠ **The zero-allocation gate covers the states its fixture renders, and nothing else.** It caught
+  nothing for three cuts while `crab_overlay` leaked 32 B per frame with a menu open, because the
+  fixture never opened one. Arms now exist for the menu, the sheet and the preview. **A new
+  render-path branch without an arm here is a new blind spot, not a covered feature.**
 
 ### Hazards that are permanent, not gaps
 
@@ -461,35 +511,40 @@ _None — top-level application._
 
 ## Next
 
-**M4 is complete.** The next slot is **M5 — Views**, and its shape is unusual: two of its four items
-are gated on dhancha, and the other two are available today.
+**M4 is complete. M5 is STARTED, and the two ungated items are in.**
+
+⭐ **Done (unreleased)**: the `crab_render` parameter cleanup, the preview pane with real metadata,
+and header-only image dimensions — plus *deferral #12* (the fuzz harness) closed along the way.
 
 **Start here, in this order:**
 
-1. ⭐ **Thumbnails, because the gate on that line was FALSE.** The roadmap read *"Gate: an image
-   decoder; none exists in the stack today."* **chitra 1.0.0 is released** — a pure-Cyrius CPU raster
-   decoder for PNG, JPEG, GIF and BMP, each with an `_rgba` entry point, a `dist/chitra.cyr` fold
-   ready to declare, and a `chitra_image_decode_budget` that is exactly the shape a thumbnailer wants.
-   ⚠ What it genuinely needs is a **decode budget and a cache policy** — a directory of 8192×5464
-   images cannot decode on the keystroke path. **M4's stepped-copy pattern is the answer**: bounded
-   work per idle tick, driven by the same tick, with the tray already there to show it.
-2. **The preview pane** — ungated, and it is where a decoded thumbnail has somewhere to go.
-3. **The `crab_render` parameter list**, before M5 adds three more. See *Known gaps*.
-4. Then the gated pair (grid/columns on dhancha widgets, proportional text on rekha).
+1. ⛔⛔ **BURN ON IRON BEFORE BUILDING MORE. This is now the oldest and largest untested stretch in
+   the project's history.** The last iron run was **2026-08-30 against the 0.7.0 tree**. Everything
+   since — the entire write layer, the tray, recursion, the menu, the edit field, and now the
+   record refactor and the preview — has run only on the host and under QEMU. **Both defects crab
+   has ever shipped were iron-only.** ⚠ agnos has also moved 1.56.53 → 1.56.55 underneath, including
+   a rewrite of `is_user_range`, the validator on crab's only kernel-facing hot path.
+   ⚠ The new work touches the agnos-only event loop at five render sites and adds a file read on the
+   selection path — neither is visible to any host test.
+2. ⛔ **THE THUMBNAIL DECISION IS THE OPERATOR'S, AND IT NOW HAS A NUMBER.** chitra 1.0.0 costs
+   **+528,688 B (+116.6 %)** host / **+526,576 (+110.9 %)** agnos, ~399 KB of which is `sankoch`'s
+   inflate, and `CYRIUS_DCE=1` reclaims none. The preview pane, the format sniffing, the decode
+   budget's shape and the cache policy are all built and are the common prefix of both futures —
+   so the ruling can be made late and cheaply. **Nothing is blocked on it except the pixels.**
+   ⚠ For comparison, the precedent: kashi's library face was refused at **+183,360 B (+50 %)**.
+3. **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard. See
+   *Known gaps*. It is a correctness question about the write layer, not a preview question.
+4. Then the gated pair — grid/columns and the sidebar, both **dhancha**. Re-derived 2026-08-31:
+   `dh_grid_new`, `dh_columns_new`, `dh_tree_new` and a menu BAR are all genuinely absent from
+   `dist/dhancha.cyr`. ⭐ **These two gates are REAL**, unlike the three false ones this project has
+   recorded.
 
-⛔ **Before believing any gate, re-derive it.** This project has now recorded **three false gates**:
+⛔ **Before believing any gate, re-derive it.** This project has recorded **three false gates**:
 M4's *"Gate: agnos write syscalls"* (every arm real since agnos 1.41.3), drag's *"gated on nothing"*
-(it was gated, just not where the line said), and thumbnails' *"no image decoder"*. A gate is a claim
-about another repository, and claims about other repositories go stale silently.
-⇒ [`roadmap.md`](roadmap.md) now carries **one table of everything gated**, with the date each claim
-was last checked.
-
-⛔ **And burn before building much more.** The last iron run was **2026-08-30 against the 0.7.0 tree**.
-Everything since — the entire write layer, the tray, recursion, the menu, the edit field — has run
-only on the host and under QEMU. Both defects crab has ever shipped were iron-only, and 0.7.1–0.7.5
-is the largest untested-on-iron stretch in the project's history. ⚠ agnos has also moved 1.56.53 →
-1.56.55 underneath, including a rewrite of `is_user_range`, the validator on crab's only kernel-facing
-hot path.
+(it was gated, just not where the line said), and thumbnails' *"no image decoder"* (chitra 1.0.0
+ships one — and the real obstacle turned out to be its **size**, which no gate line mentioned).
+⇒ [`roadmap.md`](roadmap.md) carries one table of everything gated, with the date each claim was
+last checked.
 
 Two decisions are settled and shape everything downstream:
 [ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no

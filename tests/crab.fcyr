@@ -1,15 +1,198 @@
-# crab fuzz harness
+# crab fuzz harness — the header parsers, driven with real bytes.
+#
+# ⛔⛔ THIS FILE WAS A SCAFFOLD THAT READ NONE OF ITS INPUT UNTIL 2026-08-31, AND THAT IS WHY IT IS
+# WORTH SAYING SO HERE. `fuzz_main(data, len)` returned 0 without touching a byte of `data`, so
+# `cyrius fuzz` reported **PASS against any input whatsoever** — a green gate that could not go red.
+# It stood while crab grew a readdir parser, a write layer that deletes trees, and a header parser
+# for image files. Roadmap *deferral #12*.
+#
+# ⭐ AND IT EARNED ITS KEEP IMMEDIATELY. `crab_img_dims` — written the same day — shipped a draft in
+# which the JPEG marker walk dereferenced its cursor as an ABSOLUTE ADDRESS rather than an offset
+# into the buffer (`load8(p)` for `load8(buf + p)`). Every bounds check in it was correct, because
+# the cursor really was compared against the length; only the base was missing. That class of bug is
+# invisible to a bounds review and instant to a fuzzer.
+#
+# ⛔ DETERMINISTIC ON PURPOSE — a fixed seed and an LCG, never a clock or `/dev/urandom`. A fuzz
+# failure nobody can reproduce is a rumour, and a harness whose corpus changes per run reports a
+# different pass rate every time it is asked. Change `FZ_SEED` to explore; do not make it a variable.
+
+include "src/app.cyr"
+
+enum CrabFuzz {
+    FZ_SEED     = 0x5EED1234;
+    # ⚠ A modulus that keeps `s * 1103515245` inside i64: 2^31 * 1103515245 ~ 2.4e18, well under the
+    # 9.2e18 ceiling. An LCG that silently overflows is a constant generator.
+    FZ_MOD      = 2147483648;
+    FZ_BUFSZ    = 512;
+    FZ_ROUNDS   = 20000;
+}
+
+var fz_state = 0;
+var fz_fails = 0;
+var fz_recognised = 0;
+
+fn fz_next(): i64 {
+    fz_state = (fz_state * 1103515245 + 12345) - ((fz_state * 1103515245 + 12345) / FZ_MOD) * FZ_MOD;
+    return fz_state;
+}
+
+# ⛔⛔ THE HIGH BITS, NEVER THE LOW ONES — AND THE FIRST DRAFT OF THIS HARNESS GOT IT WRONG IN
+# EXACTLY THE TEXTBOOK WAY. An LCG modulo a power of two has period 2^k in its low k bits: `v % 4`
+# cycles with period **four**. Combined with the stride between draws in the round-1 loop, the
+# format selector `fz_upto(4)` returned **only 1 and 2 across all 20,000 rounds** — so PNG and JPEG
+# were NEVER SEEDED, `crab_jpeg_dims` was entered **zero** times, and the harness printed "fuzz: ok"
+# having tested half the formats and none of the code it was written for. It was caught by planting
+# the known JPEG bug and watching the fuzzer pass.
+# ⇒ Dividing first discards the degenerate low bits and samples the high ones, which carry the LCG's
+# full period. ⚠ This is the "three tests could not fail in their first draft" lesson (0.6.0) in a
+# new costume: **a fuzzer must be shown to catch a bug you plant on purpose**, or its green is a
+# statement about its own corpus and nothing else.
+fn fz_byte(): i64 { var v = fz_next() / 8192; return v - (v / 256) * 256; }
+fn fz_upto(n): i64 { if (n <= 0) { return 0; } var v = fz_next() / 8192; return v - (v / n) * n; }
+
+fn fz_fail(msg): i64 {
+    fz_fails = fz_fails + 1;
+    println(msg);
+    return 0;
+}
+
+# Seed the buffer with a structurally valid header for one of the four formats, so that mutation
+# starts from something the parser will actually walk into rather than reject at byte 0.
+# ⛔ A FUZZER WHOSE INPUTS ARE ALL REJECTED AT THE SIGNATURE TESTS NOTHING BUT THE SIGNATURE. Random
+# bytes are a PNG about one time in 2^32; the interesting code is everything past the magic.
+fn fz_seed_header(buf, which): i64 {
+    var i = 0;
+    while (i < FZ_BUFSZ) { store8(buf + i, 0); i = i + 1; }
+    if (which == 0) {                                   # PNG
+        store8(buf, 137); store8(buf + 1, 80); store8(buf + 2, 78); store8(buf + 3, 71);
+        store8(buf + 4, 13); store8(buf + 5, 10); store8(buf + 6, 26); store8(buf + 7, 10);
+        store8(buf + 12, 73); store8(buf + 13, 72); store8(buf + 14, 68); store8(buf + 15, 82);
+        store8(buf + 18, 2); store8(buf + 22, 1);
+        return 0;
+    }
+    if (which == 1) {                                   # GIF89a
+        store8(buf, 71); store8(buf + 1, 73); store8(buf + 2, 70);
+        store8(buf + 3, 56); store8(buf + 4, 57); store8(buf + 5, 97);
+        store8(buf + 6, 64); store8(buf + 8, 200);
+        return 0;
+    }
+    if (which == 2) {                                   # BMP
+        store8(buf, 66); store8(buf + 1, 77);
+        store8(buf + 14, 40); store8(buf + 18, 4); store8(buf + 22, 2);
+        return 0;
+    }
+    # JPEG — SOI, an APP0 segment, then an SOF0 the walk has to reach.
+    store8(buf, 255); store8(buf + 1, 216);
+    store8(buf + 2, 255); store8(buf + 3, 224);
+    store8(buf + 4, 0); store8(buf + 5, 16);
+    store8(buf + 20, 255); store8(buf + 21, 192);
+    store8(buf + 22, 0); store8(buf + 23, 17); store8(buf + 24, 8);
+    store8(buf + 25, 4); store8(buf + 27, 6);
+    return 0;
+}
+
+# ⛔ THE INVARIANT, AND IT IS THE WHOLE POINT: a parser over untrusted bytes may answer "no" as often
+# as it likes, but when it answers "yes" the answer must be inside the bounds it promises. A fuzzer
+# that only checks for crashes misses a header that reports a four-billion-pixel width.
+fn fz_check_dims(r, out): i64 {
+    if (r == 0) { return 0; }
+    if (r != 1) { return fz_fail("FAIL: crab_img_dims returned something other than 0 or 1"); }
+    fz_recognised = fz_recognised + 1;
+    var w = load64(out + CRAB_IMG_W);
+    var h = load64(out + CRAB_IMG_H);
+    if (w <= 0) { return fz_fail("FAIL: accepted a width <= 0"); }
+    if (h <= 0) { return fz_fail("FAIL: accepted a height <= 0"); }
+    if (w > CRAB_IMG_DIM_MAX) { return fz_fail("FAIL: accepted a width past CRAB_IMG_DIM_MAX"); }
+    if (h > CRAB_IMG_DIM_MAX) { return fz_fail("FAIL: accepted a height past CRAB_IMG_DIM_MAX"); }
+    return 0;
+}
 
 fn fuzz_main(data, len) {
     if (len == 0) { return 0; }
+    var out = alloc(CRAB_IMG_SZ);
+    # ⚠ THE DECLARED LENGTH IS FUZZED SEPARATELY FROM THE CONTENT, and that is deliberate: a caller
+    # that hands over a length longer than the buffer is the exact mistake bounds checks exist to
+    # survive, and `crab_preview_hdr` derives its length from a `read()` return that a short file
+    # makes smaller than the buffer.
+    crab_img_dims(data, len, out);
     return 0;
 }
 
 fn main() {
     alloc_init();
-    fuzz_main("test", 4);
-    println("fuzz: ok");
-    return 0;
+    fz_state = FZ_SEED;
+    var buf = alloc(FZ_BUFSZ);
+    var out = alloc(CRAB_IMG_SZ);
+    var name = alloc(CRAB_NAME_MAX + 8);
+
+    # ---- round 1: mutate valid headers ------------------------------------------------------
+    var round = 0;
+    while (round < FZ_ROUNDS) {
+        fz_seed_header(buf, fz_upto(4));
+        # Between one and eight byte flips, anywhere in the first 64 bytes — the region every one of
+        # the four formats keeps its dimensions in.
+        var flips = 1 + fz_upto(8);
+        var f = 0;
+        while (f < flips) { store8(buf + fz_upto(64), fz_byte()); f = f + 1; }
+        # ⚠ A LENGTH THAT LIES SHORT is the truncated-file case and must be refused, not read past.
+        var len = fz_upto(FZ_BUFSZ + 1);
+        fz_check_dims(crab_img_dims(buf, len, out), out);
+        round = round + 1;
+    }
+
+    # ---- round 2: wholly random bytes -------------------------------------------------------
+    round = 0;
+    while (round < FZ_ROUNDS) {
+        var i = 0;
+        while (i < 64) { store8(buf + i, fz_byte()); i = i + 1; }
+        fz_check_dims(crab_img_dims(buf, fz_upto(65), out), out);
+        round = round + 1;
+    }
+
+    # ---- round 3: degenerate lengths --------------------------------------------------------
+    # ⛔ NEGATIVE AND ZERO LENGTHS ARE CALLER BUGS AND MUST BE REFUSED RATHER THAN TREATED AS
+    # "plenty of bytes". Every bound in the parser is `< len`, so a negative fails them all — this
+    # is what pins that it stays so.
+    fz_seed_header(buf, 0);
+    fz_check_dims(crab_img_dims(buf, 0, out), out);
+    fz_check_dims(crab_img_dims(buf, 0 - 1, out), out);
+    fz_check_dims(crab_img_dims(buf, 0 - 999999, out), out);
+    if (crab_img_dims(buf, 0 - 1, out) != 0) { fz_fail("FAIL: a negative length was accepted"); }
+    if (crab_img_dims(0, 64, out) != 0) { fz_fail("FAIL: a null buffer was accepted"); }
+    if (crab_img_dims(buf, 64, 0) != 0) { fz_fail("FAIL: a null output record was accepted"); }
+
+    # ---- round 4: the name predicates, over arbitrary bytes ---------------------------------
+    # ⛔ `crab_name_ok` GUARDS EVERY WRITE crab MAKES — mkdir, rename, the batch sheet and the
+    # recursive copy all pass a name through it, and the batch sheet's `*` splices in a readdir name
+    # the operator never typed. It must survive any byte sequence, including one with no NUL inside
+    # the buffer at all.
+    round = 0;
+    while (round < FZ_ROUNDS) {
+        var nl = fz_upto(CRAB_NAME_MAX + 4);
+        var j = 0;
+        while (j < nl) { store8(name + j, fz_byte()); j = j + 1; }
+        # ⚠ HALF THE ROUNDS GET NO TERMINATOR, which is the case a bounded scan exists for.
+        if (fz_upto(2) == 0) { store8(name + nl, 0); }
+        else { store8(name + CRAB_NAME_MAX + 7, 0); }
+        var ok = crab_name_ok(name);
+        if (ok != 0) { if (ok != 1) { fz_fail("FAIL: crab_name_ok returned neither 0 nor 1"); } }
+        var im = crab_is_image(name);
+        if (im != 0) { if (im != 1) { fz_fail("FAIL: crab_is_image returned neither 0 nor 1"); } }
+        crab_cstr_len(name, CRAB_NAME_MAX);
+        round = round + 1;
+    }
+
+    # ⛔ NON-VACUITY. A harness that rejected every input would report zero failures and prove
+    # nothing — which is exactly the state this file was in before today. The corpus MUST reach the
+    # accepting paths, so the run fails if it never recognised a single header.
+    if (fz_recognised == 0) {
+        fz_fails = fz_fails + 1;
+        println("FAIL: the corpus never produced a single valid header — the fuzzer tested nothing");
+    }
+
+    if (fz_fails == 0) { println("fuzz: ok"); return 0; }
+    println("fuzz: FAILED");
+    return 1;
 }
 
 var r = main();

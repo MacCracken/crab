@@ -177,6 +177,14 @@ enum CrabCol {
     CRAB_COL_MTIME_W  = 153;    # 17 chars — "2026-08-28 11:04" plus its gap
     CRAB_COL_NAME_MIN = 90;     # 10 chars — below this a name column cannot tell files apart
     CRAB_PANE_GAP     = 6;      # the seam between the two panes, and the window's own edge padding
+    # ⛔ THE PREVIEW COLUMN'S WIDTH IS `CRAB_COL_MTIME_W`, AND THAT IS A DERIVATION, NOT A COINCIDENCE.
+    # The widest line the preview draws is a modified timestamp — `2026-08-28 11:04`, seventeen
+    # characters with its gap — which is the same string the MODIFIED column exists to hold and was
+    # measured for. Giving the column its own literal would be a second number meaning the same
+    # thing, free to drift when the font or the date format moves. ⇒ One constant, one derivation.
+    CRAB_PV_W         = 153;
+    CRAB_PV_ROW_H     = 18;     # a preview line, matching the column header's row height
+    CRAB_PV_HDR_H     = 28;     # ...and its header, matching a PANE header so the two tops line up
 }
 
 # @public — can this window honestly show TWO panes? 1 = two, 0 = one pane plus the A/B switcher.
@@ -1261,7 +1269,17 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
             i = i + 1;
         }
         dh_list_select(m, menusel);
-        var mr = alloc(32);
+        # ⛔⛔ `dh_falloc`, NOT `alloc` — THIS WAS A REAL PER-FRAME LEAK, SHIPPED IN 0.7.5. Both this
+        # rect and the sheet's below are pure scratch: an out-parameter read on the next three lines
+        # and never referenced again. On the global allocator, which has no `free()`, they cost 32 B
+        # on EVERY frame drawn while a menu or the rename sheet is open — and crab re-renders after
+        # every handled event, so arrowing down a six-item menu leaked 32 B per keystroke, forever.
+        # ⛔ THE GATE COULD NOT SEE IT, AND THAT IS THE REAL FINDING. crab's zero-allocation
+        # assertion renders twenty frames with **no overlay open**, so this whole branch never ran
+        # under it. A gate that covers only the default state proves the default state.
+        # ⇒ The test now renders with the menu open, the sheet open and the preview open. Found
+        # 2026-08-31 while making `crab_is_image` allocation-free — the same mistake, one branch over.
+        var mr = dh_falloc(32);
         dh_place_at_point(mr, menux, menuy, CRAB_MENU_W, dh_menu_pref_h(m), w, h, 4);
         dh_widget_set_pref(m, load64(mr + 16), load64(mr + 24));
         dh_widget_set_offset(m, load64(mr + 0), load64(mr + 8));
@@ -1305,7 +1323,7 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         dh_widget_set_fg(hint, dh_theme_mute());
         dh_widget_set_text(hint, "Enter = confirm    Esc = cancel");
         dh_widget_add_child(sh, hint);
-        var sr = alloc(32);
+        var sr = dh_falloc(32);      # ⛔ scratch — see the ⛔ on the menu's rect above
         dh_place_pinned(sr, 0, CRAB_SHEET_H, w, h, DH_PIN_BOTTOM, 24);
         dh_widget_set_pref(sh, load64(sr + 16), load64(sr + 24));
         dh_widget_set_offset(sh, load64(sr + 0), load64(sr + 8));
@@ -1315,15 +1333,593 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
     return layer;
 }
 
-# ⚠ `lstate` / `rstate` come from `crab_pane_state(count, crab_listing_err())`, captured by the
-# caller AT LISTING TIME. They are parameters and not globals for one reason: `crab_listing_err`
-# reports the LAST readdir, and crab lists two panes — so a global read at render time would give
-# both panes the right pane's state. The capture has to happen next to the listing that produced it.
-# ⚠ `opname` / `opdone` / `optotal` are the transfer tray's state, passed in for the same reason
-# `lstate`/`rstate` are: this file sits BELOW `app.cyr`, which owns the operation record. `opname == 0`
-# (or an empty string) means nothing is running and the tray costs no pixels and no widgets.
-fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal, oprate, opeta, lmarks, rmarks, menuopen, menux, menuy, menusel, editopen, editlabel): i64 {
+# Case-insensitive compare of an `el`-byte extension against an all-lowercase literal.
+#
+# ⛔⛔ ALLOCATION-FREE ON PURPOSE, AND THE FIRST DRAFT OF THIS WAS NOT. It lowercased into an
+# `alloc(8)` scratch buffer — eight bytes per call, on a path `crab_preview` reaches EVERY FRAME,
+# through an allocator with no `free()`. That is precisely the per-frame leak dhancha 0.9.13–0.9.16
+# and crab 0.6.0 spent four releases driving to zero, reintroduced by a convenience buffer.
+# ⚠ `dh_falloc` would also have been wrong here, though only in style: nothing outlives the call, so
+# the right answer is not to allocate at all. Reach for the arena when a WIDGET needs the string.
+# ⚠ The suite did not catch the first draft, because the zero-allocation gate rendered frames with
+# the preview CLOSED. That gap is closed alongside this — see the preview arm in `crab.tcyr`.
+fn crab_ext_eq(ext, el, lit): i64 {
+    var i = 0;
+    while (i < el) {
+        var c = load8(ext + i);
+        if (c >= 65) { if (c <= 90) { c = c + 32; } }
+        if (c != load8(lit + i)) { return 0; }
+        i = i + 1;
+    }
+    if (load8(lit + el) != 0) { return 0; }    # the literal is longer -> not a match
+    return 1;
+}
+
+# @public — is `name` one of the raster formats this stack can actually decode? 1 = yes.
+#
+# ⛔ THE SET IS DERIVED FROM chitra, NOT INVENTED HERE. chitra 1.0.0 decodes exactly PNG, JPEG, GIF
+# and BMP — `chitra_image_decode` sniffs those four signatures and REJECTS anything else with no
+# fall-through — so this is the set for which crab can ever show dimensions or a thumbnail. Naming a
+# fifth extension here would promise a preview the stack cannot produce.
+# ⚠ AN EXTENSION IS A HINT AND crab TREATS IT AS ONE. It decides what is worth *reading a header
+# for*; the header's own signature bytes decide what the file actually is. A `.png` holding JPEG
+# bytes is a JPEG, and `crab_img_dims` says so — this function only avoids opening every file in the
+# directory to find out.
+# ⚠ CASE-INSENSITIVE, because `.JPG` off a camera is the common case, not the odd one.
+fn crab_is_image(name): i64 {
+    if (name == 0) { return 0; }
+    var n = 0;
+    while ((load8(name + n) != 0) && (n < CRAB_NAME_MAX)) { n = n + 1; }
+    var dot = 0 - 1;
+    var i = n - 1;
+    while (i > 0) {
+        if (load8(name + i) == 46) { dot = i; i = 0; }
+        else { i = i - 1; }
+    }
+    if (dot < 0) { return 0; }
+    var e = dot + 1;
+    var el = n - e;
+    if (el < 3) { return 0; }
+    if (el > 4) { return 0; }
+    if (crab_ext_eq(name + e, el, "png") == 1) { return 1; }
+    if (crab_ext_eq(name + e, el, "jpg") == 1) { return 1; }
+    if (crab_ext_eq(name + e, el, "jpeg") == 1) { return 1; }
+    if (crab_ext_eq(name + e, el, "gif") == 1) { return 1; }
+    if (crab_ext_eq(name + e, el, "bmp") == 1) { return 1; }
+    return 0;
+}
+
+# ⭐⭐ IMAGE DIMENSIONS FROM THE HEADER ALONE — no decoder, no dependency, no inflate.
+#
+# ⛔⛔ THIS IS DELIBERATELY NOT chitra, AND THE REASON IS A MEASURED 528 KB. Declaring
+# `chitra 1.0.0` takes crab's host binary from **453,304 B to 981,992 B (+116.6 %)** and the agnos
+# binary from 474,944 to 1,001,520 (+110.9 %), and `CYRIUS_DCE=1` reclaims **none** of it — it NOPs
+# the unreachable functions and the byte count does not move. Decomposed on 2026-08-31:
+#
+#   | added                                   | host bytes |     delta |
+#   |-----------------------------------------|-----------:|----------:|
+#   | (baseline, 0.7.5)                       |    453,304 |         — |
+#   | + stdlib `thread`                       |    461,608 |    +8,304 |
+#   | + stdlib `flags`                        |    461,624 |    +8,320 |
+#   | + stdlib `thread` + `sankoch`           |    860,784 |  +407,480 |
+#   | + all three + chitra's own fold         |    981,992 |  +528,688 |
+#
+# ⇒ **~399 KB of it is `sankoch`**, the RFC 1950/1951 inflate leaf that PNG's IDAT needs, pulled in
+# transitively — chitra's own decoder fold is only ~113 KB. crab does not choose that; PNG does.
+# ⚠ And crab need not DECLARE the extra leaves: `cyrius deps` re-creates them from chitra's
+# `dist/chitra.deps` sidecar, so the cost arrives whether or not the manifest names them.
+# ⇒ **Dimensions do not need any of it.** PNG, GIF and BMP put width and height at FIXED offsets in
+# the first 26 bytes, and JPEG puts them in an SOF segment a bounded marker walk reaches. So the
+# metadata half of the preview is free, and the PIXEL half — thumbnails — is a separate decision
+# with a price tag attached, which is the operator's to make and not this file's.
+#
+# ⛔⛔ EVERY READ IS BOUNDED BY `len`, AND THAT IS NOT OPTIONAL — this parses a FILE, which is the
+# most untrusted input crab handles. `src/path.cyr` exists because an unbounded copy over readdir
+# data caused the 0.5.0 P-1, and a file's bytes are chosen by whoever wrote the file. The JPEG walk
+# additionally caps its iteration count, for the same reason the `#101` readdir loops do: a segment
+# length of 0 would otherwise spin forever on a crafted file.
+#
+# -> 1 with width at `out + CRAB_IMG_W` and height at `+ CRAB_IMG_H`; 0 if the bytes are not a
+# format crab recognises, are truncated, or claim an absurd size.
+enum CrabImg {
+    CRAB_IMG_W        = 0;
+    CRAB_IMG_H        = 8;
+    CRAB_IMG_SZ       = 16;
+    # ⚠ An ABSURDITY bound, not a format limit — PNG's own maximum is 2^31-1. A raster crab could
+    # act on is bounded by what a surface can hold; anything past this is a corrupt header, and
+    # reporting it as a size would put a nonsense number in front of the operator.
+    CRAB_IMG_DIM_MAX  = 1048576;
+    # ⚠ Same shape and reasoning as `CRAB_READDIR_STEPS_MAX`: far above any legitimate JPEG (a photo
+    # with EXIF has a handful of segments before SOF), so reaching it is always a malformed file.
+    CRAB_IMG_SCAN_MAX = 256;
+}
+
+# Big-endian and little-endian scalar reads. ⚠ `load8` is UNSIGNED (0..255) — verified by probe,
+# not assumed, because a sign-extending load would make PNG's 0x89 signature byte compare as -119
+# and every PNG would be rejected.
+fn crab_be16(p): i64 { return load8(p) * 256 + load8(p + 1); }
+fn crab_be32(p): i64 {
+    return load8(p) * 16777216 + load8(p + 1) * 65536 + load8(p + 2) * 256 + load8(p + 3);
+}
+fn crab_le16(p): i64 { return load8(p + 1) * 256 + load8(p); }
+fn crab_le32(p): i64 {
+    return load8(p + 3) * 16777216 + load8(p + 2) * 65536 + load8(p + 1) * 256 + load8(p);
+}
+
+# Accept a width/height pair only if both are positive and inside the absurdity bound.
+fn crab_dims_ok(out, w, h): i64 {
+    if (w <= 0) { return 0; }
+    if (h <= 0) { return 0; }
+    if (w > CRAB_IMG_DIM_MAX) { return 0; }
+    if (h > CRAB_IMG_DIM_MAX) { return 0; }
+    store64(out + CRAB_IMG_W, w);
+    store64(out + CRAB_IMG_H, h);
+    return 1;
+}
+
+# JPEG: walk the marker chain to the first SOF segment, which carries height then width.
+# ⚠ SOF is 0xC0-0xCF **except** 0xC4 (DHT), 0xC8 (JPG) and 0xCC (DAC) — those three sit inside the
+# range and are not frame headers. Treating them as SOF reads a Huffman table as a size.
+fn crab_jpeg_dims(buf, len, out): i64 {
+    # ⛔⛔ `p` IS AN OFFSET INTO `buf`, NEVER AN ADDRESS — every read below is `buf + p`. The first
+    # draft wrote `load8(p)`, which dereferences address 2 and segfaults on the very first marker.
+    # ⚠ AND NOT ONE BOUNDS CHECK WOULD HAVE CAUGHT IT: `p` was compared against `len` correctly
+    # throughout, so the arithmetic was right and only the BASE was missing. A bounds check proves
+    # an index is in range; it says nothing about which buffer the index is used against.
+    var p = 2;                                   # past SOI
+    var steps = 0;
+    while (steps < CRAB_IMG_SCAN_MAX) {
+        steps = steps + 1;
+        if (p + 1 >= len) { return 0; }
+        # ⚠ FILL BYTES: a marker may be preceded by any number of 0xFF padding bytes, so the marker
+        # identifier is the first NON-0xFF byte after them. ⛔ The loop carries an explicit flag
+        # rather than encoding "found" in `p` itself — a first draft signalled the exit by assigning
+        # `p = len + len` and then subtracting it back, which restored `p` to 0 and restarted the
+        # walk at the SOI. It compiled, and on a JPEG with no fill bytes it never ran.
+        if (load8(buf + p) != 255) { return 0; }
+        var scanning = 1;
+        while (scanning == 1) {
+            if (p >= len) { return 0; }
+            if (load8(buf + p) == 255) { p = p + 1; } else { scanning = 0; }
+        }
+        var mk = load8(buf + p);
+        p = p + 1;
+        # ⚠ STANDALONE MARKERS CARRY NO LENGTH PAYLOAD — SOI, TEM and the eight restart markers are
+        # two bytes and nothing more, so reading a segment length after one reads the NEXT marker's
+        # bytes as a size. A flag rather than a nested else-chain: three conditions with one
+        # consequence read as three conditions, and the chain needed a `steps = steps;` no-op in
+        # each empty arm to say nothing.
+        var standalone = 0;
+        if (mk == 0xD8) { standalone = 1; }                       # SOI
+        if (mk == 0x01) { standalone = 1; }                       # TEM
+        if ((mk >= 0xD0) && (mk <= 0xD7)) { standalone = 1; }     # RST0-RST7
+        if (standalone == 0) {
+            # ⛔ SOS and EOI mean the frame header is behind us and was never found. Scanning into
+            # entropy-coded data would find 0xFF bytes that are not markers at all.
+            if (mk == 0xDA) { return 0; }
+            if (mk == 0xD9) { return 0; }
+            if (p + 1 >= len) { return 0; }
+            var seg = crab_be16(buf + p);
+            # ⚠ DEFENCE IN DEPTH, NOT THE TERMINATION GUARANTEE — and the fuzzer proved which is
+            # which. A segment length below 2 cannot advance `p`, so a crafted file would re-read
+            # the same marker forever; but removing this check does NOT hang, because
+            # `CRAB_IMG_SCAN_MAX` stops the walk after 256 markers regardless. **The step cap is
+            # what makes this function total**; this line just makes the refusal immediate and
+            # named. Same relationship as `CRAB_WALK_STEPS_MAX` to the walk's own guards.
+            if (seg < 2) { return 0; }
+            var issof = 0;
+            if ((mk >= 0xC0) && (mk <= 0xCF)) { issof = 1; }
+            if (mk == 0xC4) { issof = 0; }
+            if (mk == 0xC8) { issof = 0; }
+            if (mk == 0xCC) { issof = 0; }
+            if (issof == 1) {
+                if (p + 7 >= len) { return 0; }
+                return crab_dims_ok(out, crab_be16(buf + p + 5), crab_be16(buf + p + 3));
+            }
+            p = p + seg;
+        }
+    }
+    return 0;
+}
+
+# @public — read an image's pixel dimensions out of `len` header bytes. See the ⛔ block above.
+fn crab_img_dims(buf, len, out): i64 {
+    if (buf == 0) { return 0; }
+    if (out == 0) { return 0; }
+    if (len < 10) { return 0; }
+    store64(out + CRAB_IMG_W, 0);
+    store64(out + CRAB_IMG_H, 0);
+    # --- PNG: the 8-byte signature, then an IHDR chunk whose width/height are at 16 and 20.
+    if (load8(buf) == 137) {
+        if (load8(buf + 1) == 80) {
+            if (load8(buf + 2) == 78) {
+                if (load8(buf + 3) == 71) {
+                    if (len < 24) { return 0; }
+                    # ⛔ THE CHUNK TYPE IS CHECKED, not assumed from the signature. IHDR is required
+                    # to be first by the spec, and a file that breaks that rule is exactly the file
+                    # this parser must not read four arbitrary bytes out of.
+                    if (load8(buf + 12) != 73) { return 0; }      # 'I'
+                    if (load8(buf + 13) != 72) { return 0; }      # 'H'
+                    if (load8(buf + 14) != 68) { return 0; }      # 'D'
+                    if (load8(buf + 15) != 82) { return 0; }      # 'R'
+                    return crab_dims_ok(out, crab_be32(buf + 16), crab_be32(buf + 20));
+                }
+            }
+        }
+    }
+    # --- GIF: "GIF87a" / "GIF89a", then a little-endian logical screen size at 6 and 8.
+    if (load8(buf) == 71) {
+        if (load8(buf + 1) == 73) {
+            if (load8(buf + 2) == 70) {
+                # ⚠ THE VERSION IS TWO CHARACTERS, "87a" or "89a", AND BOTH ARE CHECKED. Testing
+                # only the '8' accepts "GIF8Xa" for any X — a signature check that admits files no
+                # decoder in the stack would take, which is the opposite of what it is for.
+                if (load8(buf + 3) != 56) { return 0; }           # '8'
+                var gv = load8(buf + 4);
+                if ((gv != 55) && (gv != 57)) { return 0; }       # '7' or '9'
+                if (load8(buf + 5) != 97) { return 0; }           # 'a'
+                return crab_dims_ok(out, crab_le16(buf + 6), crab_le16(buf + 8));
+            }
+        }
+    }
+    # --- BMP: "BM", then a DIB header whose SIZE field says which layout it is.
+    if (load8(buf) == 66) {
+        if (load8(buf + 1) == 77) {
+            if (len < 26) { return 0; }
+            var dib = crab_le32(buf + 14);
+            # ⚠ BITMAPCOREHEADER is 12 bytes with 16-bit dimensions; everything since is >= 40 with
+            # 32-bit ones. Reading a core header at the modern offsets gets the palette instead.
+            if (dib == 12) { return crab_dims_ok(out, crab_le16(buf + 18), crab_le16(buf + 20)); }
+            if (dib < 40) { return 0; }
+            var bw = crab_le32(buf + 18);
+            var bh = crab_le32(buf + 22);
+            # ⚠ A NEGATIVE HEIGHT MEANS TOP-DOWN ROW ORDER, not a negative size. It is a direction
+            # flag living in the sign bit, and the magnitude is the real height.
+            if (bh >= 2147483648) { bh = 4294967296 - bh; }
+            if (bw >= 2147483648) { bw = 4294967296 - bw; }
+            return crab_dims_ok(out, bw, bh);
+        }
+    }
+    # --- JPEG: SOI, then a bounded walk to the first SOF.
+    if (load8(buf) == 255) {
+        if (load8(buf + 1) == 216) { return crab_jpeg_dims(buf, len, out); }
+    }
+    return 0;
+}
+
+# @public — the KIND line's text. ⚠ THREE KINDS AND DELIBERATELY NOT MORE.
+# An extension-to-kind table is the "small language nobody asked for" that the batch-rename sheet
+# refused for the same reason: every entry is a claim about a file crab has not opened, and the
+# table grows forever once it exists. crab names the two kinds it can act on differently — a folder
+# it can descend into, and an image it can read dimensions from — and calls everything else a file.
+fn crab_kind_str(name, is_dir): i64 {
+    if (is_dir == 1) { return "Folder"; }
+    if (crab_is_image(name) == 1) { return "Image"; }
+    return "File";
+}
+
+# @public — may this window show the preview column? 1 = yes. `want` is the operator's toggle.
+#
+# ⛔ THE THRESHOLD IS DERIVED FROM crab's OWN COLUMN RULE, exactly as `crab_two_panes_fit` is, and
+# for the reason recorded there: a pixel lifted from a mockup is a number nobody can re-derive when
+# the font or the column set changes. The rule is **the preview may not cost a pane its SIZE
+# column** — a pane reduced to bare names is not a file manager, and the preview shows the metadata
+# of ONE entry while the column shows it for all of them.
+# ⚠ IT DELIBERATELY DOES NOT DEMAND THREE COLUMNS. Opening the preview at the shipped 380x220 does
+# drop the panes from three columns to two — but the value that leaves the pane, MODIFIED, is the
+# value the preview then shows for the selected entry. That is a trade the operator asked for by
+# pressing the key, not a silent loss.
+# ⛔ AND WHEN IT DOES NOT FIT, THE ANSWER IS A REFUSAL THE OPERATOR CAN SEE — `src/main.cyr` sets a
+# notice, the same discipline `crab_resize_wanted` uses. A toggle that silently does nothing is
+# indistinguishable from a broken key.
+fn crab_preview_fit(w, want): i64 {
+    if (want == 0) { return 0; }
+    var rest = w - CRAB_PV_W;
+    if (rest <= CRAB_PANE_GAP) { return 0; }
+    var panew = rest - CRAB_PANE_GAP;
+    if (crab_two_panes_fit(rest) == 1) { panew = (rest - CRAB_PANE_GAP) / 2; }
+    if (crab_cols_for_width(panew) < 2) { return 0; }
+    return 1;
+}
+
+# One label/value pair in the preview column. The label is muted and the value is not, so the eye
+# lands on the data rather than on the word naming it.
+# ⚠ `dh_falloc` throughout — `dh_widget_set_text` stores the pointer and does not copy, so every
+# string here must die with the frame that built it.
+fn crab_pv_field(col, label, value): i64 {
+    var l = dh_widget_new(LABEL);
+    dh_widget_set_pref(l, 0, CRAB_PV_ROW_H);
+    dh_widget_set_flex(l, 0);
+    dh_widget_set_fg(l, dh_theme_mute());
+    dh_widget_set_text(l, label);
+    dh_widget_add_child(col, l);
+    var v = dh_widget_new(LABEL);
+    dh_widget_set_pref(v, 0, CRAB_PV_ROW_H);
+    dh_widget_set_flex(v, 0);
+    dh_widget_set_text(v, value);
+    dh_widget_add_child(col, v);
+    return 0;
+}
+
+# @public — the preview column: what the ACTIVE pane's selected entry is, in words.
+#
+# ⛔ IT READS THE SAME ARRAYS THE PANE DOES and calls the same formatters — `crab_size_str` and
+# `crab_mtime_str`. A preview that formatted its own size would be a second answer to a question the
+# pane already answers, free to disagree with the row two inches to its left. That disagreement is
+# the exact bug 0.5.0 fixed in `crab_status_str`, where a blank in the pane read as a dash in the
+# status line for one unstattable file.
+# ⚠ A PENDING SIZE STAYS PENDING HERE TOO. `crab_size_str` renders the deferred-stat sentinel as it
+# renders it everywhere else, so opening the preview does not force a synchronous stat onto the
+# keystroke path — the thing M3 *#03* restructured the listing to avoid.
+# ⚠ AN EMPTY PANE GETS THE COLUMN, NOT A HOLE. The header stays and the fields read "—", because a
+# column that vanishes when a directory happens to be empty makes the whole window jump.
+fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh): i64 {
+    var col = dh_widget_new(BOX);
+    dh_widget_set_layout(col, BOX_V);
+    dh_widget_set_pref(col, CRAB_PV_W, h);
+    dh_widget_set_flex(col, 0);
+    dh_widget_set_bg(col, dh_theme_panel());
+    var hdr = dh_widget_new(LABEL);
+    dh_widget_set_bg(hdr, dh_theme_panel());
+    dh_widget_set_pref(hdr, 0, CRAB_PV_HDR_H);
+    dh_widget_set_flex(hdr, 0);
+    dh_widget_set_text(hdr, "PREVIEW");
+    dh_widget_add_child(col, hdr);
+    if (count <= 0) {
+        crab_pv_field(col, "NAME", "—");
+        crab_pv_field(col, "KIND", "—");
+        dh_widget_add_child(parent, col);
+        return col;
+    }
+    var rec = buf + sel * CRAB_REC_SZ;
+    var isdir = load8(rec + CRAB_REC_TYPE);
+    # ⚠ TRUNCATED TO THE COLUMN, with the same "~" marker the pane rows use — a name clipped without
+    # a marker is a name the operator will retype wrongly.
+    var nb = dh_falloc(CRAB_NAME_MAX + 4);
+    crab_name_cell(nb, rec, crab_col_chars(CRAB_PV_W));
+    crab_pv_field(col, "NAME", nb);
+    crab_pv_field(col, "KIND", crab_kind_str(rec, isdir));
+    if (isdir == 1) {
+        # ⛔ A DIRECTORY HAS NO SIZE crab CAN HONESTLY REPORT. The on-disk size of the directory
+        # entry itself is not what "size" means to anyone looking at a folder, and the recursive
+        # answer is a tree walk — which crab has (`crab_walk_step`) and which costs what it costs.
+        # Printing the wrong number is worse than printing none.
+        crab_pv_field(col, "SIZE", "—");
+    } else {
+        var sb = dh_falloc(24);
+        crab_size_str(sb, load64(sizes + sel * 8));
+        crab_pv_field(col, "SIZE", sb);
+    }
+    var mb = dh_falloc(24);
+    crab_mtime_str(mb, load64(mtimes + sel * 8));
+    crab_pv_field(col, "MODIFIED", mb);
+    # ⭐ THE CANVAS'S OWN LINE — `42.8 MB · 8192 x 5464`. ⛔ THE ROW IS ABSENT, NOT EMPTY, when crab
+    # has no dimensions: a "DIMENSIONS: —" under every text file is a promise the preview keeps
+    # failing, and a "0 x 0" is worse still because it reads as a measurement. The label appears
+    # exactly when there is something to put beside it.
+    if (imgw > 0) {
+        if (imgh > 0) {
+            var db = dh_falloc(48);
+            var dl = crab_u2s(db, imgw);
+            store8(db + dl, 32); store8(db + dl + 1, 120); store8(db + dl + 2, 32);
+            dl = dl + 3 + crab_u2s(db + dl + 3, imgh);
+            store8(db + dl, 0);
+            crab_pv_field(col, "DIMENSIONS", db);
+        }
+    }
+    dh_widget_add_child(parent, col);
+    return col;
+}
+
+# ⭐⭐ THE RENDER-STATE RECORD (M5). `crab_render` took **32 positional parameters** and every one of
+# them arrived for a good reason — state flows DOWN into this file rather than being reached UP for,
+# because `ui.cyr` sits below `app.cyr` and the render path must never call back up. That rule is not
+# being relaxed. What changes is the *carrier*: one record pointer instead of 32 argument slots.
+#
+# ⛔ THE FAILURE THIS EXISTS TO PREVENT IS A MISCOUNTED COMMA. At 32 positional arguments — nine of
+# which are 0, four of which are `0 - 1`, and six of which are bare pointers — dropping or adding one
+# argument shifts every argument after it and still compiles, because they are all `i64`. crab had
+# twenty-four such call sites in `tests/crab.tcyr` alone. A setter with eleven named parameters
+# cannot silently absorb that mistake: the arity check catches it at compile time.
+#
+# ⛔ THE DEFAULTS ARE WRITTEN ONCE, HERE, AND THAT IS THE OTHER HALF OF THE POINT. `optotal`,
+# `oprate` and `opeta` all use **-1 = cannot be said yet**, not 0 — 0 means "measured, and it is
+# zero", which the tray would render as a real 0 B/s. A zeroed record is therefore WRONG, so
+# `crab_rs_reset` sets the three sentinels explicitly. Every one of those 24 call sites used to spell
+# `0 - 1` by hand, and a single one of them spelling `0` instead would have been invisible.
+#
+# ⚠ Byte offsets, not a struct — the same discipline as the readdir record (`CrabRec`) and the
+# operation record (`CrabOp`). ⚠ The two pane blocks are IDENTICAL in layout and indexed by pane
+# number, so `crab_rs_pane` is one function rather than a left copy and a right copy that drift.
+enum CrabRs {
+    # --- per-pane block, 2 x CRAB_RSP_SZ starting at 0 ---
+    CRAB_RSP_BUF    = 0;    # readdir buffer: CRAB_REC_SZ-byte records
+    CRAB_RSP_N      = 8;    # entries in it
+    CRAB_RSP_PATH   = 16;   # the pane's directory path (a cstring)
+    CRAB_RSP_SIZES  = 24;   # parallel i64 array, or CRAB_SZ_PENDING
+    CRAB_RSP_MTIMES = 32;   # parallel i64 array
+    CRAB_RSP_STATE  = 40;   # CrabPaneState, captured AT LISTING TIME — see below
+    CRAB_RSP_MARKS  = 48;   # parallel byte array, 1 = marked
+    CRAB_RSP_SEL    = 56;   # selected row
+    CRAB_RSP_SCROLL = 64;   # POINTER to the caller's scroll cell — written back through
+    CRAB_RSP_SZ     = 72;
+
+    CRAB_RS_ACTIVE   = 144;  # 0 = left, 1 = right
+    # The transfer tray. ⚠ Three of these are -1-means-unknown; see the ⛔ above.
+    CRAB_RS_OPNAME   = 152;
+    CRAB_RS_OPDONE   = 160;
+    CRAB_RS_OPTOTAL  = 168;
+    CRAB_RS_OPRATE   = 176;
+    CRAB_RS_OPETA    = 184;
+    # The overlay: the context menu and the rename/batch field.
+    CRAB_RS_MENUOPEN = 192;
+    CRAB_RS_MENUX    = 200;
+    CRAB_RS_MENUY    = 208;
+    CRAB_RS_MENUSEL  = 216;
+    CRAB_RS_EDITOPEN = 224;
+    CRAB_RS_EDITLBL  = 232;
+    # The preview column (M5). ⚠ The operator's WANT, not the outcome — `crab_preview_fit` decides
+    # whether the window can honour it, and the toggle stays on across a resize that cannot.
+    CRAB_RS_PVOPEN   = 240;
+    # ⚠ 0 x 0 MEANS "NOT AN IMAGE, OR crab COULD NOT READ ITS HEADER" — the preview then shows no
+    # dimensions line at all rather than a "0 x 0" that reads like a measurement.
+    CRAB_RS_PVW      = 248;
+    CRAB_RS_PVH      = 256;
+    CRAB_RS_SZ       = 264;
+}
+
+var crab_rs_rec = 0;
+
+# @public — the process-wide render-state record, allocated once.
+#
+# ⚠ ONE RECORD FOR THE PROCESS, like the sort scratch, the copy buffer and the operation record —
+# and for the same reason: `lib/alloc.cyr` is a bump allocator with no `free()`, so a record minted
+# per frame would be retained forever. crab renders one frame at a time.
+# ⚠ `crab_render` takes the record as a PARAMETER rather than calling this itself, so a caller that
+# genuinely needs two independent states (a test rendering two scenarios without them aliasing) can
+# allocate its own `CRAB_RS_SZ` bytes and pass that instead.
+fn crab_rs(): i64 {
+    if (crab_rs_rec == 0) {
+        crab_rs_rec = alloc(CRAB_RS_SZ);
+        if (crab_rs_rec != 0) { crab_rs_reset(crab_rs_rec); }
+    }
+    return crab_rs_rec;
+}
+
+# @public — clear a record to the state that means "two empty panes, nothing running, no overlay".
+#
+# ⛔ NOT A memset. Three fields default to **-1**, not 0 — see the ⛔ on `CrabRs`. This function is
+# the single place that knows which, and it is why a caller can no longer get it wrong.
+fn crab_rs_reset(rs): i64 {
+    if (rs == 0) { return 0; }
+    var i = 0;
+    while (i < CRAB_RS_SZ) { store64(rs + i, 0); i = i + 8; }
+    store64(rs + CRAB_RS_OPTOTAL, 0 - 1);
+    store64(rs + CRAB_RS_OPRATE, 0 - 1);
+    store64(rs + CRAB_RS_OPETA, 0 - 1);
+    return 0;
+}
+
+# @public — fill one pane's block. `which` is 0 = left, 1 = right.
+#
+# ⚠ `state` comes from `crab_pane_state(count, crab_listing_err())` and is captured by the caller AT
+# LISTING TIME. It is carried rather than recomputed for one reason: `crab_listing_err` reports the
+# LAST readdir, and crab lists two panes — so reading it at render time would give both panes the
+# right-hand pane's state. The capture has to happen next to the listing that produced it.
+# ⚠ `scroll` is a POINTER to a caller-owned i64 cell, not a value: `crab_render` writes the settled
+# offset back through it. The widget tree is rebuilt every frame, so the LIST that owns the offset is
+# destroyed and recreated each time and that cell is what carries it across.
+fn crab_rs_pane(rs, which, buf, n, path, sizes, mtimes, state, marks, sel, scroll): i64 {
+    if (rs == 0) { return 0; }
+    if (which < 0) { return 0; }
+    if (which > 1) { return 0; }
+    var p = rs + which * CRAB_RSP_SZ;
+    store64(p + CRAB_RSP_BUF, buf);
+    store64(p + CRAB_RSP_N, n);
+    store64(p + CRAB_RSP_PATH, path);
+    store64(p + CRAB_RSP_SIZES, sizes);
+    store64(p + CRAB_RSP_MTIMES, mtimes);
+    store64(p + CRAB_RSP_STATE, state);
+    store64(p + CRAB_RSP_MARKS, marks);
+    store64(p + CRAB_RSP_SEL, sel);
+    store64(p + CRAB_RSP_SCROLL, scroll);
+    return 1;
+}
+
+# @public — the transfer tray's state. `name == 0` or `""` means nothing is running, and the tray
+# then costs no pixels and no widgets at all.
+# ⚠ `total` / `rate` / `eta` are **-1 when they cannot be said yet**, never 0. See `crab_op_rate`.
+fn crab_rs_op(rs, name, done, total, rate, eta): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_OPNAME, name);
+    store64(rs + CRAB_RS_OPDONE, done);
+    store64(rs + CRAB_RS_OPTOTAL, total);
+    store64(rs + CRAB_RS_OPRATE, rate);
+    store64(rs + CRAB_RS_OPETA, eta);
+    return 1;
+}
+
+# @public — the operator's preview-column toggle. ⚠ SEPARATE FROM `crab_rs_chrome` on purpose: the
+# preview is a persistent view preference that survives every menu, rename and transfer, while the
+# chrome group is per-frame overlay state that is cleared and rebuilt. Folding a preference into a
+# group whose whole job is to be reset is how a toggle turns itself off.
+fn crab_rs_preview(rs, want): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_PVOPEN, want);
+    return 1;
+}
+
+# @public — the selected entry's pixel dimensions, for the preview's DIMENSIONS line.
+# ⛔ THE READ THAT PRODUCES THESE LIVES IN `app.cyr` (`crab_preview_dims`) BECAUSE IT NEEDS A
+# SYSCALL, and this file sits below that one. Carrying the answer in the record is what keeps the
+# render path from reaching up for it — the same rule the pane state and the tray follow.
+fn crab_rs_dims(rs, w, h): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_PVW, w);
+    store64(rs + CRAB_RS_PVH, h);
+    return 1;
+}
+
+# @public — which pane is active, plus the overlay: the context menu and the rename/batch field.
+fn crab_rs_chrome(rs, active, menuopen, menux, menuy, menusel, editopen, editlabel): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_ACTIVE, active);
+    store64(rs + CRAB_RS_MENUOPEN, menuopen);
+    store64(rs + CRAB_RS_MENUX, menux);
+    store64(rs + CRAB_RS_MENUY, menuy);
+    store64(rs + CRAB_RS_MENUSEL, menusel);
+    store64(rs + CRAB_RS_EDITOPEN, editopen);
+    store64(rs + CRAB_RS_EDITLBL, editlabel);
+    return 1;
+}
+
+# ⭐ EVERY VALUE THE FRAME NEEDS ARRIVES IN `rs` — see `CrabRs`. This file sits BELOW `app.cyr`, which
+# owns the listing, the operation record and the pane state, so the render path may not reach up for
+# any of them; carrying them in a record changes the vehicle, not that rule.
+# ⚠ THE BODY UNPACKS INTO THE OLD NAMES ON PURPOSE. Reading the record once at the top and then
+# leaving the 120 lines below untouched is what makes this a change of signature rather than a
+# rewrite of the renderer — and `load64` of a field is not free, so hoisting it out of the layout
+# code is also the faster shape.
+# ⚠ A NULL `rs` RENDERS NOTHING AND SAYS SO by returning 0, exactly as a null surface does. It is a
+# caller error, and a frame drawn from a zeroed record would look like an empty directory.
+fn crab_render(surf, font, rs): i64 {
     if (surf == 0) { return 0; }
+    if (rs == 0) { return 0; }
+    var lp0 = rs;
+    var rp0 = rs + CRAB_RSP_SZ;
+    var lbuf     = load64(lp0 + CRAB_RSP_BUF);
+    var ln       = load64(lp0 + CRAB_RSP_N);
+    var lpath    = load64(lp0 + CRAB_RSP_PATH);
+    var lsizes   = load64(lp0 + CRAB_RSP_SIZES);
+    var lmtimes  = load64(lp0 + CRAB_RSP_MTIMES);
+    var lstate   = load64(lp0 + CRAB_RSP_STATE);
+    var lmarks   = load64(lp0 + CRAB_RSP_MARKS);
+    var sel_l    = load64(lp0 + CRAB_RSP_SEL);
+    var scroll_l = load64(lp0 + CRAB_RSP_SCROLL);
+    var rbuf     = load64(rp0 + CRAB_RSP_BUF);
+    var rn       = load64(rp0 + CRAB_RSP_N);
+    var rpath    = load64(rp0 + CRAB_RSP_PATH);
+    var rsizes   = load64(rp0 + CRAB_RSP_SIZES);
+    var rmtimes  = load64(rp0 + CRAB_RSP_MTIMES);
+    var rstate   = load64(rp0 + CRAB_RSP_STATE);
+    var rmarks   = load64(rp0 + CRAB_RSP_MARKS);
+    var sel_r    = load64(rp0 + CRAB_RSP_SEL);
+    var scroll_r = load64(rp0 + CRAB_RSP_SCROLL);
+    var active_pane = load64(rs + CRAB_RS_ACTIVE);
+    var opname   = load64(rs + CRAB_RS_OPNAME);
+    var opdone   = load64(rs + CRAB_RS_OPDONE);
+    var optotal  = load64(rs + CRAB_RS_OPTOTAL);
+    var oprate   = load64(rs + CRAB_RS_OPRATE);
+    var opeta    = load64(rs + CRAB_RS_OPETA);
+    var menuopen = load64(rs + CRAB_RS_MENUOPEN);
+    var menux    = load64(rs + CRAB_RS_MENUX);
+    var menuy    = load64(rs + CRAB_RS_MENUY);
+    var menusel  = load64(rs + CRAB_RS_MENUSEL);
+    var editopen = load64(rs + CRAB_RS_EDITOPEN);
+    var editlabel = load64(rs + CRAB_RS_EDITLBL);
+    var pvwant   = load64(rs + CRAB_RS_PVOPEN);
+    var pvw      = load64(rs + CRAB_RS_PVW);
+    var pvh      = load64(rs + CRAB_RS_PVH);
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
     if (dh_frame_arena_get() == 0) { dh_frame_arena_set(crab_frame_arena()); }
@@ -1366,9 +1962,23 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     # `crab_hit` relies on: it walks parents comparing against `crab_llst` / `crab_rlst`, and its
     # loop condition is `node != 0`, so a 0 list can never match a live node. A pane rendered
     # off-screen instead would still hit-test, and clicks would land in a pane nobody can see.
-    var twopanes = crab_two_panes_fit(w);
-    var panew = w - CRAB_PANE_GAP;
-    if (twopanes == 1) { panew = (w - CRAB_PANE_GAP) / 2; }
+    # ⭐⭐ THE PREVIEW TAKES ITS WIDTH FIRST, AND THE PANES THEN DIVIDE WHAT IS LEFT — including the
+    # decision of whether there are two of them. That order is what makes the layout re-derivable
+    # rather than a special case: `crab_two_panes_fit` and `crab_cols_for_width` are asked about the
+    # width the panes actually get, not about the window, so no rule needs a "unless the preview is
+    # open" clause. ⛔ It also means opening the preview can legitimately collapse two panes into
+    # one, which is the same ratified rule answering a narrower window — not a second behaviour.
+    var pvon = crab_preview_fit(w, pvwant);
+    var availw = w;
+    if (pvon == 1) { availw = w - CRAB_PV_W; }
+    var twopanes = crab_two_panes_fit(availw);
+    var panew = availw - CRAB_PANE_GAP;
+    if (twopanes == 1) { panew = (availw - CRAB_PANE_GAP) / 2; }
+    # ⚠ HOISTED ABOVE THE PANE BUILD (M5) so the preview column can read the same four arrays the
+    # status line does. They describe the ACTIVE pane, which is the one whose selection both surfaces
+    # are about — two surfaces answering "what is selected" from different sources is how they drift.
+    var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
+    if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
     var llst = 0;
@@ -1386,10 +1996,12 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
             rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1, rmarks);
         }
     }
+    # ⭐ THE PREVIEW IS THE LAST CHILD OF `panes`, so it sits to the RIGHT of whichever panes were
+    # built — including in solo mode, where the one pane and the preview split the window between
+    # them. ⚠ It is a sibling of the panes rather than a child of one: it describes the ACTIVE
+    # pane's selection and the active pane changes, so parenting it to a pane would make it move.
+    if (pvon == 1) { crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh); }
     dh_widget_add_child(root, panes);
-
-    var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
-    if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
     if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal, oprate, opeta); }
     var status = dh_widget_new(LABEL);

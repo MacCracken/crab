@@ -55,6 +55,10 @@ fn rt_row_has(sds, y, x0, x1, col): i64 {
 }
 
 fn main(): i64 {
+    # ⭐ ONE RENDER-STATE RECORD FOR THE WHOLE HARNESS, re-`reset` and refilled before each
+    # render below — the record is a carrier, not a scenario, so reusing it is correct and it keeps
+    # every scenario's setup visible at its own call site.
+    var rs = crab_rs();
     alloc_init();
     var lbuf = alloc(16 * 64); var rbuf = alloc(16 * 64);
     var a0 = "aethersafha"; rt_entry(lbuf, 0, a0, 0);
@@ -87,7 +91,10 @@ fn main(): i64 {
     # asserts on that, and then dumps `sds` at the very end, AFTER `sds2` exists. One shared target
     # would make the dump show the wrong picture, silently.
     var surf1 = dh_surface_new(w, h);
-    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmtimes, CRAB_PANE_OK, 0, 1, sl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, sr);
+    var sds = crab_render(surf1, 0, rs);
 
     # ---- the ACTIVE pane's selection is accented, the inactive pane's is muted --------------
     # ⛔ THE ONE QUESTION A TWO-PANE FILE MANAGER MUST ANSWER ON SCREEN: which pane do my arrow keys
@@ -153,7 +160,10 @@ fn main(): i64 {
     var s2 = alloc(8); store64(s2, 0);
     var s3 = alloc(8); store64(s3, 0);
     var surf2 = dh_surface_new(w, h);
-    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, big, 12, lp, bsz, bmt, CRAB_PANE_OK, 0, 11, s2);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, s3);
+    var sds2 = crab_render(surf2, 0, rs);
     # ⚠ AND THE TWO REALLY ARE DISTINCT — the guard on the paragraph above. If a future change made
     # `crab_render` share one target again, every assertion below would silently be reading `sds2`
     # while the checks above had already passed against a picture that no longer exists.
@@ -188,8 +198,10 @@ fn main(): i64 {
     var surf3 = dh_surface_new(w, h);
     var e0 = alloc(CRAB_REC_SZ);
     var esz = alloc(8); var emt = alloc(8);
-    var sds3 = crab_render(surf3, 0, 0, 0, 0, e0, 0, lp, esz, emt, rbuf, 3, rp, rsizes, rmtimes,
-      s4, s5, CRAB_PANE_GONE, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, e0, 0, lp, esz, emt, CRAB_PANE_GONE, 0, 0, s4);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, s5);
+    var sds3 = crab_render(surf3, 0, rs);
     check(sds3 == sds, 0);
     check(sds3 == sds2, 0);
     # The notice sits in the first row slot: below the 28px path header and the 18px column header.
@@ -221,8 +233,10 @@ fn main(): i64 {
     var ssl = alloc(8); store64(ssl, 0);
     var ssr = alloc(8); store64(ssr, 0);
     var ssurf = dh_surface_new(380, 220);
-    var ssds = crab_render(ssurf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
-      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmtimes, CRAB_PANE_OK, 0, 1, ssl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, ssr);
+    var ssds = crab_render(ssurf, 0, rs);
     check(ssds != 0, 1);
     check(crab_llst != 0, 1);                # active_pane 0 -> the LEFT pane is the one drawn
     check(crab_rlst, 0);                     # ...and the right pane was never built
@@ -234,10 +248,61 @@ fn main(): i64 {
     check(load64(shb), 0);                   # pane 0 — never the pane that was not drawn
     # ⭐ AND THE OTHER HALF OF THE SWITCH: active_pane 1 draws B and leaves A unbuilt.
     var ssurf2 = dh_surface_new(380, 220);
-    crab_render(ssurf2, 0, 1, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
-      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmtimes, CRAB_PANE_OK, 0, 1, ssl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 1, 0, 0, 0, 0, 0, "");
+    crab_render(ssurf2, 0, rs);
     check(crab_rlst != 0, 1);
     check(crab_llst, 0);
+
+    # ---- M5: the preview column occupies its own band, and refuses when it cannot ----------
+    # ⛔ A LAYOUT ASSERTION, NOT A COLOUR ONE. crab names no colour (ADR 0001) — it reads
+    # `dh_theme_panel()` and asks whether those pixels are WHERE the column should be. Asserting a
+    # literal would be crab claiming a palette it does not own, and the check would break the next
+    # time the compositor's theme moved rather than the next time crab's layout did.
+    # ⚠ THE PROBE IS 760 PX WIDE so the preview fits alongside two panes: `crab_two_panes_fit` needs
+    # 600 px of pane area and the column takes 153, so two panes plus a preview need 753.
+    var pvl = alloc(8); store64(pvl, 0);
+    var pvr2 = alloc(8); store64(pvr2, 0);
+    var pvsurf = dh_surface_new(760, 240);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmtimes, CRAB_PANE_OK, 0, 0, pvl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, pvr2);
+    crab_rs_preview(rs, 1);
+    var pvds = crab_render(pvsurf, 0, rs);
+    check(pvds != 0, 1);
+    # ⭐ THE COLUMN IS THE RIGHTMOST BAND. Its header is a panel-coloured bar CRAB_PV_HDR_H tall,
+    # starting CRAB_PV_W from the right edge — so panel pixels must appear there.
+    var pvpanel = dh_theme_panel();
+    check(rt_band_has(pvds, 2, CRAB_PV_HDR_H - 2, 760 - CRAB_PV_W + 4, 758, pvpanel), 1);
+    # ⛔ AND THE PANES REALLY GAVE THE WIDTH UP, which is the half a "the column drew" check misses.
+    # `crab_hit` walks the laid-out tree, so a click inside the preview band must resolve to NO pane
+    # — if the panes had kept their full width the click would land in the right-hand one and the
+    # column would merely be painted over a pane that still owns those pixels.
+    var pvhb = alloc(16);
+    check(crab_hit(760 - 40, 80, pvhb), 0);
+    # ...while a click just LEFT of the column is still inside a pane.
+    check(crab_hit(760 - CRAB_PV_W - 20, 80, pvhb), 1);
+    # ⚠ TWO PANES SURVIVE AT THIS WIDTH — 760 - 153 = 607, which clears the 600 px two-pane floor.
+    check(crab_llst != 0, 1);
+    check(crab_rlst != 0, 1);
+
+    # ⭐ THE REFUSAL, at a window too narrow to honour the toggle. The operator's WANT is still 1;
+    # `crab_preview_fit` is what says no, and nothing of the column may appear.
+    var nsurf2 = dh_surface_new(280, 220);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lbuf, 3, lp, lsizes, lmtimes, CRAB_PANE_OK, 0, 0, pvl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, pvr2);
+    crab_rs_preview(rs, 1);
+    var nds = crab_render(nsurf2, 0, rs);
+    check(nds != 0, 1);
+    # ⛔ THE WHOLE WIDTH STILL BELONGS TO THE PANE — the click that would have hit the column hits
+    # the solo pane instead. This is the assertion that a refused preview costs no pixels; a check
+    # for "no panel colour on the right" would find the PANE's own panel background and pass
+    # vacuously, which is the same trap `on-accent` sets on MUDRA dark.
+    check(crab_hit(280 - 10, 80, pvhb), 1);
+    check(load64(pvhb), 0);
 
     var pix = sd_surface_pixels(sds);
     var path = "build/crab-render.bin";
@@ -245,6 +310,27 @@ fn main(): i64 {
     if (fd >= 0) { syscall(1, fd, pix, w * h * 4); syscall(3, fd); }
     var ok = "crab render_test: dumped 640x220 BGRA to build/crab-render.bin\n";
     syscall(1, 1, ok, strlen(ok));
+    # ⛔ REPORT THE COUNT, NOT JUST THE FAILURES. This harness returned `g_fails` and printed only the
+    # dump line, so it exited **0** whether it ran 26 checks or none — and the handoff has quoted a
+    # check count for three cuts that nothing in the program actually printed. A refactor that
+    # dropped an assertion, or an early `return` that skipped a block, was indistinguishable from a
+    # clean run. Now the number is on stdout and a drop is visible without reading the source.
+    # ⚠ This is the same discipline as the mutation rule: an assertion you cannot observe FAILING —
+    # or, here, cannot observe RUNNING — is not evidence.
+    var cbuf = alloc(64);
+    var cl = 0;
+    var tag = "crab render_test: ";
+    while (load8(tag + cl) != 0) { store8(cbuf + cl, load8(tag + cl)); cl = cl + 1; }
+    cl = cl + crab_u2s(cbuf + cl, g_n);
+    var mid = " checks, ";
+    var mi = 0;
+    while (load8(mid + mi) != 0) { store8(cbuf + cl, load8(mid + mi)); cl = cl + 1; mi = mi + 1; }
+    cl = cl + crab_u2s(cbuf + cl, g_fails);
+    var tail = " failed\n";
+    var ti = 0;
+    while (load8(tail + ti) != 0) { store8(cbuf + cl, load8(tail + ti)); cl = cl + 1; ti = ti + 1; }
+    store8(cbuf + cl, 0);
+    syscall(1, 1, cbuf, cl);
     return g_fails;
 }
 

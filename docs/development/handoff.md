@@ -1,29 +1,79 @@
-# Handoff — **0.7.0 cut. The five M3 defects are CLOSED and M4's first slice is in.**
+# Handoff — **M5 is started. The two ungated items are in, and thumbnails now have a price tag.**
 
-> ⭐ **Updated 2026-08-30**, after the iron burn of that date and the defect/M4 work it prompted.
-> The five defects below are **fixed**; the section is kept for its reasoning and for two
-> corrections to the review that found them.
+> ⭐ **Updated 2026-08-31**, after M5's first slice. Everything below the *Where things stand* table
+> is kept from the 0.7.5 handoff because the reasoning is still the reasoning — but **every number
+> in it is 0.7.5's or older**. Re-derive before quoting.
 >
-> ⭐⭐ **THE HEADLINE, IF YOU READ NOTHING ELSE: M4's stated gate does not exist.** The roadmap read
-> *"Copy · move · rename · delete · mkdir · open. **Gate: agnos** write syscalls."* Every arm has
-> been real and mount-routed since agnos **1.41.3**, and crab's **already-pinned cyrius 6.5.35**
-> vendors a wrapper for each. ⛔ agnos's own userland-ABI **table** still says otherwise — it is
-> stale, and its dispatcher is not. **Verify against the dispatcher, never the table.**
+> ⛔⛔ **THE HEADLINE, IF YOU READ NOTHING ELSE: BURN ON IRON. It is the oldest and largest untested
+> stretch in this project's history.** The last iron run was **2026-08-30 against the 0.7.0 tree**.
+> Everything since — the whole write layer, the tray, recursion, the menu, the edit field, and now a
+> render-signature refactor touching five sites in the agnos-only event loop plus a file read on the
+> selection path — has run only on the host and under QEMU. **Both defects crab has ever shipped were
+> iron-only.** agnos has moved 1.56.53 → 1.56.55 underneath, including a rewrite of `is_user_range`.
 >
-> ⭐ **The 2026-08-30 burn was crab's third on iron and the first for the M3 tree.** It proved:
-> launcher → placed channel → setu surface → **`#92` op 0x01 GPU shader blend** → key forwarding →
-> navigation → clean exit, with **zero dropped input** and a listing of `/` cross-checked at
-> **122 entries** against the shell's own `ls -a`. It did **not** exercise any of M2 — no resize, no
-> pointer, no scroll, no sort cycle — and no MODIFIED column, because the window stayed 380x220 the
-> whole run.
-> ⚠ **The 5 fps is aethersafha's, not crab's**: of a 199,652 µs mean frame, present is 194,876 µs
-> and crab's render is **217 µs** (0.11 %).
->
-> ⭐ **The burned binary IS reproducible, contrary to what this file used to imply.** Built with a
-> clean 6.5.35 from the released tarball, `build/crab_agnos` comes out **byte-identical** to the
-> staged artifact at **406,992 B**, and the host build reproduces **398,504 B** exactly. Earlier
-> measurements of 398,520 / 407,040 were the *contaminated local snapshot*, not a source difference.
-> ⇒ **Build through the released tarball, not `~/.cyrius`** — see *Verifying anything in this stack*.
+> ⛔⛔ **AND THE SECOND HEADLINE: THUMBNAILS ARE NOT GATED, THEY ARE PRICED — AND THE PRICE IS
+> +117 % OF THE BINARY.** The roadmap's thumbnail line has now been wrong twice. First it said *"no
+> image decoder exists"* (chitra 1.0.0 does). Then the correction implied that made it free.
+> **Measured 2026-08-31**: declaring `chitra 1.0.0` takes the host binary **453,304 → 981,992 B
+> (+116.6 %)** and agnos **474,944 → 1,001,520 (+110.9 %)**, and `CYRIUS_DCE=1` reclaims **nothing**
+> — it NOPs, and the byte count does not move. **~399 KB is `sankoch`**, the RFC 1950/1951 inflate
+> leaf PNG's IDAT needs, pulled in transitively; chitra's own fold is only ~113 KB.
+> ⇒ **A gate can be false in both directions.** This is an **operator ruling**, not a technical
+> block. Precedent: kashi's library face was refused at +50 %.
+> ⭐ **It blocks nothing but the pixels.** The preview pane, the format sniffing, the decode budget's
+> shape and the cache policy all shipped without paying it, and they are the common prefix of both
+> futures — so the ruling can be made late.
+
+## What landed (unreleased, on top of 0.7.5)
+
+⚠ **`VERSION` is untouched, nothing is committed or tagged** — the operator drives all of that.
+Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md) under `[Unreleased]`.
+
+| | |
+|---|---|
+| `crab_render` | **32 positional parameters → one record.** Filled by `crab_rs_pane` (11 params, indexed by pane), `_op`, `_chrome`, `_preview`, `_dims`. ⛔ The point is not brevity: at 32 `i64` arguments across 23 call sites, a miscounted comma shifted everything after it and still compiled. And `crab_rs_reset` now owns the three **`-1` = cannot be said yet** defaults that every one of those sites used to spell by hand — `0` there would make the tray render a real `0 B/s`. |
+| Preview column | `p` toggles it. NAME · KIND · SIZE · MODIFIED · DIMENSIONS. ⛔ Width rule **derived** from crab's own column rule (*it may not cost a pane its SIZE column* → 303 px), not lifted from the canvas. Refuses out loud below that, via `crab_set_notice`. |
+| Image dimensions | `crab_img_dims` — PNG/JPEG/GIF/BMP from header bytes, **no decoder, no dependency**. Verified against real files against `identify`: 137×42, 1×1, 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real 384×288 JPEG whose SOF sits past an APP0 block. |
+| Fuzz harness | ✅ **Deferral #12 CLOSED.** 60,000 deterministic rounds. It caught a real segfault in `crab_img_dims` the day it was written. |
+| Leak fixed | ⛔ `crab_overlay` used `alloc(32)` not `dh_falloc(32)` on both the menu and sheet branches — **32 B per frame, shipped in 0.7.5**, invisible because the zero-allocation gate never opened an overlay. |
+| Numbers | tests **757 → 925/0** · `render_test` **26 → 35** checks · coverage **86 % → 87 %** (161/183) · host **466,056 B** · `--agnos` **491,856 B** · fmt clean · both targets build |
+
+### ⛔⛔ THE FOUR LESSONS FROM THIS SLICE, EACH CHEAP AND EACH EXPENSIVE TO RE-LEARN
+
+**1. A gate that covers one state proves one state.** crab's zero-allocation assertion rendered
+twenty frames with **no overlay open**, so `crab_overlay`'s two `alloc(32)` calls leaked from 0.7.5
+until now with a green suite. The loop now runs with the menu open, the sheet open and the preview
+open, plus a **non-vacuity arm** proving those branches were really entered. ⇒ **A new render-path
+branch without an arm here is a new blind spot, not a covered feature.**
+
+**2. A fuzzer must be shown to catch a bug you plant on purpose.** The new harness's own first draft
+was vacuous: an LCG's low bits have period 2^k, so its format selector returned **only two of four
+values across 20,000 rounds** — PNG and JPEG were never seeded and the JPEG walk ran **zero** times
+while it printed `fuzz: ok`. Nothing but a planted bug would have said so. Sample the high bits.
+
+**3. A bounds check proves an index is in range. It says nothing about which buffer.**
+`crab_jpeg_dims` dereferenced its cursor as an **absolute address** (`load8(p)` for `load8(buf + p)`)
+and segfaulted on the first marker — while every comparison of `p` against `len` was correct. That
+class is invisible to a bounds review and instant to a fuzzer.
+
+**4. `render_test` is where four of seven mutations were caught, and CI runs none of it.**
+*Deferral #14* stopped being a tidiness item: a swapped pair of pane blocks, and a preview column
+painted over panes that never gave up their width, both ship through CI green today. It at least
+prints its check count now — it used to exit **0** whether it ran 26 checks or none.
+
+### ⚠ Two things found and deliberately NOT changed
+
+- ⛔ **`crab_fs_open_w` diverges between targets, and the shipping target is the permissive one.**
+  Host: `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, returns `EEXIST`. agnos:
+  `AO_WRONLY|AO_CREAT|AO_TRUNC`, **no `AO_EXCL`** — it truncates. So every host assertion about
+  "crab will not overwrite" is a claim about the host only. Pinned by a host assertion; changing
+  write semantics is an operator call and a recursive copy is what would notice.
+- ⚠ **The preview's dimension read is on the selection path, not the idle tick.** Memoised on
+  (directory, name) and capped at 64 KiB, so it costs one open/read/close per newly-selected image
+  and nothing otherwise — but arrowing fast through a directory of large JPEGs still pays per entry.
+  The idle-tick stepping thumbnails would need is the same machinery that would move it.
+
+---
 
 > **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated across M2 and M3; cut at 0.7.0 on 2026-08-28.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).

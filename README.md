@@ -79,12 +79,16 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
 
 ## Status
 
-**Shipping, and read-only.**
+**Shipping. It browses, it writes, and it previews.**
 
-⛔ **This section said "Scaffold." until 2026-08-26, and listed the dual-pane GUI under *Planned
-scope* — both false since 0.2.0 (2026-07-10), fifteen releases earlier.** It is called out rather
-than quietly overwritten because the README is the first thing a newcomer reads, and a status line
-that under-claims by fifteen releases is as misleading as one that over-claims.
+⛔⛔ **THIS SECTION HAS NOW BEEN WRONG IN BOTH DIRECTIONS, AND BOTH TIMES FOR THE SAME REASON: it
+was written once, correctly, and never re-read at a cut.** It said **"Scaffold."** until 2026-08-26 —
+false since 0.2.0, fifteen releases earlier. It was then rewritten to **"Shipping, and read-only"**,
+which was true that day and was falsified by M4 five releases later, while still quoting a retired
+256-entry cap and a stat figure the cap bump had quadrupled. Both are called out rather than quietly
+overwritten, because a status line that under-claims misleads exactly as much as one that over-claims.
+⇒ **Re-read this section at every release.** Nothing gates it — the same absence that let
+`state.md` rot twice.
 
 ⭐ **Version, binary sizes, test counts and dependency versions are deliberately NOT here** — inlined
 state rots, and this repo has watched it happen twice. They live in
@@ -94,18 +98,19 @@ versus merely built, the open items, and the hazards.
 
 **What works today**: two panes over real `readdir` + `stat` — the stat sweep is **deferred off the
 keystroke path** and fills in from the idle loop, so descending costs no syscalls (it cost ~1.1 ms per
-entry, ~280 ms at the 256-entry cap, measured under QEMU); keyboard navigation — switch pane,
+entry under QEMU, so ~1.1 s at the 1024-entry cap it would otherwise pay on a keypress); keyboard navigation — switch pane,
 move the selection, Enter to descend, Backspace to ascend — on a scrolling `dh_list`, plus **pointer
 input, a mouse wheel, held-key repeat and compositor resize** (M2). `s` cycles four **sort** modes
 (name · size · modified · kind, directories always first) across both panes, and the selection
 **follows** you: Backspace lands on the directory you just left, and re-sorting keeps you on the same
-entry. Panes start at `/bin` and `/` unless you name them: `crab [LEFT] [RIGHT]`. Each row is a
+entry. Panes start at `/bin` and `/` unless you name them: `crab [LEFT] [RIGHT]`. Rows are
 **real columns with headers** — NAME · SIZE · MODIFIED — sharing one width spec so the header and
 every row line up. NAME is the **remainder** column, so it grows with the pane; a truncated name is
-still marked with `~`. ⚠ **Columns that do not fit are dropped, not squeezed**: at the default
-380x220 a pane is ~187 px, which cannot hold a `2026-08-28 11:04` date and a usable filename, so a
-wider window earns more columns. The **status line** carries the active selection's name, size and
-modified date. crab connects to the
+still marked with `~`. ⚠ **Columns that do not fit are dropped, not squeezed**, and below 600 px the
+second pane leaves entirely in favour of an A/B switcher — both thresholds derived from what a pane
+can honestly show rather than copied from a mockup. The **status line** carries the active
+selection's name, size and modified date. ⛔ **Dotfiles are never hidden**, deliberately: hiding them
+is only safe where there is a way to reveal them, and crab has no such affordance. crab connects to the
 `aethersafha` compositor through `setu` and
 presents on a real agnos kernel, observed under QEMU at `-smp 4`.
 
@@ -113,15 +118,34 @@ presents on a real agnos kernel, observed under QEMU at `-smp 4`.
 window holding one of only sixteen system-wide GPU buffer slots, and a directory listing that dropped
 82 of 114 entries in silence. QEMU is not a control for timing- or pressure-dependent behaviour.
 
+**Writing and acting on files** (M4): copy, move, **recursive** copy and delete, rename, batch
+rename, mkdir, and open. Multi-select with Space, a context menu that is a *discovery* surface rather
+than a second set of verbs — every entry maps to a key binding that already exists — and a transfer
+tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
+Esc cancels them**, so a recursive copy never freezes the window.
+
+**The preview column** (M5): `p` opens a right-hand inspector for the selected entry — NAME · KIND ·
+SIZE · MODIFIED · DIMENSIONS. ⭐ Image dimensions are read straight out of the file header for PNG,
+JPEG, GIF and BMP, **with no image decoder and no new dependency**; the read is capped and memoised
+so it never lands on the arrow-key path. ⚠ **The width rule is derived, not drawn**: the preview may
+not cost a pane its SIZE column, so it needs a window of 303 px and refuses out loud below that.
+
 **What does not**:
 
-- **crab is read-only.** No copy, move, rename, delete or mkdir. Enter on a *file* does nothing at
-  all, silently. (Roadmap M4.)
+- **No thumbnails — and the obstacle is size, not capability.** `chitra` decodes PNG/JPEG/GIF/BMP and
+  is released, but declaring it more than **doubles** crab's binary (+117 %), most of it the `zlib`
+  inflate leaf PNG requires. That is a deliberate open decision, recorded with its measurements in
+  [`docs/development/roadmap.md`](docs/development/roadmap.md). The preview shows an image's size in
+  pixels; it does not yet show the image.
+- **No grid, columns or gallery view, and no sidebar.** Genuinely gated on `dhancha` widgets that do
+  not exist yet. (Roadmap M5–M6.)
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
-  but crab now says by how much (`showing 1024 of 1200`), because agnos 1.56.50's resumable
-  `#101 readdir_at` lets it keep counting past its own buffer.
+  but crab says by how much (`showing 1024 of 1200`), because agnos's resumable `readdir_at` lets it
+  keep counting past its own buffer.
+- **Text is a bitmap font, not proportional.** crab draws with `kashi`'s CP437 8x16 glyphs; the
+  `rekha` TrueType path is not wired. (Roadmap M5.)
 - **None of the AI arc exists.** No index, no tags, no semantic find, no dedup — and `cyrius.cyml`
   declares no daimon dependency. (Roadmap M7–M8.)
 
