@@ -199,10 +199,26 @@ fn crab_col_chars(px): i64 {
 # that is not cosmetic: the operator selects, descends and acts on rows.
 # ⚠ '~' (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph.
 # ⚠ The width is now the COLUMN's, not a hardcoded 13 — that constant was the thing *#32* retired.
+# ⛔⛔ THE SCAN IS BOUNDED, AND `name` IS KERNEL DATA. `name` points into a readdir record the kernel
+# filled — untrusted by crab's own rule, and the exact data whose unbounded copies caused the 0.5.0
+# P-1 that made `src/path.cyr` a file. This loop used to be a bare `while (load8(name + n) != 0)`.
+#
+# ⚠ IT WAS SAFE ONLY BY A COINCIDENCE THAT WAS ABOUT TO EXPIRE, WHICH IS WHY IT IS FIXED NOW RATHER
+# THAN WHEN IT BITES. Two things happened to hold it up: the kernel NUL-terminates at <= 62 bytes,
+# and `dst` was reached through a `chars` small enough to clamp any runaway. The second guard is
+# GONE above a ~1,860 px window — `chars` is width-derived, and at a full-screen 2560 px it is 118,
+# well past the cell — leaving the kernel's own good behaviour as the only thing between a
+# misformed record and a heap write. crab already accepts that resize (`crab_resize_wanted`), so one
+# F5 on the next burn reaches it. Defence in depth means TWO guards, and this restores the missing one.
+#
+# ⚠ THE BOUND IS `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, AND THE ONE-BYTE DIFFERENCE IS THE POINT.
+# The name region of a record is bytes [0, CRAB_REC_TYPE); byte 63 is the TYPE. Scanning to
+# `CRAB_NAME_MAX` (64) would read that byte and render it as a character on a record the kernel
+# failed to terminate. This reads only what is a name.
 fn crab_name_cell(dst, name, chars): i64 {
     if (chars <= 0) { store8(dst, 0); return 0; }
     var n = 0;
-    while (load8(name + n) != 0) { n = n + 1; }
+    while ((n < CRAB_REC_TYPE) && (load8(name + n) != 0)) { n = n + 1; }
     if (n <= chars) {
         var i = 0;
         while (i < n) { store8(dst + i, load8(name + i)); i = i + 1; }
@@ -230,7 +246,13 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime): i64 {
 
     # NAME — the remainder column. A directory keeps its trailing '/', which is why the marker is
     # appended to the truncated text rather than being a column of its own.
-    var nm = dh_falloc(80);
+    # ⛔ DERIVED, NOT `80`. This is the destination `crab_name_cell` writes into, and the literal was
+    # a second, unstated contract with that function's bound — the kind of pairing that silently
+    # stops holding when one side moves. The worst case is now arithmetic rather than a guess:
+    # `crab_name_cell` writes at most `CRAB_REC_TYPE` name bytes plus its NUL, and a directory then
+    # takes one more byte for the '/' and re-terminates. That is `CRAB_REC_TYPE + 2` bytes = 65;
+    # the `+ 3` keeps a byte of slack so a future marker is not an overflow.
+    var nm = dh_falloc(CRAB_REC_TYPE + 3);
     var nchars = namew;
     if (is_dir != 0) { nchars = nchars - 1; }          # leave room for the '/'
     var used = crab_name_cell(nm, name, nchars);
@@ -261,9 +283,62 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime): i64 {
 # ⭐⭐ THE PORT (0.4.10): this used to be a `BOX_V` of at most `CRAB_ROWS_CAP` rows, and the entries
 # past row 7 were simply NOT DRAWN — a directory's 8th file did not exist as far as the operator
 # could tell. Every row is now added and the LIST scrolls, so the cap and the truncation are gone.
+# ⭐⭐ WHY A PANE WITH NO ROWS NEEDS A STATE AT ALL (M4). A pane showing nothing had exactly one
+# appearance — blank — and it meant four unrelated things: the directory is empty, the directory is
+# gone, the path is not a directory, or the read failed. Those need different reactions from the
+# operator, and blank asks them to guess. This is the M4 item the 2026-08-30 iron burn actually
+# produced evidence for: `/` held two entries (`/sl_s`, `/lp`) the kernel could list but not stat,
+# and every layer above reported the failure as an absence.
+#
+# ⛔⛔ THERE IS NO "PERMISSION DENIED" STATE, AND INVENTING ONE WOULD BE A LIE. The roadmap's M4 line
+# reads "empty and permission-denied pane states", written against POSIX habits. agnos is
+# single-user and always-root: `ext2_readdir_at_sys` has no `EACCES` arm and cannot produce one, and
+# `getuid`#15 is a literal `return 0`. The burn's "operation not permitted" lines came from kriya's
+# `rm`/`ls` failing to *stat* a broken symlink, not from any denial crab can observe.
+# ⇒ These are the states the kernel can actually report. If agnos ever grows a credential model, a
+# DENIED state belongs here and not before.
+#
+# ⚠ THE CODES ARE `#101`'s, TRANSCRIBED FROM ITS ABI ROW, and `#81` cannot express most of them —
+# which is why the fallback path keeps `#101`'s classification when it made one. See
+# `crab_readdir_into`.
+enum CrabPaneState {
+    CRAB_PANE_OK     = 0;    # rows to draw — no notice
+    CRAB_PANE_EMPTY  = 1;    # the read succeeded and the directory holds nothing
+    CRAB_PANE_GONE   = 2;    # -2: the path does not resolve
+    CRAB_PANE_NOTDIR = 3;    # -4: it resolves, but it is a file
+    CRAB_PANE_UNREAD = 4;    # -1 / -5 / anything else: bad pointer, not ext2, bad cursor, I/O
+}
+
+# @public — classify a finished listing. `err` is 0 or the kernel's negative code.
+#
+# ⚠ COUNT WINS OVER ERROR, DELIBERATELY. A walk that returned entries and *then* failed has real
+# rows to show, and replacing them with a notice would hide data crab already holds. The error only
+# decides the notice when there is nothing to draw.
+fn crab_pane_state(count, err): i64 {
+    if (count > 0) { return CRAB_PANE_OK; }
+    if (err == 0) { return CRAB_PANE_EMPTY; }
+    if (err == (0 - 2)) { return CRAB_PANE_GONE; }
+    if (err == (0 - 4)) { return CRAB_PANE_NOTDIR; }
+    return CRAB_PANE_UNREAD;
+}
+
+# @public — the line an empty pane shows. Never 0; `CRAB_PANE_OK` returns the empty string so a
+# caller that draws it unconditionally renders nothing rather than dereferencing.
+#
+# ⚠ PLAIN LANGUAGE, NOT ERRNO. "-2" tells the operator nothing they can act on; "this folder no
+# longer exists" tells them the pane is stale and Backspace is the way out. The numeric code still
+# reaches the console through `crab_readdir_into`, where a developer is the one reading.
+fn crab_pane_state_label(state): i64 {
+    if (state == CRAB_PANE_EMPTY)  { return "This folder is empty"; }
+    if (state == CRAB_PANE_GONE)   { return "This folder no longer exists"; }
+    if (state == CRAB_PANE_NOTDIR) { return "Not a folder"; }
+    if (state == CRAB_PANE_UNREAD) { return "This folder could not be read"; }
+    return "";
+}
+
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
-fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active): i64 {
+fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -316,6 +391,24 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active): 
         crab_row(lst, spec, ncols, namechars, rec, is_dir, sz, mt);
         i = i + 1;
     }
+    # ⭐ THE EMPTY-PANE NOTICE (M4). Added as a row so it inherits the list's clipping and scroll
+    # geometry rather than floating over them, and so a pane that later gains entries needs no
+    # different layout path.
+    # ⛔ IT IS NOT SELECTABLE, AND THAT MATTERS. `dh_list_select` is skipped below whenever
+    # `count == 0`, so the notice can never be the selected row — a highlighted "This folder is
+    # empty" reads as a file with that name, and Enter on it would descend into nothing.
+    # ⚠ Drawn through the SPEC's first cell like every other row, so it starts at the NAME column's
+    # left edge and lines up with what the operator was reading a moment ago.
+    if (count == 0) {
+        var note = crab_pane_state_label(state);
+        if (load8(note) != 0) {
+            var nrow = dh_table_row(spec);
+            dh_widget_set_bg(nrow, 0 - 1);
+            dh_widget_set_pref(nrow, 0, 26);
+            dh_table_cell(nrow, spec, 0, note);
+            dh_list_add(lst, nrow);
+        }
+    }
     # ⛔ THE SELECTION IS SET, NOT PAINTED. dhancha draws it — accented when this list holds focus,
     # muted when it does not — which is why `active` no longer reaches the rows at all.
     if (count > 0) { dh_list_select(lst, sel); }
@@ -327,6 +420,25 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active): 
 
 # Build the status-line text (returned as a cstring) for the active pane's selected
 # entry: "<name>   <size|<dir>>   <mtime>". Empty pane -> a single space.
+# ⭐⭐ THE TRANSIENT NOTICE (M4) — what the status line says INSTEAD of the selected row, when crab
+# has something to tell the operator that the row cannot.
+#
+# ⛔ IT EXISTS BECAUSE A DESTRUCTIVE ACTION NEEDS A VISIBLE PROMPT AND A VISIBLE RESULT. crab's other
+# diagnostics go to the console, and on iron that console is shared unserialised by three processes
+# and is not where the operator is looking — the 2026-08-30 burn has crab's own exit line spliced
+# into the middle of aethersafha's frame banner. A "delete this?" that only the console asks is a
+# delete with no confirmation at all.
+# ⚠ SET IT TO A LITERAL OR TO SOMETHING THAT OUTLIVES THE FRAME. `dh_widget_set_text` stores the
+# pointer without copying, so a notice built in `dh_falloc` scratch would be freed by the next
+# `dh_frame_begin` while the widget still pointed at it. Every current caller passes a literal.
+# ⚠ CLEARED BY THE NEXT KEYPRESS, not by a timer. crab has no clock in the render path and a notice
+# that lingers past the action it describes is worse than none.
+var crab_notice = 0;
+
+fn crab_set_notice(s): i64 { crab_notice = s; return 0; }
+fn crab_clear_notice(): i64 { crab_notice = 0; return 0; }
+fn crab_get_notice(): i64 { return crab_notice; }
+
 fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
     var out = dh_falloc(96);    # ⛔ the status LABEL points at this — same lifetime
     if (count <= 0) { store8(out, 32); store8(out + 1, 0); return out; }
@@ -381,9 +493,38 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 # KEEPS the chain, so the render loop converges on its high-water mark and then costs the global
 # allocator nothing at all. A fixed arena would have to guess a capacity, and guessing low means
 # `dh_falloc` silently spilling back to the global heap — the leak, quietly restored.
-# ⚠ 256 KiB sizes the COMMON case, not the worst. Measured: it absorbs a full frame at the
-# `CRAB_MAX_ENTRIES` ceiling (256 entries per pane) without ever chaining. GROW covers anything past
-# that with one extra chunk, reused forever.
+# ⚠ 256 KiB SIZES THE COMMON CASE AND NOTHING MORE, AND THE CHAIN IS NOT AN EDGE CASE ANY MORE.
+# This comment used to read "it absorbs a full frame at the `CRAB_MAX_ENTRIES` ceiling (256 entries
+# per pane) without ever chaining. GROW covers anything past that with ONE extra chunk." Both halves
+# were true when written and neither survived, because TWO things moved under it and neither
+# re-derived the number: M3 *#02* took the cap 256 -> 1024, and M3 *#32* took a row from one widget
+# to 1 + `ncols` (a row widget plus a cell widget per column, at `DH_WIDGET_SIZE` = 256 B each).
+#
+# ⭐ RE-MEASURED 2026-08-30 with `arena_capacity_total`, per rendered frame, both panes:
+#
+#   | window    | entries | cols | chain total | chunks |
+#   |-----------|--------:|-----:|------------:|-------:|
+#   | 380x220   |     122 |    2 |     262,144 |      1 |   <- the real iron `/`, 2026-08-30
+#   | 380x220   |     256 |    2 |     524,288 |      2 |
+#   | 380x220   |    1024 |    2 |   1,835,008 |      7 |
+#   | 2560x1440 |    1024 |    3 |   2,621,440 |     10 |
+#
+# ⇒ The ceiling costs SEVEN chunks at the shipped window, not one. Note the second row: at the OLD
+# 256 cap it already chained, so the claim was stale before the cap bump and the bump only widened
+# the gap.
+#
+# ⚠ MEASURE WITH `arena_capacity_total`, NOT `arena_used`. `arena_used` is `cur - base` of the
+# CURRENT chunk only, so on a chained arena it reports the tail residue — 13,104 B for the 2.6 MB
+# row above. Reading it as the total is how a ten-chunk frame looks like a 4%-full one.
+#
+# ⭐ AND IT IS STILL NOT A LEAK, WHICH IS WHY THIS IS A COMMENT AND NOT A DEFECT. `arena_reset`
+# rewinds to the first chunk and KEEPS the chain, so the chunks are allocated once and reused for
+# the process's life: the global heap still sees zero bytes per steady-state frame, which is the
+# gate four releases were spent closing. What changed is the one-time cost — ~1.8 MB at the cap
+# rather than the 256 KiB this comment promised.
+# ⇒ 256 KiB is KEPT deliberately: the common case is what the burn actually ran (122 entries at the
+# default window = 217,680 B), and that fits one chunk with room to spare. Sizing for the ceiling
+# would pay 1.8 MB up front for a directory almost nobody opens.
 var crab_arena = 0;
 
 # @public — crab's per-frame arena, created on first call. -> the arena, or 0 if it could not be made.
@@ -468,7 +609,11 @@ fn crab_hit(x, y, out16): i64 {
     return 1;
 }
 
-fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r): i64 {
+# ⚠ `lstate` / `rstate` come from `crab_pane_state(count, crab_listing_err())`, captured by the
+# caller AT LISTING TIME. They are parameters and not globals for one reason: `crab_listing_err`
+# reports the LAST readdir, and crab lists two panes — so a global read at render time would give
+# both panes the right pane's state. The capture has to happen next to the listing that produced it.
+fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate): i64 {
     if (surf == 0) { return 0; }
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
@@ -496,8 +641,8 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var panew = (w - 6) / 2;
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    var llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la);
-    var rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra);
+    var llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate);
+    var rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate);
     dh_widget_add_child(root, panes);
 
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
@@ -505,7 +650,11 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var status = dh_widget_new(LABEL);
     dh_widget_set_bg(status, dh_theme_panel());   # status line
     dh_widget_set_pref(status, 0, 22);
-    dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt));
+    # ⚠ THE NOTICE OUTRANKS THE ROW. When crab is asking a question ("delete this?") or reporting a
+    # refusal, that is the only thing the status line may say — showing the selected file's size
+    # underneath a pending confirmation is how the wrong key gets pressed.
+    if (crab_notice != 0) { dh_widget_set_text(status, crab_notice); }
+    else { dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt)); }
     dh_widget_add_child(root, status);
 
     # ⚠ RECORDED FOR HIT-TESTING, and refreshed here every frame — see the ⛔ on `crab_root`.

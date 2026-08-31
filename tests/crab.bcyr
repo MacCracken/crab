@@ -5,17 +5,92 @@
 # For sub-1us ops use batch_size >= 1000 to amortize clock_gettime overhead
 # (~240 ns per start/stop pair on x86_64 Linux). See lib/bench.cyr header for
 # the full overhead-vs-batching guidance.
+#
+# ⛔⛔ THIS FILE TIMED AN EMPTY FUNCTION UNTIL NOW, AND THAT IS WHY THE REGRESSION IT WOULD HAVE
+# CAUGHT SHIPPED. `bench_noop` measured the harness against itself: green forever, informative
+# never. Meanwhile `CRAB_MAX_ENTRIES` went 256 -> 1024 and re-opened a latency defect on the
+# keystroke path that M3 *#03* had spent a release closing — and nothing in the tree could say so,
+# because the only cost this project measured was allocation.
+#
+# ⭐ WHAT IS MEASURED HERE IS THE KEYSTROKE PATH, not a microbenchmark chosen for looking good.
+# `crab_sort_entries` runs ONCE PER LISTING — every descend, every ascend, and both panes when `s`
+# cycles the mode. So this number is a lower bound on how long crab takes to answer a cursor key at
+# a full pane, on a machine far faster than the agnos target under QEMU.
+#
+# ⚠ REVERSE-SORTED IS NOT A PATHOLOGICAL INPUT, IT IS A DIRECTORY. It is what any descending sort
+# produces before re-sorting, and what `s` hands the next sort every time it cycles. An insertion
+# sort's worst case is the ordinary case here, which is why both orders are timed.
 
-fn bench_noop(): i64 { return 0; }
+include "src/app.cyr"
+
+# Fill `count` entries with a deterministic scramble. Same construction the differential test in
+# `tests/crab.tcyr` uses, so a number here and a correctness failure there describe the same input.
+# `rev` = 1 lays the names down in descending order — the insertion sort's worst case.
+fn b_fill(buf, sizes, mtimes, count, rev): i64 {
+    var nm = alloc(32);
+    var e = 0;
+    while (e < count) {
+        var v = e;
+        if (rev != 0) { v = count - 1 - e; }
+        else { v = (e * 2654435761) & 0xFFFF; }
+        store8(nm + 0, 97 + ((v / 512) & 7));
+        store8(nm + 1, 97 + ((v / 64) & 7));
+        store8(nm + 2, 97 + ((v / 8) & 7));
+        store8(nm + 3, 97 + (v & 7));
+        store8(nm + 4, 46); store8(nm + 5, 116); store8(nm + 6, 120); store8(nm + 7, 0);
+        var i = 0;
+        while (i < CRAB_REC_SZ) { store8(buf + e * CRAB_REC_SZ + i, 0); i = i + 1; }
+        i = 0;
+        while (load8(nm + i) != 0) { store8(buf + e * CRAB_REC_SZ + i, load8(nm + i)); i = i + 1; }
+        store8(buf + e * CRAB_REC_SZ + CRAB_REC_TYPE, (v / 4096) & 1);
+        store64(sizes + e * 8, v & 255);
+        store64(mtimes + e * 8, (v / 4) & 255);
+        e = e + 1;
+    }
+    return 0;
+}
+
+# One timed run of `count` entries, `reps` times, re-filling between each so every rep sorts an
+# unsorted buffer. ⛔ Without the re-fill this would measure the ALREADY-SORTED case after rep 1,
+# which is the insertion sort's *best* case — the benchmark would then report that the defect it
+# exists to catch does not exist.
+fn b_sort(label, count, reps, rev, use_merge): i64 {
+    var buf = alloc(count * CRAB_REC_SZ);
+    var sz = alloc(count * 8);
+    var mt = alloc(count * 8);
+    var b = bench_new(label);
+    var r = 0;
+    while (r < reps) {
+        b_fill(buf, sz, mt, count, rev);
+        bench_batch_start(b);
+        if (use_merge != 0) { crab_sort_entries(buf, sz, mt, count, CRAB_SORT_NAME); }
+        else { crab_sort_insertion(buf, sz, mt, count, CRAB_SORT_NAME); }
+        bench_batch_stop(b, 1);
+        r = r + 1;
+    }
+    bench_report(b);
+    return 0;
+}
 
 fn main(): i64 {
     alloc_init();
-    var b = bench_new("noop");
-    bench_batch_start(b);
-    var i = 0;
-    while (i < 1000000) { bench_noop(); i = i + 1; }
-    bench_batch_stop(b, 1000000);
-    bench_report(b);
+
+    # ⚠ The cap itself, both orders — this is the number that matters, because it is what one
+    # cursor key costs at a full pane.
+    b_sort("sort merge     1024 scrambled", CRAB_MAX_ENTRIES, 20, 0, 1);
+    b_sort("sort insertion 1024 scrambled", CRAB_MAX_ENTRIES, 20, 0, 0);
+    b_sort("sort merge     1024 reversed",  CRAB_MAX_ENTRIES, 20, 1, 1);
+    b_sort("sort insertion 1024 reversed",  CRAB_MAX_ENTRIES, 20, 1, 0);
+
+    # ⚠ 256 is kept because it is the size the retired comment justified the insertion sort at, so
+    # the two rows together show what the cap bump actually cost.
+    b_sort("sort merge      256 scrambled", 256, 50, 0, 1);
+    b_sort("sort insertion  256 scrambled", 256, 50, 0, 0);
+
+    # ⚠ 122 is the real iron count for `/` on the 2026-08-30 burn — the size crab actually sorted on
+    # hardware, kept so the benchmark has one row that is not a ceiling.
+    b_sort("sort merge      122 iron '/'",  122, 100, 0, 1);
+    b_sort("sort insertion  122 iron '/'",  122, 100, 0, 0);
     return 0;
 }
 

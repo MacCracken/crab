@@ -83,7 +83,7 @@ fn main(): i64 {
     # asserts on that, and then dumps `sds` at the very end, AFTER `sds2` exists. One shared target
     # would make the dump show the wrong picture, silently.
     var surf1 = dh_surface_new(w, h);
-    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr);
+    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK);
 
     # ---- the ACTIVE pane's selection is accented, the inactive pane's is muted --------------
     # ⛔ THE ONE QUESTION A TWO-PANE FILE MANAGER MUST ANSWER ON SCREEN: which pane do my arrow keys
@@ -149,7 +149,7 @@ fn main(): i64 {
     var s2 = alloc(8); store64(s2, 0);
     var s3 = alloc(8); store64(s3, 0);
     var surf2 = dh_surface_new(w, h);
-    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3);
+    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3, CRAB_PANE_OK, CRAB_PANE_OK);
     # ⚠ AND THE TWO REALLY ARE DISTINCT — the guard on the paragraph above. If a future change made
     # `crab_render` share one target again, every assertion below would silently be reading `sds2`
     # while the checks above had already passed against a picture that no longer exists.
@@ -170,6 +170,43 @@ fn main(): i64 {
 
     # A pane scrolled to the last entry must NOT still be at offset 0 while claiming to show it.
     check(load64(s2) >= 26, 1);              # at least one row's worth of scroll
+
+    # --- M4: the empty-pane notice is DRAWN, not merely returned ----------------------------------
+    # ⛔⛔ `crab_pane_state_label` returning the right string proves nothing about the picture. The
+    # notice is built inside `crab_pane` behind a `count == 0` arm, and the ways it can be right in
+    # the unit test and wrong on screen are exactly the ways this file exists to catch: added to the
+    # wrong parent, clipped by the list's viewport, drawn in the background colour, or laid out
+    # under the status line. So it is asserted where it renders.
+    # ⚠ `rt_band_has`, NOT `rt_row_has` — this is TEXT. Whether a glyph lights any given scan line
+    # depends on the letterform, which is the trap already recorded at the top of this file.
+    var s4 = alloc(8); store64(s4, 0);
+    var s5 = alloc(8); store64(s5, 0);
+    var surf3 = dh_surface_new(w, h);
+    var e0 = alloc(CRAB_REC_SZ);
+    var esz = alloc(8); var emt = alloc(8);
+    var sds3 = crab_render(surf3, 0, 0, 0, 0, e0, 0, lp, esz, emt, rbuf, 3, rp, rsizes, rmtimes,
+      s4, s5, CRAB_PANE_GONE, CRAB_PANE_OK);
+    check(sds3 == sds, 0);
+    check(sds3 == sds2, 0);
+    # The notice sits in the first row slot: below the 28px path header and the 18px column header.
+    var noteink = 0;
+    if (rt_band_has(sds3, 46, 46 + 26, 4, midl - 4, ink) == 1) { noteink = 1; }
+    check(noteink, 1);                       # SOMETHING is written where the first row would be
+    # ⛔ AND IT IS NOT SELECTABLE. `dh_list_select` is skipped when `count == 0`, so no accent may
+    # appear anywhere in that pane — a highlighted notice reads as a file with that name, and Enter
+    # on it would descend into nothing.
+    var noteaccent = 0;
+    var ny = 28;
+    while (ny < h - 24) {
+        if (rt_row_has(sds3, ny, 4, midl - 4, accent) == 1) { noteaccent = 1; }
+        ny = ny + 1;
+    }
+    check(noteaccent, 0);
+    # ⚠ THE RIGHT PANE IS UNAFFECTED — the notice belongs to the pane whose listing failed, and a
+    # state leaking across panes is exactly what the parameters (rather than a global) prevent.
+    var rightrows = 0;
+    if (rt_band_has(sds3, 46, 46 + 26, midr + 4, w - 4, ink) == 1) { rightrows = 1; }
+    check(rightrows, 1);
 
     var pix = sd_surface_pixels(sds);
     var path = "build/crab-render.bin";

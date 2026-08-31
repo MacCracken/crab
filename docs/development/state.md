@@ -31,9 +31,13 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.35` (in `cyrius.cyml [package].cyrius`)
+- **Cyrius pin**: `6.5.36` (in `cyrius.cyml [package].cyrius`) — moved 2026-08-30 with the defect
+  and M4 work, per the standing rule that a repaired repo does not stay on a stale pin.
+  ⭐ **This bump retired `CRAB_SYS_READDIR_AT = 101`**: 6.5.36 vendors `sys_readdir_at`, so crab no
+  longer hardcodes a syscall number, and crab is the first consumer to actually call that wrapper.
 - Trail: `6.4.71` → `6.5.5` (0.4.3) → `6.5.9` → **6.5.21** (0.4.9, one language version across the
-  desktop stack) → **6.5.27** (0.4.11) → **6.5.28** (0.4.13) → **6.5.35** (0.4.15).
+  desktop stack) → **6.5.27** (0.4.11) → **6.5.28** (0.4.13) → **6.5.35** (0.4.15) →
+  **6.5.36** (`[Unreleased]`).
 - ⚠ The pin is documentation, not enforcement — `cyrius build` compiles with the **installed** `cycc`,
   warns `toolchain drift`, and carries on. ⛔ It is not cosmetic: **CI installs the toolchain from this
   pin** (`grep '^cyrius = ' cyrius.cyml`, both `.github/workflows/*.yml`), so while the pin lagged, a
@@ -42,6 +46,13 @@ demands and the one this file broke twice.
   The binary is **377,288 B on both 6.5.28 and 6.5.35 — the same SIZE** — but **240,284 of those bytes
   differ (63.7 %)**, from the .35 linear-scan register-allocator rework. ⚠ An identical size is exactly
   the shape of evidence that gets mistaken for "nothing changed". It is not.
+- ⭐ **HOW TO BUILD crab CORRECTLY, given the note below**: fetch the pinned **released tarball**,
+  extract it, create `$D/versions/<v>/{lib,bin}` symlinks, and run
+  `CYRIUS_HOME=$D PATH=$D/bin:$PATH $D/bin/cyrius …`. ⭐ **This is verifiable, not just hygienic**:
+  built that way at the 0.7.0 tree, `build/crab` comes out **398,504 B** and `build/crab_agnos`
+  **406,992 B — byte-identical to the artifact that burned on iron**. The contaminated local
+  snapshot produced 398,520 / 407,040 instead. **A byte delta of 16/48 against the documented sizes
+  is the signature of a poisoned toolchain, not of a source change.**
 - ⛔⛔ **THE LOCAL `~/.cyrius` 6.5.35 SNAPSHOT IS POISONED (2026-08-28)** — overwritten with 6.5.36
   stdlib. The **released** 6.5.35 tarball has **0** hits for `v6.5.36` and **0** for `SYS_READDIR_AT`;
   the local copy has both. ⇒ **Every `cyrius build` / `cyrius test` re-vendors 6.5.36 stdlib into
@@ -50,8 +61,10 @@ demands and the one this file broke twice.
   clean; `git checkout -- lib/ cyrius.lock` undoes it. Root fix (ask the operator first — they may be
   developing 6.5.36 on purpose):
   `curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | CYRIUS_VERSION=6.5.35 sh`
-- ⚠ **6.5.36 is UNRELEASED** — no tag; latest cyrius release is **6.5.35**. CI installs *releases*, so
-  the pin cannot move to 6.5.36 and `sys_readdir_at` does not exist for any consumer.
+- ⭐ **6.5.36 IS RELEASED (verified 2026-08-30)** — tagged on the remote. This meets the documented
+  expiry condition for `CRAB_SYS_READDIR_AT = 101`. ⚠ **The pin has NOT moved and must not move
+  here** — the operator drives version and toolchain bumps — so the hardcoded constant stays until
+  it does. This line said "UNRELEASED" until 2026-08-30; that was true when written.
 - `lib/` is vendored from the pinned snapshot by `cyrius lib sync`, **not** by `cyrius deps` — a
   toolchain bump without a `lib sync` leaves the stdlib behind. ⚠ The sync walks the **declared**
   `[deps].stdlib` set: **29 leaves**, while crab actually vendors **30**. The odd one out is
@@ -60,10 +73,14 @@ demands and the one this file broke twice.
 
 ## Source
 
-2019 lines across **six** files (five until 0.6.0). ⚠ +507 in M3, almost all of it in
-`app.cyr` (368 → 755) and its tests — sorting, selection memory, argv validation, deferred statting.
+**3,152 lines** across **six** files (five until 0.6.0) at `[Unreleased]`; 2,227 at the 0.7.0 cut.
+⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
+stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
+here.
+⚠ +925 since the cut: the two P0 repairs, the merge sort, M4's pane states and write layer, and the
+tests for all of it.
 
-- `src/main.cyr` (562) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
+- `src/main.cyr` (675) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
   `_entry();`, so a test that included it would RUN THE APP — which is why everything testable was
   moved to `src/app.cyr`. **Do not add a function here.** What remains is the dhancha client
   lifecycle, the shm present path and the frame loop.
@@ -72,18 +89,20 @@ demands and the one this file broke twice.
   not a rename.
   ⚠ **No arena setup here any more** (0.6.0). It lived in `main()` and that was a gap: deleting it
   broke no test while restoring a 77 KB-per-frame leak. `crab_render` owns it.
-- `src/app.cyr` (755) — ⭐ **NEW at 0.6.0**, and M3's centre of gravity. The application layer lifted out of `main.cyr`: the
+- `src/app.cyr` (1,417) — ⭐ **NEW at 0.6.0**, and M3's centre of gravity; M4's write layer lives
+  here too (`crab_fs_*`, the per-target syscall shim, `crab_name_ok`). The application layer lifted out of `main.cyr`: the
   readdir parser (`crab_readdir_into` and its cap clamp), the stat layer, `crab_descend` /
   `crab_ascend`, `crab_surface_flags`, the serial logging.
   ⛔ It exists for the same reason `path.cyr` does — **none of it was reachable from any test** while
   it lived in `main.cyr`, in a program whose two shipped defects were both found on iron. 0.6.0 added
   17 assertions against it, all mutation-proven.
-  ⚠ `CRAB_MAX_ENTRIES = 256` and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
+  ⚠ `CRAB_MAX_ENTRIES = 1024` (256 until M3 *#02*) and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
   **unconditionally** — no flag, no arm, no env var — both live here.
-- `src/path.cyr` (91) — the #81 record layout and the **bounded** cstring/path helpers.
+- `src/path.cyr` (131) — the readdir record layout and the **bounded** cstring/path helpers
+  (`crab_cstr_len`, `crab_streq_n`, `crab_strcpy_n`, `crab_join_n`).
   ⛔ Extracted at 0.5.0 for the reason `app.cyr` was extracted at 0.6.0: a memory-safety fix that
   cannot be asserted on is a fix held on trust.
-- `src/ui.cyr` (453) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` (695) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
   ⛔ **`crab_render` OWNS THE PER-FRAME ARENA** (0.6.0) — creates it on first use, installs it, and
   calls `dh_frame_begin()`. Placed here rather than in `main.cyr` so every caller is correct without
@@ -99,8 +118,9 @@ demands and the one this file broke twice.
   ⚠ **A row sets no background at all.** dhancha paints selection and focus from the list's own state;
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
-- `src/render_test.cyr` (145) — a standalone harness: renders the production surface at 380×220
-  and dumps BGRA to `build/crab-render.bin`, 11 `check()` assertions.
+- `src/render_test.cyr` (221) — a standalone harness: renders the production surface at 380×220
+  and dumps BGRA to `build/crab-render.bin`, **19** `check()` assertions (11 was three cuts stale;
+  it was 14 at the 0.7.0 cut and M4's empty-pane notice added five).
   ⚠ It creates **two** `DhSurface`s on purpose — it holds two frames live and dumps the first, and
   since dhancha 0.9.14 one surface would hand both renders the same target.
   ⛔ **It is not run by CI or by `cyrius test`** — see Known gaps.
@@ -157,6 +177,9 @@ at least twice, and both burns found real defects:
   had been in the protocol from the start and was never sent by any compositor nor handled by any
   client.
 - **2026-08-19** — a real `/` on iron held **114 entries**; the pane listed 32 and dropped 82 silently
+- ⭐ **2026-08-30** — a real `/` on iron now holds **122 entries**, cross-checked against the shell's
+  own `ls -a` in the same capture. Every "114" elsewhere in the docs is that older burn's number;
+  the memory and allocation work was measured against it.
   (0.4.13, `CRAB_MAX_ENTRIES` 32 → 256), and the per-entry stat tracing that revealed it was itself the
   performance regression the operator reported (0.4.14).
 
@@ -376,7 +399,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **253 passed / 0 failed** (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **408 passed / 0 failed** at `[Unreleased]` (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -414,8 +437,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, 394,248 B                                       |
-| `--agnos`    | ✅ builds, 398,648 B — the real target                     |
+| x86_64 linux | ✅ builds, **411,304 B** at `[Unreleased]` (398,504 B at the 0.7.0 cut) |
+| `--agnos`    | ✅ builds, **419,992 B** at `[Unreleased]` (406,992 B at the cut) — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -434,7 +457,8 @@ harvested 39 deferrals out of comment prose and folded them into eight milestone
 only what a cold start must know *before touching the code*; the roadmap is the full inventory.
 
 - ⛔⛔ **FIVE OPEN DEFECTS, reviewed 2026-08-28, NONE FIXED.** Full detail with line numbers in
-  [`handoff.md`](handoff.md). All are in code that builds and passes **253/0**, so the suite will not
+  [`handoff.md`](handoff.md). ⭐ **ALL FIVE ARE NOW FIXED (2026-08-30)** — this line described them as
+  open. They were in code that built and passed **253/0**, so the suite did not
   find them:
   1. **Hang risk** — neither `#101` loop (`src/app.cyr:566`, `:587`) bounds iterations or checks
      cursor progress; agnos `ext2.cyr:2329`/`:2333` return `count >= 0` with the cursor **unmoved** on
@@ -465,7 +489,8 @@ only what a cold start must know *before touching the code*; the roadmap is the 
   | + step 2 (0.9.14 + crab) — the sadish render target, reused | 77,568 B |
   | + step 3 (0.9.15 + crab) — the widget tree, arena'd | **0 B** |
 
-  Identical at 114 entries per pane (the iron count for `/`) and at 256 (`CRAB_MAX_ENTRIES`).
+  Identical at 114 entries per pane (the 2026-08-19 iron count for `/`; it is **122** as of
+  2026-08-30) and at 256 — which was `CRAB_MAX_ENTRIES` when this was measured and is now **1024**.
   ⚠ **Zero is per-frame, not total** — crab pays a one-time **~597 KB** (334,432 B render target +
   262,144 B arena chunk), allocated on the first frame and reused for the process's life.
   ⚠ Neither step 1 nor step 2 was the "one line" two documents claimed, and step 2 was not purely
@@ -494,7 +519,8 @@ only what a cold start must know *before touching the code*; the roadmap is the 
   the **installed toolchain**, not `lib/`. ⇒ This file's Toolchain note that "a toolchain bump without
   a `lib sync` leaves the stdlib behind" describes the snapshot, not the compiler input, and the
   stdlib's arena internals **cannot be mutation-tested from this repo**.
-- ⛔ **`src/render_test.cyr`'s eleven pixel assertions never run in CI**, and CI **never builds
+- ⛔ **`src/render_test.cyr`'s NINETEEN pixel assertions run under NEITHER CI NOR `cyrius test`**,
+  and CI **never builds
   `--agnos`** — the target this file calls the real one. Every `#ifdef CYRIUS_TARGET_AGNOS` region is
   uncompiled by the gate. CI also runs no fuzz, bench, lint, `fmt --check`, vet, deny or coverage.
 - ⛔ **The fuzz and bench harnesses are both scaffolds** that measure nothing — see Tests above.

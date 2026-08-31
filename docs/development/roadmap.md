@@ -457,22 +457,48 @@ Both targets built and all 228 tests passed against that graph, and the resultin
 
 crab is a read-only browser. Enter on a file does nothing, silently.
 
-⛔ **CLEAR THE FIVE M3 DEFECTS FIRST — they are cheap now and expensive after M4.** Reviewed
-2026-08-28, none fixed; full detail with line numbers in [`handoff.md`](handoff.md). Two are
-load-bearing for M4 specifically: the **non-terminating `#101` readdir loop** (`src/app.cyr:566`,
-`:587`) becomes a hang *while a write is in flight*, and the **O(n²) sort back on the keystroke path**
-(256 → 1024 cap; **measured 6 ms → 100 ms native**) is the same latency budget the transfer tray will
-compete for. The other three: a false truncation warning at exactly the cap, three stale cost
-comments, and an unbounded `strlen` over kernel data in `crab_name_cell`.
+⭐ **ALL FIVE M3 DEFECTS ARE CLEARED (2026-08-30)** — see the CHANGELOG's `[Unreleased]`. The two
+that were load-bearing for M4 are the two that mattered: the **non-terminating `#101` readdir walk**
+(both loops, now guarded on a stalled cursor *and* capped) would have become a hang *while a write
+was in flight*, and the **O(n²) sort on the keystroke path** is now a bottom-up merge over an index
+array — **182.9 ms → 414 µs** at the cap, reverse-sorted, measured. That is the latency budget the
+transfer tray was going to compete for.
+⚠ **One of the five was fixed differently than the review prescribed.** The false truncation at
+exactly the cap was to be fixed by "guard on `cur`" — and that does not work: `ext2.cyr:2412` *parks*
+the cursor on the record it declined to take, so `cur != -1` at exactly the cap. The count is the
+oracle, not the cursor.
 
-- Copy · move · rename · delete · mkdir · open. **Gate: agnos** write syscalls. *Deferral #10.*
+- ⭐ **Copy · move · delete — DONE (2026-08-30). THERE WAS NO GATE.** The line here read
+  *"Gate: agnos write syscalls"* and it was false: every arm has been real and mount-routed since
+  agnos **1.41.3** — `open`#7 (`syscall.cyr:8496`), `mkdir`#9 (`:8547`), `rmdir`#10 (`:8565`),
+  `unlink`#30 (`:8849`), `rename`#31 (`:8879`) — and crab's **already-pinned cyrius 6.5.35** vendors
+  a wrapper for every one. No pin move was needed and none is.
+  ⛔ **WHERE THE FALSE GATE CAME FROM, so it is not re-derived wrongly**: agnos's own
+  `agnos-userland-abi.md` still describes mkdir and rmdir as *"🔧 stub → 0"* and open as
+  *"initrd_open ONLY"* — contradicted by the dispatcher arms in the same repo. **Verify against the
+  dispatcher, never the table.**
+  ⚠ **rename and mkdir are implemented and tested but NOT yet bound to keys** — both need a name
+  typed, and wiring dhancha's `TEXTINPUT` (which exists, since 0.9.7) into the event loop's focus
+  and escape routing is the next slice. `crab_fs_rename` / `crab_fs_mkdir` are done and asserted.
+  ⚠ **`Deferral #10` is cited here and defined nowhere** — there is no deferral registry in the repo.
+  Either write one or drop the reference.
 - **Transfer tray** (1c) — active operations with progress, rate and ETA.
   **Gate: dhancha** PROGRESS widget.
 - **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
   **Gate: dhancha** context menu + modal sheet.
 - **Drag between panes** — dhancha already has `DRAG_START`/`DRAG_MOVE`/`DRAG_DROP`/`DRAG_END` and
-  `dh_widget_set_draggable`/`set_drop_target`. crab consumes none of it.
-- **Empty and permission-denied pane states** — also from the canvas's not-yet-drawn list.
+  `dh_widget_set_draggable`/`set_drop_target`. crab consumes none of it. ⚠ **Gated on nothing** —
+  the same false-gate check that cleared the write syscalls applies here.
+- ⛔ **The genuinely gated part of M4 is the transfer tray** (dhancha PROGRESS), and it is what
+  blocks recursive copy and recursive delete: neither may go behind a keypress without a surface
+  that shows what is happening and a way to stop it.
+- ⭐ **Empty pane states — DONE (2026-08-30).** A pane with no rows had one appearance and four
+  meanings; it now says which. ⛔ **There is no "permission-denied" state and this line should stop
+  asking for one**: agnos is single-user always-root, `ext2_readdir_at_sys` has no `EACCES` arm, and
+  `getuid`#15 is a literal `return 0`. The states the kernel can actually report are EMPTY / GONE /
+  NOTDIR / UNREAD. A DENIED state belongs here the day agnos grows a credential model, not before.
+  ⚠ The 2026-08-30 burn is what motivated this: `/` held two entries (`/sl_s`, `/lp`) that could be
+  listed but not stat'd, and every layer above reported the failure as an absence.
 - **Ratify the small-window question** — one pane + switcher at 420px.
 
 ### M5 — Views (v0.9.0)

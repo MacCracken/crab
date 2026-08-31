@@ -80,7 +80,7 @@ fn t_render(w, h): i64 {
     # own surface. Sharing one here would make two `t_render()` results alias and any test comparing
     # them would be comparing a frame with itself.
     var surf = dh_surface_new(w, h);
-    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr);
+    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -260,6 +260,59 @@ fn main() {
     assert_eq(crab_name_cell(ncell, "abc", 0), 0, "a zero-width column yields the empty string");
     assert_eq(load8(ncell), 0, "...NUL-terminated, not left as garbage");
 
+    # --- M4: an empty pane says WHY it is empty ----------------------------------------------------
+    # ⛔ A pane with no rows used to have one appearance and four meanings — empty, gone, not a
+    # directory, unreadable — because `crab_readdir_into` clamps its return to >= 0 and the reason
+    # did not survive the call.
+    assert_eq(crab_pane_state(5, 0), CRAB_PANE_OK, "rows to draw — no notice");
+    assert_eq(crab_pane_state(0, 0), CRAB_PANE_EMPTY, "no rows and no error — genuinely empty");
+    assert_eq(crab_pane_state(0, 0 - 2), CRAB_PANE_GONE, "-2 — the path does not resolve");
+    assert_eq(crab_pane_state(0, 0 - 4), CRAB_PANE_NOTDIR, "-4 — it resolves, but it is a file");
+    assert_eq(crab_pane_state(0, 0 - 1), CRAB_PANE_UNREAD, "-1 — bad pointer / not ext2");
+    assert_eq(crab_pane_state(0, 0 - 5), CRAB_PANE_UNREAD, "-5 — a bad cursor is unreadable, not gone");
+    assert_eq(crab_pane_state(0, 0 - 99), CRAB_PANE_UNREAD, "an unknown code degrades to unreadable, never to empty");
+    # ⛔ COUNT WINS OVER ERROR. A walk that returned entries and then failed has real rows, and a
+    # notice would replace data crab already holds with an apology for not holding it.
+    assert_eq(crab_pane_state(1, 0 - 2), CRAB_PANE_OK, "one row outranks even a definitive error");
+    assert_eq(crab_pane_state(CRAB_MAX_ENTRIES, 0 - 1), CRAB_PANE_OK, "...at any count");
+    # ⚠ Every state must have a line, and OK must have none — `crab_pane` draws the label whenever
+    # it is non-empty, so a missing string would render a blank row and a stray one an empty file.
+    assert_eq(load8(crab_pane_state_label(CRAB_PANE_OK)), 0, "the OK state draws nothing at all");
+    assert(load8(crab_pane_state_label(CRAB_PANE_EMPTY)) != 0, "EMPTY has a line");
+    assert(load8(crab_pane_state_label(CRAB_PANE_GONE)) != 0, "GONE has a line");
+    assert(load8(crab_pane_state_label(CRAB_PANE_NOTDIR)) != 0, "NOTDIR has a line");
+    assert(load8(crab_pane_state_label(CRAB_PANE_UNREAD)) != 0, "UNREAD has a line");
+    # ⚠ The four lines must differ from each other, or the state machine is decorative.
+    assert_eq(t_streq(crab_pane_state_label(CRAB_PANE_EMPTY), crab_pane_state_label(CRAB_PANE_GONE)), 0,
+      "empty and gone do not say the same thing");
+    assert_eq(t_streq(crab_pane_state_label(CRAB_PANE_GONE), crab_pane_state_label(CRAB_PANE_UNREAD)), 0,
+      "gone and unreadable do not say the same thing");
+    assert_eq(t_streq(crab_pane_state_label(CRAB_PANE_NOTDIR), crab_pane_state_label(CRAB_PANE_UNREAD)), 0,
+      "not-a-folder and unreadable do not say the same thing");
+
+    # ⛔⛔ THE WIDE-PANE REGIME, WHICH NOTHING REACHED UNTIL NOW. Every assertion above passes a
+    # `chars` of 10 or 0, so the scan was always clamped by the column and the destination was never
+    # the binding constraint. That is the regime the 2026-08-30 burn did NOT run (the window stayed
+    # 380x220, `chars` 14) and the one a single F5 would enter: at a full-screen 2560 px pane,
+    # `crab_col_chars` yields 118. These pin the behaviour there, where the kernel's NUL is the only
+    # remaining guard and the bound in `crab_name_cell` has to be the one holding.
+    var wide = alloc(256);
+    var unterm = alloc(CRAB_REC_SZ);
+    var wi = 0;
+    while (wi < CRAB_REC_SZ) { store8(unterm + wi, 65); wi = wi + 1; }   # a record of 64 'A's, NO NUL
+    assert_eq(crab_name_cell(wide, unterm, 118), CRAB_REC_TYPE,
+      "an unterminated record stops at the name region, never at the caller's 118");
+    assert_eq(load8(wide + CRAB_REC_TYPE), 0, "...and the cell is terminated by crab, not by the kernel");
+    assert_eq(load8(unterm + CRAB_REC_TYPE), 65, "...with the TYPE byte never read as a name character");
+    # ⚠ A well-formed long name is unaffected — the bound must not become a truncator of legal names.
+    var maxname = alloc(CRAB_REC_SZ);
+    wi = 0;
+    while (wi < 62) { store8(maxname + wi, 66); wi = wi + 1; }
+    store8(maxname + 62, 0);
+    assert_eq(crab_name_cell(wide, maxname, 118), 62, "the longest name the kernel can emit is copied whole");
+    assert_eq(load8(wide + 61), 66, "...to its last character");
+    assert_eq(load8(wide + 62), 0, "...and terminated");
+
     test_group("crab — 0.5.0: the path helpers are BOUNDED (the P1)");
     # ⛔⛔ THIS IS THE 0.5.0 P-1. `crab_strcpy` / `crab_join` took no destination size and checked
     # nothing, while every destination was a fixed alloc(256). Descent depth is unbounded, so the pane
@@ -342,7 +395,7 @@ fn main() {
     var rb = alloc(8); store64(rb, 0);
 
     # Frame A: left pane active, selection 0.
-    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
     assert(fa != 0, "frame A rendered into the caller's surface");
     var nbytes = rw * rh * 4;
     var snap = alloc(nbytes);
@@ -352,7 +405,7 @@ fn main() {
 
     # Frame B: the OTHER pane active, a different selection — a visibly different picture.
     store64(ra, 0); store64(rb, 0);
-    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
     assert_eq(fb, fa, "the surface hands back the SAME render target — this is the reuse");
     var diff = 0;
     bi = 0;
@@ -366,7 +419,7 @@ fn main() {
 
     # Frame A again, into the same reused target. Every byte must match the snapshot.
     store64(ra, 0); store64(rb, 0);
-    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
     assert_eq(fa2, fa, "...still the same target on the third render");
     var residue = 0;
     bi = 0;
@@ -380,7 +433,7 @@ fn main() {
     bi = 0;
     while (bi < nbytes) { store8(apix + bi, 0x5A); bi = bi + 1; }
     store64(ra, 0); store64(rb, 0);
-    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
     var survived = 0;
     bi = 0;
     while (bi < nbytes) {
@@ -392,7 +445,7 @@ fn main() {
     # ⚠ AND TWO SURFACES STILL GIVE TWO PICTURES — the escape hatch `src/render_test.cyr` depends on.
     var rsurf2 = dh_surface_new(rw, rh);
     store64(ra, 0); store64(rb, 0);
-    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb);
+    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
     assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
     # ================================================================
@@ -432,7 +485,7 @@ fn main() {
     dh_frame_arena_set(0);
     assert_eq(dh_frame_arena_get(), 0, "the frame arena can be uninstalled");
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
     assert(dh_frame_arena_get() != 0, "a render installs one BY ITSELF — no step for main() to forget");
     assert_eq(dh_frame_arena_get(), crab_frame_arena(), "...crab's own, not some other arena");
 
@@ -446,10 +499,10 @@ fn main() {
     assert(tiny != 0, "a deliberately tiny arena is created");
     dh_frame_arena_set(tiny);
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
     var n0 = alloc_used();
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
     assert(alloc_used() - n0 > 0,
       "a frame that cannot fit its arena SPILLS to the global heap instead of failing");
 
@@ -467,7 +520,7 @@ fn main() {
 
     # Warm-up: the first arena'd frame establishes what one frame costs.
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
     var one_frame = arena_used(farena);
     assert(one_frame > 0, "the frame really landed in the arena");
     var cap0 = arena_capacity_total(farena);
@@ -476,7 +529,7 @@ fn main() {
     var af = 0;
     while (af < 20) {
         store64(asl, 0); store64(asr, 0);
-        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
         af = af + 1;
     }
     # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
@@ -493,7 +546,7 @@ fn main() {
     # ⛔ AND THE PIXELS ARE STILL RIGHT. A frame whose widgets were freed mid-render would still
     # produce *a* surface; this is the check that it produces the right one.
     store64(asl, 0); store64(asr, 0);
-    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr);
+    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
     assert(asds != 0, "an arena'd frame still renders");
     t_bad_alpha = 0; t_bad_premul = 0;
     assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
@@ -713,7 +766,7 @@ fn main() {
     }
     var hsl = alloc(8); store64(hsl, 0);
     var hsr = alloc(8); store64(hsr, 0);
-    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr);
+    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK);
 
     var hb = alloc(16);
     # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
@@ -831,6 +884,131 @@ fn main() {
     crab_strcpy_n(firstn, sbuf, 64);
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
     assert(t_streq(sbuf, firstn), "sorting twice is the same as sorting once");
+
+    # --- the merge sort against the insertion sort, differentially --------------------------------
+    # ⛔⛔ WHY A DIFFERENTIAL TEST AND NOT MORE LITERALS. The sort stopped being insertion sort and
+    # became a bottom-up merge over an index array (the O(n^2)-on-the-keystroke-path repair). Every
+    # assertion above uses FIVE entries, which exercises run widths 1, 2 and 4 and never once makes
+    # the merge choose between two non-trivial runs, split an odd tail, or follow a permutation
+    # cycle longer than two. Writing more expected-output literals by hand would test the same
+    # narrow shapes with more typing.
+    # ⇒ `crab_sort_insertion` is retained as the fallback path AND used here as the oracle: it is
+    # the algorithm whose output every assertion above already pins, so agreeing with it at scale is
+    # a stronger claim than any literal. A bug in either shows up as disagreement.
+    # ⚠ THE SIZES ARE CHOSEN, NOT ROUND. Powers of two are the one case a bottom-up merge always
+    # gets right; the interesting ones are the odd tails (`hi`/`mid` clamping) and n just past a
+    # power of two, where the final merge is maximally lopsided.
+    var dn = alloc(9 * 8);
+    store64(dn + 0,  2); store64(dn + 8,  3); store64(dn + 16,  7); store64(dn + 24,  8);
+    store64(dn + 32, 9); store64(dn + 40, 33); store64(dn + 48, 64); store64(dn + 56, 100);
+    store64(dn + 64, 257);
+    var ab = alloc(257 * 64); var asz = alloc(257 * 8); var amt = alloc(257 * 8);
+    var bb = alloc(257 * 64); var bsz2 = alloc(257 * 8); var bmt = alloc(257 * 8);
+    var nm2 = alloc(32);
+    var di = 0;
+    while (di < 9) {
+        var cnt = load64(dn + di * 8);
+        var mi2 = 0;
+        while (mi2 < 4) {                                # every sort mode, not just NAME
+            # ⚠ A deterministic scramble, NOT a random one — a differential failure has to be
+            # reproducible from the source alone. 2654435761 is Knuth's 32-bit golden-ratio
+            # multiplier; it decorrelates the name, size, mtime and type of each entry from its
+            # index so no key is accidentally pre-sorted.
+            var e = 0;
+            while (e < cnt) {
+                var h = (e * 2654435761) & 0xFFFF;
+                # name: a fixed-width digit string so ordering is by value, not by length
+                store8(nm2 + 0, 97 + (h & 7));
+                store8(nm2 + 1, 97 + ((h / 8) & 7));
+                store8(nm2 + 2, 97 + ((h / 64) & 7));
+                store8(nm2 + 3, 46); store8(nm2 + 4, 116); store8(nm2 + 5, 120);   # ".tx"
+                store8(nm2 + 6, 97 + (h & 3));                                     # varying ext tail
+                store8(nm2 + 7, 0);
+                t_entry(ab, e, nm2, (h / 512) & 1);
+                t_entry(bb, e, nm2, (h / 512) & 1);
+                # ⚠ -1 appears in both parallel arrays on purpose: unstattable entries are real
+                # (the burn found /sl_s and /lp) and they are the values the comparators special-case.
+                var sv = h & 255; if ((h & 15) == 0) { sv = 0 - 1; }
+                var mv = (h / 4) & 255; if ((h & 31) == 0) { mv = 0 - 1; }
+                store64(asz + e * 8, sv); store64(amt + e * 8, mv);
+                store64(bsz2 + e * 8, sv); store64(bmt + e * 8, mv);
+                e = e + 1;
+            }
+            crab_sort_entries(ab, asz, amt, cnt, mi2);        # the merge sort
+            crab_sort_insertion(bb, bsz2, bmt, cnt, mi2);     # the oracle
+            var bad = 0;
+            e = 0;
+            while (e < cnt) {
+                if (t_streq(ab + e * 64, bb + e * 64) == 0) { bad = 1; }
+                if (load8(ab + e * 64 + 63) != load8(bb + e * 64 + 63)) { bad = 1; }
+                # ⛔ The parallel arrays are checked at every index, not just the records. A sort
+                # that orders names correctly while shearing sizes off them is the failure this
+                # whole family of assertions exists for, and it is invisible in the record bytes.
+                if (load64(asz + e * 8) != load64(bsz2 + e * 8)) { bad = 1; }
+                if (load64(amt + e * 8) != load64(bmt + e * 8)) { bad = 1; }
+                e = e + 1;
+            }
+            assert_eq(bad, 0, "merge sort agrees with the insertion oracle, records and both parallel arrays");
+            mi2 = mi2 + 1;
+        }
+        di = di + 1;
+    }
+
+    # ⚠ Already-sorted and reverse-sorted inputs, which are the two cases a merge sort can get wrong
+    # in opposite directions — and reverse-sorted is the insertion sort's 200 ms worst case, i.e.
+    # the exact input this repair exists for.
+    var e2 = 0;
+    while (e2 < 200) {
+        store8(nm2 + 0, 97 + (e2 / 64)); store8(nm2 + 1, 97 + ((e2 / 8) & 7));
+        store8(nm2 + 2, 97 + (e2 & 7)); store8(nm2 + 3, 0);
+        t_entry(ab, e2, nm2, 0); t_entry(bb, 199 - e2, nm2, 0);
+        store64(asz + e2 * 8, e2); store64(amt + e2 * 8, e2);
+        store64(bsz2 + (199 - e2) * 8, e2); store64(bmt + (199 - e2) * 8, e2);
+        e2 = e2 + 1;
+    }
+    crab_sort_entries(ab, asz, amt, 200, CRAB_SORT_NAME);
+    crab_sort_entries(bb, bsz2, bmt, 200, CRAB_SORT_NAME);
+    var bad2 = 0;
+    e2 = 0;
+    while (e2 < 200) {
+        if (t_streq(ab + e2 * 64, bb + e2 * 64) == 0) { bad2 = 1; }
+        if (load64(asz + e2 * 8) != load64(bsz2 + e2 * 8)) { bad2 = 1; }
+        e2 = e2 + 1;
+    }
+    assert_eq(bad2, 0, "an already-sorted and a reverse-sorted input reach the same order");
+    assert_eq(load64(asz + 0), 0, "...ascending by name carried size 0 to the front");
+    assert_eq(load64(asz + 199 * 8), 199, "...and 199 to the back");
+
+    # --- STABILITY, and it is only observable through the parallel arrays -------------------------
+    # ⛔⛔ THE MERGE'S `<= 0` IS THE STABILITY, AND NOTHING ABOVE CAN SEE IT. Everything else in this
+    # family compares records, and `crab_entry_cmp` returns 0 only for entries identical on every
+    # axis INCLUDING raw name bytes — so where a tie exists the records are interchangeable and
+    # reordering them is invisible by construction. Changing `<= 0` to `< 0` passed every other
+    # assertion in this file.
+    # ⇒ The tie has to be made in the KEY while the payload stays distinct. Under `CRAB_SORT_NAME`
+    # the comparator reads only the type byte and the name, so entries sharing both compare equal
+    # while carrying different sizes — and the size array then reports the order the sort chose.
+    # ⚠ This is the property that keeps a re-sort from reshuffling equal rows out from under the
+    # selection, which is what `s` does on every press.
+    var ti = 0;
+    while (ti < 16) {
+        t_entry(ab, ti, "dup.txt", 0);
+        store64(asz + ti * 8, ti);                   # the payload that reveals the order
+        store64(amt + ti * 8, 1000 - ti);
+        ti = ti + 1;
+    }
+    crab_sort_entries(ab, asz, amt, 16, CRAB_SORT_NAME);
+    var unstable = 0;
+    ti = 0;
+    while (ti < 16) {
+        if (load64(asz + ti * 8) != ti) { unstable = 1; }
+        if (load64(amt + ti * 8) != (1000 - ti)) { unstable = 1; }
+        ti = ti + 1;
+    }
+    assert_eq(unstable, 0, "sixteen name-identical entries keep their original relative order — the sort is STABLE");
+    # ⚠ 16 is a power of two on purpose: every merge round is a balanced pair, so an unstable merge
+    # reverses a run at EVERY width rather than only in a lopsided tail, which is the loudest signal
+    # this shape can give.
 
     # --- M3 #34: SELECTION MEMORY -----------------------------------------------------------------
     # ⛔ Backspace used to land at the TOP of the parent, so the directory you had just left was
@@ -994,10 +1172,10 @@ fn main() {
     # sweep is a no-op either way, so the ORACLE IS THE RETURN VALUE, and it is labelled as such.
     crab_stat_reset(psz, pmt, 5);
     assert_eq(crab_stat_for_listing("/bin", bbuf, 5, psz, pmt, bscr, bstat, CRAB_SORT_NAME), 0,
-              "a name-ordered listing does NOT sweep");
+      "a name-ordered listing does NOT sweep");
     assert_eq(load64(psz), 0 - 2, "...so every entry is still pending after it");
     assert_eq(crab_stat_for_listing("/bin", bbuf, 5, psz, pmt, bscr, bstat, CRAB_SORT_SIZE), 1,
-              "a size-ordered listing DOES sweep");
+      "a size-ordered listing DOES sweep");
     assert_eq(load64(psz), 0 - 1, "...and leaves nothing pending");
     assert_eq(crab_stat_next_pending(psz, 5, 0), 0 - 1, "...for any entry");
 
@@ -1005,6 +1183,270 @@ fn main() {
     # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
     # rather than the clamp. Stated because a green line here must not be read as covering the cap.
     assert_eq(crab_readdir_into("/bin", dbuf), 0, "readdir yields 0 on the host — the mock-pane path");
+
+    # --- the #101 stall guard ---------------------------------------------------------------------
+    # ⛔ THE LOOPS THIS PROTECTS CANNOT BE REACHED FROM HERE — both are inside
+    # `#ifdef CYRIUS_TARGET_AGNOS` and drive a raw syscall, which is precisely how a non-terminating
+    # loop shipped and then sat through 253/0 green. These assertions cover the DECISION, which is
+    # the part that can be wrong; the wiring is covered by review and by the next burn.
+    # ⚠ The kernel shape being modelled: `agnos/kernel/core/ext2.cyr`'s I/O-error arms
+    # `store64(cursor_uva, pos)` with `pos` unchanged and `return count` — a NON-NEGATIVE count,
+    # often 0. That is the row below marked "the hang".
+    assert_eq(crab_readdir_stalled(0, 4096, 4096), 1, "zero records AND an unmoved cursor — the hang");
+    assert_eq(crab_readdir_stalled(0, 4096, 8192), 0, "zero records but the cursor MOVED — a block of deleted entries, keep walking");
+    assert_eq(crab_readdir_stalled(64, 4096, 4096), 0, "records came back — progress, whatever the cursor did");
+    assert_eq(crab_readdir_stalled(64, 4096, 8192), 0, "the ordinary healthy step");
+    assert_eq(crab_readdir_stalled(0, 0, 0), 1, "the stall is detectable on the very FIRST call, from cursor 0");
+    assert_eq(crab_readdir_stalled(0, 8192, 4096), 0, "a cursor that went BACKWARDS is movement, not a stall — the step cap owns that case");
+    # ⚠ The end-of-directory sentinel is -1, and the loop tests it BEFORE calling, so a stall test
+    # against it never runs in practice. Pinned anyway: were the order ever swapped, treating the
+    # sentinel as a stall would still terminate, and treating it as progress would not.
+    assert_eq(crab_readdir_stalled(0, 0 - 1, 0 - 1), 1, "the -1 sentinel, unmoved, still reads as stalled");
+
+    # --- a full buffer is not a truncation --------------------------------------------------------
+    # ⛔ THE REGRESSION THIS PINS: the shipped guard was `n >= CRAB_MAX_ENTRIES` alone, so a directory
+    # of EXACTLY the cap — complete, nothing missing — printed "has more entries than are shown".
+    assert_eq(crab_truncation_note(CRAB_MAX_ENTRIES, CRAB_MAX_ENTRIES), 0,
+      "a directory of exactly the cap is COMPLETE, and says nothing");
+    assert_eq(crab_truncation_note(CRAB_MAX_ENTRIES, CRAB_MAX_ENTRIES + 1), 1,
+      "one entry past the cap is a real cut, with a count");
+    assert_eq(crab_truncation_note(CRAB_MAX_ENTRIES, 3891), 1, "...and so is a large one");
+    assert_eq(crab_truncation_note(CRAB_MAX_ENTRIES, 0 - 1), 2,
+      "a full buffer with an UNKNOWN total says so without inventing a number");
+    assert_eq(crab_truncation_note(122, 0 - 1), 0,
+      "the 2026-08-30 iron listing of / — well under the cap, silent whatever the total says");
+    assert_eq(crab_truncation_note(CRAB_MAX_ENTRIES - 1, 0 - 1), 0,
+      "one entry short of the cap is not a truncation either");
+    assert_eq(crab_truncation_note(0, 0 - 1), 0, "an empty listing is not a truncation");
+
+
+    test_group("crab — M4: the write layer, against a REAL filesystem");
+    # ⭐⭐ THESE ASSERTIONS PERFORM ACTUAL SYSCALLS. Unlike `#101` readdir — agnos-only, so the suite
+    # can never execute it and the stall guard had to be tested as a predicate — `mkdir`, `unlink`,
+    # `rename`, `open`, `read` and `write` all exist on the host. So the refusal logic, the bounded
+    # join, the overwrite guard and the short-write loop are exercised for real, against files that
+    # are really created and really removed. Only the agnos ABI arm is taken on trust, and that arm
+    # differs in ARITY from the host's, so a mis-wired `#ifdef` cannot compile.
+    # ⚠ `build/` is gitignored, so the debris of a failed run is never committed.
+
+    # --- the name guard: what crab refuses to act on ----------------------------------------------
+    # ⛔ THIS IS THE GUARD BETWEEN A KEYPRESS AND `unlink`. Every entry below is a name that could
+    # arrive from a kernel readdir record.
+    assert_eq(crab_name_ok("hello.txt"), 1, "an ordinary name is fine");
+    assert_eq(crab_name_ok(".bashrc"), 1, "a DOTFILE is an ordinary file — crab never hides them");
+    assert_eq(crab_name_ok("..hidden"), 1, "...and a name merely STARTING with two dots is not '..'");
+    assert_eq(crab_name_ok("...."), 1, "nor is a run of dots");
+    assert_eq(crab_name_ok(""), 0, "the empty name joins to the parent — refused");
+    assert_eq(crab_name_ok("."), 0, "'.' is the directory crab is standing in — refused");
+    assert_eq(crab_name_ok(".."), 0, "'..' is the PARENT — one keystroke from deleting the tree above");
+    assert_eq(crab_name_ok("a/b"), 0, "a '/' cannot occur in a record — refused as malformed");
+    assert_eq(crab_name_ok("/etc"), 0, "...leading");
+    assert_eq(crab_name_ok("etc/"), 0, "...or trailing");
+    assert_eq(crab_name_ok("../escape"), 0, "the classic escape is refused by the slash rule");
+    assert_eq(crab_name_ok(0), 0, "a null pointer is refused, not dereferenced");
+    # An unterminated 64-byte record has no length that can be taken safely.
+    var un = alloc(CRAB_REC_SZ);
+    var ui = 0;
+    while (ui < CRAB_REC_SZ) { store8(un + ui, 65); ui = ui + 1; }
+    assert_eq(crab_name_ok(un), 0, "an unterminated record is refused — no length can be taken from it");
+
+    # --- the bounded helpers underneath -----------------------------------------------------------
+    assert_eq(crab_cstr_len("abc", 16), 3, "a bounded length is the length");
+    assert_eq(crab_cstr_len("", 16), 0, "the empty string is zero, not an error");
+    assert_eq(crab_cstr_len(un, CRAB_REC_SZ), 0 - 1, "no NUL within cap is -1, never cap");
+    assert_eq(crab_cstr_len("abc", 0), 0 - 1, "a zero cap can answer nothing");
+    assert_eq(crab_streq_n("abc", "abc", 16), 1, "equal strings are equal");
+    assert_eq(crab_streq_n("abc", "abd", 16), 0, "...and unequal ones are not");
+    assert_eq(crab_streq_n("abc", "ab", 16), 0, "a prefix is not a match");
+    assert_eq(crab_streq_n(un, un, CRAB_REC_SZ), 0,
+      "two UNTERMINATED strings are not 'equal' — the callers delete based on this answer");
+
+    # --- real operations --------------------------------------------------------------------------
+    var fsdir  = "build/m4test";
+    var fsdir2 = "build/m4test2";
+    var sc1 = alloc(CRAB_PATH_MAX);
+    var sc2 = alloc(CRAB_PATH_MAX);
+    var fstat = alloc(STAT_BUFSZ);
+    # Clean any debris from a previous run so the assertions below start from a known disk.
+    crab_fs_delete(fsdir, "copy.txt", 0, sc1);
+    crab_fs_delete(fsdir, "src.txt", 0, sc1);
+    crab_fs_delete(fsdir, "renamed.txt", 0, sc1);
+    crab_fs_delete(fsdir2, "src.txt", 0, sc1);
+    crab_fs_delete(fsdir2, "moved.txt", 0, sc1);
+    crab_fs_delete(fsdir, "sub", 1, sc1);
+    crab_fs_delete("build", "m4test", 1, sc1);
+    crab_fs_delete("build", "m4test2", 1, sc1);
+
+    assert_eq(crab_fs_mkdir("build", "m4test", sc1, fstat), CRAB_FS_OK, "mkdir creates a directory");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1, "...and it is really there");
+    # ⛔ NEVER OVERWRITE SILENTLY. agnos has no O_EXCL equivalent, so this refusal is crab's own and
+    # not the kernel's — see `crab_fs_open_w`. If it regressed, the host would still refuse (Linux
+    # HAS O_EXCL) while agnos silently clobbered: the same code, opposite outcomes.
+    assert_eq(crab_fs_mkdir("build", "m4test", sc1, fstat), CRAB_FS_EEXIST, "...and mkdir refuses a name in use");
+    assert_eq(crab_fs_mkdir("build", "m4test2", sc1, fstat), CRAB_FS_OK, "a second directory for the move tests");
+    assert_eq(crab_fs_mkdir(fsdir, "..", sc1, fstat), CRAB_FS_EBADNAME, "mkdir refuses '..' before touching the disk");
+    assert_eq(crab_fs_mkdir(fsdir, "a/b", sc1, fstat), CRAB_FS_EBADNAME, "...and a name with a separator");
+
+    # A file to operate on, written through crab's own open/write shims.
+    var fpl = crab_fs_path(sc1, fsdir, "src.txt");
+    assert(fpl > 0, "the source path joins");
+    var wfd = crab_fs_open_w(sc1, fpl);
+    assert(wfd >= 0, "a file can be created for writing");
+    assert_eq(sys_write(wfd, "crab m4 payload", 15), 15, "...and written");
+    sys_close(wfd);
+    assert_eq(crab_fs_exists(sc1, fpl, fstat), 1, "the source file exists");
+
+    # --- copy -------------------------------------------------------------------------------------
+    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "copy to the other pane");
+    var cpl = crab_fs_path(sc2, fsdir2, "src.txt");
+    assert_eq(crab_fs_exists(sc2, cpl, fstat), 1, "...the destination exists");
+    # ⛔ AND THE SOURCE SURVIVES — a copy that moved would be indistinguishable here without this.
+    var spl = crab_fs_path(sc1, fsdir, "src.txt");
+    assert_eq(crab_fs_exists(sc1, spl, fstat), 1, "...and the SOURCE still exists");
+    # The bytes really arrived: read the copy back and compare.
+    var rfd = crab_fs_open_r(sc2, cpl);
+    assert(rfd >= 0, "the copy can be reopened");
+    var m4rb = alloc(64);
+    var m4got = sys_read(rfd, m4rb, 64);
+    sys_close(rfd);
+    assert_eq(m4got, 15, "...and holds exactly the bytes written");
+    store8(m4rb + 15, 0);
+    assert(t_streq(m4rb, "crab m4 payload"), "...byte for byte");
+    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_EEXIST,
+      "a second copy refuses rather than clobbering");
+    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
+      "copying a file onto ITSELF is refused before either handle opens");
+    assert_eq(crab_fs_copy(fsdir, "..", fsdir2, sc1, sc2, fstat), CRAB_FS_EBADNAME, "copy refuses '..'");
+
+    # --- rename -----------------------------------------------------------------------------------
+    assert_eq(crab_fs_rename(fsdir, "src.txt", "renamed.txt", sc1, sc2, fstat), CRAB_FS_OK, "rename within a directory");
+    var rpl = crab_fs_path(sc2, fsdir, "renamed.txt");
+    assert_eq(crab_fs_exists(sc2, rpl, fstat), 1, "...the new name exists");
+    var opl = crab_fs_path(sc1, fsdir, "src.txt");
+    assert_eq(crab_fs_exists(sc1, opl, fstat), 0, "...and the old name is gone");
+    assert_eq(crab_fs_rename(fsdir, "renamed.txt", "renamed.txt", sc1, sc2, fstat), CRAB_FS_ESAME,
+      "renaming to the SAME name is refused, not a no-op that reports success");
+    assert_eq(crab_fs_rename(fsdir, "renamed.txt", "..", sc1, sc2, fstat), CRAB_FS_EBADNAME,
+      "⛔ the DESTINATION name is validated too — it comes from a text field, not a record");
+    assert_eq(crab_fs_rename(fsdir, "renamed.txt", "../escape", sc1, sc2, fstat), CRAB_FS_EBADNAME,
+      "...so a typed escape cannot leave the directory");
+
+    # --- move -------------------------------------------------------------------------------------
+    assert_eq(crab_fs_move(fsdir, "renamed.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "move to the other pane");
+    var mpl = crab_fs_path(sc2, fsdir2, "renamed.txt");
+    assert_eq(crab_fs_exists(sc2, mpl, fstat), 1, "...the destination exists");
+    # ⛔ AND THE SOURCE IS GONE — this is what makes it a move rather than a copy.
+    var mspl = crab_fs_path(sc1, fsdir, "renamed.txt");
+    assert_eq(crab_fs_exists(sc1, mspl, fstat), 0, "...and the source is gone");
+    # ⛔⛔ A REFUSED MOVE MUST NOT DELETE THE SOURCE. This is the single most destructive thing the
+    # write layer could get wrong, so it is asserted rather than reasoned about.
+    assert_eq(crab_fs_move(fsdir2, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_ESAME, "a same-path move is refused");
+    var survive = crab_fs_path(sc1, fsdir2, "src.txt");
+    assert_eq(crab_fs_exists(sc1, survive, fstat), 1, "...and the source SURVIVES the refusal");
+
+    # ⛔⛔ THE DATA-LOSS PATH, AND IT NEEDS FORCING TO REACH. `crab_fs_move` tries `rename` first and
+    # falls back to copy-then-delete only when it refuses — and within one filesystem rename NEVER
+    # refuses, so every assertion above exercised the atomic arm and left the destructive arm dead.
+    # A mutation that deleted the source regardless of the copy's result passed the whole suite.
+    # ⇒ Force the fallback by naming a destination directory that does not exist: rename fails
+    # (no such path), the copy then cannot create its output, and the source MUST survive both.
+    var dl1 = crab_fs_path(sc1, fsdir, "precious.txt");
+    var dfd = crab_fs_open_w(sc1, dl1);
+    assert(dfd >= 0, "a file to try to lose");
+    assert_eq(sys_write(dfd, "do not lose me", 14), 14, "...with contents");
+    sys_close(dfd);
+    assert(crab_fs_move(fsdir, "precious.txt", "build/m4nodir", sc1, sc2, fstat) != CRAB_FS_OK,
+      "a move whose rename AND copy both fail reports failure");
+    var dl2 = crab_fs_path(sc1, fsdir, "precious.txt");
+    assert_eq(crab_fs_exists(sc1, dl2, fstat), 1,
+      "⛔⛔ ...and the SOURCE SURVIVES. A move that deletes after a failed copy is data loss.");
+    var dfd2 = crab_fs_open_r(sc1, dl2);
+    var dchk = alloc(32);
+    var dgot = sys_read(dfd2, dchk, 32);
+    sys_close(dfd2);
+    assert_eq(dgot, 14, "...intact, not truncated by the attempt");
+    assert_eq(crab_fs_delete(fsdir, "precious.txt", 0, sc1), CRAB_FS_OK, "...and cleaned up");
+
+    # ⚠ A COPY LARGER THAN ONE `CRAB_COPY_CHUNK`, so the read loop actually iterates. Everything
+    # above fits in a single 4 KiB read, which leaves the chunking untested — a loop that handled
+    # exactly one buffer and stopped would have passed.
+    # ⚠ THIS DOES NOT COVER THE SHORT-WRITE LOOP. `write` to a regular file does not return short in
+    # practice, so that arm is unreachable from here; it is written from the contract, not the test.
+    var big1 = crab_fs_path(sc1, fsdir, "big.bin");
+    var bfd = crab_fs_open_w(sc1, big1);
+    assert(bfd >= 0, "a multi-chunk source");
+    var chunk = alloc(1000);
+    var ci = 0;
+    while (ci < 1000) { store8(chunk + ci, 65 + (ci & 31)); ci = ci + 1; }
+    var bw = 0;
+    while (bw < 11) { sys_write(bfd, chunk, 1000); bw = bw + 1; }      # 11,000 B = 2.7 chunks
+    sys_close(bfd);
+    assert_eq(crab_fs_copy(fsdir, "big.bin", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "a multi-chunk copy succeeds");
+    var bdst = crab_fs_path(sc2, fsdir2, "big.bin");
+    var bfd2 = crab_fs_open_r(sc2, bdst);
+    var total = 0;
+    var scratchb = alloc(4096);
+    var reading = 1;
+    var mismatch = 0;
+    while (reading == 1) {
+        var gotb = sys_read(bfd2, scratchb, 4096);
+        if (gotb <= 0) { reading = 0; }
+        else {
+            var bi = 0;
+            while (bi < gotb) {
+                # ⚠ The 1000-byte source block is written 11 times, so the pattern repeats every
+                # 1000 bytes — the expected byte is a function of the offset MOD the block, not of
+                # the absolute offset. (Getting this wrong reports the copy as corrupt when it is
+                # the assertion that is.)
+                var koff = total + bi;
+                var kmod = koff - (koff / 1000) * 1000;
+                if (load8(scratchb + bi) != (65 + (kmod & 31))) { mismatch = 1; }
+                bi = bi + 1;
+            }
+            total = total + gotb;
+        }
+    }
+    sys_close(bfd2);
+    assert_eq(total, 11000, "...and every byte crossed, not just the first chunk");
+    assert_eq(mismatch, 0, "...in the right order, with no chunk boundary corruption");
+    assert_eq(crab_fs_delete(fsdir, "big.bin", 0, sc1), CRAB_FS_OK, "cleanup: source");
+    assert_eq(crab_fs_delete(fsdir2, "big.bin", 0, sc1), CRAB_FS_OK, "cleanup: copy");
+
+    # --- delete -----------------------------------------------------------------------------------
+    assert_eq(crab_fs_delete(fsdir2, "src.txt", 0, sc1), CRAB_FS_OK, "delete a file");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 0, "...and it is really gone");
+    assert_eq(crab_fs_delete(fsdir2, "src.txt", 0, sc1), CRAB_FS_ESYS, "deleting what is not there is a kernel refusal");
+    assert_eq(crab_fs_delete(fsdir, "..", 0, sc1), CRAB_FS_EBADNAME, "⛔ delete refuses '..' BEFORE the syscall");
+    assert_eq(crab_fs_delete(fsdir, ".", 0, sc1), CRAB_FS_EBADNAME, "...and '.'");
+    assert_eq(crab_fs_delete(fsdir, "", 0, sc1), CRAB_FS_EBADNAME, "...and the empty name");
+    # ⛔ NO RECURSION: a non-empty directory is refused by the kernel and crab reports it.
+    assert_eq(crab_fs_mkdir(fsdir, "sub", sc1, fstat), CRAB_FS_OK, "a directory to delete");
+    assert_eq(crab_fs_mkdir(fsdir, "sub", sc1, fstat), CRAB_FS_EEXIST, "...confirmed present");
+    assert_eq(crab_fs_delete(fsdir, "sub", 1, sc1), CRAB_FS_OK, "an EMPTY directory is removed");
+    assert_eq(crab_fs_delete(fsdir2, "renamed.txt", 0, sc1), CRAB_FS_OK, "clean up the moved file");
+    var nonemptypl = crab_fs_path(sc1, fsdir, "keep.txt");
+    var kfd = crab_fs_open_w(sc1, nonemptypl);
+    sys_close(kfd);
+    assert_eq(crab_fs_delete("build", "m4test", 1, sc1), CRAB_FS_ESYS,
+      "⛔ a NON-EMPTY directory is refused — crab does not recurse behind one keypress");
+    assert_eq(crab_fs_delete(fsdir, "keep.txt", 0, sc1), CRAB_FS_OK, "...emptied");
+    assert_eq(crab_fs_delete("build", "m4test", 1, sc1), CRAB_FS_OK, "...and now it goes");
+    assert_eq(crab_fs_delete("build", "m4test2", 1, sc1), CRAB_FS_OK, "both scratch directories removed");
+
+    # --- the path cap -----------------------------------------------------------------------------
+    # ⚠ A name that cannot be joined within CRAB_PATH_MAX is refused, never truncated — a truncated
+    # path is a DIFFERENT path, and this layer deletes things.
+    var longname = alloc(CRAB_NAME_MAX + 1);
+    var li2 = 0;
+    while (li2 < 60) { store8(longname + li2, 120); li2 = li2 + 1; }
+    store8(longname + 60, 0);
+    var m4deep = alloc(CRAB_PATH_MAX);
+    var di2 = 0;
+    while (di2 < 240) { store8(m4deep + di2, 121); di2 = di2 + 1; }
+    store8(m4deep, 47);
+    store8(m4deep + 240, 0);
+    assert_eq(crab_fs_delete(m4deep, longname, 0, sc1), CRAB_FS_ETOOLONG,
+      "a join past CRAB_PATH_MAX is refused rather than truncated");
 
     return assert_summary();
 }

@@ -45,6 +45,46 @@ enum CrabPath {
     CRAB_NAME_MAX = 64;      # one readdir record — the longest name that can exist
 }
 
+# @public — length of a NUL-terminated string, scanning AT MOST `cap` bytes. Returns the length, or
+# -1 if no NUL was found within `cap`.
+#
+# ⛔ EVERY LENGTH TAKEN IN THIS APP IS BOUNDED, AND THE STDLIB `strlen` IS NOT. crab's strings come
+# from two places it does not control — kernel readdir records and its own joined paths — and the
+# 0.5.0 P-1 in this very file was an unbounded walk over the first of those. `strlen` is still
+# correct for a literal (`crab_say`); it is not correct for anything the kernel wrote.
+# ⚠ THE -1 IS NOT DECORATION. The agnos write syscalls take an explicit `pathlen`, so a caller that
+# silently substituted `cap` for an unterminated string would hand the KERNEL a length running past
+# the buffer — the overflow moved one layer down rather than removed.
+fn crab_cstr_len(s, cap): i64 {
+    if (s == 0) { return -1; }
+    if (cap <= 0) { return -1; }
+    var i = 0;
+    while (i < cap) {
+        if (load8(s + i) == 0) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+# @public — are two NUL-terminated strings equal, comparing AT MOST `cap` bytes? 1 = yes, 0 = no.
+#
+# ⚠ TWO UNTERMINATED STRINGS ARE NOT "EQUAL" HERE — running off the end of both returns 0, not 1.
+# The callers use this to decide whether a destination IS the source before deleting one of them,
+# and answering "the same" about two strings whose ends were never found is the wrong direction to
+# be wrong in.
+fn crab_streq_n(a, b, cap): i64 {
+    if (a == 0) { return 0; }
+    if (b == 0) { return 0; }
+    var i = 0;
+    while (i < cap) {
+        var ca = load8(a + i);
+        if (ca != load8(b + i)) { return 0; }
+        if (ca == 0) { return 1; }                       # both ended here
+        i = i + 1;
+    }
+    return 0;                                            # neither terminated within cap
+}
+
 # Copy a NUL-terminated cstring src -> dst, writing AT MOST `cap` bytes including the NUL.
 # Returns the length written, or -1 if src did not fit. dst is ALWAYS NUL-terminated inside
 # its allocation, even on the truncation path — a caller that ignores -1 still gets a valid

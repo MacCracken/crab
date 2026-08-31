@@ -1,6 +1,29 @@
-# Handoff — **0.7.0 cut; all three M3 gates CLOSED and RELEASED upstream.** M3 is complete.
+# Handoff — **0.7.0 cut. The five M3 defects are CLOSED and M4's first slice is in.**
 
-> ⛔ **Five reviewed-but-unfixed defects are listed below. Read that section before writing code.**
+> ⭐ **Updated 2026-08-30**, after the iron burn of that date and the defect/M4 work it prompted.
+> The five defects below are **fixed**; the section is kept for its reasoning and for two
+> corrections to the review that found them.
+>
+> ⭐⭐ **THE HEADLINE, IF YOU READ NOTHING ELSE: M4's stated gate does not exist.** The roadmap read
+> *"Copy · move · rename · delete · mkdir · open. **Gate: agnos** write syscalls."* Every arm has
+> been real and mount-routed since agnos **1.41.3**, and crab's **already-pinned cyrius 6.5.35**
+> vendors a wrapper for each. ⛔ agnos's own userland-ABI **table** still says otherwise — it is
+> stale, and its dispatcher is not. **Verify against the dispatcher, never the table.**
+>
+> ⭐ **The 2026-08-30 burn was crab's third on iron and the first for the M3 tree.** It proved:
+> launcher → placed channel → setu surface → **`#92` op 0x01 GPU shader blend** → key forwarding →
+> navigation → clean exit, with **zero dropped input** and a listing of `/` cross-checked at
+> **122 entries** against the shell's own `ls -a`. It did **not** exercise any of M2 — no resize, no
+> pointer, no scroll, no sort cycle — and no MODIFIED column, because the window stayed 380x220 the
+> whole run.
+> ⚠ **The 5 fps is aethersafha's, not crab's**: of a 199,652 µs mean frame, present is 194,876 µs
+> and crab's render is **217 µs** (0.11 %).
+>
+> ⭐ **The burned binary IS reproducible, contrary to what this file used to imply.** Built with a
+> clean 6.5.35 from the released tarball, `build/crab_agnos` comes out **byte-identical** to the
+> staged artifact at **406,992 B**, and the host build reproduces **398,504 B** exactly. Earlier
+> measurements of 398,520 / 407,040 were the *contaminated local snapshot*, not a source difference.
+> ⇒ **Build through the released tarball, not `~/.cyrius`** — see *Verifying anything in this stack*.
 
 > **Written 2026-08-26 at 0.5.0; rewritten 2026-08-27 at 0.6.0, then updated across M2 and M3; cut at 0.7.0 on 2026-08-28.** Read this, then [`CLAUDE.md`](../../CLAUDE.md), then
 > [`state.md`](state.md), then [`roadmap.md`](roadmap.md).
@@ -25,10 +48,33 @@
 | Deps | agnos **1.56.50** · bhumi 1.4.3 · setu 0.8.8 · sigil 3.12.12 · dhancha **0.9.20** · aethersafha 0.16.22 · sadish 0.5.2 · rupa **0.1.5** · rekha 0.3.5 · kashi 1.0.6. ⭐ **all released and pushed** (agnos `1.56.50`, dhancha `0.9.20`, rupa `0.1.5`). The four-way tag check was RE-RUN 2026-08-28 with every `path` override DISABLED: `cyrius deps` resolves **6 deps / 0 errors**, host **and** `--agnos` build, **253/0** tests. rupa and dhancha also moved their toolchain pin to **6.5.35**, matching crab. |
 | Mid-arc work | **The three M3 gates were repaired upstream and their crab-side items are done.** rupa **0.1.5** (`on-accent` + contrast primitives), dhancha **0.9.20** (columns, per-widget fg, the unreadable-selection fix), agnos **1.56.50** (`#101 readdir_at`). M3 is complete; next is **M4 — file operations (v0.8.0)**. |
 
-### ⛔⛔ FIVE OPEN DEFECTS — reviewed 2026-08-28, **none fixed**
+### ✅ THE FIVE DEFECTS ARE CLOSED (2026-08-30) — kept below for the reasoning, not as open work
 
-Found by a full review of the M3 gate work. All five are in code that **builds and passes 253/0**, so
-the suite will not find them for you. Ranked.
+Found by a full review of the M3 gate work. All five were in code that **built and passed 253/0**,
+which is exactly why the suite did not find them. **All five are now fixed** — see the CHANGELOG's
+`[Unreleased]`. The descriptions are kept because the reasoning is still the reasoning; the list is
+no longer a work queue.
+
+⛔ **TWO CORRECTIONS TO THIS LIST, BOTH FOUND WHILE FIXING IT. Read them before trusting a review.**
+
+1. **Defect 3's prescribed fix — "Guard on `cur`" — DOES NOT WORK.** `agnos/kernel/core/ext2.cyr:2412`
+   *parks* the cursor on the record it declined to take (`store64(cursor_uva, blkbase + off)`)
+   whenever the batch budget is reached; only `:2440` (walked off the end) and `:2392`
+   (`start >= dir_size`) ever store `-1`. So at exactly the cap the final batch fills, the cursor is
+   parked rather than exhausted, and a cursor test **still reports the false truncation**. The
+   COUNT is the oracle: the counting walk resumes from that parked cursor, takes `:2392` at once,
+   and adds nothing — leaving `crab_dir_total == n`.
+2. **Defect 1's ranking rationale was wrong.** The review called the counting loop "the worse of the
+   two" because the listing loop has an `n >= CRAB_MAX_ENTRIES` escape. **That escape can never fire
+   on a stalled cursor** — `n` advances only by `n = n + k`, and on a stall `k` is the zero. Both
+   loops were equally unbounded. There was no safer half.
+
+⚠ **And the review under-counted the stale comments**: defect 4 says three sites; there are **seven**,
+plus two of a different class (`src/main.cyr` describing listing as `#81` when both live call sites
+are `#101`), plus the arena comment in `src/ui.cyr`, which was stale for a **second, undocumented
+reason** — *#32* took a row from one widget to 1 + `ncols`, so the frame chains **7 chunks** at the
+shipped window, not the one the comment promised. Measure that with `arena_capacity_total`;
+`arena_used` reports the current chunk only and shows 13,104 B for a 2.6 MB frame.
 
 1. **Neither `#101` loop terminates on a stalled cursor — a hang, not a crash.**
    `src/app.cyr:566` (the listing walk) and `src/app.cyr:587` (the counting walk) both loop

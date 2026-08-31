@@ -2,7 +2,139 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — upstream gate repairs
+## [Unreleased] — upstream gate repairs, the five M3 defects, M4's first slice, and the 6.5.36 pin
+
+### Changed — toolchain pin 6.5.35 -> 6.5.36, and the hardcoded syscall number is retired
+
+⭐ **`CRAB_SYS_READDIR_AT = 101` is gone.** It was an interim with a written expiry — *"switch to
+`sys_readdir_at` and delete this constant the moment crab's pin moves to >= 6.5.36"* — and that
+condition is now met: **cyrius 6.5.36 is released** (tag + assets on the remote; the docs said
+"UNRELEASED", which was true when written on 2026-08-28). The pin moves, `cyrius lib sync` vendors
+`sys_readdir_at`, and both `#101` call sites go through the wrapper.
+
+⚠ **crab is the FIRST consumer to actually CALL that wrapper.** agnos's own `rdat.cyr` proves the
+kernel contract but uses the raw number, so until now the cyrius peer was asserted to compile and
+had never been executed. The next burn is what proves it.
+⚠ `cyrius lib sync` copies the **declared** `[deps].stdlib` set — **29** files — while crab vendors
+**30**. The odd one out is `lib/atomic.cyr`, a transitive leaf no declaration names; checked by hand
+and identical to the 6.5.36 snapshot.
+⚠ 6.5.35 and 6.5.36 format crab's files identically, so the bump caused no formatting churn.
+
+### Fixed — the two P0 defects the M3 review found and left open (2026-08-30)
+
+Both were in code that built and passed **253 / 0**, which is why the suite never found them.
+
+- ⛔ **Neither `#101` readdir walk terminated on a stalled cursor — a hang, not a crash.**
+  `agnos/kernel/core/ext2.cyr:2401` and `:2405` `store64(cursor_uva, pos)` with `pos` **unchanged**
+  and `return count`, which may be `0` and is **not negative** — so a persistent block-read failure
+  satisfied `k >= 0` and `cur != -1` forever, spinning crab in a syscall loop with no output.
+  Both loops now break on zero-records-AND-an-unmoved-cursor, and both carry a
+  `CRAB_READDIR_STEPS_MAX` backstop. ⚠ The listing loop's `n >= CRAB_MAX_ENTRIES` test was **not**
+  a second escape: `n` advances only by `n = n + k`, and on a stall `k` is the zero.
+  The decision is lifted into `crab_readdir_stalled` so the suite can assert it — the loops
+  themselves are inside `#ifdef CYRIUS_TARGET_AGNOS` and cannot be reached from a host test.
+- ⛔ **`crab_name_cell` scanned kernel readdir data with an unbounded `strlen`** (`src/ui.cyr`),
+  the same data whose unbounded copies caused the 0.5.0 P-1. It was safe only because `chars` was
+  small at the shipped 380x220 window — and `chars` is width-derived, so above ~1,860 px it exceeds
+  the cell and the kernel's own NUL becomes the sole guard. crab already accepts a 2560x1440 resize,
+  so one F5 reached it. Now bounded by `CRAB_REC_TYPE`, and the destination is derived from that
+  constant rather than a bare `80`.
+
+### Fixed — a full buffer is not a truncation (P1)
+
+A directory of **exactly** `CRAB_MAX_ENTRIES` entries printed *"has more entries than are shown"*.
+⛔ **The obvious fix is wrong**: `ext2.cyr:2412` *parks* the cursor on the record it declined to take
+whenever the batch budget is reached, so `cur != -1` at exactly the cap and a cursor test still
+reports the false truncation. The oracle is the **count** — `crab_truncation_note` now returns
+"say nothing" / "showing n of total" / "has more, count unknown", and the unknown arm no longer
+depends on a digit buffer to terminate its line.
+
+### Changed — the sort is O(n log n), off the keystroke path (P2)
+
+`crab_sort_entries` was insertion sort with a 64-byte record swap done **one byte at a time**, and it
+runs once per listing — every descend, every ascend, both panes on `s`. M3 *#02* raised the cap
+256 -> 1024 without re-deriving the comment that justified it ("`CRAB_MAX_ENTRIES` is 256"). Now a
+bottom-up merge over an **index array**, then one cycle-following permutation pass, so the 64-byte
+payload is touched once per entry instead of O(n^2) times. Measured on native x86_64:
+
+| n | order | insertion (was) | merge (now) | |
+|---|---|---:|---:|---|
+| 1024 | scrambled | 89.1 ms | **447 us** | 199x |
+| 1024 | reverse-sorted | 182.9 ms | **414 us** | 442x |
+| 256 | scrambled | 5.48 ms | 84 us | 65x |
+| 122 (the iron `/`) | scrambled | 1.24 ms | 36.5 us | 34x |
+
+⚠ **Stability is preserved and is load-bearing** — it is what keeps a re-sort from reshuffling equal
+rows under the selection. `crab_sort_insertion` is **retained** as the fallback when the index
+scratch cannot be allocated, and doubles as the differential oracle the merge sort is tested against.
+⚠ The old per-call `alloc(CRAB_REC_SZ)` swap slot leaked 64 B **per keypress** into an allocator with
+no `free()`; the scratch is now allocated once for the process.
+
+### Fixed — stale cost comments the cap bump invalidated (P2)
+
+Seven sites, not the three the review listed: `~280 ms at the 256 cap` (now ~1.1 s) in two files,
+"8 ticks" (now 32), "114 entries on iron" (now **122**, measured 2026-08-30), and two more.
+`src/main.cyr` also described listing as *"via the readdir syscall (#81)"* in two places when both
+live call sites are `#101`.
+
+⭐ **And the arena comment was stale for a second, undocumented reason.** It claimed 256 KiB
+"absorbs a full frame at the `CRAB_MAX_ENTRIES` ceiling without ever chaining". Re-measured with
+`arena_capacity_total` (**not** `arena_used`, which reports the current chunk only and shows 13,104 B
+for a 2.6 MB frame):
+
+| window | entries | cols | chain total | chunks |
+|---|---:|---:|---:|---:|
+| 380x220 | 122 | 2 | 262,144 | 1 |
+| 380x220 | 1024 | 2 | 1,835,008 | **7** |
+| 2560x1440 | 1024 | 3 | 2,621,440 | **10** |
+
+Two things moved under it: the cap 256 -> 1024, and *#32* taking a row from one widget to
+1 + `ncols`. ⭐ Still **not** a leak — `arena_reset` keeps the chain, so the global heap still sees
+zero bytes per steady-state frame. 256 KiB is kept deliberately: it fits the case the burn actually
+ran.
+
+### Added — M4: pane states, and the write layer
+
+- ⭐ **An empty pane now says why it is empty.** Blank meant four unrelated things — empty, gone, not
+  a directory, unreadable — because `crab_readdir_into` clamps its return to `>= 0`. The kernel's
+  code now survives the call (`crab_listing_err`) and `crab_pane_state` classifies it.
+  ⛔ **There is no "permission denied" state, and inventing one would be a lie**: agnos is
+  single-user always-root, `ext2_readdir_at_sys` has no `EACCES` arm, and `getuid`#15 is a literal
+  `return 0`. The burn's *"operation not permitted"* lines came from `stat` failing on a broken
+  symlink, not from any denial crab can observe.
+- ⭐⭐ **The write layer — copy, move, delete — and M4's stated gate does not exist.** The roadmap
+  read *"Gate: agnos write syscalls"*. Every arm has been real and mount-routed since **1.41.3**
+  (`open`#7, `mkdir`#9, `rmdir`#10, `unlink`#30, `rename`#31), and crab's **already-pinned cyrius
+  6.5.35** vendors a wrapper for every one. No pin move was required.
+  ⛔ **The trap**: agnos's own userland-ABI *table* still calls mkdir/rmdir *"stub -> 0"*, contradicted
+  by the dispatcher in the same repo. Verify against the dispatcher, never the table.
+- ⛔ **The two targets disagree on every signature** — agnos takes an explicit `pathlen`, Linux takes
+  a NUL-terminated path and a **mode** in the same position. Same arity, different meaning, so a call
+  written for one compiles clean against the other. One shim per operation; nothing else calls `sys_*`.
+- ⛔ **agnos has no `AO_EXCL`**, so the kernel cannot refuse an overwrite. Every destination is
+  checked with `crab_fs_exists` first — a copy that relied on the open failing would refuse correctly
+  on the host and **silently truncate on agnos**. The residual TOCTOU window is disclosed, not hidden.
+- Keys: `c` copy, `m` move to the other pane (the dual-pane idiom — no text entry needed), `d` delete
+  behind a `y`/anything-else confirmation shown in the status line. ⚠ Not F5/F6: aethersafha takes
+  F5 for maximize, so a client binding it would never see the key.
+- ⛔ **No recursion, deliberately.** `rmdir` refuses a non-empty directory and crab reports it;
+  folders cannot be copied. A recursive delete behind one keypress cannot be undone or interrupted,
+  and crab has neither a progress surface nor a trash. That is M4's genuinely gated part.
+
+### Added — tests, and a benchmark that measures something
+
+**253 -> 408 passing**, plus `render_test` **14 -> 19** pixel checks.
+⭐ The write layer's tests perform **real syscalls against a real filesystem** — unlike `#101`
+readdir, `mkdir`/`unlink`/`rename`/`open`/`read`/`write` all exist on the host, so the refusals, the
+bounded join, the overwrite guard and multi-chunk copying are exercised for real.
+⛔ **The data-loss path needed forcing to reach**: `crab_fs_move` tries `rename` first and falls back
+to copy-then-delete only when it refuses — and within one filesystem rename never refuses, so a
+mutation that deleted the source regardless of the copy's result **passed the entire suite**. It is
+now reached by naming a destination directory that does not exist.
+⚠ `tests/crab.bcyr` timed `bench_noop` — an empty function — until now, which is why the latency
+regression above shipped unnoticed. It now measures the sort at the cap, at 256, and at the burn's
+real 122.
+
 
 ### Fixed — the declared dependency graph did not resolve (release-plumbing repair, 2026-08-28)
 
