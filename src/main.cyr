@@ -535,18 +535,34 @@ fn main(): i64 {
                                 # `crab_relist` readdirs straight back into this buffer, so a name
                                 # still pointing into it afterwards describes a different file.
                                 crab_strcpy_n(namescr, drec, CRAB_NAME_MAX);
-                                var rcd = crab_fs_delete(dpath, namescr, ddir, pathscr);
-                                crab_set_notice(crab_fs_msg(rcd));
+                                # ⭐ A FOLDER IS A RECURSIVE DELETE NOW (M4). ⛔ It is the single
+                                # most destructive thing crab can do and it is NOT undoable — which
+                                # is why it sits behind the same y-confirmation, why the prompt says
+                                # "and everything in it", and why Esc stops it mid-walk.
+                                var rcd = 0;
+                                if (ddir != 0) {
+                                    rcd = crab_walk_begin(CRAB_OP_DTREE, dpath, namescr, 0,
+                                      pathscr, pathscr2, statbuf);
+                                    if (rcd == CRAB_FS_OK) { crab_set_notice("deleting folder..."); }
+                                    else { crab_set_notice(crab_fs_msg(rcd)); }
+                                } else {
+                                    rcd = crab_fs_delete(dpath, namescr, ddir, pathscr);
+                                    crab_set_notice(crab_fs_msg(rcd));
+                                }
                                 crab_say("crab: delete "); crab_say(namescr);
                                 crab_say(" -> "); crab_say(crab_fs_msg(rcd)); crab_say("\n");
-                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                lstate = crab_pane_state(ln, crab_listing_err());
-                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                rstate = crab_pane_state(rn, crab_listing_err());
-                                if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
-                                if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                # ⚠ A tree delete is still RUNNING here — the idle tick relists when
+                                # it finishes. Relisting now would readdir a directory mid-removal.
+                                if (crab_op_active() == 0) {
+                                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                    crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                    lstate = crab_pane_state(ln, crab_listing_err());
+                                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                    crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                    rstate = crab_pane_state(rn, crab_listing_err());
+                                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                }
                             }
                         } else { crab_say("crab: delete cancelled\n"); }
                     } else {
@@ -659,7 +675,18 @@ fn main(): i64 {
                                 # front of a nine-file marked set is the most dangerous sentence in
                                 # the app — the operator answers the question they were asked.
                                 if (nmark > 0) { crab_set_notice("delete the MARKED entries?  y = yes, any other key = no"); }
-                                else { crab_set_notice("delete the selected entry?  y = yes, any other key = no"); }
+                                else {
+                                    # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected
+                                    # entry?" in front of a directory is technically true and
+                                    # practically a lie — the operator answers the question asked.
+                                    var qrec = lbuf + sel_l * CRAB_REC_SZ;
+                                    if (active_pane == 1) { qrec = rbuf + sel_r * CRAB_REC_SZ; }
+                                    if (load8(qrec + CRAB_REC_TYPE) != 0) {
+                                        crab_set_notice("delete this FOLDER and everything in it?  y = yes");
+                                    } else {
+                                        crab_set_notice("delete the selected entry?  y = yes, any other key = no");
+                                    }
+                                }
                             } else { crab_set_notice("nothing selected to delete"); }
                         }
                         # ⭐ COPY AND MOVE GO TO THE OTHER PANE, WHICH IS WHAT THE SECOND PANE IS FOR.
@@ -679,7 +706,14 @@ fn main(): i64 {
                                 # bytes, so the "copy" would produce a corrupt FILE where a folder was
                                 # asked for. Recursive copy needs the transfer tray to show and stop it.
                                 if (load8(srec + CRAB_REC_TYPE) != 0) {
-                                    crab_set_notice("folders cannot be copied yet — files only");
+                                    # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
+                                    # acceptable: it shows what is happening and Esc stops it.
+                                    crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
+                                    var rct = crab_walk_begin(CRAB_OP_CTREE, srcp, namescr, dstp,
+                                      pathscr, pathscr2, statbuf);
+                                    if (rct == CRAB_FS_OK) { crab_set_notice("copying folder..."); }
+                                    else { crab_set_notice(crab_fs_msg(rct)); }
+                                    crab_say("crab: copy tree "); crab_say(namescr); crab_say("\n");
                                 } else {
                                     crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
                                     # ⭐ MARKS OUTRANK THE CURSOR, and with nothing marked the cursor IS the

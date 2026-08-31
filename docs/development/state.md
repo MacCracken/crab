@@ -24,7 +24,7 @@
 
 ## Version
 
-**0.7.3** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.4** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
 ⭐ M4 is now substantially in: `open`, the small-window ratification, and drag between panes, on top
 of 0.7.1's write layer. ⚠ **Semver would normally make new user-facing features a MINOR**; this is
@@ -85,7 +85,7 @@ demands and the one this file broke twice.
 
 ## Source
 
-**3,897 lines** across **six** files (five until 0.6.0) at 0.7.3; 2,227 at the 0.7.0 cut; 2,227 at the 0.7.0 cut.
+**4,803 lines** across **six** files (five until 0.6.0) at 0.7.4; 2,227 at the 0.7.0 cut; 2,227 at the 0.7.0 cut.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
@@ -141,7 +141,7 @@ tests for all of it.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⭐ `cyrius coverage` reports **88/109 fns referenced (80 %)** at 0.7.3, 6/6 files — **the v1.0
+⭐ `cyrius coverage` reports **122/140 fns referenced (87 %)** at 0.7.4, 6/6 files — **the v1.0
 criterion, met.** It dipped to 73 % mid-cut as M4's write layer landed faster than its tests, and was
 recovered by writing the assertions that were genuinely missing (`crab_entry_cmp` directly, the
 result messages, the notice channel, `crab_lower`, the listing accessors) rather than by naming
@@ -356,7 +356,7 @@ errors**, host and `--agnos` both build, **253/0**).
 | rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.22 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| dhancha | 0.9.23 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
@@ -420,7 +420,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **520 passed / 0 failed** at 0.7.3 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **653 passed / 0 failed** at 0.7.4 (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -458,8 +458,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **419,816 B** at 0.7.3 (398,504 B at the 0.7.0 cut) |
-| `--agnos`    | ✅ builds, **437,008 B** at 0.7.3 (406,992 B at the cut) — the real target |
+| x86_64 linux | ✅ builds, **444,824 B** at 0.7.4 (398,504 B at the 0.7.0 cut) |
+| `--agnos`    | ✅ builds, **462,240 B** at 0.7.4 (406,992 B at the cut) — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

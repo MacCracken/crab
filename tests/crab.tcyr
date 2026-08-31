@@ -1779,6 +1779,222 @@ fn main() {
     assert_eq(crab_fs_delete("build", "m4step", 1, sc1), CRAB_FS_OK, "cleanup: source dir");
     assert_eq(crab_fs_delete("build", "m4step2", 1, sc1), CRAB_FS_OK, "cleanup: dest dir");
 
+    # --- M4: the walk's enumeration shim, on a REAL directory --------------------------------------
+    # ⭐⭐ THIS IS WHY THE SHIM EXISTS. `crab_readdir_into` is agnos-only and yields 0 on the host, so
+    # a tree walk built on it would be another `#101`-shaped blind spot — in the most destructive code
+    # in the app. Linux's `getdents64` carries `d_off`, a seek cookie with exactly `#101`'s
+    # semantics, so the same state machine runs for real here.
+    assert_eq(crab_fs_mkdir("build", "m4walk", sc1, fstat), CRAB_FS_OK, "a tree to walk");
+    var wd = "build/m4walk";
+    assert_eq(crab_fs_mkdir(wd, "sub", sc1, fstat), CRAB_FS_OK, "...with a subdirectory");
+    var wf1 = crab_fs_path(sc1, wd, "a.txt");
+    var wfd1 = crab_fs_open_w(sc1, wf1); sys_write(wfd1, "aaa", 3); sys_close(wfd1);
+    var wf2 = crab_fs_path(sc1, wd, "b.txt");
+    var wfd2 = crab_fs_open_w(sc1, wf2); sys_write(wfd2, "bb", 2); sys_close(wfd2);
+
+    var wbuf2 = alloc(CRAB_READDIR_BATCH * CRAB_REC_SZ);
+    var wcur = alloc(8); store64(wcur, 0);
+    var wn = crab_walk_readdir(wd, crab_cstr_len(wd, CRAB_PATH_MAX), wbuf2, CRAB_READDIR_BATCH, wcur);
+    assert_eq(wn, 3, "three entries — and '.' and '..' are SKIPPED, never records");
+    # ⛔ A walk that descended into '..' would leave the tree immediately.
+    var wdirs = 0;
+    var wi2 = 0;
+    while (wi2 < wn) {
+        if (load8(wbuf2 + wi2 * CRAB_REC_SZ + CRAB_REC_TYPE) == 1) { wdirs = wdirs + 1; }
+        wi2 = wi2 + 1;
+    }
+    assert_eq(wdirs, 1, "exactly one of the three is a DIRECTORY — the descend gate reads this byte");
+    # ⚠ The cursor advanced and the next read exhausts.
+    assert(load64(wcur) != 0, "the cursor moved");
+    var wn2 = crab_walk_readdir(wd, crab_cstr_len(wd, CRAB_PATH_MAX), wbuf2, CRAB_READDIR_BATCH, wcur);
+    assert_eq(wn2, 0, "a second read is exhausted");
+    assert_eq(load64(wcur), 0 - 1, "...and the cursor is the -1 sentinel");
+    # ⚠ Reading from an exhausted cursor is a no-op, not a restart from the top.
+    var wn3 = crab_walk_readdir(wd, crab_cstr_len(wd, CRAB_PATH_MAX), wbuf2, CRAB_READDIR_BATCH, wcur);
+    assert_eq(wn3, 0, "an exhausted cursor stays exhausted");
+    # ⚠ A path that is not a directory is an error, not an empty listing.
+    store64(wcur, 0);
+    assert(crab_walk_readdir("build/m4walk/nope", 16, wbuf2, CRAB_READDIR_BATCH, wcur) < 0,
+      "a missing directory is an ERROR, not an empty listing");
+
+    # --- the delete walk must restart at cursor 0; the copy walk carries its own -------------------
+    # ⛔⛔ `ext2_dir_remove` COALESCES a removed entry into its PREDECESSOR, so a parked cursor
+    # becomes INTERIOR to that record — and the kernel then parses a header out of the middle of a
+    # FILENAME. The alignment check passes and `ext2_dirent_valid` is satisfied by ordinary name
+    # bytes, so the failure is a FABRICATED name handed to `unlink`. If it matches a real sibling,
+    # the wrong file is deleted.
+    assert_eq(crab_walk_cursor_for(CRAB_OP_DTREE, 4096), 0, "a DELETE always re-reads from the top");
+    assert_eq(crab_walk_cursor_for(CRAB_OP_DTREE, 0), 0, "...whatever was saved");
+    assert_eq(crab_walk_cursor_for(CRAB_OP_CTREE, 4096), 4096, "a COPY carries its cursor — it does not mutate the source");
+    assert_eq(crab_walk_cursor_for(CRAB_OP_CTREE, 0), 0, "...including from the top");
+
+    # --- the destination-inside-the-source guard ---------------------------------------------------
+    # ⛔ `/a` copied into `/a/b` produces `/a/b/a/b/…` until the path bound stops it.
+    assert_eq(crab_path_within("/a", "/a/b", CRAB_PATH_MAX), 1, "a child is inside its parent");
+    assert_eq(crab_path_within("/a", "/a", CRAB_PATH_MAX), 1, "...and a path is inside itself");
+    assert_eq(crab_path_within("/a", "/a/b/c", CRAB_PATH_MAX), 1, "...at any depth");
+    # ⛔ BOUNDARY-AWARE. A plain prefix compare says /ab is inside /a, and refusing that copy is a
+    # false refusal the operator cannot argue with.
+    assert_eq(crab_path_within("/a", "/ab", CRAB_PATH_MAX), 0, "'/ab' is a SIBLING of '/a', not a child");
+    assert_eq(crab_path_within("/home/x", "/home/xy", CRAB_PATH_MAX), 0, "...at any length");
+    assert_eq(crab_path_within("/a/b", "/a", CRAB_PATH_MAX), 0, "a parent is not inside its child");
+    assert_eq(crab_path_within("/a", "/b", CRAB_PATH_MAX), 0, "unrelated paths are unrelated");
+    # ⚠ The root ends in a separator already — every absolute path is inside it.
+    assert_eq(crab_path_within("/", "/anything", CRAB_PATH_MAX), 1, "everything is inside the root");
+
+    assert_eq(crab_fs_delete(wd, "a.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete(wd, "b.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete(wd, "sub", 1, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete("build", "m4walk", 1, sc1), CRAB_FS_OK, "cleanup");
+
+    # --- M4: the RECURSIVE walk, driven by hand against real trees ---------------------------------
+    # ⭐⭐ These run for real because `crab_walk_readdir` has a host arm over `getdents64`. A tree
+    # walk built on the agnos-only `crab_readdir_into` would have been a blind spot in the most
+    # destructive code in the app.
+    assert_eq(crab_fs_mkdir("build", "m4tree", sc1, fstat), CRAB_FS_OK, "a tree to delete");
+    assert_eq(crab_fs_mkdir("build/m4tree", "d1", sc1, fstat), CRAB_FS_OK, "...a level down");
+    assert_eq(crab_fs_mkdir("build/m4tree/d1", "d2", sc1, fstat), CRAB_FS_OK, "...and another");
+    var tf = crab_fs_path(sc1, "build/m4tree", "top.txt");
+    var rtfd = crab_fs_open_w(sc1, tf); sys_write(rtfd, "t", 1); sys_close(rtfd);
+    var tf2 = crab_fs_path(sc1, "build/m4tree/d1", "mid.txt");
+    var tfd2 = crab_fs_open_w(sc1, tf2); sys_write(tfd2, "m", 1); sys_close(tfd2);
+    var tf3 = crab_fs_path(sc1, "build/m4tree/d1/d2", "deep.txt");
+    var tfd3 = crab_fs_open_w(sc1, tf3); sys_write(tfd3, "d", 1); sys_close(tfd3);
+
+    # ⛔ A NON-RECURSIVE DELETE STILL REFUSES A NON-EMPTY DIRECTORY — the guard the tree walk exists
+    # to work WITH, not around.
+    assert_eq(crab_fs_delete("build", "m4tree", 1, sc1), CRAB_FS_ESYS,
+      "the plain delete still refuses a non-empty directory");
+
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4tree", 0, sc1, sc2, fstat), CRAB_FS_OK,
+      "a recursive delete starts");
+    assert_eq(crab_op_active(), 1, "...and is in flight");
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4tree", 0, sc1, sc2, fstat), CRAB_FS_EBUSY,
+      "...and a second is refused, as with any transfer");
+    var wg = 0;
+    var wr = crab_op_step();
+    while (wr == 1) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
+    assert_eq(wr, CRAB_FS_OK, "the recursive delete finishes cleanly");
+    assert_eq(crab_op_active(), 0, "...and the record is idle");
+    # ⛔ CHILDREN FIRST: the whole tree is gone, root included. `rmdir` refuses a non-empty directory,
+    # so a walk that removed parents first could not have completed at all.
+    var gonep = crab_fs_path(sc1, "build", "m4tree");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 0,
+      "the entire tree is gone, root and all");
+
+    # --- recursive COPY: parents first --------------------------------------------------------------
+    assert_eq(crab_fs_mkdir("build", "m4src", sc1, fstat), CRAB_FS_OK, "a source tree");
+    assert_eq(crab_fs_mkdir("build/m4src", "inner", sc1, fstat), CRAB_FS_OK, "...with a level");
+    var cf = crab_fs_path(sc1, "build/m4src", "one.txt");
+    var cfd = crab_fs_open_w(sc1, cf); sys_write(cfd, "hello", 5); sys_close(cfd);
+    var cf2 = crab_fs_path(sc1, "build/m4src/inner", "two.txt");
+    var cfd2 = crab_fs_open_w(sc1, cf2); sys_write(cfd2, "world!", 6); sys_close(cfd2);
+    assert_eq(crab_fs_mkdir("build", "m4dst", sc1, fstat), CRAB_FS_OK, "a destination");
+
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "m4src", "build/m4dst", sc1, sc2, fstat), CRAB_FS_OK,
+      "a recursive copy starts");
+    wg = 0;
+    wr = crab_op_step();
+    while ((wr == 1) || (wr == 2)) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
+    assert_eq(wr, CRAB_FS_OK, "the recursive copy finishes cleanly");
+    # Every level and every file arrived.
+    var d1 = crab_fs_path(sc1, "build/m4dst", "m4src");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1, "the root was recreated");
+    var d2 = crab_fs_path(sc1, "build/m4dst/m4src", "inner");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1, "...and the nested level");
+    var d3 = crab_fs_path(sc1, "build/m4dst/m4src", "one.txt");
+    assert_eq(crab_fs_stat_size(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 5, "the top file, with its bytes");
+    var d4 = crab_fs_path(sc1, "build/m4dst/m4src/inner", "two.txt");
+    assert_eq(crab_fs_stat_size(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 6, "...and the nested one");
+    # ⛔ AND THE SOURCE IS UNTOUCHED — a copy that moved would pass every check above.
+    var s1 = crab_fs_path(sc1, "build/m4src", "one.txt");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1, "the SOURCE tree survives a copy");
+
+    # --- the destination-inside-source refusal, for real --------------------------------------------
+    # ⛔ `/a` into `/a/b` recurses until the path bound stops it. Refused BEFORE anything is created.
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "m4src", "build/m4src/inner", sc1, sc2, fstat),
+      CRAB_FS_ELOOP, "copying a folder INTO ITSELF is refused");
+    assert_eq(crab_op_active(), 0, "...and nothing was started");
+    assert(load8(crab_fs_msg(CRAB_FS_ELOOP)) != 0, "...with its own sentence");
+
+    # --- cleanup, by recursive delete (which also re-exercises it) ----------------------------------
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4src", 0, sc1, sc2, fstat), CRAB_FS_OK, "cleanup: source");
+    wg = 0; wr = crab_op_step();
+    while ((wr == 1) || (wr == 2)) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
+    assert_eq(wr, CRAB_FS_OK, "...removed");
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4dst", 0, sc1, sc2, fstat), CRAB_FS_OK, "cleanup: destination");
+    wg = 0; wr = crab_op_step();
+    while ((wr == 1) || (wr == 2)) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
+    assert_eq(wr, CRAB_FS_OK, "...removed");
+    assert_eq(crab_op_step(), 0, "stepping an idle record is 0, not an error");
+
+    # --- coverage: the queue's captured directories, and the per-target raw shims ------------------
+    # ⛔ THE QUEUE'S DESTINATION IS CAPTURED WHEN IT STARTS, NOT READ FROM THE PANE EACH TIME. A
+    # multi-file transfer spans many idle ticks and the operator can navigate either pane while it
+    # runs — reading the live path at each step would send the second file somewhere the first did
+    # not go.
+    crab_queue_reset();
+    assert_eq(crab_queue_dirs(CRAB_OP_MOVE, "build", "build/m4test"), 0, "the queue captures its directories");
+    assert_eq(crab_queue_kind(), CRAB_OP_MOVE, "...and the kind it was started with");
+    assert(t_streq(crab_queue_srcdir(), "build"), "...the source");
+    assert(t_streq(crab_queue_dstdir(), "build/m4test"), "...and the destination");
+    # ⚠ Re-capturing replaces, so a second verb press does not inherit the first's destination.
+    crab_queue_dirs(CRAB_OP_COPY, "/a", "/b");
+    assert_eq(crab_queue_kind(), CRAB_OP_COPY, "re-capturing replaces the kind");
+    assert(t_streq(crab_queue_srcdir(), "/a"), "...and the paths");
+    # ⚠ Advancing an EMPTY queue is 0 ("spent"), not an error and not a start.
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), 0, "advancing a spent queue starts nothing");
+    assert_eq(crab_op_active(), 0, "...and leaves the record idle");
+
+    # ⛔ THE PER-TARGET RAW SHIMS — the layer where agnos takes an explicit `pathlen` and Linux takes
+    # a MODE in the same argument position. Same arity, different meaning, so a call written for one
+    # compiles clean against the other. Asserting the HOST arm directly separates "the shim is wrong"
+    # from "the operation is wrong", which are otherwise one failure.
+    assert_eq(crab_fs_mkdir("build", "m4raw", sc1, fstat), CRAB_FS_OK, "a directory for the raw shims");
+    var rawp = crab_fs_path(sc1, "build/m4raw", "sub");
+    assert_eq(crab_fs_mkdir_raw(sc1, rawp), 0, "mkdir_raw creates");
+    assert_eq(crab_fs_exists(sc1, rawp, fstat), 1, "...really");
+    assert_eq(crab_fs_rmdir_raw(sc1, rawp), 0, "rmdir_raw removes");
+    assert_eq(crab_fs_exists(sc1, rawp, fstat), 0, "...really");
+    var rawf = crab_fs_path(sc1, "build/m4raw", "f.txt");
+    var rawfd = crab_fs_open_w(sc1, rawf); sys_write(rawfd, "x", 1); sys_close(rawfd);
+    var rawg = crab_fs_path(sc2, "build/m4raw", "g.txt");
+    assert_eq(crab_fs_rename_raw(sc1, rawf, sc2, rawg), 0, "rename_raw renames");
+    assert_eq(crab_fs_exists(sc2, rawg, fstat), 1, "...to the new name");
+    assert_eq(crab_fs_unlink_raw(sc2, rawg), 0, "unlink_raw removes a file");
+    assert_eq(crab_fs_exists(sc2, rawg, fstat), 0, "...really");
+    # ⛔ `unlink` REFUSES A DIRECTORY and `rmdir` refuses a file — the asymmetry the delete walk
+    # depends on, since it unlinks leaves and rmdirs only emptied levels.
+    var rawd = crab_fs_path(sc1, "build/m4raw", "dd");
+    crab_fs_mkdir_raw(sc1, rawd);
+    assert(crab_fs_unlink_raw(sc1, rawd) < 0, "unlink refuses a DIRECTORY");
+    assert_eq(crab_fs_rmdir_raw(sc1, rawd), 0, "...and rmdir is what removes one");
+    assert_eq(crab_fs_delete("build", "m4raw", 1, sc1), CRAB_FS_OK, "cleanup");
+
+    # --- coverage: the lazily-allocated scratch buffers are stable ---------------------------------
+    # ⚠ Each is allocated ONCE for the process. A per-call allocation would leak into a bump
+    # allocator that never frees — the rule the frame arena, the sort scratch and the copy buffer all
+    # follow. Two calls returning the same pointer is the cheapest statement of it.
+    assert(crab_sort_scratch() != 0, "the sort scratch allocates");
+    assert_eq(crab_sort_scratch(), crab_sort_scratch(), "...once, and is reused");
+    assert(crab_copy_buf() != 0, "the copy buffer allocates");
+    assert_eq(crab_copy_buf(), crab_copy_buf(), "...once");
+    assert(crab_walk_buf() != 0, "the walk's batch buffer allocates");
+    assert_eq(crab_walk_buf(), crab_walk_buf(), "...once");
+    assert_eq(crab_walk_statbuf(), crab_walk_statbuf(), "...and so does the walk's statbuf");
+    assert_eq(crab_elf_magic_buf(), crab_elf_magic_buf(), "...and the ELF magic buffer");
+    assert_eq(crab_queue_buf(), crab_queue_buf(), "...and the multi-select queue");
+    assert_eq(crab_op_rec(), crab_op_rec(), "...and the operation record");
+    # ⛔ AND THEY ARE ALL DISTINCT. A collision would have two subsystems writing the same bytes —
+    # the sort permuting the copy buffer mid-transfer, say — with nothing to say so.
+    assert_eq(crab_sort_scratch() == crab_copy_buf(), 0, "the sort scratch is not the copy buffer");
+    assert_eq(crab_walk_buf() == crab_copy_buf(), 0, "the walk buffer is not the copy buffer");
+    assert_eq(crab_op_rec() == crab_queue_buf(), 0, "the record is not the queue");
+
+    # --- coverage: an idle record reports nothing rather than stale state --------------------------
+    assert_eq(crab_op_active(), 0, "idle");
+    assert(t_streq(crab_op_name(), ""), "an idle record has no name — not the last one it carried");
+
     # --- the path cap -----------------------------------------------------------------------------
     # ⚠ A name that cannot be joined within CRAB_PATH_MAX is refused, never truncated — a truncated
     # path is a DIFFERENT path, and this layer deletes things.

@@ -146,7 +146,7 @@ path = "../dhancha"
 # `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
 # refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
 # "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
-tag    = "0.9.22"
+tag    = "0.9.23"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]

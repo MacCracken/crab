@@ -885,6 +885,7 @@ enum CrabFs {
     CRAB_FS_ENOEXEC  = -16;    # not an executable, and crab has no handler for it
     CRAB_FS_ESPAWNLEN = -17;   # the path exceeds what `spawn_path` accepts
     CRAB_FS_EBUSY    = -18;    # a transfer is already in flight — crab runs one at a time
+    CRAB_FS_ELOOP    = -19;    # the destination is inside the source tree
 }
 
 # @public — may crab act on this entry name? 1 = yes, 0 = refuse.
@@ -1644,6 +1645,8 @@ enum CrabOp {
     CRAB_OP_IDLE   = 0;
     CRAB_OP_COPY   = 1;    # a plain copy
     CRAB_OP_MOVE   = 2;    # a copy whose source is unlinked on success
+    CRAB_OP_CTREE  = 3;    # a RECURSIVE copy — parents first
+    CRAB_OP_DTREE  = 4;    # a RECURSIVE delete — children first
     # ⚠ Chunks per idle tick. `CRAB_STAT_BATCH` is 32 entries at ~1.1 ms each; a 4 KiB chunk is far
     # cheaper, so 64 of them is a comparable slice of a tick rather than a number picked for looking
     # round. Bigger throws away the responsiveness this exists to buy.
@@ -1665,7 +1668,42 @@ enum CrabOp {
     # whole run rather than from the last step, which is the difference between a number that settles
     # and one that flickers with every disk hiccup.
     CRAB_OP_T0     = 616;
-    CRAB_OP_SZ     = 624;
+    # ⭐⭐ THE WALK'S STATE (M4 recursion). An EXPLICIT stack, not language recursion: a recursive
+    # function would blow the ring-3 stack on a deep tree AND could not be paused mid-way, which is
+    # the whole requirement — a tree operation must yield to the idle tick like everything else.
+    # ⚠ A SLOT HOLDS NO PATH. `sys_readdir_at` is path-based, not fd-based, so there is no directory
+    # handle to retain: a level is a resume cursor plus the two path lengths a pop truncates back to.
+    # The naive design — one entry buffer per level — is 64 KB PER LEVEL against a bump allocator
+    # that never frees. 32 bytes is 2000x cheaper and is what makes this one static allocation.
+    CRAB_OP_SROOT  = 624;    # + CRAB_PATH_MAX — the tree's source root, immutable for the run
+    CRAB_OP_DROOT  = 880;    # + CRAB_PATH_MAX — its destination root ("" for a delete)
+    CRAB_OP_CURS   = 1136;   # + CRAB_PATH_MAX — the LIVE source path: the level the walk stands in
+    CRAB_OP_CURD   = 1392;   # + CRAB_PATH_MAX — the live destination path, moved in lockstep
+    CRAB_OP_DEPTH  = 1648;
+    CRAB_OP_FILES  = 1656;   # entries finished — the tray's numerator
+    CRAB_OP_BYTES  = 1664;   # bytes moved across the WHOLE operation — the rate's numerator
+    CRAB_OP_WSTEP  = 1672;   # walk steps taken — the backstop counter
+    CRAB_OP_STACK  = 1680;   # CRAB_WALK_DEPTH_MAX * CRAB_WALK_SLOT
+    CRAB_OP_SZ     = 5776;
+    # ⛔ THE DEPTH BOUND IS DERIVED, NOT CHOSEN, AND IT IS PROVABLY UNREACHABLE. `CRAB_PATH_MAX` is
+    # 256, root "/" is one character and every level costs at least two more, so `crab_join_n`
+    # refuses at depth 127 before this clamp can fire. It exists so that if `CRAB_PATH_MAX` ever
+    # moves, the failure is a bounds check rather than a stack overrun — the same defence-in-depth
+    # as the unreachable entry-count clamp in `crab_readdir_into`.
+    CRAB_WALK_DEPTH_MAX = 128;
+    CRAB_WALK_SLOT      = 32;
+    CRAB_WS_CUR         = 0;    # the cursor this level's current batch was read from
+    CRAB_WS_SLEN        = 8;    # length of CURS at this level — what a pop truncates back to
+    CRAB_WS_DLEN        = 16;   # length of CURD at this level (0 on a delete)
+    CRAB_WS_IDX         = 24;   # records already consumed out of the current batch
+    # ⚠ Directory entries per idle tick, alongside `CRAB_COPY_STEP_CHUNKS`. ⛔ A tick is EITHER 64
+    # chunks of one file OR 32 entries, never both — so the tick cost is bounded by the larger, not
+    # their sum. 32 matches `CRAB_STAT_BATCH` because an entry costs about the same: a stat plus a
+    # mkdir, or a pair of opens.
+    CRAB_WALK_STEP_ENTRIES = 32;
+    # ⚠ The same shape and reasoning as `CRAB_READDIR_STEPS_MAX`: far above any legitimate walk, so
+    # reaching it is always a fault and never a big tree.
+    CRAB_WALK_STEPS_MAX = 262144;
 }
 
 var crab_op = 0;
@@ -1868,6 +1906,441 @@ fn crab_copy_step(): i64 {
     return 1;
 }
 
+# =================================================================================================
+# M4 — THE RECURSIVE WALK. Copying and deleting a tree, a bounded slice at a time.
+# =================================================================================================
+
+# @public — is `path` inside the tree rooted at `root`? 1 = yes.
+#
+# ⛔⛔ THE GUARD AGAINST COPYING A FOLDER INTO ITSELF. `/a` copied into `/a/b` produces
+# `/a/b/a/b/a/b/…` until the path bound stops it — a walk that never terminates on its own and
+# leaves a deep partial tree behind. Refused BEFORE anything is created.
+# ⚠ BOUNDARY-AWARE: `/ab` is NOT inside `/a`. A plain prefix compare says it is, and that would
+# refuse a perfectly legal copy — the kind of false refusal an operator cannot argue with.
+# ⚠ A path IS inside itself, which the caller wants: the exact-same-path case is refused too, and
+# `crab_streq_n` catches it first with the clearer `CRAB_FS_ESAME`.
+fn crab_path_within(root, path, cap): i64 {
+    var rl = crab_cstr_len(root, cap);
+    var pl = crab_cstr_len(path, cap);
+    if (rl < 0) { return 0; }
+    if (pl < 0) { return 0; }
+    if (pl < rl) { return 0; }
+    var i = 0;
+    while (i < rl) {
+        if (load8(root + i) != load8(path + i)) { return 0; }
+        i = i + 1;
+    }
+    if (pl == rl) { return 1; }
+    # ⚠ The next byte must be a separator, or this is a SIBLING whose name merely starts the same.
+    # ⚠ Unless the root already ends in one, which is only true of "/" itself.
+    if (load8(root + rl - 1) == 47) { return 1; }
+    if (load8(path + rl) == 47) { return 1; }
+    return 0;
+}
+
+# @public — the cursor a walk of `kind` may resume a directory read from.
+# -> 0 for a delete (always restart), `saved` for a copy.
+#
+# ⛔⛔ A DELETE MUTATES THE DIRECTORY IT IS READING, AND THAT IS WHY IT CANNOT CARRY A CURSOR.
+# `ext2_dir_remove` coalesces a removed entry into its PREDECESSOR by extending that record's
+# `rec_len`. `readdir_at` parks its cursor on the record it did not take and resumes by reading a
+# header at that offset — which, after a coalesce, is now INTERIOR to the predecessor's extended
+# record. So the kernel parses a record header out of the middle of a FILENAME.
+# ⛔ AND THE TWO GUARDS DO NOT SAVE IT. The 4-byte alignment check passes, because a valid record
+# start stays 4-aligned; and `ext2_dirent_valid` is satisfied by ordinary filename bytes. The failure
+# is not a crash and not an empty listing — it is a FABRICATED ENTRY NAME handed to `unlink`, and a
+# fabricated name that happens to match a real sibling deletes the wrong file.
+# ⇒ A delete re-reads from 0 every step. It costs one extra `readdir_at` per step and it is the
+# difference between correct and catastrophic.
+# ⚠ A predicate rather than an inline branch, for the same reason `crab_readdir_stalled` is one: the
+# walk it protects is agnos-shaped and the rule is what a host test can actually assert.
+fn crab_walk_cursor_for(kind, saved): i64 {
+    if (kind == CRAB_OP_DTREE) { return 0; }
+    return saved;
+}
+
+# ⚠ One shared batch buffer for the whole walk — never one per level. 64 records = 4 KB, the same
+# shape as `crab_readdir_into`'s counting scratch and one ext2 block.
+var crab_wbuf = 0;
+var crab_wraw = 0;
+
+fn crab_walk_buf(): i64 {
+    if (crab_wbuf == 0) { crab_wbuf = alloc(CRAB_READDIR_BATCH * CRAB_REC_SZ); }
+    return crab_wbuf;
+}
+
+fn crab_walk_raw(): i64 {
+    if (crab_wraw == 0) { crab_wraw = alloc(CRAB_COPY_CHUNK); }
+    return crab_wraw;
+}
+
+# @public — read up to `max` entries of the directory at `path` into `buf` as crab records,
+# resuming from `*curptr` (0 = the top) and writing the next cursor back. -> the count, or negative.
+# `*curptr` becomes -1 when the directory is exhausted.
+#
+# ⭐⭐ THIS EXISTS SO THE WALK CAN BE TESTED, AND THAT IS NOT A SIDE BENEFIT. `crab_readdir_into` is
+# agnos-only — its whole body sits inside `#ifdef CYRIUS_TARGET_AGNOS` and yields 0 on the host — so
+# a tree walk built on it would have been another `#101`-shaped blind spot, in the most destructive
+# code in the app. Linux's `getdents64` carries `d_off`, a seek cookie with EXACTLY `#101`'s
+# semantics, so the same state machine runs for real against real directories in `tests/crab.tcyr`.
+# ⚠ `.` and `..` are skipped on both targets. They consume batch space and never become records —
+# a walk that descended into `..` would leave the tree immediately.
+fn crab_walk_readdir(path, plen, buf, max, curptr): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return sys_readdir_at(path, buf, max, curptr);
+    #else
+    var fd = sys_open(path, O_RDONLY, 0);
+    if (fd < 0) { return 0 - 1; }
+    var start = load64(curptr);
+    if (start < 0) { sys_close(fd); return 0; }
+    if (start > 0) { xlseek(fd, start, 0); }   # portable in every syscall peer
+    var raw = crab_walk_raw();
+    if (raw == 0) { sys_close(fd); return 0 - 1; }
+    var got = sys_getdents64(fd, raw, CRAB_COPY_CHUNK);
+    if (got < 0) { sys_close(fd); return 0 - 1; }
+    if (got == 0) { store64(curptr, 0 - 1); sys_close(fd); return 0; }
+    var n = 0;
+    var off = 0;
+    var lastoff = start;
+    while (off < got) {
+        # struct linux_dirent64: u64 d_ino; s64 d_off; u16 d_reclen @+16; u8 d_type @+18; name @+19
+        var reclen = load8(raw + off + 16) | (load8(raw + off + 17) << 8);
+        if (reclen <= 0) { off = got; }
+        else {
+            if (n >= max) { off = got; }
+            else {
+                var dt = load8(raw + off + 18);
+                var nm = raw + off + 19;
+                var skip = 0;
+                if (load8(nm) == 46) {
+                    if (load8(nm + 1) == 0) { skip = 1; }
+                    if (load8(nm + 1) == 46) { if (load8(nm + 2) == 0) { skip = 1; } }
+                }
+                lastoff = load64(raw + off + 8);
+                if (skip == 0) {
+                    var rec = buf + n * CRAB_REC_SZ;
+                    var i = 0;
+                    while (i < CRAB_REC_SZ) { store8(rec + i, 0); i = i + 1; }
+                    crab_strcpy_n(rec, nm, CRAB_NAME_MAX);
+                    # ⚠ DT_DIR is 4 on Linux; crab's record uses 1 = directory, matching agnos.
+                    if (dt == 4) { store8(rec + CRAB_REC_TYPE, 1); }
+                    n = n + 1;
+                }
+                off = off + reclen;
+            }
+        }
+    }
+    store64(curptr, lastoff);
+    sys_close(fd);
+    return n;
+    #endif
+}
+
+# Close both descriptors WITHOUT ending the operation. Split out of `crab_op_release` for the walk:
+# a tree must close a finished file's fds and keep going, where a single-file transfer is done.
+# ⚠ Still ONE place that closes, which is the property the original comment names.
+fn crab_op_fds_close(r): i64 {
+    if (r == 0) { return 0; }
+    var fi = load64(r + CRAB_OP_FIN);
+    var fo = load64(r + CRAB_OP_FOUT);
+    if (fo >= 0) { sys_close(fo); }
+    if (fi >= 0) { sys_close(fi); }
+    store64(r + CRAB_OP_FIN, 0 - 1);
+    store64(r + CRAB_OP_FOUT, 0 - 1);
+    return 0;
+}
+
+# Truncate the live paths back to this level's prefix. Called after every entry, so `CURS`/`CURD`
+# always describe the DIRECTORY the walk stands in and never the entry it just looked at.
+fn crab_walk_restore(r, slot): i64 {
+    var sl = load64(slot + CRAB_WS_SLEN);
+    var dl = load64(slot + CRAB_WS_DLEN);
+    store8(r + CRAB_OP_CURS + sl, 0);
+    if (dl > 0) { store8(r + CRAB_OP_CURD + dl, 0); }
+    return 0;
+}
+
+# End the walk, leaving the record idle. -> `rc`, so callers can `return crab_walk_stop(r, code)`.
+fn crab_walk_stop(r, rc): i64 {
+    crab_op_fds_close(r);
+    store64(r + CRAB_OP_KIND, CRAB_OP_IDLE);
+    return rc;
+}
+
+# @public — begin a recursive copy (`CRAB_OP_CTREE`) or delete (`CRAB_OP_DTREE`) of the directory
+# `name` in `srcdir`. `dstdir` is ignored for a delete. -> CRAB_FS_OK once running, or a refusal.
+fn crab_walk_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return CRAB_FS_EIO; }
+    if (load64(r + CRAB_OP_KIND) != CRAB_OP_IDLE) { return CRAB_FS_EBUSY; }
+    if (crab_walk_buf() == 0) { return CRAB_FS_EIO; }
+    var ls = crab_fs_path(scr1, srcdir, name);
+    if (ls < 0) { return ls; }
+    var ld = 0;
+    if (kind == CRAB_OP_CTREE) {
+        ld = crab_fs_path(scr2, dstdir, name);
+        if (ld < 0) { return ld; }
+        if (crab_streq_n(scr1, scr2, CRAB_PATH_MAX) != 0) { return CRAB_FS_ESAME; }
+        # ⛔ THE DESTINATION MUST NOT BE INSIDE THE SOURCE. `/a` into `/a/b` produces `/a/b/a/b/…`
+        # until the path bound stops it — a walk that never terminates on its own and leaves a deep
+        # partial tree behind. Checked ONCE here rather than per step: the walk only ever descends
+        # real directories under the source root and builds the destination from the destination
+        # root, so this static check holds for the whole run.
+        if (crab_path_within(scr1, dstdir, CRAB_PATH_MAX) == 1) { return CRAB_FS_ELOOP; }
+        if (crab_fs_exists(scr2, ld, statbuf) != 0) { return CRAB_FS_EEXIST; }
+        if (crab_fs_mkdir_raw(scr2, ld) < 0) { return CRAB_FS_ESYS; }
+    }
+    store64(r + CRAB_OP_KIND, kind);
+    store64(r + CRAB_OP_FIN, 0 - 1);
+    store64(r + CRAB_OP_FOUT, 0 - 1);
+    store64(r + CRAB_OP_DONE, 0);
+    store64(r + CRAB_OP_TOTAL, 0 - 1);
+    store64(r + CRAB_OP_T0, clock_now_ms());
+    store64(r + CRAB_OP_DEPTH, 0);
+    store64(r + CRAB_OP_FILES, 0);
+    store64(r + CRAB_OP_BYTES, 0);
+    store64(r + CRAB_OP_WSTEP, 0);
+    crab_strcpy_n(r + CRAB_OP_NAME, name, CRAB_NAME_MAX);
+    crab_strcpy_n(r + CRAB_OP_SROOT, scr1, CRAB_PATH_MAX);
+    crab_strcpy_n(r + CRAB_OP_CURS, scr1, CRAB_PATH_MAX);
+    store8(r + CRAB_OP_DROOT, 0);
+    store8(r + CRAB_OP_CURD, 0);
+    if (kind == CRAB_OP_CTREE) {
+        crab_strcpy_n(r + CRAB_OP_DROOT, scr2, CRAB_PATH_MAX);
+        crab_strcpy_n(r + CRAB_OP_CURD, scr2, CRAB_PATH_MAX);
+    }
+    var slot = r + CRAB_OP_STACK;
+    store64(slot + CRAB_WS_CUR, 0);
+    store64(slot + CRAB_WS_SLEN, ls);
+    store64(slot + CRAB_WS_DLEN, ld);
+    store64(slot + CRAB_WS_IDX, 0);
+    return CRAB_FS_OK;
+}
+
+# Advance the file currently in flight inside a tree copy. Same chunk loop as `crab_copy_step`, with
+# two differences: EOF closes the fds and keeps the WALK alive (returning 2, "an item finished"), and
+# every chunk also accumulates into the operation-wide byte total.
+fn crab_walk_file_step(): i64 {
+    var r = crab_op_rec();
+    var buf = crab_copy_buf();
+    var fin = load64(r + CRAB_OP_FIN);
+    var fout = load64(r + CRAB_OP_FOUT);
+    var n = 0;
+    while (n < CRAB_COPY_STEP_CHUNKS) {
+        var got = sys_read(fin, buf, CRAB_COPY_CHUNK);
+        if (got < 0) { return crab_walk_stop(r, CRAB_FS_EIO); }
+        if (got == 0) {
+            crab_op_fds_close(r);
+            store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
+            store64(r + CRAB_OP_DONE, 0);
+            store64(r + CRAB_OP_TOTAL, 0 - 1);
+            return 2;
+        }
+        var off = 0;
+        while (off < got) {
+            var put = sys_write(fout, buf + off, got - off);
+            if (put <= 0) { return crab_walk_stop(r, CRAB_FS_EIO); }
+            off = off + put;
+        }
+        store64(r + CRAB_OP_DONE, load64(r + CRAB_OP_DONE) + got);
+        store64(r + CRAB_OP_BYTES, load64(r + CRAB_OP_BYTES) + got);
+        n = n + 1;
+    }
+    return 1;
+}
+
+# Advance the directory walk by at most `CRAB_WALK_STEP_ENTRIES` entries.
+# -> 1 = more to do, 2 = an item finished (redraw, but the panes did not change), CRAB_FS_OK when the
+#    whole tree is done, or a CRAB_FS_* failure.
+#
+# ⛔⛔ A DELETE GOES CHILDREN-FIRST AND A COPY GOES PARENTS-FIRST, and neither order is a preference.
+# `rmdir` refuses a non-empty directory, so a delete must empty a level before it can remove it; and
+# a copy must create the destination directory before it can write anything into it.
+# ⛔ AND THE DELETE RE-READS FROM CURSOR 0 EVERY STEP — see `crab_walk_cursor_for`. It is mutating
+# the directory it is reading, and a carried cursor lands inside a coalesced record.
+fn crab_walk_step(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    var kind = load64(r + CRAB_OP_KIND);
+    if (kind == CRAB_OP_IDLE) { return 0; }
+    var wbuf = crab_walk_buf();
+    if (wbuf == 0) { return crab_walk_stop(r, CRAB_FS_EIO); }
+    var curbox = r + CRAB_OP_WSTEP;                  # scratch: reused as the readdir cursor cell
+    var budget = 0;
+    while (budget < CRAB_WALK_STEP_ENTRIES) {
+        # ⚠ The backstop, the same shape as `CRAB_READDIR_STEPS_MAX`: far above any legitimate walk,
+        # so reaching it is a fault rather than a big tree.
+        if (load64(r + CRAB_OP_WSTEP) >= CRAB_WALK_STEPS_MAX) { return crab_walk_stop(r, CRAB_FS_EIO); }
+        var d = load64(r + CRAB_OP_DEPTH);
+        var slot = r + CRAB_OP_STACK + d * CRAB_WALK_SLOT;
+        var slen = load64(slot + CRAB_WS_SLEN);
+        var dlen = load64(slot + CRAB_WS_DLEN);
+        # Refill this level's batch from its saved cursor (a delete always from 0).
+        var cbox[8];
+        store64(&cbox, crab_walk_cursor_for(kind, load64(slot + CRAB_WS_CUR)));
+        var n = crab_walk_readdir(r + CRAB_OP_CURS, slen, wbuf, CRAB_READDIR_BATCH, &cbox);
+        if (n < 0) { return crab_walk_stop(r, CRAB_FS_ESYS); }
+        var idx = load64(slot + CRAB_WS_IDX);
+        # ⚠ A DELETE'S INDEX IS ALWAYS 0. It re-reads from the top and the entries it already removed
+        # are gone, so the first record is always the next one to remove. Carrying an index would
+        # skip exactly as many survivors as it had already deleted.
+        if (kind == CRAB_OP_DTREE) { idx = 0; }
+        if (idx >= n) {
+            # ⛔⛔ "THIS LEVEL IS FINISHED" IS A DIFFERENT QUESTION FOR EACH KIND, AND CONFLATING THEM
+            # HANGS THE WALK. A COPY carries its cursor, so it is done when the cursor says exhausted.
+            # A DELETE always re-reads from the TOP (see `crab_walk_cursor_for`), so its cursor is
+            # meaningless — and an empty directory still yields `.` and `..`, which are skipped, so
+            # the read returns 0 entries with a cursor that is NOT the sentinel. Testing the cursor
+            # there re-reads the same empty directory forever.
+            # ⇒ For a delete, "no entries came back from the top" IS empty.
+            var lvldone = 0;
+            if (kind == CRAB_OP_DTREE) { if (n == 0) { lvldone = 1; } }
+            else { if (load64(&cbox) == (0 - 1)) { lvldone = 1; } }
+            if (lvldone == 1) {
+                # This level is exhausted.
+                if (kind == CRAB_OP_DTREE) {
+                    # ⛔ CHILDREN FIRST: the directory itself goes only now that it is empty.
+                    if (crab_fs_rmdir_raw(r + CRAB_OP_CURS, slen) < 0) {
+                        return crab_walk_stop(r, CRAB_FS_ESYS);
+                    }
+                    store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
+                }
+                if (d == 0) { return crab_walk_stop(r, CRAB_FS_OK); }
+                store64(r + CRAB_OP_DEPTH, d - 1);
+                var up = r + CRAB_OP_STACK + (d - 1) * CRAB_WALK_SLOT;
+                crab_walk_restore(r, up);
+                # ⚠ The parent's batch is stale after a descend, so its index restarts. A copy's
+                # cursor still carries, so it resumes where it left off rather than re-walking.
+                store64(up + CRAB_WS_IDX, load64(up + CRAB_WS_IDX));
+                budget = budget + 1;
+                store64(r + CRAB_OP_WSTEP, load64(r + CRAB_OP_WSTEP) + 1);
+            } else {
+                store64(slot + CRAB_WS_CUR, load64(&cbox));
+                store64(slot + CRAB_WS_IDX, 0);
+                # ⚠ A refill spends budget too. Without this a pathological directory that yields a
+                # cursor but no usable records could spin inside one step forever — the same class of
+                # non-terminating loop the `#101` stall guard exists for.
+                budget = budget + 1;
+                store64(r + CRAB_OP_WSTEP, load64(r + CRAB_OP_WSTEP) + 1);
+            }
+        } else {
+            var rec = wbuf + idx * CRAB_REC_SZ;
+            store64(slot + CRAB_WS_IDX, idx + 1);
+            store64(r + CRAB_OP_WSTEP, load64(r + CRAB_OP_WSTEP) + 1);
+            budget = budget + 1;
+            if (crab_name_ok(rec) == 0) { return crab_walk_stop(r, CRAB_FS_EBADNAME); }
+            # ⛔ JOIN THE DESTINATION FIRST — BEFORE THE SOURCE AND BEFORE ANY mkdir OR open. A tree
+            # that is legal at the source can be illegal at the destination, because the bound is on
+            # the ABSOLUTE path and the two roots differ in length. Refusing here means a partial
+            # tree is always a PREFIX of a correct copy, never a corrupt one.
+            var dl2 = 0;
+            if (kind == CRAB_OP_CTREE) {
+                if (crab_join_n(r + CRAB_OP_CURD, CRAB_PATH_MAX, r + CRAB_OP_CURD, rec) < 0) {
+                    crab_walk_restore(r, slot);
+                    return crab_walk_stop(r, CRAB_FS_ETOOLONG);
+                }
+                dl2 = crab_cstr_len(r + CRAB_OP_CURD, CRAB_PATH_MAX);
+            }
+            if (crab_join_n(r + CRAB_OP_CURS, CRAB_PATH_MAX, r + CRAB_OP_CURS, rec) < 0) {
+                crab_walk_restore(r, slot);
+                return crab_walk_stop(r, CRAB_FS_ETOOLONG);
+            }
+            var sl2 = crab_cstr_len(r + CRAB_OP_CURS, CRAB_PATH_MAX);
+            # ⚠ `== 1`, NOT `!= 0`, AND NO TEST DISTINGUISHES THEM TODAY — said rather than implied.
+            # Both backends emit only 0 or 1 (agnos sets the byte from `ftype == 2`; the host arm
+            # sets it from `DT_DIR`), so the two forms are currently equivalent and a mutation
+            # between them passes the suite. `== 1` is chosen anyway: a future backend that passed a
+            # raw ext2 `ftype` through would make `!= 0` descend a SYMLINK, whose ftype is 7.
+            # ⛔ THE DESCEND GATE IS THE RECORD'S TYPE BYTE AND NOTHING ELSE — NEVER A STAT. A
+            # symlink, including one pointing at a directory, arrives with type 0 because both kernel
+            # backends set the byte from `ftype == 2` alone. So the walk treats it as a leaf and
+            # unlinks the LINK, never the target — correct `rm -r` behaviour, achieved with no
+            # `lstat` (which does not exist in the pinned stdlib) and safe by construction rather
+            # than by a check that could be forgotten.
+            if (load8(rec + CRAB_REC_TYPE) == 1) {
+                if ((d + 1) >= CRAB_WALK_DEPTH_MAX) {
+                    crab_walk_restore(r, slot);
+                    return crab_walk_stop(r, CRAB_FS_ETOOLONG);
+                }
+                if (kind == CRAB_OP_CTREE) {
+                    if (crab_fs_exists(r + CRAB_OP_CURD, dl2, crab_walk_statbuf()) != 0) {
+                        crab_walk_restore(r, slot);
+                        return crab_walk_stop(r, CRAB_FS_EEXIST);
+                    }
+                    if (crab_fs_mkdir_raw(r + CRAB_OP_CURD, dl2) < 0) {
+                        crab_walk_restore(r, slot);
+                        return crab_walk_stop(r, CRAB_FS_ESYS);
+                    }
+                    store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
+                }
+                store64(r + CRAB_OP_DEPTH, d + 1);
+                var down = r + CRAB_OP_STACK + (d + 1) * CRAB_WALK_SLOT;
+                store64(down + CRAB_WS_CUR, 0);
+                store64(down + CRAB_WS_SLEN, sl2);
+                store64(down + CRAB_WS_DLEN, dl2);
+                store64(down + CRAB_WS_IDX, 0);
+            } else {
+                if (kind == CRAB_OP_DTREE) {
+                    if (crab_fs_unlink_raw(r + CRAB_OP_CURS, sl2) < 0) {
+                        crab_walk_restore(r, slot);
+                        return crab_walk_stop(r, CRAB_FS_ESYS);
+                    }
+                    store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
+                    crab_walk_restore(r, slot);
+                } else {
+                    if (crab_fs_exists(r + CRAB_OP_CURD, dl2, crab_walk_statbuf()) != 0) {
+                        crab_walk_restore(r, slot);
+                        return crab_walk_stop(r, CRAB_FS_EEXIST);
+                    }
+                    var fin2 = crab_fs_open_r(r + CRAB_OP_CURS, sl2);
+                    if (fin2 < 0) { crab_walk_restore(r, slot); return crab_walk_stop(r, CRAB_FS_ESYS); }
+                    var fout2 = crab_fs_open_w(r + CRAB_OP_CURD, dl2);
+                    if (fout2 < 0) {
+                        sys_close(fin2);
+                        crab_walk_restore(r, slot);
+                        return crab_walk_stop(r, CRAB_FS_ESYS);
+                    }
+                    store64(r + CRAB_OP_FIN, fin2);
+                    store64(r + CRAB_OP_FOUT, fout2);
+                    store64(r + CRAB_OP_DONE, 0);
+                    store64(r + CRAB_OP_TOTAL, crab_fs_stat_size(r + CRAB_OP_CURS, sl2, crab_walk_statbuf()));
+                    crab_strcpy_n(r + CRAB_OP_NAME, rec, CRAB_NAME_MAX);
+                    # ⛔ SRC AND DST ARE REWRITTEN FOR EVERY FILE. `crab_copy_cancel` reads DST after
+                    # the fds are closed, and a stale DST would unlink the PREVIOUS file.
+                    crab_strcpy_n(r + CRAB_OP_SRC, r + CRAB_OP_CURS, CRAB_PATH_MAX);
+                    crab_strcpy_n(r + CRAB_OP_DST, r + CRAB_OP_CURD, CRAB_PATH_MAX);
+                    # ⚠ The live paths go back to describing the DIRECTORY immediately — the walk
+                    # never stands on a file.
+                    crab_walk_restore(r, slot);
+                    return 1;
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+# ⚠ The walk's own statbuf — it cannot borrow the caller's, because the walk outlives the call.
+var crab_wstat = 0;
+fn crab_walk_statbuf(): i64 {
+    if (crab_wstat == 0) { crab_wstat = alloc(STAT_BUFSZ); }
+    return crab_wstat;
+}
+
+# @public — THE single entry point the idle tick calls. Dispatches on what is actually running.
+# ⛔ A TICK IS EITHER 64 CHUNKS OF ONE FILE OR 32 DIRECTORY ENTRIES, NEVER BOTH — the open-fd test
+# below guarantees it, so the tick cost is bounded by the larger of the two rather than their sum.
+fn crab_op_step(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    var k = load64(r + CRAB_OP_KIND);
+    if (k == CRAB_OP_IDLE) { return 0; }
+    if (k == CRAB_OP_COPY) { return crab_copy_step(); }
+    if (k == CRAB_OP_MOVE) { return crab_copy_step(); }
+    if (load64(r + CRAB_OP_FIN) >= 0) { return crab_walk_file_step(); }
+    return crab_walk_step();
+}
+
 # @public — the operator-facing sentence for a `CRAB_FS_*` result. Never 0.
 #
 # ⚠ THE STATUS LINE IS THE ONLY PLACE A REFUSAL IS SEEN. crab logs to the console as well, but three
@@ -1883,6 +2356,7 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_ENOEXEC)  { return "crab has no way to open that yet"; }
     if (rc == CRAB_FS_ESPAWNLEN) { return "refused: the path is too long to launch"; }
     if (rc == CRAB_FS_EBUSY)    { return "a transfer is already running"; }
+    if (rc == CRAB_FS_ELOOP)    { return "refused: a folder cannot be copied into itself"; }
     return "failed: the filesystem refused";
 }
 

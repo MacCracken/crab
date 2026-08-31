@@ -2,6 +2,117 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.4] - 2026-08-31 — M4 complete: recursion, multi-select, rate and ETA
+
+### Added — recursive copy and delete, as a stepped walk
+
+⛔⛔ **AN EXPLICIT STACK, NOT LANGUAGE RECURSION.** A recursive function would blow the ring-3 stack
+on a deep tree *and* could not be paused mid-way — which is the whole requirement, because a tree
+operation must yield to the idle tick like everything else.
+⚠ **A stack slot holds no path.** `sys_readdir_at` is path-based, not fd-based, so there is no
+directory handle to retain: a level is a resume cursor plus the two path lengths a pop truncates back
+to. **32 bytes.** The naive design — one entry buffer per level — is 64 KB *per level* against a bump
+allocator that never frees.
+
+⛔⛔ **A DELETE RE-READS FROM CURSOR 0 EVERY STEP, AND THIS IS THE MOST IMPORTANT LINE IN THE
+RELEASE.** `ext2_dir_remove` coalesces a removed entry into its **predecessor** by extending that
+record's `rec_len`; `readdir_at` parks its cursor on the record it did not take and resumes by
+reading a header at that offset — which, after a coalesce, is **interior to the predecessor's
+extended record**. The kernel then parses a record header **out of the middle of a filename**.
+⛔ **The two guards do not save it**: the 4-byte alignment check passes because a valid record start
+stays 4-aligned, and `ext2_dirent_valid` is satisfied by ordinary filename bytes. The failure is not
+a crash and not an empty listing — it is a **fabricated entry name handed to `unlink`**, and a
+fabricated name that happens to match a real sibling **deletes the wrong file**.
+⇒ `crab_walk_cursor_for` is a predicate rather than an inline branch, for the same reason
+`crab_readdir_stalled` is one: the rule is what a host test can assert.
+
+⛔ **The descend gate is the record's type byte and NOTHING ELSE — never a stat.** A symlink,
+including one pointing at a directory, arrives with type 0 because both backends set the byte from
+`ftype == 2` alone. So the walk treats it as a leaf and `unlink`s the **link, never the target** —
+correct `rm -r` behaviour, achieved with no `lstat` (which does not exist in the pinned stdlib) and
+safe *by construction* rather than by a check that could be forgotten.
+⚠ The 2026-08-30 burn's `/lp` — a self-referential ELOOP link — is type 0: unlinked as a leaf, never
+entered. **No visited set is needed**: `ext2_link` refuses directory hard links, symlinks are never
+descended, and depth is bounded absolutely at 127 by `CRAB_PATH_MAX`.
+
+⛔ **Copying a folder into itself is refused** (`CRAB_FS_ELOOP`) before anything is created — `/a`
+into `/a/b` produces `/a/b/a/b/…` until the path bound stops it. `crab_path_within` is
+**boundary-aware**: `/ab` is *not* inside `/a`, and refusing that copy would be a false refusal the
+operator cannot argue with.
+⛔ **The destination is joined FIRST**, before the source and before any `mkdir` or `open`: a tree
+legal at the source can be illegal at the destination, because the bound is on the absolute path.
+That ordering is what makes a partial tree always a **prefix of a correct copy, never a corrupt one**.
+
+### Added — `crab_walk_readdir`, and the walk is host-testable
+
+⭐⭐ **This is why the recursion has real tests rather than a predicate and a hope.**
+`crab_readdir_into` is agnos-only — its body is inside `#ifdef CYRIUS_TARGET_AGNOS` and yields 0 on
+the host — so a tree walk built on it would have been another `#101`-shaped blind spot, **in the most
+destructive code in the app**. Linux's `getdents64` carries `d_off`, a seek cookie with *exactly*
+`#101`'s semantics, so the same state machine runs against real directories in the suite.
+
+### Added — multi-select
+
+Space marks and advances (the Norton Commander gesture). Marked rows tint via `DH_W_FG`, and **yield
+to the selection's on-accent guarantee** — accent-on-accent is the one invisible combination, and
+dhancha settled that at 0.9.20.
+⛔ **Marks are indices, so 18 sites clear them** — every re-list, descend, ascend, **and the sort
+cycle**. The sort is the subtle one: the listing does not change, only its *order*, so nothing else
+would notice that every mark now points at a different file.
+⛔ **The transfer queue holds names, not indices.** A multi-file copy re-lists after each file, so any
+index captured when `c` was pressed is wrong by the second file. ⚠ A refusal does **not** stop the
+queue — one file already at the destination must not abandon the other nine.
+⛔ The delete prompt says whether it is the **marked set**, the cursor row, or **a FOLDER and
+everything in it** — the operator answers the question they were asked.
+
+### Added — rate and ETA
+
+⛔ **Both refuse to answer before they can.** Under 500 ms the elapsed time is dominated by the cost
+of starting, so a rate computed from it is noise dressed as a measurement — and a **wrong rate is
+worse than none**, because the operator plans around it. The detail line shows each half only if it
+is true; `0 B/s · 0s left` reads as a stall.
+⚠ Averaged over the whole run, not the last step: a per-step rate swings with every disk hiccup and
+never settles. Durations are two units, never three, zero-padded (`3m 04s`).
+
+### Changed — the idle tick dispatches through `crab_op_step`
+
+A new return code **`2`** means *an item finished, the walk continues*: redraw, but do **not** relist.
+⚠ It is not cosmetic — the completion arm relists **both** panes, and a 500-file tree copy reporting
+per-file completion would do that 500 times on the idle path.
+⛔ A tick is **either** 64 chunks of one file **or** 32 directory entries, never both, so the tick
+cost is bounded by the larger rather than their sum.
+
+### Changed — dependencies: sadish **0.5.3**, rupa **0.1.6**, dhancha **0.9.23**
+
+All three released first, then declared, then check 4 re-run — the order the 2026-08-28 phantom-tag
+failure exists to enforce. ⭐ **6 deps / 0 errors with every `path` override disabled, both targets,
+and byte-identical binaries.**
+⚠ **No `path` override was added for sadish.** sadish and rekha are the only two deps crab resolves by
+tag alone, which makes them the only two whose remote resolution a local build actually exercises —
+the one thing standing between this manifest and a repeat of that failure. The chain was verified
+with a *temporary* override, which was then removed.
+
+### Verified
+
+**520 → 653 passing**; `render_test` 26/26; reference coverage **75 % → 87 %** (122/140) after 31
+functions were added; both targets build; `fmt --check` clean.
+
+⭐ **Mutations that fail the suite**: a delete carrying its cursor (the coalesce corruption); the
+destination-inside-source guard removed; `crab_path_within` losing its boundary check; a move
+unlinking at the start instead of at EOF; a cancel leaving the partial destination; the source never
+stat'd; the percentage dividing before multiplying.
+⚠ **One equivalent mutant, stated rather than papered over**: the descend gate's `== 1` versus
+`!= 0`. Both backends emit only 0 or 1 today, so no test distinguishes them. `== 1` is kept because a
+future backend passing a raw ext2 `ftype` would make `!= 0` descend a **symlink**, whose ftype is 7.
+
+⛔ **Not covered**: the idle-tick wiring itself. The walk and the step machine are driven by hand in
+the suite; that they are *called* from the tick is agnos-only event-loop code no host test reaches —
+the same irreducible gap `main.cyr` has always had, and what a QEMU run would confirm.
+⚠ **crab cannot recreate a symlink.** A recursive copy copies whatever `open` + `read` yields through
+one — the target's bytes, or a failed open for a dangling link. `sys_symlink` exists but crab cannot
+*learn* that a source is a link without `readlink`'s ambiguous negative. Honest limit of the current
+kernel ABI, and it moves when `lstat`#102 gets its cyrius peer.
+
 ## [0.7.3] - 2026-08-31 — the copy steps, and the transfer tray exists
 
 ### Added — M4: the stepped copy. What makes a progress bar mean anything

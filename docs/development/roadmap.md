@@ -454,7 +454,15 @@ Both targets built and all 228 tests passed against that graph, and the resultin
   forced sweep found nothing pending. That is the design working, not the sweep failing to fire.
 - **`on-accent` token** — **Gate: rupa.** Forced here: selected rows need legible ink.
 
-### M4 — File operations (v0.8.0) — ⭐ **STARTED in v0.7.1**, completes at v0.8.0
+### M4 — File operations — ⭐⭐ **COMPLETE at v0.7.4** (2026-08-31)
+
+⭐ Every item shipped: copy · move · delete · **open**, the empty-pane states, the small-window
+ratification, drag between panes, the transfer tray with rate and ETA, **multi-select**, and
+**recursive copy and delete**. The context menu, inline rename and batch-rename sheet are unblocked
+by dhancha 0.9.23 (MENU + SHEET) and are the first items of the next slot.
+⚠ **M4 rode four PATCH numbers by operator ruling** — 0.7.1 through 0.7.4 — rather than the v0.8.0
+the ladder below reserves. The milestone→version mapping has now been wrong twice; **re-derive the
+number at each cut** rather than trusting these headings.
 
 ⭐ **Shipped in 0.7.1**: copy, move and delete (keys `c` / `m` / `d`, the last behind a `y`
 confirmation), the empty-pane states, and the whole `crab_fs_*` write layer with its per-target
