@@ -260,7 +260,7 @@ fn crab_name_cell(dst, name, chars): i64 {
 
 # One row of the pane, as CELLS in the shared column spec (dhancha 0.9.20) rather than one
 # space-padded string. `ncols` is what the pane's width can honestly show.
-fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime): i64 {
+fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime, marked): i64 {
     var row = dh_table_row(spec);
     # ⭐ NO BACKGROUND (0.4.10). Rows used to paint their own selection — accent when the pane was
     # active, a muted line-tint when it was not — and dhancha 0.9.8 does exactly that from the LIST's
@@ -269,6 +269,15 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime): i64 {
     # through. This deletion is the point of the port: the rule lived in three apps, now it lives once.
     dh_widget_set_bg(row, 0 - 1);
     dh_widget_set_pref(row, 0, 26);
+    # ⭐⭐ A MARKED ROW IS TINTED, NOT PREFIXED (M4 multi-select). A marker character would be
+    # unambiguous but it steals a column from the NAME cell, which at the shipped window is 14
+    # characters wide — and the names it would truncate are exactly the ones the operator marked.
+    # `DH_W_FG` (dhancha 0.9.20) costs no width.
+    # ⛔ AND IT YIELDS TO THE SELECTION, WHICH IS CORRECT AND NOT A BUG. dhancha treats a widget's
+    # own `fg` as a PREFERENCE and the focused selection's `on-accent` as a legibility GUARANTEE, so
+    # the marked row under the cursor renders in on-accent rather than accent-on-accent — which is
+    # the one combination that would be invisible. The toolkit already settled this at 0.9.20.
+    if (marked != 0) { dh_widget_set_fg(row, dh_theme_accent()); }
 
     # NAME — the remainder column. A directory keeps its trailing '/', which is why the marker is
     # appended to the truncated text rather than being a column of its own.
@@ -382,9 +391,66 @@ fn crab_pane_label(dst, cap, which, path): i64 {
     return n + 3;
 }
 
+# =================================================================================================
+# M4 — MULTI-SELECT MARKS. Pure array predicates over a byte-per-entry mark buffer.
+# =================================================================================================
+#
+# ⛔⛔ THESE LIVE IN `ui.cyr`, NOT `app.cyr`, AND THE REASON IS THE INCLUDE CHAIN — I GOT THIS WRONG
+# TWICE IN ONE MILESTONE. `ui.cyr` is included BY `app.cyr`, and both `render_test.cyr` and the suite
+# include `ui.cyr` **alone**. A render path that calls up into `app.cyr` compiles fine through
+# `main.cyr` and leaves `render_test` with undefined symbols. ⇒ **Anything the render path calls must
+# be at or below `ui.cyr`.** The mark QUEUE stays in `app.cyr` because it is operation state, not
+# rendering — and nothing in the render path touches it.
+#
+# ⛔ MARKS ARE INDICES, SO EVERY RE-LISTING CLEARS THEM. An index means nothing once the directory
+# has been read again: entries move when the sort mode changes and vanish when a file is deleted. A
+# stale mark set would act on whatever now occupies that row, which is the worst possible failure
+# for a delete.
+# ⚠ Marks are separate from the CURSOR. The cursor is where the keyboard is; marks are what the next
+# verb acts on. With nothing marked the verbs act on the cursor, so an operator who never presses
+# Space never sees a difference.
+
+# @public — toggle the mark on entry `i`. -> the new state (1 = marked, 0 = not).
+fn crab_mark_toggle(marks, i, count): i64 {
+    if (marks == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= count) { return 0; }
+    var v = 1 - load8(marks + i);
+    store8(marks + i, v);
+    return v;
+}
+
+# @public — is entry `i` marked? 1 = yes. Bounds-checked, because it is read from the render path.
+fn crab_marked(marks, i, count): i64 {
+    if (marks == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= count) { return 0; }
+    return load8(marks + i);
+}
+
+# @public — how many entries are marked.
+fn crab_mark_count(marks, count): i64 {
+    if (marks == 0) { return 0; }
+    var n = 0;
+    var i = 0;
+    while (i < count) {
+        if (load8(marks + i) != 0) { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+# @public — clear every mark. Called on EVERY re-listing; see the ⛔ above.
+fn crab_mark_clear(marks, count): i64 {
+    if (marks == 0) { return 0; }
+    var i = 0;
+    while (i < count) { store8(marks + i, 0); i = i + 1; }
+    return 0;
+}
+
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
-fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo): i64 {
+fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo, marks): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -446,7 +512,7 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
         var is_dir = load8(rec + CRAB_REC_TYPE);  # type byte: 1 = dir
         var sz = load64(sizes + i * 8);         # per-entry byte size (-1 = dir/unknown)
         var mt = load64(mtimes + i * 8);
-        crab_row(lst, spec, ncols, namechars, rec, is_dir, sz, mt);
+        crab_row(lst, spec, ncols, namechars, rec, is_dir, sz, mt, crab_marked(marks, i, count));
         i = i + 1;
     }
     # ⭐ THE EMPTY-PANE NOTICE (M4). Added as a row so it inherits the list's clipping and scroll
@@ -667,6 +733,67 @@ fn crab_hit(x, y, out16): i64 {
     return 1;
 }
 
+# @public — write the tray's detail line into `dst`: "118 MB/s · 3m 04s left".
+# -> bytes written, excluding the NUL. `dst` must hold at least 40. Writes "" when nothing is known.
+#
+# ⛔ EACH HALF APPEARS ONLY IF IT IS TRUE. `rate < 0` means the transfer is too young to have a
+# trustworthy rate; `eta < 0` means there is no denominator to project against. The canvas draws
+# "118 MB/s · 3m 04s left" as one string, but a tray that prints "0 B/s · 0s left" while it works out
+# what is happening is worse than one that prints nothing — the operator reads the zero as a stall.
+# ⇒ Four outcomes: both, rate only, neither. (ETA without a rate is impossible by construction.)
+# ⚠ The canvas's own 420px variant drops this line entirely, so an absent detail line is a drawn
+# state rather than a missing feature.
+fn crab_tray_detail(dst, rate, eta): i64 {
+    store8(dst, 0);
+    if (rate < 0) { return 0; }
+    var n = crab_size_str(dst, rate);
+    store8(dst + n, 47); n = n + 1;                    # '/'
+    store8(dst + n, 115); n = n + 1;                   # 's'
+    if (eta < 0) { store8(dst + n, 0); return n; }
+    store8(dst + n, 32); n = n + 1;
+    store8(dst + n, 183 - 0); n = n + 1;               # CP437 middle dot
+    store8(dst + n, 32); n = n + 1;
+    n = n + crab_dur_str(dst + n, eta);
+    store8(dst + n, 32); n = n + 1;
+    store8(dst + n, 108); n = n + 1;                   # 'l'
+    store8(dst + n, 101); n = n + 1;                   # 'e'
+    store8(dst + n, 102); n = n + 1;                   # 'f'
+    store8(dst + n, 116); n = n + 1;                   # 't'
+    store8(dst + n, 0);
+    return n;
+}
+
+# @public — write `secs` into `dst` as "45s" / "3m 04s" / "2h 09m". -> bytes written.
+#
+# ⚠ TWO UNITS, NEVER THREE, AND THE SECOND IS ZERO-PADDED. "3m 4s" reads as ambiguous at a glance
+# where "3m 04s" does not, and an ETA precise to the second across two hours is precision the
+# measurement does not have.
+fn crab_dur_str(dst, secs): i64 {
+    var sv = secs;
+    if (sv < 0) { sv = 0; }
+    if (sv < 60) {
+        var n0 = crab_u2s(dst, sv);
+        store8(dst + n0, 115); store8(dst + n0 + 1, 0);      # 's'
+        return n0 + 1;
+    }
+    if (sv < 3600) {
+        var m = sv / 60;
+        var n1 = crab_u2s(dst, m);
+        store8(dst + n1, 109); n1 = n1 + 1;                  # 'm'
+        store8(dst + n1, 32); n1 = n1 + 1;
+        n1 = n1 + crab_pad2(dst + n1, sv - m * 60);
+        store8(dst + n1, 115); store8(dst + n1 + 1, 0);      # 's'
+        return n1 + 1;
+    }
+    var h = sv / 3600;
+    var n2 = crab_u2s(dst, h);
+    store8(dst + n2, 104); n2 = n2 + 1;                      # 'h'
+    store8(dst + n2, 32); n2 = n2 + 1;
+    n2 = n2 + crab_pad2(dst + n2, (sv - h * 3600) / 60);
+    store8(dst + n2, 109); store8(dst + n2 + 1, 0);          # 'm'
+    return n2 + 1;
+}
+
 # @public — write the tray's percentage into `dst` ("68%", or "--" when the total is unknown).
 # -> the bytes written, excluding the NUL. `dst` must hold at least 8.
 #
@@ -699,6 +826,7 @@ enum CrabTray {
     CRAB_TRAY_H      = 31;
     CRAB_TRAY_BAR_H  = 4;
     CRAB_TRAY_TITLE_H = 18;
+    CRAB_TRAY_DETAIL_H = 14;
 }
 
 # @public — should the tray be on screen at all? 1 = yes. `opname` is 0 when nothing is running.
@@ -729,7 +857,7 @@ fn crab_tray_wanted(opname): i64 {
 # fills the row height and ignores it — the bar would silently become as tall as its row.
 # ⚠ Every string here is `dh_falloc`, because `dh_widget_set_text` stores the pointer without
 # copying: a global-alloc string on an arena widget outlives its widget forever.
-fn crab_tray(root, w, opname, opdone, optotal): i64 {
+fn crab_tray(root, w, opname, opdone, optotal, oprate, opeta): i64 {
     var tray = dh_widget_new(BOX);
     dh_widget_set_layout(tray, BOX_V);
     dh_widget_set_bg(tray, dh_theme_panel());
@@ -758,6 +886,18 @@ fn crab_tray(root, w, opname, opdone, optotal): i64 {
     dh_widget_add_child(title, pctw);
     dh_widget_add_child(tray, title);
 
+    # ⚠ THE DETAIL LINE IS ADDED ONLY WHEN IT HAS SOMETHING TO SAY, so the tray does not reserve a
+    # row for a string that is empty for the first half-second of every transfer.
+    var db = dh_falloc(48);
+    var dn = crab_tray_detail(db, oprate, opeta);
+    if (dn > 0) {
+        var det = dh_widget_new(LABEL);
+        dh_widget_set_pref(det, 0, CRAB_TRAY_DETAIL_H);
+        dh_widget_set_flex(det, 0);
+        dh_widget_set_fg(det, dh_theme_mute());
+        dh_widget_set_text(det, db);
+        dh_widget_add_child(tray, det);
+    }
     var bar = dh_progress_new(CRAB_TRAY_BAR_H);
     dh_widget_set_flex(bar, 1);
     # ⛔ THE TOTAL IS PASSED THROUGH UNTOUCHED, INCLUDING -1. dhancha reads `den <= 0` as
@@ -777,7 +917,7 @@ fn crab_tray(root, w, opname, opdone, optotal): i64 {
 # ⚠ `opname` / `opdone` / `optotal` are the transfer tray's state, passed in for the same reason
 # `lstate`/`rstate` are: this file sits BELOW `app.cyr`, which owns the operation record. `opname == 0`
 # (or an empty string) means nothing is running and the tray costs no pixels and no widgets.
-fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal): i64 {
+fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal, oprate, opeta, lmarks, rmarks): i64 {
     if (surf == 0) { return 0; }
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
@@ -809,7 +949,12 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     # mean building half of M5 to hold one bar. The canvas's own 420px variant already drops the
     # tray's detail line, so a compact form is a drawn variant rather than a compromise.
     var trayh = 0;
-    if (crab_tray_wanted(opname) == 1) { trayh = CRAB_TRAY_H; }
+    if (crab_tray_wanted(opname) == 1) {
+        trayh = CRAB_TRAY_H;
+        # ⚠ The band grows by exactly the detail row when there is one, so the line never overlaps
+        # the bar — the tray reserves what it draws and nothing more.
+        if (oprate >= 0) { trayh = trayh + CRAB_TRAY_DETAIL_H; }
+    }
     dh_widget_set_pref(panes, 0, h - 24 - trayh);   # reserve 24px for the status line, + the tray
     # ⭐⭐ ONE PANE OR TWO — the M4 ratification. See `crab_two_panes_fit`.
     # ⛔ IN SOLO MODE THE PANE THAT IS NOT SHOWN GETS NO WIDGETS AND ITS LIST POINTER STAYS 0, which
@@ -824,16 +969,16 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var llst = 0;
     var rlst = 0;
     if (twopanes == 1) {
-        llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0);
-        rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0);
+        llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0, lmarks);
+        rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0, rmarks);
     } else {
         # ⚠ THE SWITCHER IS THE KEYS crab ALREADY HAS. Left/Right (and h/l) set `active_pane`, which
         # in solo mode changes which pane is drawn rather than which of two is accented. No new
         # binding, and the gesture is the one an operator already knows from the two-pane view.
         if (active_pane == 0) {
-            llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, 1, lstate, 1);
+            llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, 1, lstate, 1, lmarks);
         } else {
-            rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1);
+            rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1, rmarks);
         }
     }
     dh_widget_add_child(root, panes);
@@ -841,7 +986,7 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
     if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
-    if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal); }
+    if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal, oprate, opeta); }
     var status = dh_widget_new(LABEL);
     dh_widget_set_bg(status, dh_theme_panel());   # status line
     dh_widget_set_pref(status, 0, 22);

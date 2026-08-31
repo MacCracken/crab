@@ -48,6 +48,28 @@
 | Deps | ⛔ **SIX, AND ONLY SIX**: sadish 0.5.2 · rupa 0.1.5 · rekha 0.3.5 · kashi 1.0.6 · dhancha **0.9.22** · setu 0.8.8. This row used to also list **agnos, bhumi, sigil and aethersafha** — none of them is a declared dependency (`grep '^\[deps' cyrius.cyml`); agnos is the *kernel* crab runs on and the others are peers. Misreading that row as the dep graph is how a tag check checks the wrong things. ⭐ **CHECK 4 RE-RUN 2026-08-31, AFTER the dhancha tag moved 0.9.20 → 0.9.21** (and at the 0.7.1 cut before it) — the manifest copied with all four `path` lines disabled, so `cyrius deps` actually cloned the declared tags: **6 deps / 0 errors** (lock goes 2 → 6 commit-pinned, which is the tell that the overrides were really off), host **and** `--agnos` build, **476/0** tests, and both binaries came out **byte-identical** to the path-resolved ones. That last equality is the evidence; the rest is consistent with it. |
 | Mid-arc work | M3 is complete and its five review defects are **closed in 0.7.1**. M4 is **started, not done**: copy/move/delete and the pane states shipped; rename/mkdir are written and tested but not key-bound, and the **transfer tray SHIPPED in 0.7.3** — the copy is stepped off the idle tick, Esc cancels it, and the bar is dhancha 0.9.22's `PROGRESS`. ⛔ **The tray was never really gated on dhancha**: the blocker was crab's own synchronous copy, and the widget alone would have rendered a bar once at 0 % and vanished. ⚠ **Still open in M4**: recursive copy/delete (needs a walk, and the tray is now the surface that makes it stoppable), multi-select, rate/ETA, and the context menu / inline rename / batch-rename sheet. ⚠ agnos HEAD is **1.56.55**; the 2026-08-30 burn ran **1.56.53**. ⛔ **THAT IS NOT A crab GATE AND MUST NOT BE WRITTEN AS ONE.** 1.56.55 rewrote `is_user_range`, which is agnos's own validator on every ring-3 buffer in the system — if it regressed, it regresses for every app, and proving it is **agnos's** job on agnos's schedule, not a reason to hold a crab release. crab passes ordinary BSS/stack buffers and has no special exposure. |
 
+### ⛔⛔ RELEASE ORDER, LIVE RIGHT NOW — FOUR REPOS, AND crab IS LAST
+
+**crab does not build from a clean checkout until sadish and rupa are pushed.** That is expected and
+correct, not a break: crab declares `sadish 0.5.3` and `rupa 0.1.6`, dhancha's fold calls
+`sd_fill_rect_blend` and `rupa_theme_scrim`, and neither tag exists on a remote yet.
+
+**Push in this order, each verified before the next:**
+
+| # | repo | version | why it moved |
+|---|---|---|---|
+| 1 | **sadish** | 0.5.3 | `sd_fill_rect_blend` — the first fill that reads its destination |
+| 2 | **rupa** | 0.1.6 | the `scrim` colour + alpha token, per palette |
+| 3 | **dhancha** | 0.9.23 | MENU + SHEET; the scrim becomes a real veil instead of a dither |
+| 4 | **crab** | 0.7.4 | consumes all three |
+
+⭐ **The chain was verified end to end** with a TEMPORARY `path` override on crab's sadish dep:
+6 deps / 0 errors, both targets build, **565 / 0**. The override was then **removed** —
+⛔ **do not add one permanently.** sadish and rekha are the only two deps crab resolves by tag alone,
+which makes them the only two whose remote resolution a local build actually exercises. A path
+override there would delete that property, and it is the one thing standing between this manifest and
+the 2026-08-28 phantom-tag failure.
+
 ### ✅ RELEASE ORDER HONOURED — dhancha 0.9.21 and crab 0.7.2 are both pushed (2026-08-31)
 
 ⭐ **Sequenced correctly, and check 4 re-run after the bump.** dhancha `0.9.21` and crab `0.7.2` are

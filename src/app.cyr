@@ -229,6 +229,101 @@ enum CrabPointer {
     CRAB_DRAG_THRESHOLD = 4;
 }
 
+# =================================================================================================
+# M4 — MULTI-SELECT. Marks, and the queue that lets one stepped transfer serve many files.
+# =================================================================================================
+#
+# ⛔ MARKS ARE A BYTE PER ENTRY, PARALLEL TO THE RECORD BUFFER, and they are cleared by every
+# re-listing. A mark is an INDEX, and an index means nothing once the directory has been read again:
+# entries move when the sort mode changes, and disappear when a file is deleted. A stale mark set
+# would act on whatever now occupies that row, which is the worst possible failure for a delete.
+# ⚠ Marks are separate from the CURSOR (`sel_l`/`sel_r`). The cursor is where the keyboard is; marks
+# are what the next verb acts on. With nothing marked, the verbs act on the cursor — so an operator
+# who never presses Space never sees a difference.
+
+# ⭐⭐ THE QUEUE HOLDS NAMES, NOT INDICES, AND THAT IS THE WHOLE REASON IT EXISTS. A multi-file copy
+# re-lists both panes after each file, so any index captured when the operator pressed `c` is wrong
+# by the time the second file starts. Names survive a re-listing; indices do not.
+# ⚠ Allocated lazily and ONCE — `CRAB_MAX_ENTRIES * CRAB_NAME_MAX` is 64 KB, which is real, so a
+# crab that never multi-selects never pays it.
+var crab_q = 0;
+var crab_qn = 0;
+var crab_qi = 0;
+
+fn crab_queue_buf(): i64 {
+    if (crab_q == 0) { crab_q = alloc(CRAB_MAX_ENTRIES * CRAB_NAME_MAX); }
+    return crab_q;
+}
+
+# @public — load the marked entries' NAMES into the queue. -> how many were queued.
+fn crab_queue_marked(buf, marks, count): i64 {
+    var q = crab_queue_buf();
+    crab_qn = 0;
+    crab_qi = 0;
+    if (q == 0) { return 0; }
+    var i = 0;
+    while (i < count) {
+        if (load8(marks + i) != 0) {
+            crab_strcpy_n(q + crab_qn * CRAB_NAME_MAX, buf + i * CRAB_REC_SZ, CRAB_NAME_MAX);
+            crab_qn = crab_qn + 1;
+        }
+        i = i + 1;
+    }
+    return crab_qn;
+}
+
+# @public — the next queued name, or 0 when the queue is spent. Advances.
+fn crab_queue_next(): i64 {
+    if (crab_q == 0) { return 0; }
+    if (crab_qi >= crab_qn) { return 0; }
+    var p = crab_q + crab_qi * CRAB_NAME_MAX;
+    crab_qi = crab_qi + 1;
+    return p;
+}
+
+# @public — how many entries are still waiting (excluding the one in flight).
+fn crab_queue_left(): i64 {
+    if (crab_q == 0) { return 0; }
+    if (crab_qi >= crab_qn) { return 0; }
+    return crab_qn - crab_qi;
+}
+
+fn crab_queue_reset(): i64 { crab_qn = 0; crab_qi = 0; return 0; }
+
+# ⭐ THE QUEUE'S DESTINATION IS CAPTURED WHEN IT STARTS, NOT READ FROM THE PANE EACH TIME. A
+# multi-file transfer spans many idle ticks, and the operator can navigate either pane while it runs
+# — reading `lpath`/`rpath` at each step would send the second file somewhere the first did not go.
+var crab_qkind = 0;
+var crab_qsrc = 0;
+var crab_qdst = 0;
+
+fn crab_queue_dirs(kind, srcdir, dstdir): i64 {
+    if (crab_qsrc == 0) { crab_qsrc = alloc(CRAB_PATH_MAX); }
+    if (crab_qdst == 0) { crab_qdst = alloc(CRAB_PATH_MAX); }
+    if (crab_qsrc == 0) { return 0 - 1; }
+    if (crab_qdst == 0) { return 0 - 1; }
+    crab_qkind = kind;
+    crab_strcpy_n(crab_qsrc, srcdir, CRAB_PATH_MAX);
+    crab_strcpy_n(crab_qdst, dstdir, CRAB_PATH_MAX);
+    return 0;
+}
+
+fn crab_queue_kind(): i64 { return crab_qkind; }
+fn crab_queue_srcdir(): i64 { return crab_qsrc; }
+fn crab_queue_dstdir(): i64 { return crab_qdst; }
+
+# @public — start the next queued transfer, if any. -> 1 = started, 0 = queue spent, <0 = refused.
+#
+# ⚠ A REFUSAL DOES NOT STOP THE QUEUE. One file already present at the destination should not abandon
+# the other nine — the tray reports each result and moves on. Only a cancel stops everything.
+fn crab_queue_advance(scr1, scr2, statbuf): i64 {
+    var nm = crab_queue_next();
+    if (nm == 0) { return 0; }
+    var rc = crab_copy_begin(crab_qkind, crab_qsrc, nm, crab_qdst, scr1, scr2, statbuf);
+    if (rc != CRAB_FS_OK) { return rc; }
+    return 1;
+}
+
 # @public — has a press travelled far enough to be a drag? 1 = drag, 0 = still a click.
 #
 # ⭐⭐ crab IMPLEMENTS DRAG ITSELF, AND THAT IS NOT A WORKAROUND — IT IS THE SAME DECISION crab
@@ -1553,6 +1648,10 @@ enum CrabOp {
     # cheaper, so 64 of them is a comparable slice of a tick rather than a number picked for looking
     # round. Bigger throws away the responsiveness this exists to buy.
     CRAB_COPY_STEP_CHUNKS = 64;
+    # ⚠ Below this the elapsed time is dominated by the cost of starting, so a rate computed from it
+    # is noise dressed as a measurement. Half a second is long enough for the figure to mean
+    # something and short enough that a real transfer shows one almost immediately.
+    CRAB_RATE_MIN_MS = 500;
     # Record layout. ⚠ Byte offsets, not a struct — same discipline as the readdir record.
     CRAB_OP_KIND   = 0;
     CRAB_OP_FIN    = 8;
@@ -1562,7 +1661,11 @@ enum CrabOp {
     CRAB_OP_NAME   = 40;   # CRAB_NAME_MAX bytes — the entry being moved, for the delete and the label
     CRAB_OP_SRC    = 104;  # CRAB_PATH_MAX bytes — the SOURCE path, kept for the move's unlink
     CRAB_OP_DST    = 360;  # CRAB_PATH_MAX bytes — the DESTINATION path, kept for a cancel's cleanup
-    CRAB_OP_SZ     = 616;
+    # ⚠ Rate/ETA state. `CRAB_OP_T0` is the ms the transfer STARTED; the rate is derived from the
+    # whole run rather than from the last step, which is the difference between a number that settles
+    # and one that flickers with every disk hiccup.
+    CRAB_OP_T0     = 616;
+    CRAB_OP_SZ     = 624;
 }
 
 var crab_op = 0;
@@ -1602,6 +1705,46 @@ fn crab_op_name(): i64 {
     if (r == 0) { return ""; }
     if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return ""; }
     return r + CRAB_OP_NAME;
+}
+
+# @public — bytes per second so far, or -1 when it cannot be said yet.
+#
+# ⛔ AVERAGED OVER THE WHOLE RUN, NOT THE LAST STEP. A per-step rate is recomputed from one idle
+# tick's worth of I/O, so it swings with every disk hiccup and the operator reads a number that never
+# settles. The run average is what "how fast is this going" actually means.
+# ⛔ AND IT REFUSES TO ANSWER BEFORE IT CAN. Under `CRAB_RATE_MIN_MS` the elapsed time is dominated
+# by the cost of starting, so the number would be noise dressed as a measurement — and a wrong rate
+# is worse than none, because the operator plans around it. `crab_fs_copy` moves a small file in well
+# under a second; those transfers finish having never claimed a rate at all, which is correct.
+fn crab_op_rate(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0 - 1; }
+    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return 0 - 1; }
+    var el = clock_now_ms() - load64(r + CRAB_OP_T0);
+    if (el < CRAB_RATE_MIN_MS) { return 0 - 1; }
+    var d = load64(r + CRAB_OP_DONE);
+    if (d <= 0) { return 0 - 1; }
+    # ⚠ Multiply then divide, and in THIS order: `d / el * 1000` truncates to zero for any transfer
+    # slower than 1 byte per millisecond. ⛔ `d` is bounded by the file size and `el` by the run, so
+    # `d * 1000` overflows only past ~9 petabytes.
+    return d * 1000 / el;
+}
+
+# @public — seconds remaining at the current rate, or -1 when it cannot be said.
+#
+# ⚠ AN ETA NEEDS BOTH A RATE **AND** A TOTAL, and crab often has neither: an unstattable source gives
+# no denominator, and a short transfer gives no trustworthy rate. Returning -1 for "I cannot say" is
+# the same discipline as the indeterminate bar — the tray prints nothing rather than a guess.
+fn crab_op_eta(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0 - 1; }
+    var total = load64(r + CRAB_OP_TOTAL);
+    if (total < 0) { return 0 - 1; }
+    var rate = crab_op_rate();
+    if (rate <= 0) { return 0 - 1; }
+    var left = total - load64(r + CRAB_OP_DONE);
+    if (left < 0) { left = 0; }
+    return left / rate;
 }
 
 # Close both descriptors and return the record to idle. Used by every exit path.
@@ -1673,6 +1816,7 @@ fn crab_copy_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
     store64(r + CRAB_OP_FIN, fin);
     store64(r + CRAB_OP_FOUT, fout);
     store64(r + CRAB_OP_DONE, 0);
+    store64(r + CRAB_OP_T0, clock_now_ms());
     store64(r + CRAB_OP_TOTAL, total);
     crab_strcpy_n(r + CRAB_OP_NAME, name, CRAB_NAME_MAX);
     crab_strcpy_n(r + CRAB_OP_SRC, scr1, CRAB_PATH_MAX);

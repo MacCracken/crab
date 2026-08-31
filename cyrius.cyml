@@ -40,7 +40,7 @@ stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "ass
 # sd_*/rekha_* rather than bundling them, so crab deps them directly.
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
-tag = "0.5.2"
+tag = "0.5.3"
 modules = ["dist/sadish.cyr"]
 
 # rupa (रूप — form / appearance) — the shared desktop theme-token core. crab colours
@@ -63,7 +63,7 @@ path = "../rupa"
 # ⛔ >= 0.1.5 IS THE SAME KIND OF HARD REQUIREMENT. dhancha 0.9.20 binds `dh_theme_on_accent()` to
 # `rupa_theme_on_accent`, which arrived in rupa 0.1.5. crab pulls rupa's dist directly, so against an
 # older pin the toolkit references a function crab's own dep graph does not supply.
-tag = "0.1.5"
+tag = "0.1.6"
 modules = ["dist/rupa.cyr"]
 
 [deps.rekha]
