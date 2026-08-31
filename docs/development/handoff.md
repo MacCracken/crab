@@ -1,28 +1,45 @@
-# Handoff — **M5 is started. The two ungated items are in, and thumbnails now have a price tag.**
+# Handoff — **M5's three ungated items are in, thumbnails included. Burn on iron.**
 
-> ⭐ **Updated 2026-08-31**, after M5's first slice. Everything below the *Where things stand* table
-> is kept from the 0.7.5 handoff because the reasoning is still the reasoning — but **every number
-> in it is 0.7.5's or older**. Re-derive before quoting.
+> ⭐ **Updated 2026-08-31**, after M5's first slice and the chitra adoption. Everything below the
+> *What landed* table is kept from the 0.7.5 handoff because the reasoning is still the reasoning —
+> but **every number in it is 0.7.5's or older**. Re-derive before quoting.
 >
-> ⛔⛔ **THE HEADLINE, IF YOU READ NOTHING ELSE: BURN ON IRON. It is the oldest and largest untested
-> stretch in this project's history.** The last iron run was **2026-08-30 against the 0.7.0 tree**.
-> Everything since — the whole write layer, the tray, recursion, the menu, the edit field, and now a
-> render-signature refactor touching five sites in the agnos-only event loop plus a file read on the
-> selection path — has run only on the host and under QEMU. **Both defects crab has ever shipped were
-> iron-only.** agnos has moved 1.56.53 → 1.56.55 underneath, including a rewrite of `is_user_range`.
+> ⛔⛔ **THE HEADLINE: BURN ON IRON, AND IT MATTERS MORE NOW THAN IT DID THIS MORNING.** The last
+> iron run was **2026-08-30 against the 0.7.0 tree**. Everything since — the whole write layer, the
+> tray, recursion, the menu, the edit field, a render-signature refactor touching five sites in the
+> agnos-only event loop, the preview, and now **a decoder that more than doubled the binary** — has
+> run only on the host and under QEMU. **Both defects crab has ever shipped were iron-only.**
+> ⛔ **And the thumbnail path is the most iron-sensitive code crab has ever carried**: it is the
+> first whose failure mode is *memory exhaustion over time* rather than a wrong pixel, and QEMU is
+> explicitly not a control for pressure-dependent behaviour.
 >
-> ⛔⛔ **AND THE SECOND HEADLINE: THUMBNAILS ARE NOT GATED, THEY ARE PRICED — AND THE PRICE IS
-> +117 % OF THE BINARY.** The roadmap's thumbnail line has now been wrong twice. First it said *"no
-> image decoder exists"* (chitra 1.0.0 does). Then the correction implied that made it free.
-> **Measured 2026-08-31**: declaring `chitra 1.0.0` takes the host binary **453,304 → 981,992 B
-> (+116.6 %)** and agnos **474,944 → 1,001,520 (+110.9 %)**, and `CYRIUS_DCE=1` reclaims **nothing**
-> — it NOPs, and the byte count does not move. **~399 KB is `sankoch`**, the RFC 1950/1951 inflate
-> leaf PNG's IDAT needs, pulled in transitively; chitra's own fold is only ~113 KB.
-> ⇒ **A gate can be false in both directions.** This is an **operator ruling**, not a technical
-> block. Precedent: kashi's library face was refused at +50 %.
-> ⭐ **It blocks nothing but the pixels.** The preview pane, the format sniffing, the decode budget's
-> shape and the cache policy all shipped without paying it, and they are the common prefix of both
-> futures — so the ruling can be made late.
+> ⛔⛔ **THE SECOND HEADLINE: EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE +115 % BINARY
+> — IS THE LIVE CONSTRAINT.** chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op**
+> (`return 0;`), and cyrius's `alloc` is a bump allocator whose only reclaim rewinds the whole heap.
+> **Measured: ~2.5× the RGBA size per decode, never returned**, and a second decode of the same file
+> costs it again. crab bounds it two ways and **both are load-bearing**: a per-image pre-check
+> (`CRAB_THUMB_MAX_RGBA`, 4 MB — a refusal costs **16 bytes** against up to 26.6 MB unbudgeted) and a
+> **session ceiling** (`CRAB_THUMB_TOTAL_MAX`, 32 MB), because a cap on one decode says nothing about
+> a hundred.
+> ⇒ **Those two constants are the first thing to delete** the day the allocator gains a `free()` or
+> chitra takes an arena. They are not taste; they are the allocator's shape.
+>
+> ⭐ **The gate on the thumbnail line was false TWICE, in opposite directions.** First *"no image
+> decoder exists"* (chitra 1.0.0 shipped one). Then the correction implied that made it free
+> (+115 %). And the real constraint was in neither. ⇒ **A gate is a claim about another repository:
+> it can be wrong about existence AND about price, and neither is visible from the line.**
+
+## Cross-repo work done this session — three repos, and crab is last
+
+⚠ **Nothing is committed, tagged or pushed anywhere.**
+
+| repo | state |
+|---|---|
+| **dhancha 0.9.24** | ⭐ **RELEASED** (`53d2b04`, verified on the remote) and crab's tag moved to it. Stable widget keys: dhancha identified widgets by *pointer*, which a per-frame arena invalidates — so focus, hover, press and drag were all unreachable from an immediate-mode app. Fixed at the cause. **Drag now works under a frame arena** (0.9.21 could only refuse it); `dh_text_attach` lets an app own the edit buffer. 16/16 suites, new `key_test` at 50 checks, six mutations. ⚠ **crab uses none of it yet** — adopting it deletes three hand-rolled workarounds and is its own change. |
+| **chitra 1.0.1** | 🟡 **PREPARED, NOT PUSHED.** A valid PNG past sankoch's 16 MiB inflate ceiling used to spend **26,617,512 bytes** to return a bare `CHITRA_ERR_INFLATE`; it now refuses from the header in **under 64 KiB** with its own `CHITRA_ERR_INFLATE_LIMIT`. Sidecar drops three unused stdlib leaves. 3,020 tests green, two mutations caught. ⛔ **crab still pins 1.0.0** — the phantom-tag rule. Nothing is blocked: crab's per-image budget already keeps it clear of that path. |
+| **sankoch** | Issue filed: `DECOMPRESS_MAX_OUTPUT` is an absolute 16 MiB with **no caller override**, and the streaming API enforces it identically — so no entry point can inflate a ~5.6 MP RGB PNG. Only sankoch can change that. |
+| **agnos** | Issue filed: `open`#7 has no `AO_EXCL`, so crab's overwrite guard exists on the host only. agnos's own `syscall.cyr:1138` already says so; crab is a second consumer. |
+| **cyrius** | ⚠ **An issue I filed earlier this session was WITHDRAWN** — I claimed `cyrius distlib` copies `[deps].stdlib` into the sidecar. It does not; it derives it from `src/lib.cyr`'s includes, which is sound. The symptom was real, the cause I named was not. Corrected in chitra's own issue. |
 
 ## What landed (unreleased, on top of 0.7.5)
 
@@ -33,10 +50,11 @@ Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md) under `[Unreleased
 |---|---|
 | `crab_render` | **32 positional parameters → one record.** Filled by `crab_rs_pane` (11 params, indexed by pane), `_op`, `_chrome`, `_preview`, `_dims`. ⛔ The point is not brevity: at 32 `i64` arguments across 23 call sites, a miscounted comma shifted everything after it and still compiled. And `crab_rs_reset` now owns the three **`-1` = cannot be said yet** defaults that every one of those sites used to spell by hand — `0` there would make the tray render a real `0 B/s`. |
 | Preview column | `p` toggles it. NAME · KIND · SIZE · MODIFIED · DIMENSIONS. ⛔ Width rule **derived** from crab's own column rule (*it may not cost a pane its SIZE column* → 303 px), not lifted from the canvas. Refuses out loud below that, via `crab_set_notice`. |
+| Thumbnails | 64x64, PNG/JPEG/GIF/BMP, **decoded off the idle tick** — at most one per tick, because chitra's entry point is a single call that cannot be resumed the way `crab_copy_step` can. Memoised on the full path **including a remembered refusal**; a closed preview decodes nothing. ⛔ Four differently-named nothings, because "too large" is a property of the FILE, "budget spent" of the SESSION, and "cannot decode" of this BUILD. |
 | Image dimensions | `crab_img_dims` — PNG/JPEG/GIF/BMP from header bytes, **no decoder, no dependency**. Verified against real files against `identify`: 137×42, 1×1, 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real 384×288 JPEG whose SOF sits past an APP0 block. |
 | Fuzz harness | ✅ **Deferral #12 CLOSED.** 60,000 deterministic rounds. It caught a real segfault in `crab_img_dims` the day it was written. |
 | Leak fixed | ⛔ `crab_overlay` used `alloc(32)` not `dh_falloc(32)` on both the menu and sheet branches — **32 B per frame, shipped in 0.7.5**, invisible because the zero-allocation gate never opened an overlay. |
-| Numbers | tests **757 → 925/0** · `render_test` **26 → 35** checks · coverage **86 % → 87 %** (161/183) · host **466,056 B** · `--agnos` **491,856 B** · fmt clean · both targets build |
+| Numbers | tests **757 → 966/0** · `render_test` **26 → 40** checks · coverage **86 % → 87 %** (171/196) · source **5,368 → 6,829** lines · host **1,003,168 B** · `--agnos` **1,026,872 B** · fmt clean · both targets build |
 
 ### ⛔⛔ THE FOUR LESSONS FROM THIS SLICE, EACH CHEAP AND EACH EXPENSIVE TO RE-LEARN
 

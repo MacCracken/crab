@@ -2341,6 +2341,7 @@ fn main() {
     t_img_dims();
     t_preview();
     t_preview_dims();
+    t_thumbnails();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -2810,6 +2811,185 @@ fn t_preview_dims(): i64 {
     crab_fs_delete(dir, "pvshort.png", 0, scr);
     crab_fs_delete(dir, "pvempty.png", 0, scr);
     return 0;
+}
+
+# M5 — thumbnails: the scaler, the two budgets, and the memo. Against REAL files in `build/`.
+#
+# ⛔⛔ THE BUDGETS ARE THE FEATURE, NOT A SAFETY RAIL BOLTED TO IT. Measured 2026-08-31: chitra makes
+# 31 `alloc()` calls, `chitra_image_free` is a no-op, and cyrius's `alloc` is a bump allocator with
+# no `free()` — so a decode permanently costs ~2.5x the image's RGBA size and a second decode of the
+# same file costs it again. Without the memo and the two ceilings, arrowing through a photo
+# directory exhausts memory. These assertions pin all three.
+fn t_thumbnails(): i64 {
+    test_group("crab — M5: thumbnails, and the two budgets that make them affordable");
+    var scr = alloc(CRAB_PATH_MAX);
+    var dir = "build";
+
+    # ---- the scaler ---------------------------------------------------------------------------
+    # A 4x2 RGBA source: left half red, right half blue. Wide, so the fit must letterbox top/bottom.
+    var srcw = 4; var srch = 2;
+    var src = alloc(srcw * srch * 4);
+    var si = 0;
+    while (si < srcw * srch) {
+        var o = si * 4;
+        var isleft = 0;
+        if ((si - (si / srcw) * srcw) < 2) { isleft = 1; }
+        if (isleft == 1) { store8(src + o, 255); store8(src + o + 1, 0); store8(src + o + 2, 0); }
+        else { store8(src + o, 0); store8(src + o + 1, 0); store8(src + o + 2, 255); }
+        store8(src + o + 3, 255);
+        si = si + 1;
+    }
+    assert_eq(crab_thumb_scale(src, srcw, srch), 1, "the scaler accepts a real image");
+    var tp = crab_thumb_pixels();
+    assert(tp != 0, "the thumbnail buffer exists");
+    assert_eq(crab_thumb_pixels(), crab_thumb_pixels(), "...and is a singleton, allocated once");
+    # ⛔ RGBA IN, BGRA OUT. Getting this backwards produces a red/blue-swapped thumbnail that still
+    # looks like a picture — the shape of bug that ships. The source's LEFT half is RED, so the
+    # destination's left half must have a high R **in byte 2**, not byte 0.
+    # ⚠ Aspect 4:2 fits to 64x32, centred, so row 32 is inside the image band and column 8 is well
+    # within the left half.
+    var pl = (32 * CRAB_THUMB_W + 8) * 4;
+    assert(load8(tp + pl + 2) > 200, "the left half is RED — R lands in byte 2 (BGRA)");
+    assert(load8(tp + pl) < 55, "...and its BLUE byte is low");
+    var pr = (32 * CRAB_THUMB_W + 56) * 4;
+    assert(load8(tp + pr) > 200, "the right half is BLUE — B lands in byte 0");
+    assert(load8(tp + pr + 2) < 55, "...and its RED byte is low");
+    # ⛔ ALPHA IS FORCED OPAQUE. crab declares SETU_SURF_PREMULTIPLIED and the suite gates `a == 255`
+    # across every pixel of the frame; a thumbnail carrying a source alpha would break that contract
+    # for the whole window.
+    assert_eq(load8(tp + pl + 3), 255, "every thumbnail pixel is opaque");
+    assert_eq(load8(tp + pr + 3), 255, "...on both halves");
+    # ⚠ THE LETTERBOX IS CLEARED, not left holding the previous thumbnail. Row 0 is outside a 64x32
+    # image centred in a 64x64 box.
+    assert_eq(load8(tp + 2), 0, "the letterbox band is cleared");
+    # Degenerate inputs are refused rather than dividing by zero.
+    assert_eq(crab_thumb_scale(src, 0, srch), 0, "a zero-width source is refused");
+    assert_eq(crab_thumb_scale(src, srcw, 0), 0, "a zero-height source is refused");
+
+    # ---- against real files -------------------------------------------------------------------
+    # A 2x2 PNG, written through crab's own write layer and decoded by chitra for real.
+    var png = alloc(128);
+    var pn = t_write_tiny_png(png);
+    crab_fs_path(scr, dir, "thumbtest.png");
+    crab_fs_delete(dir, "thumbtest.png", 0, scr);
+    crab_fs_path(scr, dir, "thumbtest.png");
+    var fd = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd >= 0, "the PNG fixture is created");
+    sys_write(fd, png, pn);
+    sys_close(fd);
+
+    crab_thumb_forget();
+    var spent0 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "thumbtest.png", scr), CRAB_TH_OK,
+      "a real PNG on disk decodes to a thumbnail");
+    # ⛔ THE SPEND IS REAL AND IS COUNTED. If this were 0 the session ceiling would never bind and
+    # the whole budget would be decoration.
+    assert(crab_thumb_spent() > spent0, "...and the permanent cost was accounted");
+    # ⚠ THE MEMO: a second call for the same path must NOT decode again. On an allocator with no
+    # free() a re-decode is not merely slow, it is another permanent charge — so this assertion is
+    # about memory, not speed.
+    var spent1 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "thumbtest.png", scr), CRAB_TH_OK, "the memo answers again");
+    assert_eq(crab_thumb_spent(), spent1, "...and spent NOTHING the second time");
+
+    # ⚠ A NON-IMAGE IS NEVER OPENED, let alone decoded.
+    var spent2 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "thumbtest.txt", scr), CRAB_TH_NONE, "a .txt is not a thumbnail");
+    assert_eq(crab_thumb_spent(), spent2, "...and cost nothing");
+    assert_eq(crab_thumb_step(0, "a.png", scr), CRAB_TH_NONE, "a null directory is refused");
+    assert_eq(crab_thumb_step(dir, 0, scr), CRAB_TH_NONE, "a null name is refused");
+    assert_eq(crab_thumb_step(dir, "a.png", 0), CRAB_TH_NONE, "a null path scratch is refused");
+
+    # ⛔⛔ THE PER-IMAGE BUDGET, AND THE ASYMMETRY THAT JUSTIFIES IT. A PNG whose DECLARED size
+    # exceeds `CRAB_THUMB_MAX_RGBA` is refused by `chitra_image_decode_budget` from the header alone
+    # — measured at **16 bytes**, against up to 26.6 MB for the same file through the unbudgeted
+    # entry point. That is why crab never calls bare `chitra_image_decode`.
+    var big = alloc(128);
+    var bn = t_write_huge_ihdr_png(big);
+    crab_fs_delete(dir, "thumbhuge.png", 0, scr);
+    crab_fs_path(scr, dir, "thumbhuge.png");
+    var fd2 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd2 >= 0, "the oversized fixture is created");
+    sys_write(fd2, big, bn);
+    sys_close(fd2);
+    crab_thumb_forget();
+    var spent3 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "thumbhuge.png", scr), CRAB_TH_TOO_BIG,
+      "a 4096x4096 PNG is refused by the per-image budget");
+    # ⚠ A GENEROUS BOUND, not an exact one — the err record and alignment are not this test's
+    # business. But it is four orders of magnitude below an unbudgeted decode of the same file.
+    assert(crab_thumb_spent() - spent3 < 4096,
+      "...from the HEADER ALONE, without allocating the image");
+    # ⚠ AND THE REFUSAL IS REMEMBERED. Re-deciding it on every idle tick would be a spin.
+    var spent4 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "thumbhuge.png", scr), CRAB_TH_TOO_BIG, "the refusal is cached");
+    assert_eq(crab_thumb_spent(), spent4, "...and costs nothing to repeat");
+
+    # ⛔ THE STATE IS NOT A BOOLEAN, and the preview says which nothing it is showing.
+    assert(t_streq(crab_thumb_note(CRAB_TH_TOO_BIG), "too large to preview") == 1,
+      "'too large' is a permanent property of the FILE");
+    assert(t_streq(crab_thumb_note(CRAB_TH_SPENT), "preview budget spent") == 1,
+      "'budget spent' is a property of the SESSION, and explains the next blank too");
+    assert(t_streq(crab_thumb_note(CRAB_TH_BAD), "cannot decode") == 1,
+      "'cannot decode' is a property of this BUILD");
+    assert(t_streq(crab_thumb_note(CRAB_TH_OK), "") == 1, "a decoded thumbnail needs no note");
+
+    # ⛔⛔ THE SESSION CEILING, PINNED AS A PREDICATE. Every decode is PERMANENT — ~2.5x the RGBA
+    # size, never reclaimed — so a per-image budget alone does not compose: it says nothing about a
+    # hundred images. This is the guard that stops crab from browsing itself out of memory.
+    # ⛔ `>=`, NOT `>`. At exactly the ceiling the budget IS spent; a decode allowed at the boundary
+    # is one whose entire cost lands past it. That off-by-one is the half that goes wrong quietly,
+    # and it is what these three assertions exist for.
+    assert_eq(crab_thumb_over_budget(0), 0, "a fresh session may decode");
+    assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX - 1), 0, "one byte under the ceiling still may");
+    assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX), 1, "AT the ceiling the budget is spent");
+    assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX + 1), 1, "...and past it, certainly");
+    # ⚠ WHAT THIS DOES **NOT** PROVE, said plainly rather than left to be assumed: that
+    # `crab_thumb_step` still consults the predicate. Proving that needs a test which really spends
+    # 32 MB, and a suite that allocated 32 MB per run to check a guard would cost more than the guard
+    # saves. The arithmetic is pinned here; the wiring is held by review and by the ⛔ at the call
+    # site. This is the same irreducible shape as the idle-tick wiring and the agnos event loop.
+
+    # ⚠ THE THREE SCRATCH BUFFERS ARE ALLOCATED ONCE FOR THE PROCESS — the file buffer is 4 MB, so
+    # a per-call allocation would be a 4 MB leak per selection on an allocator with no `free()`.
+    # "Allocated once" is asserted as pointer identity, the only observable form the property has.
+    assert(crab_thumb_file_buf() != 0, "the 4 MB file buffer is created");
+    assert_eq(crab_thumb_file_buf(), crab_thumb_file_buf(), "...and is the SAME buffer every time");
+    assert(crab_thumb_key_buf() != 0, "the cache-key buffer is created");
+    assert_eq(crab_thumb_key_buf(), crab_thumb_key_buf(), "...and is a singleton too");
+    assert(crab_thumb_err_buf() != 0, "the decoder's error cell is created");
+    assert_eq(crab_thumb_err_buf(), crab_thumb_err_buf(), "...and is a singleton too");
+
+    crab_fs_delete(dir, "thumbtest.png", 0, scr);
+    crab_fs_delete(dir, "thumbhuge.png", 0, scr);
+    return 0;
+}
+
+# A minimal, REAL 2x2 RGB PNG — real zlib IDAT, real CRCs. Written as literal bytes because crab has
+# no compressor and this fixture must survive chitra's own chunk-CRC validation.
+fn t_write_tiny_png(b): i64 {
+    store8(b + 0, 137); store8(b + 1, 80); store8(b + 2, 78); store8(b + 3, 71); store8(b + 4, 13); store8(b + 5, 10); store8(b + 6, 26); store8(b + 7, 10); store8(b + 8, 0); store8(b + 9, 0); store8(b + 10, 0); store8(b + 11, 13);
+    store8(b + 12, 73); store8(b + 13, 72); store8(b + 14, 68); store8(b + 15, 82); store8(b + 16, 0); store8(b + 17, 0); store8(b + 18, 0); store8(b + 19, 2); store8(b + 20, 0); store8(b + 21, 0); store8(b + 22, 0); store8(b + 23, 2);
+    store8(b + 24, 8); store8(b + 25, 2); store8(b + 26, 0); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 253); store8(b + 30, 212); store8(b + 31, 154); store8(b + 32, 115); store8(b + 33, 0); store8(b + 34, 0); store8(b + 35, 0);
+    store8(b + 36, 16); store8(b + 37, 73); store8(b + 38, 68); store8(b + 39, 65); store8(b + 40, 84); store8(b + 41, 120); store8(b + 42, 156); store8(b + 43, 99); store8(b + 44, 248); store8(b + 45, 207); store8(b + 46, 0); store8(b + 47, 4);
+    store8(b + 48, 255); store8(b + 49, 25); store8(b + 50, 32); store8(b + 51, 20); store8(b + 52, 0); store8(b + 53, 27); store8(b + 54, 242); store8(b + 55, 3); store8(b + 56, 253); store8(b + 57, 214); store8(b + 58, 150); store8(b + 59, 242);
+    store8(b + 60, 43); store8(b + 61, 0); store8(b + 62, 0); store8(b + 63, 0); store8(b + 64, 0); store8(b + 65, 73); store8(b + 66, 69); store8(b + 67, 78); store8(b + 68, 68); store8(b + 69, 174); store8(b + 70, 66); store8(b + 71, 96);
+    store8(b + 72, 130);
+    return 73;
+}
+
+# A PNG whose IHDR declares **4096x4096** — 67 MB of RGBA, sixteen times `CRAB_THUMB_MAX_RGBA`.
+# ⛔ ITS IDAT IS EIGHT BYTES AND IS NEVER READ. `chitra_image_decode_budget` compares the DECLARED
+# dimensions against the budget and refuses from the header alone, before allocating anything — which
+# is the entire reason crab uses that entry point instead of `chitra_image_decode`.
+fn t_write_huge_ihdr_png(b): i64 {
+    store8(b + 0, 137); store8(b + 1, 80); store8(b + 2, 78); store8(b + 3, 71); store8(b + 4, 13); store8(b + 5, 10); store8(b + 6, 26); store8(b + 7, 10); store8(b + 8, 0); store8(b + 9, 0); store8(b + 10, 0); store8(b + 11, 13);
+    store8(b + 12, 73); store8(b + 13, 72); store8(b + 14, 68); store8(b + 15, 82); store8(b + 16, 0); store8(b + 17, 0); store8(b + 18, 16); store8(b + 19, 0); store8(b + 20, 0); store8(b + 21, 0); store8(b + 22, 16); store8(b + 23, 0);
+    store8(b + 24, 8); store8(b + 25, 2); store8(b + 26, 0); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 125); store8(b + 30, 193); store8(b + 31, 179); store8(b + 32, 64); store8(b + 33, 0); store8(b + 34, 0); store8(b + 35, 0);
+    store8(b + 36, 8); store8(b + 37, 73); store8(b + 38, 68); store8(b + 39, 65); store8(b + 40, 84); store8(b + 41, 0); store8(b + 42, 0); store8(b + 43, 0); store8(b + 44, 0); store8(b + 45, 0); store8(b + 46, 0); store8(b + 47, 0);
+    store8(b + 48, 0); store8(b + 49, 238); store8(b + 50, 72); store8(b + 51, 93); store8(b + 52, 135); store8(b + 53, 0); store8(b + 54, 0); store8(b + 55, 0); store8(b + 56, 0); store8(b + 57, 73); store8(b + 58, 69); store8(b + 59, 78);
+    store8(b + 60, 68); store8(b + 61, 174); store8(b + 62, 66); store8(b + 63, 96); store8(b + 64, 130);
+    return 65;
 }
 
 # --- 0.5.0 test helpers ---

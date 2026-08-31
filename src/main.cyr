@@ -201,6 +201,7 @@ fn main(): i64 {
         } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
     }
     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
 
     var sds = crab_render(surf, 0, rs);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
@@ -1078,6 +1079,7 @@ fn main(): i64 {
                     } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 var s2 = crab_render(surf, 0, rs);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
@@ -1164,6 +1166,7 @@ fn main(): i64 {
                         } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
                     }
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                     var s3 = crab_render(surf, 0, rs);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
@@ -1231,9 +1234,51 @@ fn main(): i64 {
                     } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 var s5 = crab_render(surf, 0, rs);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
+            }
+        }
+        # ⭐⭐ THE THUMBNAIL DECODE (M5) — ON THE IDLE TICK, NEVER ON THE KEYSTROKE PATH.
+        # ⛔ IDLE ONLY (`ev == 0`), for the same reason the stat drain and the transfer step are: an
+        # event just handled means more may be queued, and a decode is the most expensive thing crab
+        # does. The metadata appears immediately; the picture arrives a tick later.
+        # ⛔ AT MOST ONE DECODE PER TICK, and that is the finest granularity available — chitra's
+        # entry point is a single call that returns an image or does not, so a decode cannot be
+        # resumed the way `crab_copy_step` and `crab_walk_step` can. "Bounded work per tick" here
+        # means "at most one image".
+        # ⚠ AFTER the transfer step and BEFORE the stat drain: a transfer the operator started
+        # outranks a picture they have not seen yet, and a picture they are looking at outranks size
+        # columns they have not asked about. All three are bounded, so none starves.
+        # ⚠ `crab_thumb_step` is MEMOISED on the full path — including a remembered REFUSAL — so an
+        # unchanged selection costs one string compare and nothing else. A tick does not re-decide a
+        # file it has already declined.
+        # ⛔ ONLY WHILE THE PREVIEW IS OPEN. A closed preview decodes nothing and spends nothing,
+        # which matters more here than anywhere else in crab: the spend is PERMANENT.
+        if ((running == 1) && (ev == 0)) {
+            if (pv_open == 1) {
+                var tpath = lpath; var tbuf = lbuf; var tsel = sel_l; var tcnt = ln;
+                if (active_pane == 1) { tpath = rpath; tbuf = rbuf; tsel = sel_r; tcnt = rn; }
+                if (tcnt > 0) {
+                    var tbefore = crab_thumb_state();
+                    var tafter = crab_thumb_step(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                    # ⚠ REDRAW ONLY WHEN THE ANSWER CHANGED. A decode that was already cached — the
+                    # common case on every subsequent tick — must not repaint the window, or the
+                    # idle loop becomes a busy loop drawing the same frame forever.
+                    if (tafter != tbefore) {
+                        crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                        crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                        crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                        crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                        crab_rs_preview(rs, pv_open);
+                        crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                        crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                        var s6 = crab_render(surf, 0, rs);
+                        if (s6 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                        else { setu_buf_write(buf_id, sd_surface_pixels(s6), nbytes); }
+                    }
+                }
             }
         }
         if ((running == 1) && (ev == 0)) {
@@ -1271,6 +1316,7 @@ fn main(): i64 {
                     } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 var s4 = crab_render(surf, 0, rs);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }

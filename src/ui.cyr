@@ -183,6 +183,20 @@ enum CrabCol {
     # measured for. Giving the column its own literal would be a second number meaning the same
     # thing, free to drift when the font or the date format moves. ⇒ One constant, one derivation.
     CRAB_PV_W         = 153;
+    # ⭐ THE THUMBNAIL'S SIZE AND STATES LIVE HERE, WITH THE REST OF THE COLUMN GEOMETRY, because the
+    # RENDER PATH reads them and this file is the lowest layer that path may touch. The decode that
+    # fills the buffer is in `app.cyr`; only these numbers and the state names come down.
+    # ⚠ 64x64 — `CRAB_PV_W` is 153 px, so a thumbnail wider than that would be cropped by the column
+    # rather than seen.
+    CRAB_THUMB_W      = 64;
+    CRAB_THUMB_H      = 64;
+    CRAB_THUMB_BYTES  = 16384;   # W * H * 4, BGRA
+    # States, so the preview can say WHICH kind of nothing it is showing.
+    CRAB_TH_NONE      = 0;       # not an image, or nothing selected
+    CRAB_TH_OK        = 1;
+    CRAB_TH_TOO_BIG   = 2;       # refused by the per-image budget, BEFORE allocating
+    CRAB_TH_SPENT     = 3;       # the session decode budget is exhausted
+    CRAB_TH_BAD       = 4;       # a decoder error on a file crab was willing to try
     CRAB_PV_ROW_H     = 18;     # a preview line, matching the column header's row height
     CRAB_PV_HDR_H     = 28;     # ...and its header, matching a PANE header so the two tops line up
 }
@@ -1622,6 +1636,77 @@ fn crab_preview_fit(w, want): i64 {
     return 1;
 }
 
+# ⭐⭐ THE THUMBNAIL'S PIXELS, blitted into a dhancha CANVAS.
+#
+# ⛔ THE BUFFER IS REACHED THROUGH THE WIDGET'S USERDATA, NOT A GLOBAL. `dh_canvas_new` takes a
+# userdata pointer and hands it back through `dh_widget_userdata`, which is exactly the seam that
+# keeps this file from needing to know where the decode happened — `app.cyr` owns the decoder and
+# passes the buffer down through the render-state record.
+# ⛔ THE CLIP IS HONOURED, because `dh_draw_widget` cannot clip pixels it did not write: a canvas
+# that ignores its clip box paints over its neighbours and the toolkit cannot stop it. Every write
+# below is bounded by both the widget's box and the clip rect handed in.
+# ⚠ BGRA, PREMULTIPLIED, OPAQUE. `crab_thumb_scale` already wrote alpha 255 on every pixel; this
+# only moves bytes. The AE-6 contract the suite gates (`a == 255` across the whole surface) would
+# otherwise be broken by one panel.
+fn crab_thumb_draw(wgt, sds, clx, cly, clw, clh): i64 {
+    if (wgt == 0) { return 0; }
+    if (sds == 0) { return 0; }
+    var src = dh_widget_userdata(wgt);
+    if (src == 0) { return 0; }
+    var px = sd_surface_pixels(sds);
+    var sw = sd_surface_width(sds);
+    var sh = sd_surface_height(sds);
+    var x0 = dh_widget_x(wgt);
+    var y0 = dh_widget_y(wgt);
+    var y = 0;
+    while (y < CRAB_THUMB_H) {
+        var dyy = y0 + y;
+        # ⚠ Bounds first, in both the clip and the surface. A row outside either is skipped whole
+        # rather than clamped — a clamped row would smear the thumbnail's edge along the boundary.
+        if (dyy >= cly) {
+            if (dyy < cly + clh) {
+                if (dyy >= 0) {
+                    if (dyy < sh) {
+                        var x = 0;
+                        while (x < CRAB_THUMB_W) {
+                            var dxx = x0 + x;
+                            if (dxx >= clx) {
+                                if (dxx < clx + clw) {
+                                    if (dxx >= 0) {
+                                        if (dxx < sw) {
+                                            var so = (y * CRAB_THUMB_W + x) * 4;
+                                            var doff = (dyy * sw + dxx) * 4;
+                                            store8(px + doff, load8(src + so));
+                                            store8(px + doff + 1, load8(src + so + 1));
+                                            store8(px + doff + 2, load8(src + so + 2));
+                                            store8(px + doff + 3, 255);
+                                        }
+                                    }
+                                }
+                            }
+                            x = x + 1;
+                        }
+                    }
+                }
+            }
+        }
+        y = y + 1;
+    }
+    return 0;
+}
+
+# What the preview says when there is no picture. ⛔ FOUR DIFFERENT NOTHINGS, NAMED SEPARATELY,
+# because they are not the same thing to an operator: "too large" is a permanent property of the
+# file, "budget spent" is a property of this session and explains why the NEXT one will also be
+# blank, and "cannot decode" is a property of this build. A single blank rectangle for all three is
+# how a working feature gets reported as broken.
+fn crab_thumb_note(state): i64 {
+    if (state == CRAB_TH_TOO_BIG) { return "too large to preview"; }
+    if (state == CRAB_TH_SPENT) { return "preview budget spent"; }
+    if (state == CRAB_TH_BAD) { return "cannot decode"; }
+    return "";
+}
+
 # One label/value pair in the preview column. The label is muted and the value is not, so the eye
 # lands on the data rather than on the word naming it.
 # ⚠ `dh_falloc` throughout — `dh_widget_set_text` stores the pointer and does not copy, so every
@@ -1653,7 +1738,7 @@ fn crab_pv_field(col, label, value): i64 {
 # keystroke path — the thing M3 *#03* restructured the listing to avoid.
 # ⚠ AN EMPTY PANE GETS THE COLUMN, NOT A HOLE. The header stays and the fields read "—", because a
 # column that vanishes when a directory happens to be empty makes the whole window jump.
-fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh): i64 {
+fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, tstate): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, CRAB_PV_W, h);
@@ -1689,6 +1774,34 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh): i64 {
         var sb = dh_falloc(24);
         crab_size_str(sb, load64(sizes + sel * 8));
         crab_pv_field(col, "SIZE", sb);
+    }
+    # ⭐⭐ THE THUMBNAIL, ABOVE THE FIELDS. A picture is what the operator's eye goes to first, so it
+    # sits at the top of the column rather than after four lines of text.
+    # ⚠ THE BAND IS RESERVED WHETHER OR NOT THERE IS A PICTURE, so the fields below do not jump
+    # up and down as the selection moves between images and text files — the same reasoning that
+    # gives the transfer tray its own reserved height instead of floating over the rows.
+    if (crab_is_image(rec) == 1) {
+        var tb = dh_widget_new(BOX);
+        dh_widget_set_layout(tb, BOX_V);
+        dh_widget_set_pref(tb, 0, CRAB_THUMB_H + 8);
+        dh_widget_set_flex(tb, 0);
+        if (thumb != 0) {
+            if (tstate == CRAB_TH_OK) {
+                var cv = dh_canvas_new(&crab_thumb_draw, thumb);
+                dh_widget_set_pref(cv, CRAB_THUMB_W, CRAB_THUMB_H);
+                dh_widget_set_flex(cv, 0);
+                dh_widget_add_child(tb, cv);
+            }
+        }
+        if (tstate != CRAB_TH_OK) {
+            var tn = dh_widget_new(LABEL);
+            dh_widget_set_pref(tn, 0, CRAB_PV_ROW_H);
+            dh_widget_set_flex(tn, 0);
+            dh_widget_set_fg(tn, dh_theme_mute());
+            dh_widget_set_text(tn, crab_thumb_note(tstate));
+            dh_widget_add_child(tb, tn);
+        }
+        dh_widget_add_child(col, tb);
     }
     var mb = dh_falloc(24);
     crab_mtime_str(mb, load64(mtimes + sel * 8));
@@ -1765,7 +1878,14 @@ enum CrabRs {
     # dimensions line at all rather than a "0 x 0" that reads like a measurement.
     CRAB_RS_PVW      = 248;
     CRAB_RS_PVH      = 256;
-    CRAB_RS_SZ       = 264;
+    # ⭐ THE THUMBNAIL (M5). A POINTER to a 64x64 BGRA buffer the app owns, plus the state that says
+    # WHICH kind of nothing is being shown when there is no picture.
+    # ⛔ A POINTER, NOT PIXELS, and the decode that fills it lives in `app.cyr` — this file sits
+    # BELOW that one and the render path must never call up. Same rule the pane state, the tray and
+    # the dimensions follow; the record is the carrier.
+    CRAB_RS_PVTHUMB  = 264;
+    CRAB_RS_PVTSTATE = 272;
+    CRAB_RS_SZ       = 280;
 }
 
 var crab_rs_rec = 0;
@@ -1860,6 +1980,15 @@ fn crab_rs_dims(rs, w, h): i64 {
     return 1;
 }
 
+# @public — the decoded thumbnail (64x64 BGRA) and the state that produced it. `pixels == 0` or a
+# state other than `CRAB_TH_OK` means there is no picture to draw.
+fn crab_rs_thumb(rs, pixels, state): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_PVTHUMB, pixels);
+    store64(rs + CRAB_RS_PVTSTATE, state);
+    return 1;
+}
+
 # @public — which pane is active, plus the overlay: the context menu and the rename/batch field.
 fn crab_rs_chrome(rs, active, menuopen, menux, menuy, menusel, editopen, editlabel): i64 {
     if (rs == 0) { return 0; }
@@ -1920,6 +2049,8 @@ fn crab_render(surf, font, rs): i64 {
     var pvwant   = load64(rs + CRAB_RS_PVOPEN);
     var pvw      = load64(rs + CRAB_RS_PVW);
     var pvh      = load64(rs + CRAB_RS_PVH);
+    var pvthumb  = load64(rs + CRAB_RS_PVTHUMB);
+    var pvtstate = load64(rs + CRAB_RS_PVTSTATE);
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
     if (dh_frame_arena_get() == 0) { dh_frame_arena_set(crab_frame_arena()); }
@@ -2000,7 +2131,9 @@ fn crab_render(surf, font, rs): i64 {
     # built — including in solo mode, where the one pane and the preview split the window between
     # them. ⚠ It is a sibling of the panes rather than a child of one: it describes the ACTIVE
     # pane's selection and the active pane changes, so parenting it to a pane would make it move.
-    if (pvon == 1) { crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh); }
+    if (pvon == 1) {
+        crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb, pvtstate);
+    }
     dh_widget_add_child(root, panes);
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
     if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal, oprate, opeta); }

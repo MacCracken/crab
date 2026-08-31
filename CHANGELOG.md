@@ -2,11 +2,77 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — M5's first slice: the render-state record, the preview column, and a fuzz harness that reads its input
+## [Unreleased] — M5: the preview column, thumbnails, the render-state record, and a fuzz harness that reads its input
 
 ⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
-M5 is *started*, not done: the preview pane is in and thumbnails are held behind a measured decision
-(below). The two dhancha-gated items — grid/columns and the sidebar — are unchanged and still gated.
+M5 is *started*, not done: the preview pane and thumbnails are both in — the latter by operator
+ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
+the sidebar — are unchanged and still genuinely gated.
+
+### Added — thumbnails, and the two budgets that make them affordable
+
+⭐ **chitra 1.0.0 adopted by operator ruling.** `p` now shows a 64×64 thumbnail for PNG, JPEG, GIF
+and BMP, decoded off the idle tick and box-filtered down. Host **466,056 → 1,003,168 B (+115.2 %)**,
+agnos **491,896 → 1,026,872 (+108.8 %)** — the measured price, ruled and accepted.
+
+⛔⛔⛔ **THE BINARY SIZE WAS NEVER THE HARD CONSTRAINT. THE ALLOCATOR IS.** Measured 2026-08-31:
+chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op** (`return 0;`), and cyrius's
+`alloc` is a bump allocator whose only reclaim is `alloc_reset()` — which rewinds the *whole* heap
+and would invalidate crab's pane paths, readdir buffers, surface and client struct. **Every decode is
+permanent, and a second decode of the same file costs it again:**
+
+| source | RGBA bytes | permanent alloc | ratio |
+|---|---:|---:|---:|
+| 64×64 | 16,384 | 83,976 | 5.1× |
+| 256×256 | 262,144 | 700,280 | 2.7× |
+| 512×512 | 1,048,576 | 2,670,608 | 2.5× |
+| 1024×1024 | 4,194,304 | 10,549,168 | 2.5× |
+| 2048×2048 | 16,777,216 | 42,057,928 | 2.5× |
+
+⇒ **~2.5× the RGBA size, never returned.** A file manager that decoded on every arrow key would
+exhaust a machine browsing one photo directory. Hence two budgets, and neither is optional.
+
+- ⛔ **Per image, as a PRE-CHECK.** `chitra_image_decode_budget` reads the declared dimensions from
+  the header and refuses before allocating: measured, a refusal costs **16 bytes**, against
+  **26,617,512** for the same file through the unbudgeted entry point. That asymmetry is why crab
+  never calls bare `chitra_image_decode`. `CRAB_THUMB_MAX_RGBA` is 4 MB (≈1024×1024).
+- ⛔ **Per session, because the per-image budget does not compose.** A cap on one decode says nothing
+  about a hundred. crab measures `alloc_used()` across each decode and stops at
+  `CRAB_THUMB_TOTAL_MAX` (32 MB) — and **says so** rather than silently showing nothing.
+
+⭐⭐ **And the per-image budget keeps crab clear of an upstream defect.** chitra 1.0.0 fails with
+`CHITRA_ERR_INFLATE` on any PNG whose inflated scanline data exceeds **16 MiB** — bracketed exactly:
+2200×2200 (14,522,200 B) decodes, 2370×2370 (16,853,070) does not. That is ~5.6 megapixels of RGB, so
+an ordinary phone photo saved as PNG fails — **and it fails expensively**, spending 26.6 MB to return
+0. A 1024×1024 RGB PNG inflates to ~3.1 MB, comfortably under the cliff, so crab cannot reach it.
+⚠ Fixed in **chitra 1.0.1** (prepared, not yet pinned here — the tag must exist on the remote first).
+The ceiling itself is sankoch's and only sankoch can raise it; filed there.
+
+⛔ **ON THE IDLE TICK, NEVER THE KEYSTROKE PATH**, after the transfer step and before the stat drain:
+a transfer the operator started outranks a picture they have not seen, and a picture they are looking
+at outranks size columns they have not asked about. ⚠ **At most one decode per tick** — chitra's
+entry point is one call that returns an image or does not, so a decode cannot be resumed the way
+`crab_copy_step` and `crab_walk_step` can. That is the finest granularity available.
+⚠ **Memoised on the full path, including a remembered REFUSAL** — a file too big is still too big on
+the next tick, and re-deciding it would be a spin. A closed preview decodes nothing at all.
+
+⛔ **FOUR DIFFERENT NOTHINGS, NAMED SEPARATELY**, because they are not the same to an operator:
+*too large to preview* is a permanent property of the file, *preview budget spent* is a property of
+the session and explains why the next one will also be blank, and *cannot decode* is a property of
+this build. One blank rectangle for all three is how a working feature gets reported as broken.
+
+⚠ **RGBA in, BGRA out, alpha forced opaque.** chitra emits R,G,B,A and a sadish surface is B,G,R,A —
+getting that wrong is a red/blue-swapped thumbnail that still looks like a picture. And crab declares
+`SETU_SURF_PREMULTIPLIED` with a suite that gates `a == 255` across every pixel, so a thumbnail
+carrying a source alpha would break that contract for the whole window. Both are pinned.
+⚠ **Box average, not nearest-neighbour** — point-sampling 1024×1024 down to 64 reads one pixel in 256
+and throws the rest away. The expensive part is already behind us.
+
+### Changed — dhancha 0.9.24
+
+⚠ crab uses none of it yet. The keys, the drag-under-arena fix and `dh_text_attach` are the
+general answer to crab's three hand-rolled workarounds (`dh_dispatch`, drag, `TEXTINPUT`); adopting
+them is its own change, not this one.
 
 ### Changed — `crab_render` takes ONE record instead of 32 positional parameters
 

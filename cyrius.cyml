@@ -146,7 +146,7 @@ path = "../dhancha"
 # `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
 # refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
 # "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
-tag    = "0.9.23"
+tag    = "0.9.24"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
@@ -158,3 +158,33 @@ path = "../setu"
 tag = "0.8.8"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40.
                 # 0.8.8 adds `SETU_INPUT_PTR_SCROLL` (kind 12) — the mouse wheel.
 modules = ["dist/setu.cyr"]
+
+# chitra (चित्र — image) — the pure-Cyrius CPU raster decoder: PNG, JPEG, GIF, BMP.
+# crab uses it for THUMBNAILS. ⚠ Not for the preview's DIMENSIONS line — those are read from header
+# bytes by `crab_img_dims` with no decoder at all, because PNG/GIF/BMP put width and height at fixed
+# offsets in the first 26 bytes and JPEG puts them in an SOF segment a bounded marker walk reaches.
+#
+# ⛔⛔ THE COST IS MEASURED AND IT IS LARGE — 2026-08-31, operator-ruled and adopted deliberately.
+# Declaring this dep took crab's host binary from 453,304 to 981,992 B (+116.6 %) and the agnos
+# binary from 474,944 to 1,001,520 (+110.9 %). `CYRIUS_DCE=1` reclaims NONE of it — it NOPs the
+# unreachable functions and the byte count does not move at all. Decomposed:
+#     + stdlib `thread`             ->  461,608  (+8,304)
+#     + stdlib `flags`              ->  461,624  (+8,320)
+#     + stdlib `thread` + `sankoch` ->  860,784  (+407,480)
+#     + all three + chitra's fold   ->  981,992  (+528,688)
+# ⇒ ~399 KB of it is `sankoch`, the RFC 1950/1951 inflate leaf PNG's IDAT requires, pulled in
+# TRANSITIVELY. chitra's own decoder fold is only ~113 KB. crab does not choose that price; PNG does.
+# ⚠ crab does not DECLARE the extra leaves and does not need to: `cyrius deps` re-creates `flags`,
+# `thread`, `sankoch` and their backends from `dist/chitra.deps`. Measured: deleting them from
+# `[deps].stdlib` produced a byte-identical binary. The sidecar is authoritative.
+# ⚠ `flags`, `args` and `vec` in that sidecar are referenced NOWHERE in chitra — filed as
+# chitra/docs/development/issues/2026-08-31-manifest-over-declares-unused-stdlib-leaves.md, and the
+# systemic half (distlib copying [deps].stdlib rather than the fold's real leaves) as
+# cyrius/docs/development/issues/2026-08-31-distlib-deps-sidecar-over-reports-stdlib-leaves.md.
+# ⛔⛔ AND THE BINARY SIZE IS NOT THE HARD CONSTRAINT — THE ALLOCATOR IS. See `crab_thumb_*` in
+# `src/app.cyr`: chitra makes 31 `alloc()` calls, `chitra_image_free` is a NO-OP (`return 0;`), and
+# cyrius's `alloc` is a bump allocator with no `free()`. Every decode is therefore PERMANENT.
+[deps.chitra]
+git = "https://github.com/MacCracken/chitra.git"
+tag = "1.0.0"
+modules = ["dist/chitra.cyr"]

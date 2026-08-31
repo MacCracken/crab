@@ -1548,6 +1548,7 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     # refer to different files. Renaming `b.png` over `a.png` leaves `a.png` gone and the cache
     # still holding its size.
     crab_pv_forget();
+    crab_thumb_forget();
     var cnt = crab_readdir_into(path, buf);
     crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
@@ -1695,6 +1696,256 @@ fn crab_preview_dims(dir, name, out, pathscr): i64 {
     crab_pv_w = load64(out + CRAB_IMG_W);
     crab_pv_h = load64(out + CRAB_IMG_H);
     return 1;
+}
+
+# ⭐⭐ THUMBNAILS (M5) — chitra decodes, crab downsamples, and the BUDGET is the whole design.
+#
+# ⛔⛔⛔ EVERY DECODE IS PERMANENT. THIS IS THE CONSTRAINT, NOT THE BINARY SIZE. Measured 2026-08-31:
+# chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op** (`return 0;`), and cyrius's
+# `alloc` is a bump allocator whose only reclaim is `alloc_reset()` — which rewinds the WHOLE heap
+# and would invalidate crab's pane paths, readdir buffers, surface and client struct. So the bytes a
+# decode spends are spent for the life of the process, and a second decode of the same file spends
+# them again.
+#
+#   | source        | RGBA bytes | PERMANENT alloc | ratio |
+#   |---------------|-----------:|----------------:|------:|
+#   | 64x64         |     16,384 |          83,976 |  5.1x |
+#   | 256x256       |    262,144 |         700,280 |  2.7x |
+#   | 512x512       |  1,048,576 |       2,670,608 |  2.5x |
+#   | 1024x1024     |  4,194,304 |      10,549,168 |  2.5x |
+#   | 2048x2048     | 16,777,216 |      42,057,928 |  2.5x |
+#
+# ⇒ **~2.5x the RGBA size, never returned.** A file manager that decoded on every arrow key would
+# exhaust a machine browsing one photo directory. Hence two budgets, and neither is optional.
+#
+# ⛔ BUDGET 1 — PER IMAGE, AND IT IS A PRE-CHECK. `chitra_image_decode_budget` reads the DECLARED
+# dimensions out of the header and refuses before allocating anything: measured, a refusal costs
+# **16 bytes**, against 26.6 MB for the same file decoded without it. That asymmetry is why crab
+# never calls bare `chitra_image_decode`.
+# ⛔ BUDGET 2 — PER SESSION, BECAUSE BUDGET 1 DOES NOT COMPOSE. A cap on one decode says nothing
+# about a hundred of them. crab measures `alloc_used()` across each decode and stops thumbnailing
+# once the cumulative spend passes `CRAB_THUMB_TOTAL_MAX`. ⚠ It reports that state rather than
+# silently showing nothing — a feature that stops working without saying so reads as a bug.
+#
+# ⭐⭐ AND THE PER-IMAGE BUDGET KEEPS crab ON THE WORKING SIDE OF AN UPSTREAM DEFECT.
+# chitra 1.0.0 FAILS with `CHITRA_ERR_INFLATE` on any PNG whose decompressed scanline data exceeds
+# **16 MiB** — bracketed exactly: 2200x2200 (14,522,200 B inflated) decodes, 2370x2370 (16,853,070)
+# does not. That is ~5.6 megapixels of RGB, so an ordinary phone photo saved as PNG fails — and it
+# fails EXPENSIVELY, spending 26.6 MB on the way to returning 0. chitra advertises
+# `CHITRA_MAX_PIXELS = 16,777,216` (4096x4096), well past what actually works.
+# ⇒ `CRAB_THUMB_MAX_RGBA` is 4 MB, and a 1024x1024 RGB PNG inflates to ~3.1 MB — comfortably under
+# the cliff. crab cannot reach the bug. Filed upstream; see
+# chitra/docs/development/issues/2026-08-31-inflate-fails-past-16mib.md.
+enum CrabThumb {
+    # ⛔ `CRAB_THUMB_W` / `_H` / `_BYTES` AND THE `CRAB_TH_*` STATES LIVE IN `src/ui.cyr`, NOT HERE,
+    # and that is the include-order rule rather than a preference. `app.cyr` includes `ui.cyr`, so
+    # the fold puts ui.cyr FIRST and anything declared here is invisible to it — while
+    # `render_test.cyr` and the suite include `ui.cyr` ALONE. Declaring them here compiled fine
+    # through `main.cyr` and left `render_test` with six undefined symbols. **Fourth time in this
+    # project.** Anything the render path touches lives at or below `ui.cyr`.
+    # ⚠ 4 MB of DECLARED RGBA ~ 1024x1024. Chosen against the table above (a ~10.5 MB permanent
+    # spend) and against the 16 MiB inflate cliff, not for roundness.
+    CRAB_THUMB_MAX_RGBA  = 4194304;
+    # ⚠ 32 MB of cumulative permanent spend — about three 1024x1024 images, or forty 256x256 ones.
+    # ⛔ NOT A GUESS AT WHAT IS SAFE, A LIMIT ON WHAT IS UNRECOVERABLE. When the allocator gains a
+    # free(), or chitra takes an arena, this constant is the first thing that should be deleted.
+    CRAB_THUMB_TOTAL_MAX = 33554432;
+    CRAB_THUMB_FILE_MAX  = 4194304;        # bytes of the file crab will read to feed the decoder
+}
+
+var crab_th_buf = 0;
+var crab_th_key = 0;
+var crab_th_file = 0;
+var crab_th_state = 0;
+var crab_th_spent = 0;
+
+# @public — the 64x64 BGRA thumbnail buffer. Allocated ONCE for the process.
+# ⚠ One buffer, not a cache of many: the preview describes ONE entry, and an N-entry cache would
+# need an eviction policy for a caller that does not exist. Same reasoning as the operation record.
+fn crab_thumb_pixels(): i64 {
+    if (crab_th_buf == 0) { crab_th_buf = alloc(CRAB_THUMB_BYTES); }
+    return crab_th_buf;
+}
+
+fn crab_thumb_state(): i64 { return crab_th_state; }
+
+# @public — cumulative bytes this process has permanently spent on decodes. For the ⛔ above.
+fn crab_thumb_spent(): i64 { return crab_th_spent; }
+
+# @public — has the session's decode budget been exhausted? 1 = stop decoding.
+#
+# ⛔ LIFTED OUT AS A PREDICATE SO THE SUITE CAN ASSERT IT, which is the same answer this codebase
+# gives for `crab_readdir_stalled`, `crab_walk_cursor_for` and `crab_truncation_note`: the DECISION
+# is testable even when the situation that triggers it is not reachable from a test.
+# ⚠ AND THE LIMIT OF THAT IS STATED RATHER THAN IMPLIED. This pins the boundary arithmetic — `>=`
+# against `>`, which is the half that goes wrong quietly. It does NOT pin that `crab_thumb_step`
+# still consults it: proving that needs a test that really spends 32 MB, and a suite that allocated
+# 32 MB per run to check a guard would be a worse thing than the guard is a good one.
+# ⛔ `>=`, NOT `>`. At exactly the ceiling the budget IS spent — a decode allowed at the boundary is
+# one whose ~2.5x permanent cost lands entirely past it.
+fn crab_thumb_over_budget(spent): i64 {
+    if (spent >= CRAB_THUMB_TOTAL_MAX) { return 1; }
+    return 0;
+}
+
+# @public — forget the cached thumbnail. Called from `crab_relist`, beside `crab_pv_forget`, for the
+# same reason: the cache is keyed on a NAME and crab makes names refer to different files.
+# ⚠ THE SPEND IS NOT FORGOTTEN, and must not be — those bytes are still gone. Resetting the counter
+# here would turn the session budget into a per-directory one and the ceiling would never bind.
+fn crab_thumb_forget(): i64 {
+    crab_th_state = CRAB_TH_NONE;
+    var k = crab_th_key;
+    if (k != 0) { store8(k, 0); }
+    return 0;
+}
+
+fn crab_thumb_key_buf(): i64 {
+    if (crab_th_key == 0) { crab_th_key = alloc(CRAB_PATH_MAX + 4); }
+    return crab_th_key;
+}
+
+fn crab_thumb_file_buf(): i64 {
+    if (crab_th_file == 0) { crab_th_file = alloc(CRAB_THUMB_FILE_MAX); }
+    return crab_th_file;
+}
+
+# Box-average a decoded RGBA image down into the 64x64 BGRA thumbnail, preserving aspect ratio and
+# letterboxing the remainder.
+#
+# ⛔ A BOX AVERAGE, NOT NEAREST-NEIGHBOUR. Point-sampling a 1024x1024 image down to 64 reads one
+# source pixel in every 256 and throws the rest away, which turns fine detail into noise that
+# changes as the thumbnail size changes. Averaging costs one pass over pixels already decoded — the
+# expensive part is behind us — and is the difference between a thumbnail and a mistake.
+# ⚠ NO OVERFLOW: each destination pixel averages at most 256 source pixels of at most 255 each, so
+# the accumulator peaks at 65,280.
+# ⛔ RGBA IN, BGRA OUT. chitra emits R,G,B,A; a sadish surface is B,G,R,A. Getting this wrong is a
+# blue-and-red-swapped thumbnail that still looks like a picture, which is the kind of bug that ships.
+fn crab_thumb_scale(src, sw, sh): i64 {
+    var dst = crab_thumb_pixels();
+    if (dst == 0) { return 0; }
+    if (sw <= 0) { return 0; }
+    if (sh <= 0) { return 0; }
+    var i = 0;
+    while (i < CRAB_THUMB_BYTES) { store8(dst + i, 0); i = i + 1; }
+    # Fit inside the box, preserving aspect. ⚠ Integer maths throughout; a zero result is clamped to
+    # 1 so a very wide or very tall image still draws a line rather than nothing.
+    var dw = CRAB_THUMB_W;
+    var dh = CRAB_THUMB_H;
+    if (sw * CRAB_THUMB_H > sh * CRAB_THUMB_W) { dh = (sh * CRAB_THUMB_W) / sw; }
+    else { dw = (sw * CRAB_THUMB_H) / sh; }
+    if (dw < 1) { dw = 1; }
+    if (dh < 1) { dh = 1; }
+    var ox = (CRAB_THUMB_W - dw) / 2;
+    var oy = (CRAB_THUMB_H - dh) / 2;
+    var dy = 0;
+    while (dy < dh) {
+        var sy0 = (dy * sh) / dh;
+        var sy1 = ((dy + 1) * sh) / dh;
+        if (sy1 <= sy0) { sy1 = sy0 + 1; }
+        if (sy1 > sh) { sy1 = sh; }
+        var dx = 0;
+        while (dx < dw) {
+            var sx0 = (dx * sw) / dw;
+            var sx1 = ((dx + 1) * sw) / dw;
+            if (sx1 <= sx0) { sx1 = sx0 + 1; }
+            if (sx1 > sw) { sx1 = sw; }
+            var ar = 0; var ag = 0; var ab = 0; var n = 0;
+            var yy = sy0;
+            while (yy < sy1) {
+                var xx = sx0;
+                while (xx < sx1) {
+                    var so = (yy * sw + xx) * 4;
+                    ar = ar + load8(src + so);
+                    ag = ag + load8(src + so + 1);
+                    ab = ab + load8(src + so + 2);
+                    n = n + 1;
+                    xx = xx + 1;
+                }
+                yy = yy + 1;
+            }
+            if (n < 1) { n = 1; }
+            var doff = ((oy + dy) * CRAB_THUMB_W + (ox + dx)) * 4;
+            store8(dst + doff, ab / n);          # B
+            store8(dst + doff + 1, ag / n);      # G
+            store8(dst + doff + 2, ar / n);      # R
+            # ⛔ OPAQUE, ALWAYS. crab's surface is declared `SETU_SURF_PREMULTIPLIED` and the AE-6
+            # contract the suite gates is `a == 255` on every pixel. A thumbnail carrying a source
+            # image's alpha would break that for the whole frame.
+            store8(dst + doff + 3, 255);
+            dx = dx + 1;
+        }
+        dy = dy + 1;
+    }
+    return 1;
+}
+
+# @public — produce the thumbnail for `dir`/`name` if there is not one already. -> CRAB_TH_*.
+#
+# ⛔ AT MOST ONE DECODE PER CALL, AND THE CALLER PUTS IT ON THE IDLE TICK. A decode is not resumable
+# — chitra's entry point is one call that returns an image or does not — so "bounded work per tick"
+# can only mean "at most one image per tick". That is the same shape as the stepped copy and the
+# deferred stat sweep: the metadata appears immediately, the picture arrives a tick later, and the
+# keystroke path never carries it.
+fn crab_thumb_step(dir, name, pathscr): i64 {
+    if (dir == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    if (name == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    if (crab_is_image(name) == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    var key = crab_thumb_key_buf();
+    if (key == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    if (pathscr == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    if (crab_fs_path(pathscr, dir, name) < 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
+    # Already answered for this exact path — including a remembered REFUSAL, which must not be
+    # retried: a file too big to decode is still too big on the next idle tick, and re-deciding it
+    # every tick would be a spin.
+    if (crab_streq_n(key, pathscr, CRAB_PATH_MAX) == 1) { return crab_th_state; }
+    crab_strcpy_n(key, pathscr, CRAB_PATH_MAX);
+    crab_th_state = CRAB_TH_NONE;
+    # ⛔ THE SESSION CEILING IS CHECKED BEFORE THE FILE IS EVEN OPENED. Past it, no decode may run,
+    # so there is nothing to gain by reading the bytes.
+    if (crab_thumb_over_budget(crab_th_spent) == 1) {
+        crab_th_state = CRAB_TH_SPENT;
+        return crab_th_state;
+    }
+    var fbuf = crab_thumb_file_buf();
+    if (fbuf == 0) { return crab_th_state; }
+    var fd = crab_fs_open_r(pathscr, crab_cstr_len(pathscr, CRAB_PATH_MAX));
+    if (fd < 0) { return crab_th_state; }
+    var got = sys_read(fd, fbuf, CRAB_THUMB_FILE_MAX);
+    sys_close(fd);
+    if (got <= 0) { return crab_th_state; }
+    var err = crab_thumb_err_buf();
+    if (err == 0) { return crab_th_state; }
+    # ⭐ THE PRE-CHECKED ENTRY POINT. A refusal here costs 16 bytes; the same file through
+    # `chitra_image_decode` costs up to 26 MB, permanently, to arrive at the same answer.
+    var before = alloc_used();
+    var img = chitra_image_decode_budget(fbuf, got, CRAB_THUMB_MAX_RGBA, err);
+    crab_th_spent = crab_th_spent + (alloc_used() - before);
+    if (img == 0) {
+        # ⚠ TWO DIFFERENT NOTHINGS, AND THE OPERATOR IS TOLD WHICH. "too large" is a property of the
+        # file and will never change; a decoder error is a property of this build and might.
+        if (chitra_err_code(load64(err)) == CHITRA_ERR_BUDGET) { crab_th_state = CRAB_TH_TOO_BIG; }
+        else { crab_th_state = CRAB_TH_BAD; }
+        return crab_th_state;
+    }
+    var iw = chitra_image_width(img);
+    var ih = chitra_image_height(img);
+    if (crab_thumb_scale(chitra_image_pixels(img), iw, ih) == 0) {
+        crab_th_state = CRAB_TH_BAD;
+        return crab_th_state;
+    }
+    # ⚠ CALLED FOR FORM, NOT FOR EFFECT — `chitra_image_free` is a no-op in 1.0.0 and reclaims
+    # exactly 0 bytes (measured). It is called anyway so that the day it does something, crab
+    # already does the right thing; the ⛔ at the top of this section is what stops anyone reading
+    # this line as a reason to believe the memory came back.
+    chitra_image_free(img);
+    crab_th_state = CRAB_TH_OK;
+    return crab_th_state;
+}
+
+var crab_th_err = 0;
+fn crab_thumb_err_buf(): i64 {
+    if (crab_th_err == 0) { crab_th_err = alloc(8); }
+    return crab_th_err;
 }
 
 # @public — OPEN the selected entry (M4). -> CRAB_FS_OK or a CRAB_FS_* error.

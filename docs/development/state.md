@@ -92,11 +92,11 @@ demands and the one this file broke twice.
 
 ## Source
 
-**6,320 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**6,829 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +952 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+⚠ +1,461 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
 - `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
@@ -138,7 +138,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
 - `src/render_test.cyr` — a standalone harness: renders the production surface and dumps BGRA to
-  `build/crab-render.bin`. **35** `check()` assertions *(unreleased; 26 at 0.7.5)*.
+  `build/crab-render.bin`. **40** `check()` assertions *(unreleased; 26 at 0.7.5)*.
   ⭐ **IT NOW PRINTS ITS OWN CHECK COUNT.** It returned `g_fails` and printed only its dump line, so
   it exited **0** whether it ran 26 checks or none — while this file and the handoff quoted a count
   for three cuts that nothing in the program printed. `crab render_test: 35 checks, 0 failed`.
@@ -290,7 +290,8 @@ errors**, host and `--agnos` both build, **253/0**).
 | rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.23 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| dhancha | 0.9.24 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| chitra  | 1.0.0  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
@@ -354,7 +355,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **925 passed / 0 failed**
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **966 passed / 0 failed**
   *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
@@ -410,8 +411,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **466,056 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **491,856 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,003,168 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,026,872 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -479,10 +480,26 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   "crab will not overwrite" is therefore a claim about the host only. Found (unreleased) while
   testing the preview's dimension cache; pinned by a host assertion, **not changed** — altering
   write semantics is an operator decision, and a recursive copy is what would notice.
-- ⛔ **Thumbnails have a price and the operator has not ruled on it.** Declaring `chitra 1.0.0` costs
-  **+528,688 B (+116.6 %)** on the host and **+526,576 (+110.9 %)** on agnos, of which ~399 KB is the
-  `sankoch` inflate leaf PNG needs; `CYRIUS_DCE=1` reclaims none of it. The *metadata* half of the
-  preview is already shipped without it. See the CHANGELOG's decomposition table.
+- ⛔⛔ **EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE BINARY SIZE — IS THE LIVE
+  CONSTRAINT.** chitra makes 31 `alloc()` calls, `chitra_image_free` is a **no-op**, and cyrius's
+  `alloc` has no `free()`. Measured: **~2.5x the RGBA size per decode, never reclaimed**, and a
+  re-decode of the same file costs it again. crab bounds it two ways — a per-image pre-check
+  (`CRAB_THUMB_MAX_RGBA`, 4 MB; a refusal costs **16 bytes** against up to 26.6 MB unbudgeted) and a
+  session ceiling (`CRAB_THUMB_TOTAL_MAX`, 32 MB). ⚠ **Those two constants are the first thing that
+  should be deleted** the day the allocator gains a `free()` or chitra takes an arena.
+  ⚠ **The session ceiling's WIRING is not pinned by a test** — only its boundary arithmetic is
+  (`crab_thumb_over_budget`). Proving `crab_thumb_step` still consults it needs a test that really
+  spends 32 MB; the guard is held by review and by the ⛔ at the call site.
+- ⚠ **crab's binary more than doubled**: host 466,056 -> **1,003,168 B (+115.2 %)**, agnos 491,856 ->
+  **1,026,872 (+108.8 %)**, ~399 KB of which is the `sankoch` inflate leaf PNG requires. Operator
+  ruling 2026-08-31, taken with the measurements in hand.
+- ⚠ **chitra 1.0.1 is prepared but NOT pinned here** — the tag must exist on a remote first (the
+  2026-08-28 phantom-tag rule). It makes the >16 MiB PNG failure cheap and correctly named; crab's
+  per-image budget already keeps it clear of that path, so nothing is blocked.
+- ⛔ **`crab_thumb_draw`'s clip test is unexercised defence, and `render_test` says so.** Deleting
+  the clip comparisons leaves the suite green: dhancha's BOX_V compresses its children rather than
+  overflowing them, so no cheap fixture produces a canvas laid out partially outside its column.
+  Two attempts to build one failed to discriminate. The guard stays — measured, not assumed.
 - ⚠ **The preview's dimension read is on the selection path, not the idle tick.** It is memoised on
   (directory, name) and capped at 64 KiB, so it costs one open/read/close per newly-selected image
   and nothing otherwise — but a directory of huge JPEGs arrowed through quickly still pays per
@@ -511,40 +528,41 @@ _None — top-level application._
 
 ## Next
 
-**M4 is complete. M5 is STARTED, and the two ungated items are in.**
+**M4 is complete. M5's three ungated items are IN.**
 
 ⭐ **Done (unreleased)**: the `crab_render` parameter cleanup, the preview pane with real metadata,
-and header-only image dimensions — plus *deferral #12* (the fuzz harness) closed along the way.
+header-only image dimensions, and **thumbnails** — plus *deferral #12* (the fuzz harness) closed, a
+shipped per-frame leak in `crab_overlay` fixed, and dhancha bumped to 0.9.24.
 
 **Start here, in this order:**
 
-1. ⛔⛔ **BURN ON IRON BEFORE BUILDING MORE. This is now the oldest and largest untested stretch in
-   the project's history.** The last iron run was **2026-08-30 against the 0.7.0 tree**. Everything
-   since — the entire write layer, the tray, recursion, the menu, the edit field, and now the
-   record refactor and the preview — has run only on the host and under QEMU. **Both defects crab
-   has ever shipped were iron-only.** ⚠ agnos has also moved 1.56.53 → 1.56.55 underneath, including
-   a rewrite of `is_user_range`, the validator on crab's only kernel-facing hot path.
-   ⚠ The new work touches the agnos-only event loop at five render sites and adds a file read on the
-   selection path — neither is visible to any host test.
-2. ⛔ **THE THUMBNAIL DECISION IS THE OPERATOR'S, AND IT NOW HAS A NUMBER.** chitra 1.0.0 costs
-   **+528,688 B (+116.6 %)** host / **+526,576 (+110.9 %)** agnos, ~399 KB of which is `sankoch`'s
-   inflate, and `CYRIUS_DCE=1` reclaims none. The preview pane, the format sniffing, the decode
-   budget's shape and the cache policy are all built and are the common prefix of both futures —
-   so the ruling can be made late and cheaply. **Nothing is blocked on it except the pixels.**
-   ⚠ For comparison, the precedent: kashi's library face was refused at **+183,360 B (+50 %)**.
-3. **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard. See
-   *Known gaps*. It is a correctness question about the write layer, not a preview question.
-4. Then the gated pair — grid/columns and the sidebar, both **dhancha**. Re-derived 2026-08-31:
-   `dh_grid_new`, `dh_columns_new`, `dh_tree_new` and a menu BAR are all genuinely absent from
-   `dist/dhancha.cyr`. ⭐ **These two gates are REAL**, unlike the three false ones this project has
-   recorded.
+1. ⛔⛔ **BURN ON IRON. This is the oldest and largest untested stretch in the project's history, and
+   it just got larger.** The last iron run was **2026-08-30 against the 0.7.0 tree**. Everything
+   since — the whole write layer, the tray, recursion, the menu, the edit field, the record refactor,
+   the preview and now a decoder that **more than doubled the binary** — has run only on the host
+   and under QEMU. **Both defects crab has ever shipped were iron-only.**
+   ⚠ agnos moved 1.56.53 → 1.56.55 underneath, including a rewrite of `is_user_range`.
+   ⛔ **And the thumbnail path is the most iron-sensitive thing crab has ever shipped**: it is the
+   first code whose failure mode is *memory exhaustion over time* rather than a wrong pixel, and
+   QEMU is explicitly not a control for pressure-dependent behaviour.
+2. ⚠ **Pin chitra 1.0.1 once it is pushed**, then re-run check 4. It is prepared locally: the
+   >16 MiB PNG refusal becomes cheap and correctly named (`CHITRA_ERR_INFLATE_LIMIT`), and its
+   sidecar drops three unused stdlib leaves. Nothing is blocked on it.
+3. ⭐ **Adopt dhancha 0.9.24's stable keys and delete three workarounds.** crab hand-rolls its own
+   press tracking, its own drag state and its own edit buffer because dhancha identified widgets by
+   pointer and crab's arena invalidates pointers every frame. 0.9.24 fixes that at the cause —
+   `dh_widget_set_key` + `dh_surface_set_root` re-binding — so `dh_dispatch`, drag-under-arena and
+   `dh_text_attach` are all now usable. ⚠ **crab uses none of it yet.** That is its own change.
+4. **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
+   agnos has no `AO_EXCL`. Filed; see *Known gaps*.
+5. Then the gated pair — grid/columns and the sidebar, both **dhancha**. Re-derived 2026-08-31:
+   `dh_grid_new`, `dh_columns_new`, `dh_tree_new` and a menu BAR are all genuinely absent.
+   ⭐ **These two gates are REAL**, unlike the three false ones this project has recorded.
 
-⛔ **Before believing any gate, re-derive it.** This project has recorded **three false gates**:
-M4's *"Gate: agnos write syscalls"* (every arm real since agnos 1.41.3), drag's *"gated on nothing"*
-(it was gated, just not where the line said), and thumbnails' *"no image decoder"* (chitra 1.0.0
-ships one — and the real obstacle turned out to be its **size**, which no gate line mentioned).
-⇒ [`roadmap.md`](roadmap.md) carries one table of everything gated, with the date each claim was
-last checked.
+⛔ **Before believing any gate, re-derive it.** Three false gates on record: M4's *"Gate: agnos write
+syscalls"* (real since agnos 1.41.3), drag's *"gated on nothing"* (it was gated, elsewhere), and
+thumbnails' *"no image decoder"* — where chitra existed, and the real obstacle turned out to be a
+**cost** no gate line mentioned. ⇒ A gate can be false in both directions.
 
 Two decisions are settled and shape everything downstream:
 [ADR 0001](../adr/0001-compositor-owns-theming.md) (the compositor owns theming; crab ships no

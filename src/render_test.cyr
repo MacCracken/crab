@@ -19,6 +19,12 @@ fn check(got, want): i64 {
     g_n = g_n + 1;
     if (got == want) { return 0; }
     g_fails = g_fails + 1;
+    var o = alloc(64);
+    var t = "  check #";
+    var i = 0; var w2 = 0;
+    while (load8(t + i) != 0) { store8(o + w2, load8(t + i)); w2 = w2 + 1; i = i + 1; }
+    w2 = w2 + crab_u2s(o + w2, g_n);
+    store8(o + w2, 10); syscall(1, 1, o, w2 + 1);
     return 1;
 }
 
@@ -287,6 +293,79 @@ fn main(): i64 {
     # ⚠ TWO PANES SURVIVE AT THIS WIDTH — 760 - 153 = 607, which clears the 600 px two-pane floor.
     check(crab_llst != 0, 1);
     check(crab_rlst != 0, 1);
+
+    # ---- M5: the thumbnail really reaches the surface --------------------------------------
+    # ⛔ A CANVAS THAT DOES NOT PAINT IS INDISTINGUISHABLE FROM ONE THAT WAS NEVER BUILT, and both
+    # look like "no thumbnail for this file" — which is a legitimate state. So this asserts an exact
+    # colour crab could not have produced any other way: 0x00A0B0C0, present nowhere in the theme.
+    # ⚠ IT ALSO PROVES THE BYTE ORDER. The buffer is written B=0xC0, G=0xB0, R=0xA0, and
+    # `sd_surface_pixel_at` returns 0x00RRGGBB — so a red/blue swap in `crab_thumb_draw` yields
+    # 0x00C0B0A0 and fails here rather than shipping a picture that merely looks wrong.
+    var fake = alloc(CRAB_THUMB_BYTES);
+    var fi = 0;
+    while (fi < CRAB_THUMB_W * CRAB_THUMB_H) {
+        store8(fake + fi * 4, 0xC0);         # B
+        store8(fake + fi * 4 + 1, 0xB0);     # G
+        store8(fake + fi * 4 + 2, 0xA0);     # R
+        store8(fake + fi * 4 + 3, 255);
+        fi = fi + 1;
+    }
+    var tbuf = alloc(16 * CRAB_REC_SZ);
+    rt_entry(tbuf, 0, "shot.png", 0);
+    var tz = alloc(64); var tm = alloc(64);
+    store64(tz, 1024); store64(tm, 1756600000);
+    var tsl = alloc(8); store64(tsl, 0);
+    var tsr = alloc(8); store64(tsr, 0);
+    # ⚠ 400 px TALL, NOT 300, AND THE FIRST DRAFT WAS 300 AND FAILED. The preview column stacks a
+    # 28 px header, four label/value pairs at 18 px each and a 72 px thumbnail band — 280 px of
+    # content against the 276 px a 300 px window leaves after the status line. The thumbnail was
+    # laid out past the bottom and clipped away, which reads exactly like "the canvas never
+    # painted". Size a fixture against what it has to hold.
+    var tsurf = dh_surface_new(760, 400);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    crab_rs_dims(rs, 4096, 2160);
+    crab_rs_thumb(rs, fake, CRAB_TH_OK);
+    var tds = crab_render(tsurf, 0, rs);
+    check(tds != 0, 1);
+    check(rt_band_has(tds, 0, 399, 760 - CRAB_PV_W, 759, 0x00A0B0C0), 1);
+    # ⛔ AND IT IS CONFINED TO THE PREVIEW COLUMN. A canvas that ignored its clip would paint over
+    # the panes, and `dh_draw_widget` cannot clip pixels it did not write — the toolkit's own note
+    # says so. This is the half that proves the clip was honoured.
+    # ⛔ THE BOUNDARY IS DERIVED, AND A FIRST DRAFT GUESSED IT WRONG. It assumed the column hugs the
+    # right edge at `w - CRAB_PV_W` (607). It does not: `panes` is a BOX_H holding [pane, pane,
+    # preview], so the panes take `2 * panew` from the left and the preview follows them — measured
+    # at x=600, with the remaining 7 px falling off the right as edge padding. Re-derive the layout
+    # from the same arithmetic `crab_render` uses rather than assuming where a column ends up.
+    var tpw = (760 - CRAB_PV_W - CRAB_PANE_GAP) / 2;
+    check(rt_band_has(tds, 0, 399, 0, tpw + tpw - 1, 0x00A0B0C0), 0);
+
+    # ⛔ THE CLIP TEST IN `crab_thumb_draw` IS UNEXERCISED DEFENCE, AND THIS SAYS SO RATHER THAN
+    # PRETENDING OTHERWISE. It is required — `dh_draw_widget` cannot clip pixels it did not write,
+    # so a canvas that ignored its clip would paint over its neighbours and the toolkit could not
+    # stop it. But deleting the clip comparisons leaves this suite GREEN, because no fixture here
+    # produces a canvas laid out partially outside its column: dhancha's BOX_V compresses its
+    # children rather than overflowing them, so the canvas is either fully inside the clip or not
+    # laid out at all. Two attempts to build such a fixture (a 300 px window, then 220 px) both
+    # failed to discriminate — the first because the content simply fitted.
+    # ⇒ Measured, not assumed, and left in the code: the guard costs four comparisons per pixel and
+    # is the difference between a bug and a corrupted window the day a layout change makes it
+    # reachable. ⚠ This is the same honest label `poll_test`'s zeroing assertion carries in dhancha.
+
+    # ⚠ AND A NON-OK STATE PAINTS NO PICTURE, whatever is in the buffer — the state is what decides,
+    # not the pointer, so a stale buffer from a previous selection cannot leak onto a file that
+    # could not be decoded.
+    var tsurf2 = dh_surface_new(760, 400);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    crab_rs_thumb(rs, fake, CRAB_TH_TOO_BIG);
+    var tds2 = crab_render(tsurf2, 0, rs);
+    check(tds2 != 0, 1);
+    check(rt_band_has(tds2, 0, 399, 760 - CRAB_PV_W, 759, 0x00A0B0C0), 0);
 
     # ⭐ THE REFUSAL, at a window too narrow to honour the toggle. The operator's WANT is still 1;
     # `crab_preview_fit` is what says no, and nothing of the column may appear.

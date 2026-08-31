@@ -125,18 +125,21 @@ tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped of
 Esc cancels them**, so a recursive copy never freezes the window.
 
 **The preview column** (M5): `p` opens a right-hand inspector for the selected entry — NAME · KIND ·
-SIZE · MODIFIED · DIMENSIONS. ⭐ Image dimensions are read straight out of the file header for PNG,
-JPEG, GIF and BMP, **with no image decoder and no new dependency**; the read is capped and memoised
-so it never lands on the arrow-key path. ⚠ **The width rule is derived, not drawn**: the preview may
-not cost a pane its SIZE column, so it needs a window of 303 px and refuses out loud below that.
+SIZE · MODIFIED · DIMENSIONS, and a **thumbnail** for PNG, JPEG, GIF and BMP. ⭐ Dimensions are read
+straight out of the file header with no decoder at all; thumbnails go through `chitra` and are
+**decoded off the idle tick**, so neither ever lands on the arrow-key path. ⚠ **The width rule is
+derived, not drawn**: the preview may not cost a pane its SIZE column, so it needs a window of
+303 px and refuses out loud below that.
+⛔ **Thumbnails are budgeted, and the budgets are the feature.** The decoder's memory is never
+reclaimed on this stack, so crab refuses an image larger than ~1024×1024 *from its header* — before
+allocating — and stops decoding altogether once a session has spent 32 MB. It says which of those
+happened rather than showing a blank square.
 
 **What does not**:
 
-- **No thumbnails — and the obstacle is size, not capability.** `chitra` decodes PNG/JPEG/GIF/BMP and
-  is released, but declaring it more than **doubles** crab's binary (+117 %), most of it the `zlib`
-  inflate leaf PNG requires. That is a deliberate open decision, recorded with its measurements in
-  [`docs/development/roadmap.md`](docs/development/roadmap.md). The preview shows an image's size in
-  pixels; it does not yet show the image.
+- **Thumbnails stop at about 1024×1024**, and larger images say so instead of showing one. That is
+  not a rendering limit — it is the decoder's memory, which this stack cannot reclaim. Recorded with
+  its measurements in [`docs/development/roadmap.md`](docs/development/roadmap.md).
 - **No grid, columns or gallery view, and no sidebar.** Genuinely gated on `dhancha` widgets that do
   not exist yet. (Roadmap M5–M6.)
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort

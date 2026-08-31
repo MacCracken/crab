@@ -148,18 +148,20 @@ not quietly lose them.
   small-window rule answering a narrower pane area rather than a second behaviour.
   ⚠ **Not yet**: camera and shot metadata. That is EXIF, and EXIF is a second parser over untrusted
   bytes — worth its own slot with the fuzz harness pointed at it, not a bullet appended to this one.
-- ⭐⭐ **Thumbnails — THE GATE ON THIS LINE WAS FALSE AND IS NOW CORRECTED.** It read *"Gate: an image
-  decoder; none exists in the stack today."* **chitra 1.0.0 exists, is released, and is a
-  pure-Cyrius CPU raster decoder** — PNG, JPEG, GIF and BMP, each with an `_rgba` entry point, a
-  `dist/chitra.cyr` fold ready to declare, and a `chitra_image_decode_budget` that is exactly the
-  shape a thumbnailer wants.
-  ⛔ **This is the third false gate this project has recorded** — after M4's "Gate: agnos write
-  syscalls" (every arm had been real since 1.41.3) and drag's "gated on nothing" (it was gated, just
-  not where the line said). ⇒ **Re-derive a gate before believing it.** A gate is a claim about
-  another repo, and claims about other repos go stale silently.
-  ⚠ What thumbnails *do* still need is a decode budget and a cache policy — a 40-file directory of
-  8192×5464 images cannot decode on the keystroke path, and the transfer tray's stepping is the
-  shape that solves it.
+- ✅ **Thumbnails — SHIPPED (unreleased).** 64x64, PNG/JPEG/GIF/BMP, decoded off the idle tick and
+  box-filtered down. `chitra 1.0.0` is declared.
+  ⛔⛔ **THE GATE ON THIS LINE WAS FALSE TWICE, IN OPPOSITE DIRECTIONS, AND THAT IS THE LESSON.**
+  First it read *"Gate: an image decoder; none exists in the stack today"* — chitra 1.0.0 was
+  released and shipping. Then the correction implied that made it free. **Measured**: declaring it
+  costs **+115 %** of the binary, ~399 KB of which is the `sankoch` inflate leaf PNG requires.
+  ⇒ A gate is a claim about another repository. It can be wrong about existence *and* about price,
+  and neither is visible from the line itself.
+  ⛔⛔ **AND THE REAL CONSTRAINT WAS IN NEITHER**: chitra makes 31 `alloc()` calls,
+  `chitra_image_free` is a no-op, and cyrius's `alloc` has no `free()` — so **every decode is
+  permanent**, ~2.5x the RGBA size, and a re-decode costs it again. That is bounded by a per-image
+  pre-check (a refusal costs **16 bytes** against 26.6 MB unbudgeted) and a 32 MB session ceiling.
+  ⚠ The budgets are the feature, not a rail bolted to it — and they are the first thing to delete
+  when the allocator gains a `free()`.
 - **Proportional text** (*deferral #26*). crab passes `font = 0` (kashi CP437 bitmap) and calls no
   `rekha_*` function (`grep 'rekha_' src/ → 0`), while the README claims rekha TrueType and the
   canvas assumes Barlow + JetBrains Mono. ⛔ **Gate: rekha** + dhancha font plumbing.
@@ -209,7 +211,7 @@ not quietly lose them.
 | item | milestone | gated on | verified |
 |---|---|---|---|
 | Grid / Columns views | M5 | **dhancha** GRID + COLUMNS widgets — absent (`dh_grid_new`, `dh_columns_new`: 0 hits in `dist/`) | 2026-08-31 ⭐ re-derived |
-| **Thumbnail PIXELS** | M5 | **not a dependency gate — a COST one.** chitra 1.0.0 exists and works; declaring it is **+528,688 B (+116.6 %)** host / **+526,576 (+110.9 %)** agnos, DCE reclaims 0. **Operator ruling.** | 2026-08-31 ⭐ measured |
+| ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra 1.0.0 is declared. Cost paid: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
 | Sidebar | M6 | **dhancha** TREE widget (`dh_tree_new`: 0 hits) + a drawer overlay for the small window | 2026-08-31 ⭐ re-derived |
 | Menu bar | M6 | **dhancha** MENU BAR — ⚠ *not* the popup MENU, which shipped in 0.9.23 | 2026-08-31 |
