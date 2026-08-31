@@ -2,6 +2,136 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.2] - 2026-08-31 — Enter opens, the second pane leaves, and files move by drag
+
+⚠ **Everything here landed AFTER the `0.7.1` tag** (`4ac21eb`, pushed). It was written into 0.7.1's
+section while that work was in flight; 0.7.1 is released, so its section is restored below to exactly
+what shipped and this one carries the rest. ⛔ **A released section is not a scratchpad** — editing
+one after its tag makes the tag and the notes disagree, and the notes are what a consumer reads.
+
+### Added — M4: `open`. Enter on a file is no longer silent
+
+⭐⭐ The roadmap's M4 section opens by naming this: *"crab is a read-only browser. Enter on a file
+does nothing, silently."* Enter reached `crab_descend`, which refuses a non-directory and returns
+-1, and the call site dropped that -1 with no else arm — indistinguishable from a keypress crab
+never received.
+
+⛔ **"Open" means "run", and only that, because nothing else exists on this system yet** — no handler
+registry, no MIME association, no daimon binding anywhere in the stack, so a text file has nothing to
+be opened *with*. crab says so plainly instead of inventing an association. When an association
+mechanism exists (M7's daimon arc), `crab_fs_launch` is where it hooks in and the ELF path becomes
+one arm of it rather than the whole thing.
+
+⛔ **Enter is gated on a real ELF-magic read, not on mode bits.** Enter can now start a process, so
+what it refuses matters more than what it runs: `crab_is_elf` reads four bytes off disk and refuses
+anything else. On a single-user always-root kernel the permit bits say almost nothing about what a
+file *is*. ⚠ A short read is **not** an ELF — the magic buffer is reused for the process, so treating
+a short read as success lets a 3-byte file inherit the previous read's 4th byte. The test asserts
+this in the order that makes the hazard real (a genuine ELF read immediately before).
+
+⚠ `spawn_path`#43 caps its path at **127 bytes**, half of `CRAB_PATH_MAX` — a path crab can list and
+stat is not necessarily one it can launch, and the difference is reported rather than truncated,
+because a truncated path is a different file and this one gets executed. Non-blocking by
+construction: crab does not reap the child.
+
+### Fixed — navigation ran BEFORE the delete confirmation
+
+⛔ The arrow keys and Enter sat above the confirmation gate, so a key answering *"delete this?"* also
+moved the selection or descended — and then the gate cancelled, having already acted. The gate's own
+comment claimed keys were resolved there first; they were not. Navigation now lives inside it.
+⚠ Introduced by 0.7.1's own confirmation work, and fixed here rather than left for a burn to find.
+
+### Added — M4: the second pane leaves at small widths, and MODIFIED finally appears
+
+⭐⭐ **The canvas's open question is ratified: below 600 px crab shows ONE pane plus an A/B switcher.**
+⛔ **The threshold is derived, not the canvas's 420 px copied in.** Two panes are worth it only when
+**each** can honestly show the full column set — NAME + SIZE + MODIFIED — so `panew >= 297`, i.e. a
+600 px window. A pixel lifted from a mockup is a number nobody can re-derive when the font or the
+column set changes; this rule agrees with the drawing without quoting it.
+
+⭐ **The switcher is the keys crab already has.** Left/Right (h/l) set `active_pane`, which in solo
+mode changes which pane is *drawn*. The header gains an `A` / `B` label, because side-by-side is no
+longer what tells the two apart — and that label is asserted, not left visual-only.
+
+⭐⭐ **This fixes the MODIFIED column at the shipped default.** At 380x220 the two-pane split gave each
+pane 187 px, so `crab_cols_for_width` returned **2** and MODIFIED never appeared — while the README
+and this file's own headline read "NAME · SIZE · MODIFIED". One pane at 380 is 374 px and shows all
+three.
+
+⛔ **The pane that is not shown is not built** — its list pointer stays 0, which is what keeps
+`crab_hit` from routing clicks into a pane nobody can see. Rendering it off-screen instead would
+still hit-test.
+⚠ **`render_test` and the click test now render at 640, not 380** — every assertion in them is about
+two panes side by side. `render_test` gained solo-layout checks at 380 in exchange.
+
+### Added — M4: drag between panes
+
+⭐⭐ Press a row, drag past a 4 px Manhattan threshold, release over the other pane — the file
+**moves**, matching the `m` key. Both panes re-list and the status line reports the result. crab had
+no pointer-release arm at all before this; a press did everything and the button coming back up was
+ignored.
+
+⛔ **crab does not use dhancha's `DRAG_*` events, and this is not a workaround — it is the
+architecture crab already had.** dhancha synthesizes drag inside `dh_dispatch`, which tracks a press
+as a **widget pointer**, and crab rebuilds its whole tree every frame with the arena rewinding
+underneath it (operator ruling 2026-08-27). Double-click hit that wall first and was solved with
+**pane index + row index**; the wheel likewise. Drag is the third gesture and takes the same shape:
+the toolkit supplies geometry through `crab_hit`, crab supplies identity that survives a frame.
+
+⛔ **A drop inside the source pane is not a transfer** — dragging within a pane is how an operator
+changes their mind. The destination is the other pane's *directory*, not the row under the pointer:
+a row-targeted drop is a different gesture, and guessing wrong moves a file somewhere nobody pointed
+at. Folders are refused, for the same reason `c` / `m` refuse them.
+⚠ **A drag consumes the double-click pair**, or the release ending a drag would pair with the next
+press and descend.
+
+### Fixed upstream — dhancha 0.9.21, drag stopped half-working
+
+⛔⛔ dhancha's drag API and its frame-arena API were mutually exclusive: `dh_frame_begin` calls
+`dh_reset_input()`, which zeroes `_dh_drag_src` **every frame**, so an app using the frame arena saw
+`DRAG_START` and then never `MOVE`, `DROP` or `END`. The clear is **correct** — after an arena rewind
+that pointer addresses memory about to be reused — so the conflict is structural rather than a typo.
+dhancha 0.9.21 makes `dh_drag_progress` refuse to begin a drag it cannot finish, and adds
+`dh_drag_available()`.
+⚠ **crab does not consume it** (see above), and crab's declared `tag` stays at **0.9.20** until
+0.9.21 is pushed — declaring an unreleased tag is the 2026-08-28 failure that left no consumer able
+to resolve dhancha at all.
+
+### Fixed — a manufactured burn gate, removed
+
+⛔ 0.7.1's notes claimed *"a re-burn is a gate, not a formality"* because agnos 1.56.55 rewrote
+`is_user_range`. **That is agnos's validator on every ring-3 buffer in the system** — if it
+regressed it regresses for everything, and proving it is agnos's job, not a reason to hold a crab
+release. crab passes ordinary BSS/stack buffers and has no special exposure. Removed from
+`handoff.md` and three source comments.
+⭐ **QEMU runs a real agnos kernel and confirms these paths** — it is how every M3 item was
+confirmed. Iron is for what QEMU cannot show: the GPU shader path, real HID timing, real disk
+latency. A syscall wrapper call is not one of those.
+
+### Added — coverage, raised by writing the assertions that were missing
+
+**408 → 476 passing**, `render_test` **19 → 26** pixel checks, reference coverage **73 % → 81 %**
+(78/96 fns) against a v1.0 criterion of 80 %.
+
+⛔ **Not chased.** This is *reference* coverage — a function counts as covered the moment any test
+names it, so `assert(crab_say("x") > 0)` would raise the number and prove nothing. The roadmap now
+splits the untested set into three groups and says to write only the first.
+⭐ **The biggest gap was `crab_entry_cmp`**, exercised only *through* `crab_sort_entries` — so every
+ordering rule (dirs-first outranking the key, the -1/-2 sentinels, NAME as universal tiebreak) was
+asserted in aggregate and none of them separately.
+⚠ `docs/development/roadmap.md` now carries coverage as a **per-release gate**: a criterion checked
+only at v1.0 gets further away at every cut that adds code, which is exactly what happened twice.
+
+### Verified at the cut
+
+- Both targets build; **476 / 0** tests; `render_test` **26 / 26**; `fmt --check` clean on all eight
+  sources under the pinned 6.5.36; `lint` at or below the 0.7.0 baseline.
+- ⭐ **Every new behaviour is mutation-proven** — the drag threshold's direction-independence, the
+  same-pane drop refusal, the `-1` no-pane guard, the ELF short-read guard, the A/B pane label, the
+  solo layout's unbuilt second pane, and the two-panes-fit threshold each fail the suite when broken.
+- ⚠ **Check 4 has NOT been re-run since 0.7.1** — the dep graph is unchanged (crab still declares
+  dhancha 0.9.20), so the 0.7.1 evidence stands, but re-run it if the tag moves.
+
 ## [0.7.1] - 2026-08-30 — the hang no test could reach, and crab starts writing
 
 ### Verified at the cut
@@ -12,10 +142,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`cyrius.lock` going 2 → 6 commit-pinned is the tell that the overrides were genuinely off.)
 - **`fmt --check` clean** on all eight sources under the pinned toolchain, `lint` at or below the
   0.7.0 baseline, and `lib/` verified **byte-identical to the released 6.5.36 tarball**.
-- ⭐ **Reference coverage 80 % (74/92 fns)** — it fell to 73 % mid-cut as 29 functions landed faster
-  than references to them, and was brought back by writing the assertions that were actually missing
-  rather than by naming functions to move the number. `docs/development/roadmap.md` now carries a
-  per-release coverage gate, since a criterion checked only at v1.0 gets further away every release.
+- ⚠ **Reference coverage FELL, 81 % → 73 % (65/89 fns)** — arithmetic, not rot: 29 functions were
+  added faster than references to them. The v1.0 criterion is 80 %, so this moved away from target.
 
 ### Changed — toolchain pin 6.5.35 -> 6.5.36, and the hardcoded syscall number is retired
 
@@ -27,9 +155,7 @@ condition is now met: **cyrius 6.5.36 is released** (tag + assets on the remote;
 
 ⚠ **crab is the FIRST consumer to actually CALL that wrapper.** agnos's own `rdat.cyr` proves the
 kernel contract but uses the raw number, so until now the cyrius peer was asserted to compile and
-had never been executed. ⚠ **QEMU proves it** — the `#ifdef CYRIUS_TARGET_AGNOS` paths run on a real
-agnos kernel there, which is how every M3 item was confirmed. Iron is for what QEMU cannot show
-(the GPU shader path, real HID timing, real disk latency); a wrapper call is not one of those.
+had never been executed. The next burn is what proves it.
 ⚠ `cyrius lib sync` copies the **declared** `[deps].stdlib` set — **29** files — while crab vendors
 **30**. The odd one out is `lib/atomic.cyr`, a transitive leaf no declaration names; checked by hand
 and identical to the 6.5.36 snapshot.
@@ -129,95 +255,16 @@ ran.
 - ⛔ **agnos has no `AO_EXCL`**, so the kernel cannot refuse an overwrite. Every destination is
   checked with `crab_fs_exists` first — a copy that relied on the open failing would refuse correctly
   on the host and **silently truncate on agnos**. The residual TOCTOU window is disclosed, not hidden.
-- ⭐⭐ **`open` — Enter on a file is no longer silent.** The roadmap's M4 section opens by naming
-  this: *"crab is a read-only browser. Enter on a file does nothing, silently."* Enter reached
-  `crab_descend`, which refuses a non-directory and returns -1, and the call site dropped that -1
-  with no else arm — indistinguishable from a keypress crab never received.
-  ⛔ **"Open" means "run", and only that, because nothing else exists on this system yet** — there is
-  no handler registry, no MIME association and no daimon binding in the stack, so a text file has
-  nothing to be opened *with*. crab says so plainly instead of inventing an association.
-  ⛔ **Enter is gated on a real ELF-magic read, not on mode bits.** Enter can now start a process, so
-  what it refuses matters more than what it runs: `crab_is_elf` reads four bytes off disk and
-  refuses anything else. On a single-user always-root kernel the permit bits say almost nothing
-  about what a file *is*. ⚠ A short read is **not** an ELF — the magic buffer is reused, so treating
-  one as success lets a 3-byte file inherit the previous read's 4th byte.
-  ⚠ `spawn_path`#43 caps its path at **127 bytes**, half of `CRAB_PATH_MAX` — a path crab can list
-  is not necessarily one it can launch, and the difference is reported rather than truncated.
-  Non-blocking by construction: crab does not reap the child.
 - Keys: `c` copy, `m` move to the other pane (the dual-pane idiom — no text entry needed), `d` delete
   behind a `y`/anything-else confirmation shown in the status line. ⚠ Not F5/F6: aethersafha takes
   F5 for maximize, so a client binding it would never see the key.
-- ⛔ **Fixed in the same change: navigation ran BEFORE the delete confirmation.** The arrow keys and
-  Enter sat above the confirmation gate, so a key answering *"delete this?"* also moved the selection
-  or descended — and then the gate cancelled, having already acted. The gate's own comment claimed
-  keys were resolved there first; they were not. Navigation now lives inside it.
 - ⛔ **No recursion, deliberately.** `rmdir` refuses a non-empty directory and crab reports it;
   folders cannot be copied. A recursive delete behind one keypress cannot be undone or interrupted,
   and crab has neither a progress surface nor a trash. That is M4's genuinely gated part.
 
-### Added — M4: the second pane leaves at small widths, and the MODIFIED column finally appears
-
-⭐⭐ **The canvas's open question is ratified: below 600 px crab shows ONE pane plus an A/B switcher.**
-⛔ **The threshold is derived, not the canvas's 420 px copied in.** Two panes are worth it only when
-**each** can honestly show the full column set — NAME + SIZE + MODIFIED — so `panew >= 297`, i.e. a
-600 px window. A pixel lifted from a mockup is a number nobody can re-derive when the font or the
-column set changes; this rule agrees with the drawing without quoting it.
-
-⭐ **The switcher is the keys crab already has.** Left/Right (h/l) set `active_pane`, which in solo
-mode changes which pane is *drawn*. The header gains an `A` / `B` label, because side-by-side is no
-longer what tells the two apart — and that label is asserted, not left visual-only.
-
-⭐⭐ **This fixes the MODIFIED column at the shipped default.** At 380x220 the two-pane split gave
-each pane 187 px, so `crab_cols_for_width` returned **2** and MODIFIED never appeared — while the
-README and this file's own headline read "NAME · SIZE · MODIFIED". One pane at 380 is 374 px and
-shows all three.
-
-⛔ **The pane that is not shown is not built** — its list pointer stays 0, which is what keeps
-`crab_hit` from routing clicks into a pane nobody can see. Rendering it off-screen instead would
-still hit-test.
-
-⚠ **`render_test` and the click test now render at 640, not 380** — every assertion in them is about
-two panes side by side, and at 380 there is now only one. `render_test` gained checks for the solo
-layout at 380 in exchange.
-
-### Added — M4: drag between panes
-
-⭐⭐ Press a row, drag past a 4 px Manhattan threshold, release over the other pane — the file
-**moves**, matching the `m` key. Both panes re-list and the status line reports the result. crab had
-no pointer-release arm at all before this; a press did everything and the button coming back up was
-ignored.
-
-⛔ **crab does not use dhancha's `DRAG_*` events, and this is not a workaround — it is the
-architecture crab already had.** dhancha synthesizes drag inside `dh_dispatch`, which tracks a press
-as a **widget pointer**, and crab rebuilds its whole tree every frame with the arena rewinding
-underneath it (operator ruling 2026-08-27). Double-click hit that wall first and was solved with
-**pane index + row index**; the wheel likewise. Drag is the third gesture and takes the same shape:
-the toolkit supplies geometry through `crab_hit`, crab supplies identity that survives a frame.
-
-⛔ **A drop inside the source pane is not a transfer** — dragging within a pane is how an operator
-changes their mind. The destination is the other pane's *directory*, not the row under the pointer:
-a row-targeted drop is a different gesture, and guessing wrong moves a file somewhere nobody pointed
-at. Folders are refused, for the same reason `c` / `m` refuse them.
-⚠ **A drag consumes the double-click pair**, or the release ending a drag would pair with the next
-press and descend.
-
-### Fixed upstream — dhancha 0.9.21, drag stopped half-working
-
-⛔⛔ **dhancha's drag API and its frame-arena API are mutually exclusive**, and the roadmap's
-"gated on nothing" was wrong. `dh_frame_begin` calls `dh_reset_input()`, which zeroes
-`_dh_drag_src` — **every frame**. A drag spans press → move → release, so an app using the frame
-arena can see `DRAG_START` and then never `MOVE`, `DROP` or `END`.
-⚠ The clear is **correct**: after an arena rewind that pointer addresses memory about to be reused.
-The conflict is structural — drag identity must outlive a frame and is stored as a pointer that
-cannot. Filed as `docs/development/issues/2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md`.
-
 ### Added — tests, and a benchmark that measures something
 
-**253 -> 476 passing**, plus `render_test` **14 -> 26** pixel checks, and reference coverage
-**81 % -> 80 %** (74/92) after a dip to 73 % — recovered by testing `crab_entry_cmp` directly (it had
-only ever been exercised *through* `crab_sort_entries`, so every ordering rule was asserted in
-aggregate and none of them separately), plus the result messages, the notice channel, the case
-folder and the listing accessors.
+**253 -> 408 passing**, plus `render_test` **14 -> 19** pixel checks.
 ⭐ The write layer's tests perform **real syscalls against a real filesystem** — unlike `#101`
 readdir, `mkdir`/`unlink`/`rename`/`open`/`read`/`write` all exist on the host, so the refusals, the
 bounded join, the overwrite guard and multi-chunk copying are exercised for real.

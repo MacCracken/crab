@@ -24,13 +24,19 @@
 
 ## Version
 
-**0.7.1** (2026-08-30) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.2** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
-⭐ A patch that carries more than repairs: the five M3 defects **and** M4's first slice (the write
-layer, `c`/`m`/`d`) **and** a toolchain pin move. ⚠ **Semver would normally make new user-facing
-features a MINOR**; this is the second time this project has put feature work in a patch by operator
-ruling (M2 shipped in 0.6.1 the same way). **M4's completion still targets v0.8.0** — the
-roadmap's ladder is unchanged, and the number was ruled, not derived.
+⭐ M4 is now substantially in: `open`, the small-window ratification, and drag between panes, on top
+of 0.7.1's write layer. ⚠ **Semver would normally make new user-facing features a MINOR**; this is
+the third time this project has put feature work in a patch by operator ruling (M2 shipped in 0.6.1,
+and 0.7.1 carried M4's first slice). **M4's completion still targets v0.8.0** — the roadmap's ladder
+is unchanged, and these numbers were ruled, not derived.
+
+⛔ **0.7.2 exists because 0.7.1's CHANGELOG section was being edited after its tag was pushed.**
+Three commits landed past `4ac21eb` while their notes were still being written into the released
+section. A released section is not a scratchpad: editing one after its tag makes the tag and the
+notes disagree, and the notes are what a consumer reads. 0.7.1's section is now byte-identical to
+the tag and everything since is under 0.7.2.
 
 ⭐ Refreshed **in the same commit as the CHANGELOG entry**, which is the rule the header below
 demands and the one this file broke twice.
@@ -79,7 +85,7 @@ demands and the one this file broke twice.
 
 ## Source
 
-**3,152 lines** across **six** files (five until 0.6.0) at 0.7.1; 2,227 at the 0.7.0 cut.
+**3,498 lines** across **six** files (five until 0.6.0) at 0.7.2; 2,227 at the 0.7.0 cut; 2,227 at the 0.7.0 cut.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
@@ -135,7 +141,7 @@ tests for all of it.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⭐ `cyrius coverage` reports **78/96 fns referenced (81 %)** at 0.7.1, 6/6 files — **the v1.0
+⭐ `cyrius coverage` reports **78/96 fns referenced (81 %)** at 0.7.2, 6/6 files — **the v1.0
 criterion, met.** It dipped to 73 % mid-cut as M4's write layer landed faster than its tests, and was
 recovered by writing the assertions that were genuinely missing (`crab_entry_cmp` directly, the
 result messages, the notice channel, `crab_lower`, the listing accessors) rather than by naming
@@ -414,7 +420,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **476 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **476 passed / 0 failed** at 0.7.2 (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -452,8 +458,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **411,432 B** at 0.7.1 (398,504 B at the 0.7.0 cut) |
-| `--agnos`    | ✅ builds, **424,304 B** at 0.7.1 (406,992 B at the cut) — the real target |
+| x86_64 linux | ✅ builds, **415,536 B** at 0.7.2 (398,504 B at the 0.7.0 cut) |
+| `--agnos`    | ✅ builds, **428,544 B** at 0.7.2 (406,992 B at the cut) — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
