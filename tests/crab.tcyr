@@ -260,6 +260,36 @@ fn main() {
     assert_eq(crab_name_cell(ncell, "abc", 0), 0, "a zero-width column yields the empty string");
     assert_eq(load8(ncell), 0, "...NUL-terminated, not left as garbage");
 
+    # --- M4: the small-window ratification --------------------------------------------------------
+    # ⭐⭐ THE CANVAS'S OPEN QUESTION, ANSWERED: the second pane DOES leave, below the width at which
+    # both panes could honestly show the full column set. ⛔ The threshold is DERIVED from crab's own
+    # column rule, not copied from the mockup's 420 px — a pixel number lifted from a drawing is one
+    # nobody can re-derive when the font or the column set changes.
+    assert_eq(crab_two_panes_fit(1280), 1, "a full-screen window shows two panes");
+    assert_eq(crab_two_panes_fit(600), 1, "600 is the first width where BOTH panes get all three columns");
+    assert_eq(crab_two_panes_fit(599), 0, "...and one pixel under it is one pane plus the switcher");
+    assert_eq(crab_two_panes_fit(420), 0, "the canvas's small size gets one pane, which is what the canvas draws");
+    assert_eq(crab_two_panes_fit(380), 0, "⭐ and so does crab's shipped default");
+    assert_eq(crab_two_panes_fit(0), 0, "a degenerate width does not divide into two panes");
+    assert_eq(crab_two_panes_fit(0 - 100), 0, "...nor does a negative one");
+    # ⛔⛔ THE POINT OF THE WHOLE CHANGE, AS AN ASSERTION. At the shipped 380 the two-pane split gave
+    # each pane 187 px, so `crab_cols_for_width` returned 2 and the MODIFIED column NEVER APPEARED —
+    # while the README and the CHANGELOG headline both read "NAME · SIZE · MODIFIED". One pane at the
+    # same window is 374 px and shows all three. If this pair ever disagrees again, the headline is
+    # lying about the default view.
+    assert_eq(crab_cols_for_width((380 - CRAB_PANE_GAP) / 2), 2, "two panes at 380 could only show NAME + SIZE");
+    assert_eq(crab_cols_for_width(380 - CRAB_PANE_GAP), 3, "...one pane at 380 shows NAME + SIZE + MODIFIED");
+    # ⛔ THE SWITCHER'S ONLY AFFORDANCE. With one pane on screen this letter is the entire indication
+    # of WHICH pane is showing — side-by-side no longer distinguishes them. Both panes labelled the
+    # same would leave the operator switching between two views that claim to be the same one.
+    var plb = alloc(CRAB_PATH_MAX + 4);
+    assert_eq(crab_pane_label(plb, CRAB_PATH_MAX + 4, 0, "/bin"), 7, "the left pane's header is 'A' + gap + path");
+    assert(t_streq(plb, "A  /bin"), "...spelled exactly that way");
+    assert_eq(crab_pane_label(plb, CRAB_PATH_MAX + 4, 1, "/bin"), 7, "the right pane's is 'B'");
+    assert(t_streq(plb, "B  /bin"), "...and B is not A");
+    assert_eq(crab_pane_label(plb, 3, 0, "/bin"), 0 - 1, "a destination too small to hold the label refuses");
+    assert_eq(crab_pane_label(plb, 6, 0, "/bin"), 0 - 1, "...and so does one that fits the label but not the path");
+
     # --- M4: an empty pane says WHY it is empty ----------------------------------------------------
     # ⛔ A pane with no rows used to have one appearance and four meanings — empty, gone, not a
     # directory, unreadable — because `crab_readdir_into` clamps its return to >= 0 and the reason
@@ -752,7 +782,10 @@ fn main() {
     # `crab_hit` walks the widget tree `crab_render` just built, so this exercises the same structure
     # that reaches the screen. ⚠ It must run AFTER a render: the tree and the recorded root live for
     # exactly one frame.
-    var hsurf = dh_surface_new(380, 220);
+    # ⚠ 640, NOT 380 — this test needs BOTH panes on screen. At 380 crab now renders one pane plus
+    # the A/B switcher (M4's ratification of the canvas's small-window question), so a right-pane
+    # click has no right pane to land in. 640 is the first width `crab_two_panes_fit` admits.
+    var hsurf = dh_surface_new(640, 220);
     var hl = alloc(16 * 64); var hrr = alloc(16 * 64);
     t_entry(hl, 0, "alpha", 1); t_entry(hl, 1, "beta", 0); t_entry(hl, 2, "gamma", 0);
     t_entry(hrr, 0, "one", 1);  t_entry(hrr, 1, "two", 0);  t_entry(hrr, 2, "three", 0);
@@ -772,8 +805,8 @@ fn main() {
     # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
     # first row of each pane rather than an edge, so the assertion is about which pane and row a
     # click lands in and not about a boundary pixel.
-    var lx = (380 - 6) / 4;                  # a column inside the LEFT pane
-    var rx2 = 380 - lx;                      # ...and inside the RIGHT one
+    var lx = (640 - CRAB_PANE_GAP) / 4;      # a column inside the LEFT pane
+    var rx2 = 640 - lx;                      # ...and inside the RIGHT one
     # ⚠ THE ROW ORIGIN IS READ FROM THE LAYOUT, NOT HARDCODED (*#32*). It used to be a literal 41,
     # which encoded "path header 28 px, then rows" — adding the NAME/SIZE/MODIFIED column header
     # moved every row down and that literal silently began testing the header instead. Reading the

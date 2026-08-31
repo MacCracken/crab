@@ -41,12 +41,34 @@
 |---|---|
 | Version | **0.7.1** cut 2026-08-30 — the five M3 defects, M4's first slice, and the 6.5.36 pin. ⛔ **The operator handles all git operations: never commit, tag or push.** `VERSION` and the `## [x.y.z]` heading are the operator's to DIRECT — 0.7.1 was cut on their explicit instruction, not on this file's initiative. **Nothing is committed or tagged.** |
 | Toolchain | cyrius pin **6.5.36** (moved at 0.7.1; the latest *release*). ⭐ This retired the hardcoded `CRAB_SYS_READDIR_AT = 101` at its written expiry — crab now calls `sys_readdir_at`, and is the **first consumer ever to call that wrapper**. ⛔ **THE LOCAL `~/.cyrius` SNAPSHOT IS NOT TRUSTWORTHY** — build through the released tarball; see *Verifying anything in this stack* below. |
-| Build | x86_64 **411,424 B** · `--agnos` **424,296 B** at 0.7.1 · `--win` fails (pre-existing). ⭐ At the 0.7.0 tree a clean-tarball build reproduces **398,504 / 406,992** exactly, and the agnos binary is **byte-identical to the artifact that burned on iron** — so that artifact IS reproducible, contrary to an earlier claim here. |
-| Tests | `cyrius test` **447 / 0** · `render_test` **19** checks, 0 failed (it was 14, never 15) · ⭐ **bench now measures the sort**, not `bench_noop` · fuzz still a scaffold that reads none of its input |
-| Coverage | **74/92 fns (80 %)**, 6/6 files — **the v1.0 criterion, met.** It dipped to 73 % mid-cut and was recovered by writing the assertions genuinely missing (`crab_entry_cmp` directly, the result messages, the notice channel, the listing accessors), not by naming functions to move the number. ⛔ Still reference coverage — a floor, not a correctness proof. The roadmap now gates it per release. |
+| Build | x86_64 **411,432 B** · `--agnos` **424,304 B** at 0.7.1 · `--win` fails (pre-existing). ⭐ At the 0.7.0 tree a clean-tarball build reproduces **398,504 / 406,992** exactly, and the agnos binary is **byte-identical to the artifact that burned on iron** — so that artifact IS reproducible, contrary to an earlier claim here. |
+| Tests | `cyrius test` **462 / 0** · `render_test` **26** checks, 0 failed (it was 14, never 15) · ⭐ **bench now measures the sort**, not `bench_noop` · fuzz still a scaffold that reads none of its input |
+| Coverage | **76/94 fns (80 %)**, 6/6 files — **the v1.0 criterion, met.** It dipped to 73 % mid-cut and was recovered by writing the assertions genuinely missing (`crab_entry_cmp` directly, the result messages, the notice channel, the listing accessors), not by naming functions to move the number. ⛔ Still reference coverage — a floor, not a correctness proof. The roadmap now gates it per release. |
 | Source | **3,152** lines across **six** files: `app.cyr` 1,417 · `ui.cyr` 695 · `main.cyr` 675 · `render_test.cyr` 221 · `path.cyr` 131 · `test.cyr` 13. ⚠ Re-derive with `wc -l src/*.cyr`; this row has been stale at two of the last three cuts. |
 | Deps | ⛔ **SIX, AND ONLY SIX**: sadish 0.5.2 · rupa 0.1.5 · rekha 0.3.5 · kashi 1.0.6 · dhancha 0.9.20 · setu 0.8.8. This row used to also list **agnos, bhumi, sigil and aethersafha** — none of them is a declared dependency (`grep '^\[deps' cyrius.cyml`); agnos is the *kernel* crab runs on and the others are peers. Misreading that row as the dep graph is how a tag check checks the wrong things. ⭐ **CHECK 4 RE-RUN AT THE 0.7.1 CUT (2026-08-30)** — the manifest copied with all four `path` lines disabled, so `cyrius deps` actually cloned the declared tags: **6 deps / 0 errors** (lock goes 2 → 6 commit-pinned, which is the tell that the overrides were really off), host **and** `--agnos` build, **408/0** tests, and both binaries came out **byte-identical** to the path-resolved ones. That last equality is the evidence; the rest is consistent with it. |
 | Mid-arc work | M3 is complete and its five review defects are **closed in 0.7.1**. M4 is **started, not done**: copy/move/delete and the pane states shipped; rename/mkdir are written and tested but not key-bound, and the transfer tray is the one genuinely gated item (dhancha PROGRESS). ⚠ agnos HEAD is **1.56.55**; the 2026-08-30 burn ran **1.56.53**. ⛔ **THAT IS NOT A crab GATE AND MUST NOT BE WRITTEN AS ONE.** 1.56.55 rewrote `is_user_range`, which is agnos's own validator on every ring-3 buffer in the system — if it regressed, it regresses for every app, and proving it is **agnos's** job on agnos's schedule, not a reason to hold a crab release. crab passes ordinary BSS/stack buffers and has no special exposure. |
+
+### ⛔⛔ RELEASE ORDER: dhancha 0.9.21 MUST BE PUSHED BEFORE crab's TAG MOVES
+
+dhancha was fixed to **0.9.21** on 2026-08-30 (drag no longer half-fires under a frame arena).
+crab's manifest still declares **`tag = "0.9.20"`**, and that is **deliberate, not an oversight**:
+
+- ⛔ **Declaring a tag that exists on no remote is the exact failure of 2026-08-28** — crab named
+  `rupa 0.1.5` and `dhancha 0.9.20` before either was pushed, `path` masked it locally, and check 4
+  failed with *"Remote branch not found"*, `4 deps resolved, 2 errors`. **No consumer could resolve
+  dhancha at all.** Do not repeat it: release first, then bump.
+- ⚠ **`lib/dhancha.cyr` in this tree is 0.9.21 content while the manifest says 0.9.20**, because
+  `path = "../dhancha"` wins over `tag` and every `cyrius deps` re-vendors the sibling's `dist/`.
+  Reverting it is futile — the next build brings it back. It is harmless today because **crab uses
+  nothing from 0.9.21**: crab does not call `dh_drag_available`, and does not use `dh_dispatch` at
+  all (ruling 2026-08-27). CI resolves 0.9.20 and builds green.
+- ⇒ **Order: push dhancha 0.9.21 → bump crab's `tag` to 0.9.21 → re-run check 4** (the manifest
+  copied with every `path` line disabled). Until then crab is correct as it stands.
+
+⛔ **AND AFTER ANY `cyrius distlib` IN dhancha, RUN `sh scripts/sync-deps-sidecar.sh`.** Raw distlib
+writes `kashi_font_data` into `dist/dhancha.deps` as if it were a stdlib leaf; it is vendored, so
+`cyrius deps` then fails in **every** consumer with *"dep dhancha requires 'kashi_font_data'"*.
+crab's build broke exactly this way during the 0.9.21 work. The sidecar's own header says so.
 
 ### ✅ THE FIVE DEFECTS ARE CLOSED (2026-08-30) — kept below for the reasoning, not as open work
 

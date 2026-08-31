@@ -125,15 +125,17 @@ tests for all of it.
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
 - `src/render_test.cyr` (221) — a standalone harness: renders the production surface at 380×220
-  and dumps BGRA to `build/crab-render.bin`, **19** `check()` assertions (11 was three cuts stale;
-  it was 14 at the 0.7.0 cut and M4's empty-pane notice added five).
+  and dumps BGRA to `build/crab-render.bin`, **26** `check()` assertions (11 was three cuts stale;
+  14 at the 0.7.0 cut, then M4's empty-pane notice and its solo-layout checks).
+  ⚠ **It renders at 640x220, not 380** — every assertion in it is about two panes side by side, and
+  below 600 crab now draws one. The solo layout has its own checks at 380.
   ⚠ It creates **two** `DhSurface`s on purpose — it holds two frames live and dumps the first, and
   since dhancha 0.9.14 one surface would hand both renders the same target.
   ⛔ **It is not run by CI or by `cyrius test`** — see Known gaps.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⭐ `cyrius coverage` reports **74/92 fns referenced (80 %)** at 0.7.1, 6/6 files — **the v1.0
+⭐ `cyrius coverage` reports **76/94 fns referenced (80 %)** at 0.7.1, 6/6 files — **the v1.0
 criterion, met.** It dipped to 73 % mid-cut as M4's write layer landed faster than its tests, and was
 recovered by writing the assertions that were genuinely missing (`crab_entry_cmp` directly, the
 result messages, the notice channel, `crab_lower`, the listing accessors) rather than by naming
@@ -412,7 +414,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **447 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **462 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -450,8 +452,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **411,424 B** at 0.7.1 (398,504 B at the 0.7.0 cut) |
-| `--agnos`    | ✅ builds, **424,296 B** at 0.7.1 (406,992 B at the cut) — the real target |
+| x86_64 linux | ✅ builds, **411,432 B** at 0.7.1 (398,504 B at the 0.7.0 cut) |
+| `--agnos`    | ✅ builds, **424,304 B** at 0.7.1 (406,992 B at the cut) — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

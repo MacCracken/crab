@@ -176,6 +176,31 @@ enum CrabCol {
     CRAB_COL_SIZE_W   = 54;     # 6 chars — "1023K" plus its gap
     CRAB_COL_MTIME_W  = 153;    # 17 chars — "2026-08-28 11:04" plus its gap
     CRAB_COL_NAME_MIN = 90;     # 10 chars — below this a name column cannot tell files apart
+    CRAB_PANE_GAP     = 6;      # the seam between the two panes, and the window's own edge padding
+}
+
+# @public — can this window honestly show TWO panes? 1 = two, 0 = one pane plus the A/B switcher.
+#
+# ⭐⭐ M4 RATIFIES THE CANVAS'S OPEN QUESTION: "does the second pane ever leave?" — yes, and this is
+# where. All three canvas directions drop to one pane plus a Pane A/B switcher at their small size,
+# and the roadmap listed it as unratified and *forced by M4*.
+#
+# ⛔ THE THRESHOLD IS DERIVED, NOT THE CANVAS'S 420 COPIED IN. A pixel number lifted from a mockup
+# is a number nobody can re-derive when the font, the row height or the column set changes. The rule
+# is instead the one crab already uses to decide what a pane may show: **two panes are worth it only
+# when EACH can honestly show the full column set** — NAME + SIZE + MODIFIED. Below that, splitting
+# the window buys a second path listing and pays for it by hiding the data the app exists to show.
+# ⇒ two panes need `panew >= 297`, i.e. a window of **600 px**. The canvas's 420 sits below that and
+# gets one pane, which is what the canvas draws.
+#
+# ⭐ AND THIS IS WHY THE SHIPPED DEFAULT FINALLY SHOWS A DATE. At 380x220 two panes give 187 px each,
+# so `crab_cols_for_width` returns 2 and the MODIFIED column never appeared — while the README and
+# the CHANGELOG headline read "NAME · SIZE · MODIFIED". One pane at 380 gets 374 px and all three
+# columns. The disclosure that used to be a ⚠ in the handoff is now just fixed.
+fn crab_two_panes_fit(w): i64 {
+    var panew = (w - CRAB_PANE_GAP) / 2;
+    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W)) { return 1; }
+    return 0;
 }
 
 # How many columns a pane `panew` px wide can honestly show: 1 = NAME, 2 = +SIZE, 3 = +MODIFIED.
@@ -337,9 +362,29 @@ fn crab_pane_state_label(state): i64 {
     return "";
 }
 
+# @public — the SOLO pane's header text: "A  /path" for the left pane, "B  /path" for the right.
+# -> the bytes written, or -1 if the path did not fit.
+#
+# ⛔ EXTRACTED SO THE SWITCHER'S ONE AFFORDANCE IS ASSERTABLE. When only one pane is on screen this
+# letter is the entire indication of WHICH pane the operator is looking at — the two panes can no
+# longer distinguish themselves by being side by side. Built inline it was visual-only: a mutation
+# that labelled both panes "A" changed nothing any test could see, and the operator would be left
+# switching between two views that claim to be the same one.
+# ⚠ Bounded like every other string helper here — `path` is crab's own joined path, but it is the
+# same buffer descent grows, and the 0.5.0 P-1 was in exactly that family.
+fn crab_pane_label(dst, cap, which, path): i64 {
+    if (cap < 4) { return -1; }
+    store8(dst, 65 + which);                           # 'A' + pane index
+    store8(dst + 1, 32);
+    store8(dst + 2, 32);
+    var n = crab_strcpy_n(dst + 3, path, cap - 3);
+    if (n < 0) { return -1; }
+    return n + 3;
+}
+
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
-fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state): i64 {
+fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -349,7 +394,19 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     if (active != 0) { hc = dh_theme_accent(); }   # accent when this pane is focused
     dh_widget_set_bg(hdr, hc);
     dh_widget_set_pref(hdr, 0, 28);
-    dh_widget_set_text(hdr, path);
+    # ⚠ WHEN ONLY ONE PANE IS ON SCREEN THE HEADER MUST SAY WHICH ONE IT IS. Two panes distinguish
+    # themselves by being side by side; one pane cannot, and the operator switching with Left/Right
+    # would otherwise see the path change with no way to tell A from B — worse than two panes,
+    # because it looks like navigation rather than a switch.
+    # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so this
+    # string must live exactly as long as the widget does — one frame.
+    var htext = path;
+    if (solo != 0) {
+        var hb = dh_falloc(CRAB_PATH_MAX + 4);
+        crab_pane_label(hb, CRAB_PATH_MAX + 4, which, path);
+        htext = hb;
+    }
+    dh_widget_set_text(hdr, htext);
     dh_widget_add_child(col, hdr);
 
     # ⭐⭐ REAL COLUMNS (*#32*, dhancha 0.9.20). The 13-character name column is gone — NAME is the
@@ -639,11 +696,31 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     var panes = dh_widget_new(BOX);
     dh_widget_set_layout(panes, BOX_H);         # two columns side by side
     dh_widget_set_pref(panes, 0, h - 24);       # reserve 24px for the status line
-    var panew = (w - 6) / 2;
+    # ⭐⭐ ONE PANE OR TWO — the M4 ratification. See `crab_two_panes_fit`.
+    # ⛔ IN SOLO MODE THE PANE THAT IS NOT SHOWN GETS NO WIDGETS AND ITS LIST POINTER STAYS 0, which
+    # `crab_hit` relies on: it walks parents comparing against `crab_llst` / `crab_rlst`, and its
+    # loop condition is `node != 0`, so a 0 list can never match a live node. A pane rendered
+    # off-screen instead would still hit-test, and clicks would land in a pane nobody can see.
+    var twopanes = crab_two_panes_fit(w);
+    var panew = w - CRAB_PANE_GAP;
+    if (twopanes == 1) { panew = (w - CRAB_PANE_GAP) / 2; }
     var la = 0; if (active_pane == 0) { la = 1; }
     var ra = 0; if (active_pane == 1) { ra = 1; }
-    var llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate);
-    var rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate);
+    var llst = 0;
+    var rlst = 0;
+    if (twopanes == 1) {
+        llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0);
+        rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0);
+    } else {
+        # ⚠ THE SWITCHER IS THE KEYS crab ALREADY HAS. Left/Right (and h/l) set `active_pane`, which
+        # in solo mode changes which pane is drawn rather than which of two is accented. No new
+        # binding, and the gesture is the one an operator already knows from the two-pane view.
+        if (active_pane == 0) {
+            llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, 1, lstate, 1);
+        } else {
+            rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1);
+        }
+    }
     dh_widget_add_child(root, panes);
 
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;

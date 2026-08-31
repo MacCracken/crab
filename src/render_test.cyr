@@ -74,7 +74,11 @@ fn main(): i64 {
     store64(lmtimes + 0, 1783900800); store64(lmtimes + 8, 1783900800); store64(lmtimes + 16, 1783900800);
     store64(rmtimes + 0, 1783900800); store64(rmtimes + 8, 1783900800); store64(rmtimes + 16, 1783900800);
 
-    var w = 380; var h = 220;
+    # ⚠ 640, NOT 380 — every assertion below is about TWO panes side by side, and at 380 crab now
+    # renders one pane plus the A/B switcher (M4's ratification of the canvas's small-window
+    # question). At 380 `crab_rlst` is 0 and reading a row out of it segfaults. 640 is the first
+    # width `crab_two_panes_fit` admits; the solo layout gets its own checks at the end of this file.
+    var w = 640; var h = 220;
     var sl = alloc(8); store64(sl, 0);
     var sr = alloc(8); store64(sr, 0);
     # ⛔ TWO SURFACES, DELIBERATELY. Since dhancha 0.9.14 a DhSurface owns and REUSES its sadish
@@ -208,11 +212,38 @@ fn main(): i64 {
     if (rt_band_has(sds3, 46, 46 + 26, midr + 4, w - 4, ink) == 1) { rightrows = 1; }
     check(rightrows, 1);
 
+    # --- M4: the SOLO layout, at the shipped default window ---------------------------------------
+    # ⛔⛔ THE PANE THAT IS NOT SHOWN MUST NOT BE HIT-TESTABLE. `crab_hit` walks parents comparing
+    # against `crab_llst` / `crab_rlst`; if the hidden pane were rendered off-screen instead of not
+    # at all, clicks would land in a pane nobody can see. Asserting the list pointer is 0 is the
+    # cheapest statement of "it was not built", and it is what makes `crab_hit`'s `node != 0` loop
+    # safe against a null list.
+    var ssl = alloc(8); store64(ssl, 0);
+    var ssr = alloc(8); store64(ssr, 0);
+    var ssurf = dh_surface_new(380, 220);
+    var ssds = crab_render(ssurf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
+      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK);
+    check(ssds != 0, 1);
+    check(crab_llst != 0, 1);                # active_pane 0 -> the LEFT pane is the one drawn
+    check(crab_rlst, 0);                     # ...and the right pane was never built
+    # ⚠ THE SOLO PANE SPANS THE FULL WIDTH, so a click where the right pane used to be is now inside
+    # the LEFT one — and must report pane 0. (An earlier revision of this check asserted the click
+    # found nothing, which was testing the two-pane geometry that solo mode replaces.)
+    var shb = alloc(16);
+    check(crab_hit(380 - 40, 60, shb), 1);
+    check(load64(shb), 0);                   # pane 0 — never the pane that was not drawn
+    # ⭐ AND THE OTHER HALF OF THE SWITCH: active_pane 1 draws B and leaves A unbuilt.
+    var ssurf2 = dh_surface_new(380, 220);
+    crab_render(ssurf2, 0, 1, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
+      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK);
+    check(crab_rlst != 0, 1);
+    check(crab_llst, 0);
+
     var pix = sd_surface_pixels(sds);
     var path = "build/crab-render.bin";
     var fd = syscall(2, path, 577, 420);
     if (fd >= 0) { syscall(1, fd, pix, w * h * 4); syscall(3, fd); }
-    var ok = "crab render_test: dumped 380x220 BGRA to build/crab-render.bin\n";
+    var ok = "crab render_test: dumped 640x220 BGRA to build/crab-render.bin\n";
     syscall(1, 1, ok, strlen(ok));
     return g_fails;
 }

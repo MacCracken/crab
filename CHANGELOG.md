@@ -155,9 +155,44 @@ ran.
   folders cannot be copied. A recursive delete behind one keypress cannot be undone or interrupted,
   and crab has neither a progress surface nor a trash. That is M4's genuinely gated part.
 
+### Added — M4: the second pane leaves at small widths, and the MODIFIED column finally appears
+
+⭐⭐ **The canvas's open question is ratified: below 600 px crab shows ONE pane plus an A/B switcher.**
+⛔ **The threshold is derived, not the canvas's 420 px copied in.** Two panes are worth it only when
+**each** can honestly show the full column set — NAME + SIZE + MODIFIED — so `panew >= 297`, i.e. a
+600 px window. A pixel lifted from a mockup is a number nobody can re-derive when the font or the
+column set changes; this rule agrees with the drawing without quoting it.
+
+⭐ **The switcher is the keys crab already has.** Left/Right (h/l) set `active_pane`, which in solo
+mode changes which pane is *drawn*. The header gains an `A` / `B` label, because side-by-side is no
+longer what tells the two apart — and that label is asserted, not left visual-only.
+
+⭐⭐ **This fixes the MODIFIED column at the shipped default.** At 380x220 the two-pane split gave
+each pane 187 px, so `crab_cols_for_width` returned **2** and MODIFIED never appeared — while the
+README and this file's own headline read "NAME · SIZE · MODIFIED". One pane at 380 is 374 px and
+shows all three.
+
+⛔ **The pane that is not shown is not built** — its list pointer stays 0, which is what keeps
+`crab_hit` from routing clicks into a pane nobody can see. Rendering it off-screen instead would
+still hit-test.
+
+⚠ **`render_test` and the click test now render at 640, not 380** — every assertion in them is about
+two panes side by side, and at 380 there is now only one. `render_test` gained checks for the solo
+layout at 380 in exchange.
+
+### Blocked upstream — drag between panes
+
+⛔⛔ **dhancha's drag API and its frame-arena API are mutually exclusive**, and the roadmap's
+"gated on nothing" was wrong. `dh_frame_begin` calls `dh_reset_input()`, which zeroes
+`_dh_drag_src` — **every frame**. A drag spans press → move → release, so an app using the frame
+arena can see `DRAG_START` and then never `MOVE`, `DROP` or `END`.
+⚠ The clear is **correct**: after an arena rewind that pointer addresses memory about to be reused.
+The conflict is structural — drag identity must outlive a frame and is stored as a pointer that
+cannot. Filed as `docs/development/issues/2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md`.
+
 ### Added — tests, and a benchmark that measures something
 
-**253 -> 447 passing**, plus `render_test` **14 -> 19** pixel checks, and reference coverage
+**253 -> 462 passing**, plus `render_test` **14 -> 26** pixel checks, and reference coverage
 **81 % -> 80 %** (74/92) after a dip to 73 % — recovered by testing `crab_entry_cmp` directly (it had
 only ever been exercised *through* `crab_sort_entries`, so every ordering rule was asserted in
 aggregate and none of them separately), plus the result messages, the notice channel, the case

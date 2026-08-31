@@ -42,8 +42,9 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 
 ### Still open (from the canvas's own "Open questions")
 
-- **Does the second pane ever leave?** At 420px all three directions show one pane plus a Pane A/B
-  switcher, so the canvas answers this in the affirmative — but it has not been ratified. Forced by M4.
+- ✅ **Does the second pane ever leave? — ANSWERED, RATIFIED 2026-08-30 in M4.** Yes, below 600 px,
+  where two panes could no longer each show the full column set. See M4 for the derivation and why
+  the canvas's 420 px was not copied in as the number.
 - ✅ **Which accent roles does the compositor hand over? — ANSWERED, gate closed.** rupa **0.1.5**
   publishes **`on-accent`**, dhancha **0.9.20** binds it (`dh_theme_on_accent()`) and paints the
   focused selection's *text* with it, and crab's `render_test` confirms it at the pixel.
@@ -534,9 +535,28 @@ oracle, not the cursor.
   **Gate: dhancha** PROGRESS widget.
 - **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
   **Gate: dhancha** context menu + modal sheet.
-- **Drag between panes** — dhancha already has `DRAG_START`/`DRAG_MOVE`/`DRAG_DROP`/`DRAG_END` and
-  `dh_widget_set_draggable`/`set_drop_target`. crab consumes none of it. ⚠ **Gated on nothing** —
-  the same false-gate check that cleared the write syscalls applies here.
+- ⛔⛔ **Drag between panes — BLOCKED UPSTREAM, and this line's "gated on nothing" was wrong.**
+  dhancha does ship `DRAG_START`/`DRAG_MOVE`/`DRAG_DROP`/`DRAG_END`, but **its drag API and its
+  frame-arena API are mutually exclusive**: `dh_frame_begin` calls `dh_reset_input()`, which zeroes
+  `_dh_drag_src`, **every frame**. A drag spans press → move → release, i.e. many frames, so any app
+  using the frame arena can receive `DRAG_START` and then never `MOVE`, `DROP` or `END`.
+  ⚠ **The clear is correct and must not simply be removed** — after an arena rewind that pointer
+  addresses memory about to be handed out again. The conflict is structural: drag identity must
+  outlive a frame, and it is stored as a pointer that cannot.
+  ⇒ Filed: [`2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md`](issues/2026-08-30-dhancha-drag-api-cannot-survive-a-frame-arena.md),
+  and **fixed upstream in dhancha 0.9.21** — a press on a draggable widget under a frame arena is now
+  simply a click, and `dh_drag_available()` answers the question up front. Nothing half-fires.
+  ⛔⛔ **THAT FIX DOES NOT UNBLOCK THIS ITEM, AND THE REASON IS A STANDING RULING, NOT A GAP.** Drag
+  is synthesized inside `dh_dispatch`, and **crab does not use `dh_dispatch`** — operator ruling
+  2026-08-27, recorded at `src/app.cyr:215`, for this same cross-frame-identity reason. dhancha
+  0.9.21 makes the toolkit honest; it does not give crab events crab never asked for.
+  ⇒ **The remaining choice is crab-side and needs a ruling**: implement drag in crab's own
+  `(pane, row)` model — which is exactly what crab already does for double-click and the wheel, and
+  which works today with no dependency — or drop drag from M4. Adopting `dh_dispatch` to get it is
+  the one option the 2026-08-27 ruling forecloses.
+  ⚠ **If crab implements it**: press on a row, track with the pointer state crab already owns,
+  release over the other pane, then reuse `crab_fs_copy` / `crab_fs_move`. The plumbing is ~30 lines
+  because the hit-testing and the file operations both already exist.
 - ⛔ **The genuinely gated part of M4 is the transfer tray** (dhancha PROGRESS), and it is what
   blocks recursive copy and recursive delete: neither may go behind a keypress without a surface
   that shows what is happening and a way to stop it.
@@ -547,7 +567,19 @@ oracle, not the cursor.
   NOTDIR / UNREAD. A DENIED state belongs here the day agnos grows a credential model, not before.
   ⚠ The 2026-08-30 burn is what motivated this: `/` held two entries (`/sl_s`, `/lp`) that could be
   listed but not stat'd, and every layer above reported the failure as an absence.
-- **Ratify the small-window question** — one pane + switcher at 420px.
+- ⭐ **Ratify the small-window question — DONE (2026-08-30). The second pane DOES leave.**
+  ⛔ **The threshold is derived, not the canvas's 420 px copied in**: two panes are worth it only
+  when **each** can honestly show the full column set (NAME + SIZE + MODIFIED), so `panew >= 297`,
+  i.e. a window of **600 px**. A pixel number lifted from a mockup is one nobody can re-derive when
+  the font, the row height or the column set changes. The canvas's 420 sits below 600 and gets one
+  pane, which is what the canvas draws — the rule agrees with the drawing without quoting it.
+  ⭐ **The switcher is the keys crab already has** — Left/Right (h/l) set `active_pane`, which in
+  solo mode changes which pane is drawn. No new binding, and the header gains an `A` / `B` label
+  because side-by-side is no longer what distinguishes them.
+  ⭐⭐ **AND IT FIXES THE MODIFIED COLUMN AT THE DEFAULT WINDOW.** At 380x220 two panes got 187 px
+  each, so `crab_cols_for_width` returned 2 and MODIFIED never appeared — while the README and the
+  CHANGELOG headline both read "NAME · SIZE · MODIFIED". One pane at 380 is 374 px and shows all
+  three. The ⚠ the handoff carried about that is now just fixed.
 
 ### M5 — Views (v0.9.0)
 
