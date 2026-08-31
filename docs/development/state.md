@@ -133,10 +133,12 @@ tests for all of it.
 - `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
-⚠ `cyrius coverage` reports **65/89 fns referenced (73 %)** at 0.7.1, 6/6 files — **DOWN** from the
-81 % below, and the drop is arithmetic rather than rot: 0.7.1 added 29 functions (M4's write layer,
-the per-target shims, the extracted predicates) faster than it added references to them. ⛔ The v1.0
-criterion is **80 %**, so this moved away from the target, not toward it.
+⭐ `cyrius coverage` reports **74/92 fns referenced (80 %)** at 0.7.1, 6/6 files — **the v1.0
+criterion, met.** It dipped to 73 % mid-cut as M4's write layer landed faster than its tests, and was
+recovered by writing the assertions that were genuinely missing (`crab_entry_cmp` directly, the
+result messages, the notice channel, `crab_lower`, the listing accessors) rather than by naming
+functions to move the number. ⛔ The roadmap now carries this as a **per-release gate**: a criterion
+checked only at v1.0 gets further away at every cut that adds code.
 
 ⭐ At the 0.7.0 cut it reported **44/54 fns referenced (81 %)**, 6/6 files — up from 75 % at 0.6.1, 53 %
 at 0.5.0 and 23 % at 0.4.15. ⭐ **This is the first cut above the v1.0 criterion of 80 %.**
@@ -410,7 +412,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **408 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **447 passed / 0 failed** at 0.7.1 (253 at the 0.7.0 cut) (119 in M3 —
   44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
   columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
@@ -448,8 +450,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **411,312 B** at 0.7.1 (398,504 B at the 0.7.0 cut) |
-| `--agnos`    | ✅ builds, **420,040 B** at 0.7.1 (406,992 B at the cut) — the real target |
+| x86_64 linux | ✅ builds, **411,424 B** at 0.7.1 (398,504 B at the 0.7.0 cut) |
+| `--agnos`    | ✅ builds, **424,296 B** at 0.7.1 (406,992 B at the cut) — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

@@ -55,7 +55,8 @@ enum CrabDir {
     # and `lib/syscalls_x86_64_agnos.cyr` now vendors `sys_readdir_at(path, buf, max, cursor)`.
     # ⚠ crab was the FIRST consumer to exercise that wrapper. agnos's own `rdat.cyr` proves the
     # kernel contract but calls the raw number, so until this change nothing had ever called the
-    # cyrius peer — it was asserted to compile, never to run. The next burn is what proves it.
+    # cyrius peer — it was asserted to compile, never to run. A QEMU run proves it; this is not
+    # iron-only, and nothing here needs hardware to be believed.
     # ⛔ A consumer hard-coding a syscall number is the bug class agnos's roadmap tracks; do not
     # reintroduce one. If a needed wrapper is missing, file it upstream and pin the interim to an
     # explicit expiry, as this one was.
@@ -729,6 +730,8 @@ enum CrabFs {
     CRAB_FS_ESAME    = -13;    # source and destination are the same path
     CRAB_FS_ESYS     = -14;    # the kernel refused
     CRAB_FS_EIO      = -15;    # a copy failed part-way through
+    CRAB_FS_ENOEXEC  = -16;    # not an executable, and crab has no handler for it
+    CRAB_FS_ESPAWNLEN = -17;   # the path exceeds what `spawn_path` accepts
 }
 
 # @public — may crab act on this entry name? 1 = yes, 0 = refuse.
@@ -1387,6 +1390,83 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     return cnt;
 }
 
+# ⚠ agnos `spawn_path`#43 caps its path at **127 bytes** (ABI row 43), which is HALF `CRAB_PATH_MAX`.
+# A path crab can list and stat is therefore not necessarily one it can launch, and the difference
+# has to be reported rather than truncated — a truncated path is a different file, and this one gets
+# EXECUTED.
+enum CrabSpawn {
+    CRAB_SPAWN_PATH_MAX = 127;
+    CRAB_ELF_MAGIC_LEN  = 4;
+}
+
+# @public — does `path` begin with the ELF magic? 1 = yes, 0 = no, -1 = could not be read.
+#
+# ⛔⛔ THIS IS THE GUARD BETWEEN THE Enter KEY AND `spawn_path`. Enter already descends into
+# directories; making it *run* the selected entry means one keystroke can execute whatever the
+# cursor happens to be on. `spawn_path` loads a static ELF64 and refuses anything else — but
+# refusing AFTER handing the kernel a file is not the same as not handing it over, and the operator
+# deserves "crab cannot open that" rather than a spawn that fails somewhere inside the loader.
+# ⚠ FOUR BYTES, READ AND CLOSED. Not a stat: the mode bits say what the filesystem permits, not what
+# the file IS, and on a single-user always-root kernel the permit bits say almost nothing.
+# ⚠ A SHORT READ IS NOT AN ELF. A file with fewer than four bytes cannot be one, and treating a
+# short read as success is how an empty file reaches the loader.
+fn crab_is_elf(path, plen): i64 {
+    var fd = crab_fs_open_r(path, plen);
+    if (fd < 0) { return -1; }
+    var m = crab_elf_magic_buf();
+    if (m == 0) { sys_close(fd); return -1; }
+    var got = sys_read(fd, m, CRAB_ELF_MAGIC_LEN);
+    sys_close(fd);
+    if (got < CRAB_ELF_MAGIC_LEN) { return 0; }
+    if (load8(m + 0) != 0x7F) { return 0; }
+    if (load8(m + 1) != 69) { return 0; }              # 'E'
+    if (load8(m + 2) != 76) { return 0; }              # 'L'
+    if (load8(m + 3) != 70) { return 0; }              # 'F'
+    return 1;
+}
+
+# ⚠ Four bytes, once for the process — the same rule the sort scratch and the copy buffer follow.
+var crab_elfbuf = 0;
+
+fn crab_elf_magic_buf(): i64 {
+    if (crab_elfbuf == 0) { crab_elfbuf = alloc(CRAB_ELF_MAGIC_LEN); }
+    return crab_elfbuf;
+}
+
+# @public — OPEN the selected entry (M4). -> CRAB_FS_OK or a CRAB_FS_* error.
+#
+# ⭐⭐ THIS IS THE SILENCE M4 EXISTS TO END. The roadmap's M4 section opens with "crab is a read-only
+# browser. Enter on a file does nothing, silently." Doing nothing is defensible; doing nothing
+# WITHOUT SAYING SO is what makes the app feel broken — the operator cannot tell a file crab will
+# not open from a keypress crab did not receive.
+#
+# ⛔ "OPEN" MEANS "RUN" HERE, AND ONLY THAT, BECAUSE THERE IS NOTHING ELSE ON THIS SYSTEM YET. There
+# is no handler registry, no MIME association and no daimon binding in the stack today, so a text
+# file has nothing to be opened WITH. crab says that plainly rather than inventing an association.
+# ⇒ When an association mechanism exists (M7's daimon arc is where it would live), this function is
+# where it hooks in, and the ELF path becomes one arm of it rather than the whole thing.
+#
+# ⚠ NON-BLOCKING BY CONSTRUCTION. `spawn_path`#43 returns the new pid immediately and crab does not
+# reap it — crab is a file manager, not a shell, and blocking the event loop on a child would freeze
+# the pane while the child ran. The child is the compositor's problem once it is alive.
+fn crab_fs_launch(dir, name, pathscr): i64 {
+    var l = crab_fs_path(pathscr, dir, name);
+    if (l < 0) { return l; }
+    if (l > CRAB_SPAWN_PATH_MAX) { return CRAB_FS_ESPAWNLEN; }
+    var isexe = crab_is_elf(pathscr, l);
+    if (isexe < 0) { return CRAB_FS_ESYS; }
+    if (isexe == 0) { return CRAB_FS_ENOEXEC; }
+    var pid = 0 - 1;
+    #ifdef CYRIUS_TARGET_AGNOS
+    pid = sys_spawn_path(pathscr, l);
+    #endif
+    # ⚠ On the host there is no `spawn_path`, and crab does NOT substitute fork+exec: a file manager
+    # that launches a real process out of a unit test is a test that can hang a build machine. The
+    # ELF gate above is the part with a decision in it, and that part IS tested here.
+    if (pid < 0) { return CRAB_FS_ESYS; }
+    return CRAB_FS_OK;
+}
+
 # @public — the operator-facing sentence for a `CRAB_FS_*` result. Never 0.
 #
 # ⚠ THE STATUS LINE IS THE ONLY PLACE A REFUSAL IS SEEN. crab logs to the console as well, but three
@@ -1399,6 +1479,8 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_EEXIST)   { return "refused: something of that name is already there"; }
     if (rc == CRAB_FS_ESAME)    { return "refused: the source and the destination are the same"; }
     if (rc == CRAB_FS_EIO)      { return "failed part-way: the copy is incomplete"; }
+    if (rc == CRAB_FS_ENOEXEC)  { return "crab has no way to open that yet"; }
+    if (rc == CRAB_FS_ESPAWNLEN) { return "refused: the path is too long to launch"; }
     return "failed: the filesystem refused";
 }
 

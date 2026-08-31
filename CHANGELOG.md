@@ -12,8 +12,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`cyrius.lock` going 2 → 6 commit-pinned is the tell that the overrides were genuinely off.)
 - **`fmt --check` clean** on all eight sources under the pinned toolchain, `lint` at or below the
   0.7.0 baseline, and `lib/` verified **byte-identical to the released 6.5.36 tarball**.
-- ⚠ **Reference coverage FELL, 81 % → 73 % (65/89 fns)** — arithmetic, not rot: 29 functions were
-  added faster than references to them. The v1.0 criterion is 80 %, so this moved away from target.
+- ⭐ **Reference coverage 80 % (74/92 fns)** — it fell to 73 % mid-cut as 29 functions landed faster
+  than references to them, and was brought back by writing the assertions that were actually missing
+  rather than by naming functions to move the number. `docs/development/roadmap.md` now carries a
+  per-release coverage gate, since a criterion checked only at v1.0 gets further away every release.
 
 ### Changed — toolchain pin 6.5.35 -> 6.5.36, and the hardcoded syscall number is retired
 
@@ -25,7 +27,9 @@ condition is now met: **cyrius 6.5.36 is released** (tag + assets on the remote;
 
 ⚠ **crab is the FIRST consumer to actually CALL that wrapper.** agnos's own `rdat.cyr` proves the
 kernel contract but uses the raw number, so until now the cyrius peer was asserted to compile and
-had never been executed. The next burn is what proves it.
+had never been executed. ⚠ **QEMU proves it** — the `#ifdef CYRIUS_TARGET_AGNOS` paths run on a real
+agnos kernel there, which is how every M3 item was confirmed. Iron is for what QEMU cannot show
+(the GPU shader path, real HID timing, real disk latency); a wrapper call is not one of those.
 ⚠ `cyrius lib sync` copies the **declared** `[deps].stdlib` set — **29** files — while crab vendors
 **30**. The odd one out is `lib/atomic.cyr`, a transitive leaf no declaration names; checked by hand
 and identical to the 6.5.36 snapshot.
@@ -125,16 +129,39 @@ ran.
 - ⛔ **agnos has no `AO_EXCL`**, so the kernel cannot refuse an overwrite. Every destination is
   checked with `crab_fs_exists` first — a copy that relied on the open failing would refuse correctly
   on the host and **silently truncate on agnos**. The residual TOCTOU window is disclosed, not hidden.
+- ⭐⭐ **`open` — Enter on a file is no longer silent.** The roadmap's M4 section opens by naming
+  this: *"crab is a read-only browser. Enter on a file does nothing, silently."* Enter reached
+  `crab_descend`, which refuses a non-directory and returns -1, and the call site dropped that -1
+  with no else arm — indistinguishable from a keypress crab never received.
+  ⛔ **"Open" means "run", and only that, because nothing else exists on this system yet** — there is
+  no handler registry, no MIME association and no daimon binding in the stack, so a text file has
+  nothing to be opened *with*. crab says so plainly instead of inventing an association.
+  ⛔ **Enter is gated on a real ELF-magic read, not on mode bits.** Enter can now start a process, so
+  what it refuses matters more than what it runs: `crab_is_elf` reads four bytes off disk and
+  refuses anything else. On a single-user always-root kernel the permit bits say almost nothing
+  about what a file *is*. ⚠ A short read is **not** an ELF — the magic buffer is reused, so treating
+  one as success lets a 3-byte file inherit the previous read's 4th byte.
+  ⚠ `spawn_path`#43 caps its path at **127 bytes**, half of `CRAB_PATH_MAX` — a path crab can list
+  is not necessarily one it can launch, and the difference is reported rather than truncated.
+  Non-blocking by construction: crab does not reap the child.
 - Keys: `c` copy, `m` move to the other pane (the dual-pane idiom — no text entry needed), `d` delete
   behind a `y`/anything-else confirmation shown in the status line. ⚠ Not F5/F6: aethersafha takes
   F5 for maximize, so a client binding it would never see the key.
+- ⛔ **Fixed in the same change: navigation ran BEFORE the delete confirmation.** The arrow keys and
+  Enter sat above the confirmation gate, so a key answering *"delete this?"* also moved the selection
+  or descended — and then the gate cancelled, having already acted. The gate's own comment claimed
+  keys were resolved there first; they were not. Navigation now lives inside it.
 - ⛔ **No recursion, deliberately.** `rmdir` refuses a non-empty directory and crab reports it;
   folders cannot be copied. A recursive delete behind one keypress cannot be undone or interrupted,
   and crab has neither a progress surface nor a trash. That is M4's genuinely gated part.
 
 ### Added — tests, and a benchmark that measures something
 
-**253 -> 408 passing**, plus `render_test` **14 -> 19** pixel checks.
+**253 -> 447 passing**, plus `render_test` **14 -> 19** pixel checks, and reference coverage
+**81 % -> 80 %** (74/92) after a dip to 73 % — recovered by testing `crab_entry_cmp` directly (it had
+only ever been exercised *through* `crab_sort_entries`, so every ordering rule was asserted in
+aggregate and none of them separately), plus the result messages, the notice channel, the case
+folder and the listing accessors.
 ⭐ The write layer's tests perform **real syscalls against a real filesystem** — unlike `#101`
 readdir, `mkdir`/`unlink`/`rename`/`open`/`read`/`write` all exist on the host, so the refusals, the
 bounded join, the overwrite guard and multi-chunk copying are exercised for real.

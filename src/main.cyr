@@ -398,20 +398,6 @@ fn main(): i64 {
                 }
                 if (crab_key_acts(dh_event_b(ev)) == 1) {
                     crab_say("crab: key press\n");
-                    if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
-                    if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
-                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                        if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                        if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
-                    }
-                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                        if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                        if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
-                    }
-                    if (u == 0x28) {                                       # Enter — descend into the selected dir
-                        if (active_pane == 0) { var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf); if (nl >= 0) { ln = nl; lstate = crab_pane_state(ln, crab_listing_err()); sel_l = 0; crab_log_cd(lpath); } }
-                        if (active_pane == 1) { var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf); if (nr >= 0) { rn = nr; rstate = crab_pane_state(rn, crab_listing_err()); sel_r = 0; crab_log_cd(rpath); } }
-                    }
                     # ============ M4 — FILE OPERATIONS ============================================
                     # ⛔⛔ THE CONFIRMATION IS RESOLVED BEFORE ANY OTHER KEY IS LOOKED AT, and it
                     # consumes the keypress. Letting `y` fall through to the bindings below would
@@ -446,7 +432,64 @@ fn main(): i64 {
                         # ⚠ EVERY OTHER KEY CLEARS A STALE NOTICE. Without this the result of the last
                         # operation would sit over the status line for the rest of the session, and the
                         # operator would be reading an answer to a question they have stopped asking.
+                        # ⛔ AND NAVIGATION LIVES INSIDE THIS `else`, NOT ABOVE IT. It used to sit before
+                        # the confirmation gate, so an arrow or Enter answering "delete this?" ALSO moved
+                        # the selection or descended — and then the gate cancelled, having already acted.
+                        # The comment above this gate claimed keys were resolved here first; they were not.
                         if (crab_get_notice() != 0) { crab_clear_notice(); }
+                        if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
+                        if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
+                        if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                            if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                            if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                        }
+                        if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                            if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                            if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                        }
+                        # ⭐⭐ ENTER ON A FILE IS NO LONGER SILENT (M4). It used to reach
+                        # `crab_descend`, which refuses a non-directory and returns -1 — and this
+                        # site dropped that -1 with no else arm. So Enter on a file did nothing and
+                        # SAID nothing, which the operator cannot tell from a keypress crab never
+                        # received. That silence is what the roadmap's M4 section opens by naming.
+                        # ⚠ THE TYPE BYTE DECIDES, NOT THE RETURN VALUE. Branching on `crab_descend`'s
+                        # -1 would conflate "not a directory" with "the path was too long" — two
+                        # different answers, and one of them must not launch anything.
+                        if (u == 0x28) {                                       # Enter — descend, or OPEN
+                            var epath = lpath; var ebuf = lbuf; var esel = sel_l; var ecnt = ln;
+                            if (active_pane == 1) { epath = rpath; ebuf = rbuf; esel = sel_r; ecnt = rn; }
+                            if (ecnt <= 0) { crab_set_notice("nothing to open"); }
+                            else {
+                                if (load8(ebuf + esel * CRAB_REC_SZ + CRAB_REC_TYPE) != 0) {
+                                    if (active_pane == 0) {
+                                        var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr,
+                                          lsizes, lmtimes, statbuf);
+                                        if (nl >= 0) {
+                                            ln = nl;
+                                            lstate = crab_pane_state(ln, crab_listing_err());
+                                            sel_l = 0;
+                                            crab_log_cd(lpath);
+                                        } else { crab_set_notice("cannot open that folder"); }
+                                    }
+                                    if (active_pane == 1) {
+                                        var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr,
+                                          rsizes, rmtimes, statbuf);
+                                        if (nr >= 0) {
+                                            rn = nr;
+                                            rstate = crab_pane_state(rn, crab_listing_err());
+                                            sel_r = 0;
+                                            crab_log_cd(rpath);
+                                        } else { crab_set_notice("cannot open that folder"); }
+                                    }
+                                } else {
+                                    crab_strcpy_n(namescr, ebuf + esel * CRAB_REC_SZ, CRAB_NAME_MAX);
+                                    var rco = crab_fs_launch(epath, namescr, pathscr);
+                                    crab_set_notice(crab_fs_msg(rco));
+                                    crab_say("crab: open "); crab_say(namescr);
+                                    crab_say(" -> "); crab_say(crab_fs_msg(rco)); crab_say("\n");
+                                }
+                            }
+                        }
                         if (u == 0x07) {                                       # d — delete, with a confirmation
                             var qcnt = ln; if (active_pane == 1) { qcnt = rn; }
                             if (qcnt > 0) {

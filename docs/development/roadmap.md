@@ -465,6 +465,44 @@ event loop's focus and escape routing — the widget exists, since 0.9.7), the t
 (**genuinely gated** on a dhancha PROGRESS widget, and it is what blocks recursive copy and delete),
 context menu, batch-rename sheet, drag between panes, and the small-window ratification.
 
+#### ⛔ v0.8.0 CARRIES A COVERAGE GATE, AND IT IS A RELEASE GATE RATHER THAN A v1.0 ASPIRATION
+
+**73 % at 0.7.1 (65/89 fns), down from 81 %, against a v1.0 criterion of 80 %.** The number has now
+fallen at two of the last three cuts, and both falls were the same mechanism: a release adds
+functions faster than it adds references to them. ⇒ **A criterion checked only at v1.0 gets further
+away every release.** Check it at the cut, in Process step 5, alongside the CHANGELOG and state.md.
+
+⛔ **DO NOT CHASE THE NUMBER.** This is *reference* coverage — a function counts as covered the
+moment any test names it. `assert(crab_say("x") > 0)` would raise the percentage and prove nothing,
+and this file would rather carry 73 % honestly than 85 % that means less. **23 functions are
+currently untouched by `tests/` and `render_test`; only the first group below is worth writing.**
+
+**Group 1 — behaviour that can be WRONG, and nothing would say so. Write these.**
+
+| function | what an assertion pins |
+|---|---|
+| `crab_entry_cmp` | ⭐ **the highest-value gap.** The comparator is exercised only *through* `crab_sort_entries`, so every mode's rules — dirs-first outranking the key, the -1/-2 sentinels, NAME as universal tiebreak — are asserted only in aggregate. A direct table of (a, b, mode) → sign pins each rule separately, and would have caught the `<= 0` stability bug without needing 16 identical rows. |
+| `crab_fs_msg` | every `CRAB_FS_*` code maps to a distinct non-empty string. Same shape as the `crab_pane_state_label` assertions 0.7.1 added — and the same failure it prevents: a refusal the operator cannot tell from another. |
+| `crab_status_str` | the status line's text for a selected row, an empty pane, a pending stat (`?`) and an unstattable entry (`-`). It is what the operator reads most and nothing asserts it. |
+| `crab_set_notice` / `_clear` / `_get` | the notice outranks the row, and a stale notice is cleared. 0.7.1 asserts this only at the pixel, in `render_test`, which CI does not run. |
+| `crab_lower` | case folding — ASCII, the boundaries either side of `A`/`Z`, and non-letters passed through. One line, and `crab_name_cmp` is built on it. |
+| `crab_stat_one` | ⭐ **testable for real on the host** — Linux `stat` exists, so this can assert a real size and mtime, a directory, and a failure on a path that does not resolve. |
+| `crab_fs_*_raw` (4) | the per-target shims. The host arm is real; asserting it directly separates "the shim is wrong" from "the operation is wrong", which today are one failure. |
+| `crab_listing_total` / `crab_listing_err` | that they report the LAST listing and are reset per call — the property `main.cyr` depends on when it captures pane state, and the one that breaks silently if a future edit moves the reset. |
+
+**Group 2 — transitively exercised; leave them.** `crab_pane`, `crab_spec_init` run inside every
+`render_test` render, and `crab_sort_scratch` / `crab_copy_buf` inside every sort and copy. They are
+covered in the sense that matters and uncovered in the sense the tool counts. ⚠ Naming them in a
+test would move the number without adding a claim.
+
+**Group 3 — diagnostics.** `crab_say`, `crab_log_cd`, `crab_log_extent`, `crab_stat_trace_init`.
+Writes to fd 1. ⚠ Asserting these is how a coverage number becomes theatre; if they are ever wrapped
+in logic worth testing, that logic gets a test and not the writer.
+
+⭐ **DONE at 0.7.1 — Group 1 landed and coverage is back to 80 % (74/92).** It took ~30 assertions,
+and the number moved as a side effect of writing claims rather than as its object. ⚠ What remains
+for v0.8.0 is to keep it there: check coverage at the cut, in Process step 5.
+
 crab is a read-only browser. Enter on a file does nothing, silently.
 
 ⭐ **ALL FIVE M3 DEFECTS ARE CLEARED in v0.7.1 (2026-08-30)** — see the CHANGELOG. The two
@@ -478,7 +516,7 @@ exactly the cap was to be fixed by "guard on `cur`" — and that does not work: 
 the cursor on the record it declined to take, so `cur != -1` at exactly the cap. The count is the
 oracle, not the cursor.
 
-- ⭐ **Copy · move · delete — DONE (2026-08-30). THERE WAS NO GATE.** The line here read
+- ⭐ **Copy · move · delete · open — DONE (2026-08-30). THERE WAS NO GATE.** The line here read
   *"Gate: agnos write syscalls"* and it was false: every arm has been real and mount-routed since
   agnos **1.41.3** — `open`#7 (`syscall.cyr:8496`), `mkdir`#9 (`:8547`), `rmdir`#10 (`:8565`),
   `unlink`#30 (`:8849`), `rename`#31 (`:8879`) — and crab's **already-pinned cyrius 6.5.35** vendors

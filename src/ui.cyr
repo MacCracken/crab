@@ -209,7 +209,8 @@ fn crab_col_chars(px): i64 {
 # GONE above a ~1,860 px window — `chars` is width-derived, and at a full-screen 2560 px it is 118,
 # well past the cell — leaving the kernel's own good behaviour as the only thing between a
 # misformed record and a heap write. crab already accepts that resize (`crab_resize_wanted`), so one
-# F5 on the next burn reaches it. Defence in depth means TWO guards, and this restores the missing one.
+# F5 at a large window reaches it — under QEMU as readily as on iron. Defence in depth means TWO
+# guards, and this restores the missing one.
 #
 # ⚠ THE BOUND IS `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, AND THE ONE-BYTE DIFFERENCE IS THE POINT.
 # The name region of a record is bytes [0, CRAB_REC_TYPE); byte 63 is the TYPE. Scanning to

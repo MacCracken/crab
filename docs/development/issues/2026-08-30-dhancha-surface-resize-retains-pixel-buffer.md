@@ -59,8 +59,8 @@ pointer event reached crab at all, so the window stayed 380×220 for the whole r
 was rendered at exactly one extent.
 
 ⚠ **crab will accept the resize when it is offered.** `crab_resize_wanted` admits 2560×1440
-(14,745,600 B < `CRAB_SURFACE_BYTES_MAX` 33,554,432; both axes < `CRAB_DIM_MAX` 4096), so the first
-F5 on the next burn is the trigger.
+(14,745,600 B < `CRAB_SURFACE_BYTES_MAX` 33,554,432; both axes < `CRAB_DIM_MAX` 4096), so any F5 at
+a large extent is the trigger — reachable under QEMU, no hardware required.
 
 ## What this is NOT
 

@@ -1433,6 +1433,94 @@ fn main() {
     assert_eq(crab_fs_delete("build", "m4test", 1, sc1), CRAB_FS_OK, "...and now it goes");
     assert_eq(crab_fs_delete("build", "m4test2", 1, sc1), CRAB_FS_OK, "both scratch directories removed");
 
+    # --- M4: open, and the gate between Enter and spawn_path --------------------------------------
+    # ⚠ The delete assertions above removed both scratch directories, so this section makes its own.
+    assert_eq(crab_fs_mkdir("build", "m4test", sc1, fstat), CRAB_FS_OK, "a scratch directory for the open tests");
+    # ⛔⛔ ENTER CAN NOW LAUNCH A PROCESS, so what it refuses matters more than what it runs.
+    # `crab_is_elf` reads four real bytes off disk rather than trusting mode bits: on a single-user
+    # always-root kernel the permit bits say almost nothing about what a file IS.
+    var el1 = crab_fs_path(sc1, fsdir, "notelf.txt");
+    var efd = crab_fs_open_w(sc1, el1);
+    assert(efd >= 0, "a non-ELF file to try to open");
+    assert_eq(sys_write(efd, "just some text, definitely not an ELF", 37), 37, "...with contents");
+    sys_close(efd);
+    assert_eq(crab_is_elf(sc1, el1), 0, "a text file is not an executable");
+    assert_eq(crab_fs_launch(fsdir, "notelf.txt", sc1), CRAB_FS_ENOEXEC,
+      "...so opening it is refused with a REASON, not silence");
+    # A real ELF: crab's own host binary, which the suite is running beside.
+    var el3 = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(el3, "build/crab", CRAB_PATH_MAX);
+    assert_eq(crab_is_elf(el3, crab_cstr_len(el3, CRAB_PATH_MAX)), 1, "crab's own binary IS an ELF");
+    # ⛔⛔ A FILE SHORTER THAN THE MAGIC IS NOT AN ELF, AND THE ORDER OF THESE TWO ASSERTIONS IS THE
+    # ASSERTION. The magic buffer is allocated once and REUSED, so a 3-byte read leaves the 4th byte
+    # holding whatever the previous read put there — and the previous read, immediately above, was a
+    # real ELF. So without the short-read guard this file inherits that stale 'F' and passes as an
+    # executable. Checked in the other order it would pass for the wrong reason, and the guard could
+    # be deleted with the suite still green.
+    var el2 = crab_fs_path(sc1, fsdir, "tiny.bin");
+    var tfd = crab_fs_open_w(sc1, el2);
+    sys_write(tfd, "\x7fEL", 3);
+    sys_close(tfd);
+    assert_eq(crab_is_elf(sc1, el2), 0, "three bytes of the magic is NOT the magic — a short read is not an ELF");
+    assert_eq(crab_is_elf("build/definitely-not-here", 24), 0 - 1, "an unreadable path is -1, not 0 — unknown is not 'no'");
+    assert_eq(crab_fs_launch(fsdir, "..", sc1), CRAB_FS_EBADNAME, "open refuses '..' before reading anything");
+    assert_eq(crab_fs_delete(fsdir, "notelf.txt", 0, sc1), CRAB_FS_OK, "cleanup: the non-ELF");
+    assert_eq(crab_fs_delete(fsdir, "tiny.bin", 0, sc1), CRAB_FS_OK, "cleanup: the short file");
+    assert_eq(crab_fs_delete("build", "m4test", 1, sc1), CRAB_FS_OK, "cleanup: the scratch directory");
+
+    # --- coverage group 1: the comparator, directly -----------------------------------------------
+    # ⛔ `crab_entry_cmp` was exercised ONLY through `crab_sort_entries`, so every rule was asserted
+    # in aggregate and none of them separately. A direct table pins each rule where it lives.
+    var ca = alloc(4 * 64); var casz = alloc(4 * 8); var camt = alloc(4 * 8);
+    t_entry(ca, 0, "beta",  1);  store64(casz + 0,  0 - 1); store64(camt + 0,  100);
+    t_entry(ca, 1, "alpha", 0);  store64(casz + 8,  500);   store64(camt + 8,  900);
+    t_entry(ca, 2, "Gamma", 0);  store64(casz + 16, 500);   store64(camt + 16, 0 - 1);
+    t_entry(ca, 3, "alpha", 0);  store64(casz + 24, 100);   store64(camt + 24, 50);
+    # ⛔ DIRECTORIES FIRST OUTRANKS THE KEY, on every mode — the rule that makes a folder findable.
+    assert(crab_entry_cmp(ca, casz, camt, 0, 1, CRAB_SORT_NAME) < 0, "a dir precedes a file under NAME");
+    assert(crab_entry_cmp(ca, casz, camt, 0, 1, CRAB_SORT_SIZE) < 0, "...under SIZE, despite having no size");
+    assert(crab_entry_cmp(ca, casz, camt, 0, 1, CRAB_SORT_MTIME) < 0, "...under MTIME");
+    assert(crab_entry_cmp(ca, casz, camt, 0, 1, CRAB_SORT_KIND) < 0, "...and under KIND");
+    assert(crab_entry_cmp(ca, casz, camt, 1, 0, CRAB_SORT_NAME) > 0, "...and the relation is antisymmetric");
+    # NAME is case-insensitive, and is every other mode's tiebreak.
+    assert(crab_entry_cmp(ca, casz, camt, 1, 2, CRAB_SORT_NAME) < 0, "alpha before Gamma — case-folded, not byte order");
+    assert_eq(crab_entry_cmp(ca, casz, camt, 1, 1, CRAB_SORT_NAME), 0, "an entry equals itself");
+    # ⚠ Two files of EQUAL size must fall through to NAME rather than to readdir order.
+    assert(crab_entry_cmp(ca, casz, camt, 1, 2, CRAB_SORT_SIZE) < 0, "equal sizes -> NAME decides, never the buffer order");
+    # ⛔ The -1 sentinel is "unstattable", and SIZE is largest-first, so it must sink.
+    assert(crab_entry_cmp(ca, casz, camt, 1, 3, CRAB_SORT_SIZE) < 0, "500 outranks 100 under largest-first SIZE");
+    assert(crab_entry_cmp(ca, casz, camt, 1, 2, CRAB_SORT_MTIME) < 0, "a dated file precedes an undated one under MTIME");
+
+    # --- coverage group 1: the case folder, the messages, and the notice ---------------------------
+    assert_eq(crab_lower(65), 97, "'A' folds to 'a'");
+    assert_eq(crab_lower(90), 122, "'Z' folds to 'z'");
+    assert_eq(crab_lower(97), 97, "'a' is already folded");
+    assert_eq(crab_lower(64), 64, "'@' is below 'A' and passes through untouched");
+    assert_eq(crab_lower(91), 91, "'[' is above 'Z' and passes through — the boundary either side");
+    assert_eq(crab_lower(46), 46, "'.' passes through, which is what keeps dotfiles sorting naturally");
+    # ⚠ Every result code needs its OWN sentence, or a refusal cannot be told from another.
+    assert(load8(crab_fs_msg(CRAB_FS_OK)) != 0, "OK has a sentence");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EEXIST), crab_fs_msg(CRAB_FS_ESAME)), 0, "exists != same-path");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EBADNAME), crab_fs_msg(CRAB_FS_ETOOLONG)), 0, "bad-name != too-long");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_ENOEXEC), crab_fs_msg(CRAB_FS_ESYS)), 0, "no-handler != kernel-refused");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EIO), crab_fs_msg(CRAB_FS_OK)), 0, "a part-way failure does not read as success");
+    assert(load8(crab_fs_msg(0 - 999)) != 0, "an unknown code still gets a sentence, never an empty status line");
+    # The notice channel: set, read, cleared.
+    crab_clear_notice();
+    assert_eq(crab_get_notice(), 0, "no notice by default");
+    crab_set_notice("hello");
+    assert(t_streq(crab_get_notice(), "hello"), "a notice is what was set");
+    crab_clear_notice();
+    assert_eq(crab_get_notice(), 0, "...and clearing really clears it");
+
+    # --- coverage group 1: the listing accessors reset per call ------------------------------------
+    # ⚠ `main.cyr` captures pane state straight after each listing and depends on these being fresh.
+    # If a future edit moved the reset out of `crab_readdir_into`, both panes would inherit whichever
+    # listing errored last — and nothing else in this suite would notice.
+    crab_readdir_into("/bin", dbuf);
+    assert_eq(crab_listing_err(), 0, "a host listing reports no error");
+    assert_eq(crab_listing_total(), 0 - 1, "...and an undetermined total");
+
     # --- the path cap -----------------------------------------------------------------------------
     # ⚠ A name that cannot be joined within CRAB_PATH_MAX is refused, never truncated — a truncated
     # path is a DIFFERENT path, and this layer deletes things.
