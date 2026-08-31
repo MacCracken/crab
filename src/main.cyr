@@ -145,7 +145,7 @@ fn main(): i64 {
     # in `main.cyr` is reachable from `tests/crab.tcyr`, so deleting the install broke no test while
     # restoring a 77 KB-per-frame leak. `crab_render` now owns and installs it — see `src/ui.cyr`.
 
-    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate);
+    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total());
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
@@ -512,6 +512,25 @@ fn main(): i64 {
                         # the selection or descended — and then the gate cancelled, having already acted.
                         # The comment above this gate claimed keys were resolved here first; they were not.
                         if (crab_get_notice() != 0) { crab_clear_notice(); }
+                        # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
+                        # OPERATOR CANNOT STOP IS A WORSE CONTROL THAN A BLOCKING ONE: the blocking
+                        # version at least ended by itself. Shipped in the same change as the
+                        # stepping, not after it.
+                        # ⚠ Checked BEFORE every other binding and consumes the key, so Esc during a
+                        # transfer cannot also mean whatever Esc comes to mean later.
+                        if (u == 0x29) {                                       # Esc
+                            if (crab_op_active() == 1) {
+                                crab_copy_cancel();
+                                crab_set_notice("transfer cancelled");
+                                crab_say("crab: transfer cancelled\n");
+                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                lstate = crab_pane_state(ln, crab_listing_err());
+                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                rstate = crab_pane_state(rn, crab_listing_err());
+                                if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                            }
+                        }
                         if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
                         if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
                         if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
@@ -593,20 +612,34 @@ fn main(): i64 {
                                 } else {
                                     crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
                                     var rcc = 0;
-                                    if (u == 0x06) {
-                                        rcc = crab_fs_copy(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
-                                    } else {
+                                    # ⭐ A MOVE STILL TRIES `rename` FIRST and only steps when it
+                                    # refuses — the common case (both panes on one filesystem) never
+                                    # reads a byte, finishes instantly, and shows no bar at all.
+                                    var started = 0;
+                                    if (u == 0x10) {
                                         rcc = crab_fs_move(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
-                                    }
-                                    crab_set_notice(crab_fs_msg(rcc));
+                                        if (rcc == CRAB_FS_OK) { started = 0; }
+                                        else { started = 1; }
+                                    } else { started = 1; }
+                                    if (started == 1) {
+                                        var okind = CRAB_OP_COPY;
+                                        if (u == 0x10) { okind = CRAB_OP_MOVE; }
+                                        rcc = crab_copy_begin(okind, srcp, namescr, dstp, pathscr, pathscr2, statbuf);
+                                        # ⚠ OK here means STARTED, not finished — the idle tick
+                                        # carries it from now on and reports the outcome.
+                                        if (rcc == CRAB_FS_OK) { crab_set_notice("transferring..."); }
+                                        else { crab_set_notice(crab_fs_msg(rcc)); }
+                                    } else { crab_set_notice(crab_fs_msg(rcc)); }
                                     if (u == 0x06) { crab_say("crab: copy "); } else { crab_say("crab: move "); }
                                     crab_say(namescr); crab_say(" -> "); crab_say(crab_fs_msg(rcc)); crab_say("\n");
-                                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                    lstate = crab_pane_state(ln, crab_listing_err());
-                                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                    rstate = crab_pane_state(rn, crab_listing_err());
-                                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
-                                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                    if (crab_op_active() == 0) {
+                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                        lstate = crab_pane_state(ln, crab_listing_err());
+                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                        rstate = crab_pane_state(rn, crab_listing_err());
+                                        if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                        if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                    }
                                 }
                             }
                         }
@@ -680,7 +713,7 @@ fn main(): i64 {
             # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
             # into a surface the compositor had just destroyed, and leaking a full render to do it.
             if (running == 1) {
-                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate);
+                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total());
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
                     setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
@@ -747,7 +780,7 @@ fn main(): i64 {
                         if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                     }
                     crab_say("crab: key repeat\n");
-                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate);
+                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total());
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
                 }
@@ -761,6 +794,35 @@ fn main(): i64 {
         # this change exists to remove.
         # ⚠ ONE PANE PER TICK, LEFT FIRST — not both. Draining both would double the tick's cost and
         # give back half of what the batching bought.
+        # ⭐⭐ THE TRANSFER STEP (M4, v0.7.3) — DRIVEN BY THE SAME IDLE TICK AS THE STAT DRAIN, and
+        # placed BEFORE it deliberately: a transfer the operator started and is watching outranks
+        # filling in size columns they have not asked about. Both are bounded, so neither starves.
+        # ⛔ THIS IS WHAT MAKES A PROGRESS BAR MEAN ANYTHING. The copy used to run to completion
+        # inside the keypress branch, so the loop drew no frames while it ran — a bar driven from
+        # that renders once at 0 %, never repaints, and vanishes. dhancha 0.9.22 shipping `PROGRESS`
+        # did not fix that; this does.
+        if ((running == 1) && (ev == 0)) {
+            if (crab_op_active() == 1) {
+                var cstep = crab_copy_step();
+                if (cstep != 1) {
+                    # Finished or failed. Both panes are stale: the source lost an entry on a move,
+                    # the destination gained one either way.
+                    crab_set_notice(crab_fs_msg(cstep));
+                    crab_say("crab: transfer -> "); crab_say(crab_fs_msg(cstep)); crab_say("\n");
+                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                    lstate = crab_pane_state(ln, crab_listing_err());
+                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                    rstate = crab_pane_state(rn, crab_listing_err());
+                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                }
+                # ⚠ REDRAW EVERY STEP, not only on completion — the bar moving IS the point, and a
+                # tray that updates once at the end is the blocking copy with extra steps.
+                var s5 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total());
+                if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
+            }
+        }
         if ((running == 1) && (ev == 0)) {
             var sdone = crab_stat_batch(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf, CRAB_STAT_BATCH);
             if (sdone == 0) {
@@ -777,7 +839,7 @@ fn main(): i64 {
                         crab_say("crab: stat-drain complete\n");
                     }
                 }
-                var s4 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate);
+                var s4 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total());
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }
             }

@@ -80,7 +80,7 @@ fn t_render(w, h): i64 {
     # own surface. Sharing one here would make two `t_render()` results alias and any test comparing
     # them would be comparing a frame with itself.
     var surf = dh_surface_new(w, h);
-    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK);
+    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -449,7 +449,7 @@ fn main() {
     var rb = alloc(8); store64(rb, 0);
 
     # Frame A: left pane active, selection 0.
-    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
+    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert(fa != 0, "frame A rendered into the caller's surface");
     var nbytes = rw * rh * 4;
     var snap = alloc(nbytes);
@@ -459,7 +459,7 @@ fn main() {
 
     # Frame B: the OTHER pane active, a different selection — a visibly different picture.
     store64(ra, 0); store64(rb, 0);
-    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
+    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert_eq(fb, fa, "the surface hands back the SAME render target — this is the reuse");
     var diff = 0;
     bi = 0;
@@ -473,7 +473,7 @@ fn main() {
 
     # Frame A again, into the same reused target. Every byte must match the snapshot.
     store64(ra, 0); store64(rb, 0);
-    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
+    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert_eq(fa2, fa, "...still the same target on the third render");
     var residue = 0;
     bi = 0;
@@ -487,7 +487,7 @@ fn main() {
     bi = 0;
     while (bi < nbytes) { store8(apix + bi, 0x5A); bi = bi + 1; }
     store64(ra, 0); store64(rb, 0);
-    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     var survived = 0;
     bi = 0;
     while (bi < nbytes) {
@@ -499,7 +499,7 @@ fn main() {
     # ⚠ AND TWO SURFACES STILL GIVE TWO PICTURES — the escape hatch `src/render_test.cyr` depends on.
     var rsurf2 = dh_surface_new(rw, rh);
     store64(ra, 0); store64(rb, 0);
-    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK);
+    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
     # ================================================================
@@ -539,7 +539,7 @@ fn main() {
     dh_frame_arena_set(0);
     assert_eq(dh_frame_arena_get(), 0, "the frame arena can be uninstalled");
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert(dh_frame_arena_get() != 0, "a render installs one BY ITSELF — no step for main() to forget");
     assert_eq(dh_frame_arena_get(), crab_frame_arena(), "...crab's own, not some other arena");
 
@@ -553,10 +553,10 @@ fn main() {
     assert(tiny != 0, "a deliberately tiny arena is created");
     dh_frame_arena_set(tiny);
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     var n0 = alloc_used();
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert(alloc_used() - n0 > 0,
       "a frame that cannot fit its arena SPILLS to the global heap instead of failing");
 
@@ -574,7 +574,7 @@ fn main() {
 
     # Warm-up: the first arena'd frame establishes what one frame costs.
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     var one_frame = arena_used(farena);
     assert(one_frame > 0, "the frame really landed in the arena");
     var cap0 = arena_capacity_total(farena);
@@ -583,7 +583,7 @@ fn main() {
     var af = 0;
     while (af < 20) {
         store64(asl, 0); store64(asr, 0);
-        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
         af = af + 1;
     }
     # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
@@ -600,7 +600,7 @@ fn main() {
     # ⛔ AND THE PIXELS ARE STILL RIGHT. A frame whose widgets were freed mid-render would still
     # produce *a* surface; this is the check that it produces the right one.
     store64(asl, 0); store64(asr, 0);
-    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK);
+    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
     assert(asds != 0, "an arena'd frame still renders");
     t_bad_alpha = 0; t_bad_premul = 0;
     assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
@@ -823,7 +823,7 @@ fn main() {
     }
     var hsl = alloc(8); store64(hsl, 0);
     var hsr = alloc(8); store64(hsr, 0);
-    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK);
+    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1);
 
     var hb = alloc(16);
     # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
@@ -1577,6 +1577,121 @@ fn main() {
     crab_readdir_into("/bin", dbuf);
     assert_eq(crab_listing_err(), 0, "a host listing reports no error");
     assert_eq(crab_listing_total(), 0 - 1, "...and an undetermined total");
+
+    # --- M4: the STEPPED copy, and the tray it makes possible --------------------------------------
+    # ⭐⭐ THIS IS WHAT MAKES A PROGRESS BAR MEAN ANYTHING. The copy used to run to completion inside
+    # the keypress branch, so the event loop drew no frames while it ran. dhancha 0.9.22 shipping
+    # `PROGRESS` did not fix that — stepping it does. These assertions drive the state machine by
+    # hand, exactly as the idle tick does.
+    assert_eq(crab_fs_mkdir("build", "m4step", sc1, fstat), CRAB_FS_OK, "a scratch dir for the stepped copy");
+    assert_eq(crab_fs_mkdir("build", "m4step2", sc1, fstat), CRAB_FS_OK, "...and its destination");
+    var stepdir = "build/m4step";
+    var stepdst = "build/m4step2";
+    # A source large enough to need several steps: 64 chunks/step x 4096 = 262,144 B per step, so
+    # ~300 KB takes two.
+    var bigp = crab_fs_path(sc1, stepdir, "big.bin");
+    var bfd3 = crab_fs_open_w(sc1, bigp);
+    assert(bfd3 >= 0, "a multi-step source");
+    var kb = alloc(1024);
+    var kbi = 0;
+    while (kbi < 1024) { store8(kb + kbi, 65 + (kbi & 31)); kbi = kbi + 1; }
+    var kbw = 0;
+    while (kbw < 300) { sys_write(bfd3, kb, 1024); kbw = kbw + 1; }      # 307,200 B
+    sys_close(bfd3);
+
+    assert_eq(crab_op_active(), 0, "nothing is running before it starts");
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, stepdir, "big.bin", stepdst, sc1, sc2, fstat), CRAB_FS_OK,
+      "a stepped copy starts");
+    assert_eq(crab_op_active(), 1, "...and is now in flight");
+    # ⭐ THE DENOMINATOR — nothing asked for this before, so the bar could only ever be indeterminate.
+    assert_eq(crab_op_total(), 307200, "the SOURCE was stat'd, so the bar has a real denominator");
+    assert_eq(crab_op_done(), 0, "...and nothing has moved yet");
+    # ⛔ ONE TRANSFER AT A TIME. A second start must be refused, not silently replace the first —
+    # replacing it would leak two descriptors and abandon a half-written file.
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, stepdir, "big.bin", stepdst, sc1, sc2, fstat), CRAB_FS_EBUSY,
+      "a second transfer is refused while one is running");
+    # ⚠ THE STEP RETURNS 1 WHILE RUNNING — that is what keeps the idle tick calling it.
+    var st1 = crab_copy_step();
+    assert_eq(st1, 1, "the first step reports MORE TO DO");
+    assert(crab_op_done() > 0, "...and moved some bytes");
+    assert(crab_op_done() < crab_op_total(), "...but not all of them — this is the case a bar exists for");
+    var guard = 0;
+    var last = crab_copy_step();
+    while (last == 1) { guard = guard + 1; if (guard > 100) { last = CRAB_FS_EIO; } else { last = crab_copy_step(); } }
+    assert_eq(last, CRAB_FS_OK, "the copy finishes cleanly");
+    assert_eq(crab_op_active(), 0, "...and the record returns to idle");
+    # The bytes really arrived, all of them.
+    var dstp2 = crab_fs_path(sc2, stepdst, "big.bin");
+    assert_eq(crab_fs_stat_size(sc2, dstp2, fstat), 307200, "every byte crossed, across multiple steps");
+    # ⛔ AND THE SOURCE SURVIVES A COPY.
+    var srcp2 = crab_fs_path(sc1, stepdir, "big.bin");
+    assert_eq(crab_fs_stat_size(sc1, srcp2, fstat), 307200, "...and a COPY left the source alone");
+
+    # --- the stepped MOVE unlinks its source, but only at EOF --------------------------------------
+    assert_eq(crab_fs_delete(stepdst, "big.bin", 0, sc1), CRAB_FS_OK, "clear the destination");
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, stepdir, "big.bin", stepdst, sc1, sc2, fstat), CRAB_FS_OK,
+      "a stepped move starts");
+    crab_copy_step();
+    # ⛔⛔ THE SOURCE IS STILL THERE MID-MOVE. A move that unlinked early would lose the file outright
+    # if the machine died between the unlink and the last chunk.
+    var mid = crab_fs_path(sc1, stepdir, "big.bin");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1,
+      "mid-move the SOURCE still exists — it is unlinked only at EOF");
+    guard = 0;
+    last = crab_copy_step();
+    while (last == 1) { guard = guard + 1; if (guard > 100) { last = CRAB_FS_EIO; } else { last = crab_copy_step(); } }
+    assert_eq(last, CRAB_FS_OK, "the move finishes");
+    var gone = crab_fs_path(sc1, stepdir, "big.bin");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 0, "...and NOW the source is gone");
+    var landed = crab_fs_path(sc2, stepdst, "big.bin");
+    assert_eq(crab_fs_stat_size(sc2, landed, fstat), 307200, "...with every byte at the destination");
+
+    # --- cancel: the partial destination is REMOVED, the source is not ----------------------------
+    # ⛔⛔ THE ASYMMETRY IS THE POINT. On an I/O failure the partial file is LEFT (the filesystem is
+    # already unhappy and writing more into it is not a repair). On a CANCEL nothing is wrong — the
+    # operator changed their mind — and leaving a truncated file wearing the real file's name is the
+    # worst outcome available, because the next reader cannot tell it from the whole thing.
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, stepdst, "big.bin", stepdir, sc1, sc2, fstat), CRAB_FS_OK,
+      "a transfer to cancel");
+    crab_copy_step();
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "cancel");
+    assert_eq(crab_op_active(), 0, "...stops the transfer");
+    var partial = crab_fs_path(sc1, stepdir, "big.bin");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 0,
+      "⛔ the PARTIAL destination is removed — a truncated file wearing the real name is the worst outcome");
+    var kept = crab_fs_path(sc2, stepdst, "big.bin");
+    assert_eq(crab_fs_stat_size(sc2, kept, fstat), 307200,
+      "⛔⛔ and a cancelled MOVE leaves the source WHOLE — a cancel is a no-op, not a half-move");
+    # ⚠ Cancelling when nothing is running is harmless, not an error.
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "cancelling nothing is fine");
+    assert_eq(crab_copy_step(), 0, "and stepping nothing reports idle, not an error");
+
+    # --- the tray's percentage --------------------------------------------------------------------
+    var pctb = alloc(16);
+    crab_tray_pct(pctb, 0, 100);       assert(t_streq(pctb, "0%"), "0 of 100 reads 0%");
+    crab_tray_pct(pctb, 68, 100);      assert(t_streq(pctb, "68%"), "68 of 100 reads 68%");
+    crab_tray_pct(pctb, 100, 100);     assert(t_streq(pctb, "100%"), "complete reads 100%");
+    crab_tray_pct(pctb, 1, 3);         assert(t_streq(pctb, "33%"), "truncating, not rounding");
+    # ⛔ MULTIPLY BEFORE DIVIDING — `done * (100 / total)` truncates to 0 for any file over 100 bytes,
+    # so the tray would read 0% for the whole transfer and jump to 100% at the end.
+    crab_tray_pct(pctb, 150000, 300000); assert(t_streq(pctb, "50%"), "a real byte count reads 50%, not 0%");
+    # ⛔ "--", NOT "0%", WITH NO DENOMINATOR. They are different facts, and printing 0% beside a bar
+    # that is deliberately NOT showing 0% would make the two disagree on screen.
+    crab_tray_pct(pctb, 40, 0 - 1);    assert(t_streq(pctb, "--"), "an unknown total reads '--', never 0%");
+    # ⚠ An EMPTY file is a real case and is complete the moment it starts — not a divide by zero.
+    crab_tray_pct(pctb, 0, 0);         assert(t_streq(pctb, "100%"), "an empty file is complete, not 0% and not a fault");
+    crab_tray_pct(pctb, 0 - 5, 100);   assert(t_streq(pctb, "0%"), "a negative done clamps to 0%");
+    crab_tray_pct(pctb, 500, 100);     assert(t_streq(pctb, "100%"), "...and an over-count clamps to 100%");
+
+    # --- the tray only exists while something is running -------------------------------------------
+    # ⚠ A dead progress strip along the bottom spends 31px of every window on nothing.
+    assert_eq(crab_tray_wanted(0), 0, "no transfer -> no tray");
+    assert_eq(crab_tray_wanted(""), 0, "...and an empty name is no transfer either");
+    assert_eq(crab_tray_wanted("big.bin"), 1, "a running transfer -> a tray");
+
+    assert_eq(crab_fs_delete(stepdst, "big.bin", 0, sc1), CRAB_FS_OK, "cleanup: the moved file");
+    assert_eq(crab_fs_delete("build", "m4step", 1, sc1), CRAB_FS_OK, "cleanup: source dir");
+    assert_eq(crab_fs_delete("build", "m4step2", 1, sc1), CRAB_FS_OK, "cleanup: dest dir");
 
     # --- the path cap -----------------------------------------------------------------------------
     # ⚠ A name that cannot be joined within CRAB_PATH_MAX is refused, never truncated — a truncated

@@ -532,7 +532,9 @@ oracle, not the cursor.
   ⚠ **`Deferral #10` is cited here and defined nowhere** — there is no deferral registry in the repo.
   Either write one or drop the reference.
 - **Transfer tray** (1c) — active operations with progress, rate and ETA.
-  **Gate: dhancha** PROGRESS widget.
+  ✅ **SHIPPED in v0.7.3** — the copy is stepped off the idle tick, Esc cancels it, the source is
+  stat'd for a real denominator, and the bar is dhancha 0.9.22's `PROGRESS`. ⛔ The widget was never
+  the gate; crab's own synchronous copy was. ⚠ **Rate and ETA are still absent** — see below.
 - **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
   **Gate: dhancha** context menu + modal sheet.
 - ⭐⭐ **Drag between panes — DONE (2026-08-31), in crab's own model.** Press a row, drag past a
@@ -553,9 +555,47 @@ oracle, not the cursor.
   is the other pane's **directory**, not the row under the pointer — a row-targeted drop is a
   different gesture with a different meaning, and guessing wrong moves a file somewhere nobody
   pointed at. Folders are refused for the same reason `c`/`m` refuse them: recursion needs the tray.
-- ⛔ **The genuinely gated part of M4 is the transfer tray** (dhancha PROGRESS), and it is what
-  blocks recursive copy and recursive delete: neither may go behind a keypress without a surface
-  that shows what is happening and a way to stop it.
+- ⛔⛔ **THE TRANSFER TRAY IS NOT GATED ON dhancha, AND THIS LINE SAID IT WAS — a misattribution
+  that sends the work to the wrong repo.** dhancha **0.9.22** now ships `PROGRESS`
+  (`dh_progress_new` / `_set` / `_permille`, determinate **and** indeterminate). That was necessary
+  and it is **not sufficient**.
+  ⛔ **The real blocker is inside crab**: `crab_fs_copy` runs its whole read/write loop
+  **synchronously inside the `c`/`m` keypress branch** (`src/main.cyr:597`), so the event loop draws
+  no frames while it executes. A bar dropped into crab today renders once at 0 %, never repaints,
+  and vanishes when the copy returns. **A progress bar over a blocking call is a decoration.**
+  ⇒ **The work, in order:**
+  1. **Step the copy.** Split `crab_fs_copy` into a `crab_copy_step()` doing N chunks per call, with
+     `(fd_in, fd_out, done, total, started_ms)` in a **globally-`alloc`'d** operation record — it
+     outlives frames, so it must **not** be arena'd. Drive it from the idle tick at
+     `src/main.cyr:765`, which already has exactly this shape for `crab_stat_batch` and already
+     re-renders when it did work.
+  2. **Add Esc cancel in the same change.** A stepped operation the operator cannot stop is a worse
+     control than a blocking one.
+  3. **Get a denominator.** `crab_fs_copy` stats only the *destination* for its `EEXIST` guard and
+     never stats the source; `crab_fs_exists` discards the statbuf it just filled. One `sys_stat` on
+     the source after the guard, or take the size crab already holds in `lsizes`/`rsizes`. ⚠ On the
+     host the answer is always -1, which flows into indeterminate exactly as designed.
+  4. **The tray itself** — a full-width strip above the status line (the root is already `BOX_V`
+     with `panes` reserving `h - 24`), one `BOX_V` per operation: a title line (name LABEL at
+     flex 1 + a `"68%"` LABEL in `dh_theme_mute()`) over `dh_progress_new(4)` at flex 1.
+     ⚠ **Not** a right-hand inspector column — that is M5 and does not exist yet, so it is the one
+     piece of mockup position that must not be lifted.
+     ⚠ Put the bar in a `BOX_V`: in a `BOX_H` its `pref_h` is the *cross* axis, where ALIGN_STRETCH
+     ignores it. crab names **no colour** on the bar.
+  ⚠ **And recursion is what actually blocks recursive copy/delete** — the tray is the surface that
+  makes it stoppable, but the stepping above is the prerequisite for both.
+
+- ⚠ **Rate and ETA are not gated on any dependency either.** `clock_now_ms()` is already linked and
+  already called four times in crab. They are gated on (i) the copy being stepped — a synchronous
+  call has no elapsed time to sample — and (ii) the operation being long enough to mean anything: a
+  single file through a 4 KiB `CRAB_COPY_CHUNK` finishes well under a second on ext2, so a rate over
+  that window is noise. The mockup's `118 MB/s · 3m 04s left` describes an 812-file ingest, which is
+  M4 **plus** recursion **plus** multi-select.
+  ⚠ `552 / 812 files` has no numerator today (crab copies one file per keypress and has no
+  multi-select), `2 ACTIVE` has no queue, and volume names are M6.
+  ⭐ **Shipping without them is not a compromise against the design** — the canvas's own 420x560
+  variant drops the detail line entirely and degrades `2 ACTIVE` to `2`. **Title + percent + bar is
+  a drawn variant**, and it is v0.8.0's tray.
 - ⭐ **Empty pane states — DONE (2026-08-30).** A pane with no rows had one appearance and four
   meanings; it now says which. ⛔ **There is no "permission-denied" state and this line should stop
   asking for one**: agnos is single-user always-root, `ext2_readdir_at_sys` has no `EACCES` arm, and

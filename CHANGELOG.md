@@ -2,6 +2,100 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.3] - 2026-08-31 — the copy steps, and the transfer tray exists
+
+### Added — M4: the stepped copy. What makes a progress bar mean anything
+
+⛔⛔ **A PROGRESS BAR OVER A BLOCKING CALL IS A DECORATION.** `crab_fs_copy` ran its whole read/write
+loop inside the `c`/`m` keypress branch, so the event loop drew **no frames** while it executed — a
+bar driven from that renders once at 0 %, never repaints, and vanishes when the copy returns.
+**dhancha 0.9.22 shipping `PROGRESS` did not fix that; this does.** The roadmap recorded the tray as
+"genuinely gated on a dhancha PROGRESS widget", which sent the work to the wrong repo — corrected.
+
+The copy is now a state machine that does at most `CRAB_COPY_STEP_CHUNKS` (64) chunks per call and
+returns, driven by the **existing** idle tick that already drains `crab_stat_batch` a bounded batch
+at a time and already re-renders when it did work. No new loop, no new timing model.
+
+⛔ **The operation record is `alloc`, not `dh_falloc`, and that is not a style choice.** It holds two
+open file descriptors across many frames; `dh_falloc` draws from the frame arena, which
+`dh_frame_begin` rewinds every render — so the fds would be handed out as widget memory mid-transfer
+and the copy would write into a widget tree. Everything that outlives a frame is global; everything
+that does not is arena'd.
+
+⭐ **A move still tries `rename` first** and only steps when it refuses, so the common case (both
+panes on one filesystem) never reads a byte and never shows a bar.
+⛔ **A move unlinks its source only at EOF.** Unlinking early would lose the file outright if the
+machine died between the unlink and the last chunk.
+⛔ **One transfer at a time** (`CRAB_FS_EBUSY`). Silently replacing a running one would leak two
+descriptors and abandon a half-written file.
+
+### Added — Esc cancels, and a cancel is not an I/O failure
+
+⛔ **A stepped operation the operator cannot stop is a worse control than a blocking one** — the
+blocking version at least ended by itself. Shipped in the same change as the stepping, not after it.
+
+⛔⛔ **A CANCEL DELETES THE PARTIAL DESTINATION; AN I/O FAILURE DOES NOT.** That asymmetry is the
+whole difference between the two paths. On an I/O error the filesystem is already unhappy and issuing
+another write-path syscall into it is how a bad situation becomes worse — so the evidence is left in
+place. On a cancel nothing is wrong: the operator changed their mind, and leaving a truncated file
+wearing the real file's name is the worst outcome available, because the next reader cannot tell it
+from the whole thing. ⚠ The source is never touched: a cancelled move is a no-op, not a half-move.
+
+### Added — `crab_fs_stat_size`, so the bar has a denominator
+
+⭐ **Nothing asked this before, which is why the tray had none.** `crab_fs_exists` stats the
+*destination* for the overwrite guard and throws away the statbuf it just filled; the source was
+opened without ever being measured. ⚠ **-1 is a first-class answer**, not a failure to handle: it
+flows into the operation's total and the bar renders **indeterminate**, which is exactly the state
+dhancha 0.9.22 added `den <= 0` for. On a host build that is the normal answer and the copy still runs.
+
+### Added — M4: the transfer tray
+
+A strip above the status line: a title line (name + percentage) over a `dh_progress_new(4)` bar.
+
+⛔ **A strip, not a right-hand inspector column.** The canvas draws the tray in an inspector — but
+that column is **M5** and does not exist, so lifting its *position* now would mean building half of
+M5 to hold one bar. The canvas's own 420 px variant already drops the tray's detail line, so a
+compact form is a drawn variant rather than a compromise.
+⚠ **The tray is not a permanent fixture** — when nothing is running the band is not reserved, no
+widgets are built, and the panes get the 31 px back.
+⛔ **crab names no colour on the bar.** That is the whole reason `PROGRESS` is a dhancha widget
+rather than a BOX crab tints itself.
+⛔ **The percentage is a sibling label, not text on the bar** — dhancha's own header says why: one
+centred "68 %" straddling the fill edge cannot be legible in a single ink.
+⛔ **An unknown total reads `"--"`, never `"0%"`.** They are different facts, and printing 0 % beside
+a bar that is deliberately *not* showing 0 % would make the two disagree on screen. An **empty file**
+is a real case and reads 100 % — complete the moment it starts, not a divide by zero.
+
+### Fixed — a layering inversion I introduced in this change
+
+⛔ The tray first read the operation record by calling `crab_op_active()` from `src/ui.cyr`. That
+compiled through `main.cyr` and left `src/render_test.cyr` — which includes `ui.cyr` **alone** — with
+four undefined symbols. `ui.cyr` sits *below* `app.cyr` in the include chain; reaching up into it is
+the exact inversion this codebase carved `path.cyr` and `app.cyr` out to prevent. The tray now takes
+`opname` / `opdone` / `optotal` as parameters, the same rule `lstate` / `rstate` already follow.
+
+### Changed — dependency: dhancha 0.9.21 → **0.9.22**
+
+Released and pushed first, then declared, then check 4 re-run — the order the 2026-08-28 phantom-tag
+failure exists to enforce. Remote SHA verified against the sibling before the bump.
+
+### Verified
+
+**476 → 520 passing**; `render_test` 26/26; reference coverage **80 %** (88/109) held while 13
+functions were added; both targets build; `fmt --check` clean; `lint` at baseline.
+
+⭐ **Seven mutations, each of which fails the suite** — a move that unlinks at the start instead of at
+EOF; a cancel that leaves the partial destination; a second transfer silently replacing the first; the
+source never stat'd; a step that never yields (one giant blocking step again); the percentage
+dividing before multiplying; and an unknown total printing `0%`.
+
+⚠ **Check 4 re-run after the dep bump** with all four `path` overrides disabled: 6 deps / 0 errors,
+both targets, and byte-identical binaries.
+⚠ **Not covered:** the idle-tick wiring itself. The step function is driven by hand in the suite;
+that it is called from the tick, and that the tray repaints per step, is agnos-only event-loop code
+no host test can reach — the same irreducible gap `main.cyr` has always had.
+
 ## [0.7.2] - 2026-08-31 — Enter opens, the second pane leaves, and files move by drag
 
 ⚠ **Everything here landed AFTER the `0.7.1` tag** (`4ac21eb`, pushed). It was written into 0.7.1's

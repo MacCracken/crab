@@ -758,6 +758,25 @@ fn crab_fs_exists(path, plen, statbuf): i64 {
     return 1;
 }
 
+# @public — the byte size of `path`, or -1 if it could not be stat'd.
+#
+# ⭐ NOTHING ASKED THIS BEFORE, WHICH IS WHY THE TRAY HAD NO DENOMINATOR. `crab_fs_exists` stats the
+# DESTINATION for the overwrite guard and throws the statbuf away; the source was opened without ever
+# being measured. A stepped copy needs the total up front or its bar can only be indeterminate.
+# ⚠ -1 IS A FIRST-CLASS ANSWER, not a failure to handle: it flows into `CRAB_OP_TOTAL` and the bar
+# renders indeterminate, which is precisely the state dhancha 0.9.22 added `den <= 0` for. On a host
+# build it is the normal answer and the copy still runs.
+fn crab_fs_stat_size(path, plen, statbuf): i64 {
+    var rc = 0 - 1;
+    #ifdef CYRIUS_TARGET_AGNOS
+    rc = sys_stat(path, plen, statbuf);
+    #else
+    rc = sys_stat(path, statbuf);
+    #endif
+    if (rc < 0) { return 0 - 1; }
+    return load64(statbuf + STAT_SIZE);
+}
+
 # ⚠ Named results, because a bare -1 from six operations cannot be told apart at the call site and
 # the status line has to say WHICH refusal happened.
 enum CrabFs {
@@ -770,6 +789,7 @@ enum CrabFs {
     CRAB_FS_EIO      = -15;    # a copy failed part-way through
     CRAB_FS_ENOEXEC  = -16;    # not an executable, and crab has no handler for it
     CRAB_FS_ESPAWNLEN = -17;   # the path exceeds what `spawn_path` accepts
+    CRAB_FS_EBUSY    = -18;    # a transfer is already in flight — crab runs one at a time
 }
 
 # @public — may crab act on this entry name? 1 = yes, 0 = refuse.
@@ -1505,6 +1525,205 @@ fn crab_fs_launch(dir, name, pathscr): i64 {
     return CRAB_FS_OK;
 }
 
+# =================================================================================================
+# M4 — THE STEPPED COPY. What makes a transfer tray possible at all.
+# =================================================================================================
+#
+# ⛔⛔ A PROGRESS BAR OVER A BLOCKING CALL IS A DECORATION. `crab_fs_copy` runs its whole read/write
+# loop inside the keypress branch, so the event loop draws NO FRAMES while it runs: a bar driven from
+# it would render once at 0 %, never repaint, and vanish when the copy returned. The widget was never
+# the gate — dhancha 0.9.22 shipped `PROGRESS` and this is still the work.
+# ⇒ The copy becomes a state machine that does a bounded number of chunks per call and returns, and
+# the EXISTING idle tick drives it — the same tick that already drains `crab_stat_batch` a bounded
+# batch at a time and re-renders when it did work. No new loop, no new timing model.
+#
+# ⛔ THE RECORD IS `alloc`, NOT `dh_falloc`, AND THAT IS NOT A STYLE CHOICE. It holds two open file
+# descriptors across many frames. `dh_falloc` draws from the frame arena, which `dh_frame_begin`
+# rewinds every render — so the fds would be handed out as widget memory mid-transfer and the copy
+# would write into a widget tree. Everything that outlives a frame is global; everything that does
+# not is arena'd. This is the boundary.
+# ⚠ Allocated ONCE for the process, like the sort scratch and the copy buffer. One transfer at a
+# time: crab copies a single file per keypress and has no multi-select, so a queue would be
+# scaffolding for a caller that does not exist.
+enum CrabOp {
+    CRAB_OP_IDLE   = 0;
+    CRAB_OP_COPY   = 1;    # a plain copy
+    CRAB_OP_MOVE   = 2;    # a copy whose source is unlinked on success
+    # ⚠ Chunks per idle tick. `CRAB_STAT_BATCH` is 32 entries at ~1.1 ms each; a 4 KiB chunk is far
+    # cheaper, so 64 of them is a comparable slice of a tick rather than a number picked for looking
+    # round. Bigger throws away the responsiveness this exists to buy.
+    CRAB_COPY_STEP_CHUNKS = 64;
+    # Record layout. ⚠ Byte offsets, not a struct — same discipline as the readdir record.
+    CRAB_OP_KIND   = 0;
+    CRAB_OP_FIN    = 8;
+    CRAB_OP_FOUT   = 16;
+    CRAB_OP_DONE   = 24;   # bytes written so far
+    CRAB_OP_TOTAL  = 32;   # bytes expected, or -1 = unknown (INDETERMINATE)
+    CRAB_OP_NAME   = 40;   # CRAB_NAME_MAX bytes — the entry being moved, for the delete and the label
+    CRAB_OP_SRC    = 104;  # CRAB_PATH_MAX bytes — the SOURCE path, kept for the move's unlink
+    CRAB_OP_DST    = 360;  # CRAB_PATH_MAX bytes — the DESTINATION path, kept for a cancel's cleanup
+    CRAB_OP_SZ     = 616;
+}
+
+var crab_op = 0;
+
+fn crab_op_rec(): i64 {
+    if (crab_op == 0) {
+        crab_op = alloc(CRAB_OP_SZ);
+        if (crab_op != 0) { store64(crab_op + CRAB_OP_KIND, CRAB_OP_IDLE); }
+    }
+    return crab_op;
+}
+
+# @public — is a transfer in flight? 1 = yes.
+fn crab_op_active(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return 0; }
+    return 1;
+}
+
+# @public — bytes written so far, and the expected total (-1 = unknown). For the tray.
+fn crab_op_done(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    return load64(r + CRAB_OP_DONE);
+}
+
+fn crab_op_total(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0 - 1; }
+    return load64(r + CRAB_OP_TOTAL);
+}
+
+# @public — the name of the entry being transferred, or the empty string when idle.
+fn crab_op_name(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return ""; }
+    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return ""; }
+    return r + CRAB_OP_NAME;
+}
+
+# Close both descriptors and return the record to idle. Used by every exit path.
+# ⚠ ONE PLACE THAT CLOSES, so a path added later cannot forget half of it — a leaked fd in a file
+# manager is not academic: crab is long-lived and the descriptor table is not.
+fn crab_op_release(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    var fi = load64(r + CRAB_OP_FIN);
+    var fo = load64(r + CRAB_OP_FOUT);
+    if (fo >= 0) { sys_close(fo); }
+    if (fi >= 0) { sys_close(fi); }
+    store64(r + CRAB_OP_FIN, 0 - 1);
+    store64(r + CRAB_OP_FOUT, 0 - 1);
+    store64(r + CRAB_OP_KIND, CRAB_OP_IDLE);
+    return 0;
+}
+
+# @public — abandon the transfer at the operator's request. -> CRAB_FS_OK.
+#
+# ⛔⛔ A CANCEL DELETES THE PARTIAL DESTINATION; AN I/O FAILURE DOES NOT. That asymmetry is
+# deliberate and it is the whole difference between the two paths. On an I/O error the filesystem is
+# already unhappy, and issuing another write-path syscall into it is how a bad situation becomes a
+# worse one — so `crab_copy_step` leaves the evidence in place and says so. On a CANCEL nothing is
+# wrong: the operator changed their mind, and leaving a truncated file wearing the real file's name
+# is the worst outcome available — the next reader cannot tell it from the whole thing.
+# ⚠ The source is never touched. A cancelled move is a no-op, not a half-move.
+fn crab_copy_cancel(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return CRAB_FS_OK; }
+    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return CRAB_FS_OK; }
+    crab_op_release();
+    var dl = crab_cstr_len(r + CRAB_OP_DST, CRAB_PATH_MAX);
+    if (dl > 0) { crab_fs_unlink_raw(r + CRAB_OP_DST, dl); }
+    return CRAB_FS_OK;
+}
+
+# @public — begin a stepped copy (`kind` = CRAB_OP_COPY) or move (CRAB_OP_MOVE) of `name` from
+# `srcdir` to `dstdir`. -> CRAB_FS_OK once it is running, or a CRAB_FS_* refusal.
+#
+# ⭐ A MOVE STILL TRIES `rename` FIRST, in the caller, and only reaches here when it refuses — so the
+# common case (both panes on one filesystem) never reads or writes a byte and never shows a bar.
+# ⚠ THE GUARDS ARE THE SAME ONES `crab_fs_copy` USES, IN THE SAME ORDER, and they all run BEFORE
+# anything is opened — so a refused transfer has not touched the disk.
+# ⭐ AND THE TOTAL COMES FROM A STAT OF THE **SOURCE**, which nothing did before: `crab_fs_exists`
+# stats the DESTINATION for the overwrite guard and discards the statbuf it just filled. Without a
+# source size there is no denominator, and the bar could only ever be indeterminate.
+# ⚠ A FAILED STAT IS NOT A FAILED COPY. `-1` flows into `CRAB_OP_TOTAL` and the bar renders
+# indeterminate — which is exactly the state dhancha 0.9.22 added `den <= 0` for. On a host build
+# that is the normal answer, and the copy still runs.
+fn crab_copy_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return CRAB_FS_EIO; }
+    if (load64(r + CRAB_OP_KIND) != CRAB_OP_IDLE) { return CRAB_FS_EBUSY; }
+    var ls = crab_fs_path(scr1, srcdir, name);
+    if (ls < 0) { return ls; }
+    var ld = crab_fs_path(scr2, dstdir, name);
+    if (ld < 0) { return ld; }
+    if (crab_streq_n(scr1, scr2, CRAB_PATH_MAX) != 0) { return CRAB_FS_ESAME; }
+    if (crab_fs_exists(scr2, ld, statbuf) != 0) { return CRAB_FS_EEXIST; }
+    if (crab_copy_buf() == 0) { return CRAB_FS_EIO; }
+    var fin = crab_fs_open_r(scr1, ls);
+    if (fin < 0) { return CRAB_FS_ESYS; }
+    var fout = crab_fs_open_w(scr2, ld);
+    if (fout < 0) { sys_close(fin); return CRAB_FS_ESYS; }
+    # ⚠ Stat the source AFTER both opens succeed, so a stat failure cannot leave a half-open state.
+    var total = crab_fs_stat_size(scr1, ls, statbuf);
+    store64(r + CRAB_OP_KIND, kind);
+    store64(r + CRAB_OP_FIN, fin);
+    store64(r + CRAB_OP_FOUT, fout);
+    store64(r + CRAB_OP_DONE, 0);
+    store64(r + CRAB_OP_TOTAL, total);
+    crab_strcpy_n(r + CRAB_OP_NAME, name, CRAB_NAME_MAX);
+    crab_strcpy_n(r + CRAB_OP_SRC, scr1, CRAB_PATH_MAX);
+    crab_strcpy_n(r + CRAB_OP_DST, scr2, CRAB_PATH_MAX);
+    return CRAB_FS_OK;
+}
+
+# @public — advance the transfer by at most `CRAB_COPY_STEP_CHUNKS` chunks.
+# -> 1 = still running (call again), 0 = nothing to do (idle), or a CRAB_FS_* result on completion
+#    or failure (CRAB_FS_OK = finished cleanly).
+#
+# ⛔ THE SHORT-WRITE LOOP IS INSIDE THE STEP, NOT ACROSS STEPS. `write` may take fewer bytes than
+# offered, and a chunk left half-written between two idle ticks would be a partially applied step
+# whose remainder depends on a buffer the next tick has already refilled. Each chunk is fully
+# written or the transfer fails; the step boundary is always between whole chunks.
+# ⛔ A PART-WAY FAILURE LEAVES THE PARTIAL FILE. See `crab_copy_cancel` for why that differs from a
+# cancel: here the filesystem is already failing, and writing more into it is not a repair.
+fn crab_copy_step(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    var kind = load64(r + CRAB_OP_KIND);
+    if (kind == CRAB_OP_IDLE) { return 0; }
+    var buf = crab_copy_buf();
+    var fin = load64(r + CRAB_OP_FIN);
+    var fout = load64(r + CRAB_OP_FOUT);
+    var n = 0;
+    while (n < CRAB_COPY_STEP_CHUNKS) {
+        var got = sys_read(fin, buf, CRAB_COPY_CHUNK);
+        if (got < 0) { crab_op_release(); return CRAB_FS_EIO; }
+        if (got == 0) {
+            # EOF — the only clean way out. A move unlinks its source ONLY here.
+            crab_op_release();
+            if (kind == CRAB_OP_MOVE) {
+                var sl = crab_cstr_len(r + CRAB_OP_SRC, CRAB_PATH_MAX);
+                if (sl <= 0) { return CRAB_FS_ESYS; }
+                if (crab_fs_unlink_raw(r + CRAB_OP_SRC, sl) < 0) { return CRAB_FS_ESYS; }
+            }
+            return CRAB_FS_OK;
+        }
+        var off = 0;
+        while (off < got) {
+            var put = sys_write(fout, buf + off, got - off);
+            if (put <= 0) { crab_op_release(); return CRAB_FS_EIO; }
+            off = off + put;
+        }
+        store64(r + CRAB_OP_DONE, load64(r + CRAB_OP_DONE) + got);
+        n = n + 1;
+    }
+    return 1;
+}
+
 # @public — the operator-facing sentence for a `CRAB_FS_*` result. Never 0.
 #
 # ⚠ THE STATUS LINE IS THE ONLY PLACE A REFUSAL IS SEEN. crab logs to the console as well, but three
@@ -1519,6 +1738,7 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_EIO)      { return "failed part-way: the copy is incomplete"; }
     if (rc == CRAB_FS_ENOEXEC)  { return "crab has no way to open that yet"; }
     if (rc == CRAB_FS_ESPAWNLEN) { return "refused: the path is too long to launch"; }
+    if (rc == CRAB_FS_EBUSY)    { return "a transfer is already running"; }
     return "failed: the filesystem refused";
 }
 

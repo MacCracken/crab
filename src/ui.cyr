@@ -667,11 +667,117 @@ fn crab_hit(x, y, out16): i64 {
     return 1;
 }
 
+# @public — write the tray's percentage into `dst` ("68%", or "--" when the total is unknown).
+# -> the bytes written, excluding the NUL. `dst` must hold at least 8.
+#
+# ⛔ "--", NOT "0%", WHEN THERE IS NO DENOMINATOR. They are different facts and the whole reason
+# dhancha's bar has an indeterminate mode: a transfer whose source could not be stat'd has not made
+# zero progress, it has made unmeasurable progress. Printing 0% next to a bar that is deliberately
+# NOT showing 0% would also make the two disagree on screen.
+# ⚠ A total of 0 is a real, legitimate case — an empty file — and it is COMPLETE the moment it
+# starts. It reads 100%, not a division by zero.
+fn crab_tray_pct(dst, done, total): i64 {
+    if (total < 0) { store8(dst, 45); store8(dst + 1, 45); store8(dst + 2, 0); return 2; }
+    var pct = 100;
+    if (total > 0) {
+        var d = done;
+        if (d < 0) { d = 0; }
+        if (d > total) { d = total; }
+        # ⚠ Multiply then divide, as everywhere else — `done * (100 / total)` truncates to zero for
+        # every file bigger than 100 bytes.
+        pct = d * 100 / total;
+    }
+    var n = crab_u2s(dst, pct);
+    store8(dst + n, 37);                               # '%'
+    store8(dst + n + 1, 0);
+    return n + 1;
+}
+
+# ⚠ Tray geometry. 4px bar with 5px above and 4px below, plus an 18px title line — the mockup's own
+# proportions, lifted as GEOMETRY rather than as position or colour.
+enum CrabTray {
+    CRAB_TRAY_H      = 31;
+    CRAB_TRAY_BAR_H  = 4;
+    CRAB_TRAY_TITLE_H = 18;
+}
+
+# @public — should the tray be on screen at all? 1 = yes. `opname` is 0 when nothing is running.
+#
+# ⚠ THE TRAY IS NOT A PERMANENT FIXTURE. A file manager with a dead progress strip along the bottom
+# has spent 31px of every window on nothing; when no transfer is running the band is not reserved,
+# no widgets are built, and the panes get the pixels back.
+#
+# ⛔⛔ THE TRANSFER STATE ARRIVES AS PARAMETERS, NOT BY CALLING `crab_op_active()`. This file is
+# BELOW `app.cyr` in the include chain — `ui.cyr` is included BY `app.cyr`, and both `render_test.cyr`
+# and the suite include `ui.cyr` ALONE. Reaching up into the operation record compiled fine through
+# `main.cyr` and left `render_test` with four undefined symbols, which is the layering inversion this
+# codebase already carved `path.cyr` and `app.cyr` out to prevent. Same rule as `lstate`/`rstate`:
+# the caller reads its own state and passes it down.
+fn crab_tray_wanted(opname): i64 {
+    if (opname == 0) { return 0; }
+    if (load8(opname) == 0) { return 0; }
+    return 1;
+}
+
+# Build the transfer tray: a title line over a PROGRESS bar (dhancha 0.9.22).
+#
+# ⛔⛔ crab NAMES NO COLOUR ON THE BAR, AND THAT IS THE WHOLE REASON `PROGRESS` IS A dhancha WIDGET
+# RATHER THAN A BOX crab TINTS ITSELF. A bar built here from two coloured boxes would have crab
+# writing `dh_theme_accent()` into its own source — the exact thing ADR 0001 forbids, and the first
+# step toward crab carrying a palette.
+# ⛔ AND THE BAR GOES IN A `BOX_V`. In a `BOX_H` its `pref_h` is the CROSS axis, where ALIGN_STRETCH
+# fills the row height and ignores it — the bar would silently become as tall as its row.
+# ⚠ Every string here is `dh_falloc`, because `dh_widget_set_text` stores the pointer without
+# copying: a global-alloc string on an arena widget outlives its widget forever.
+fn crab_tray(root, w, opname, opdone, optotal): i64 {
+    var tray = dh_widget_new(BOX);
+    dh_widget_set_layout(tray, BOX_V);
+    dh_widget_set_bg(tray, dh_theme_panel());
+    dh_widget_set_pref(tray, 0, CRAB_TRAY_H);
+    dh_widget_set_flex(tray, 0);
+    dh_widget_set_padding(tray, 4);
+
+    var title = dh_widget_new(BOX);
+    dh_widget_set_layout(title, BOX_H);
+    dh_widget_set_pref(title, 0, CRAB_TRAY_TITLE_H);
+    dh_widget_set_flex(title, 0);
+    var nm = dh_widget_new(LABEL);
+    dh_widget_set_flex(nm, 1);
+    dh_widget_set_text(nm, opname);
+    dh_widget_add_child(title, nm);
+    # ⚠ THE PERCENTAGE IS A SIBLING LABEL, NOT TEXT ON THE BAR. dhancha's own header says why: one
+    # centred "68%" straddling the fill edge cannot be legible in a single ink — `on-accent` over the
+    # track and plain `ink` over the fill both fall near 1.3:1 on the dark grounds.
+    var pctw = dh_widget_new(LABEL);
+    dh_widget_set_flex(pctw, 0);
+    dh_widget_set_pref(pctw, 40, 0);
+    dh_widget_set_fg(pctw, dh_theme_mute());
+    var pb = dh_falloc(16);
+    crab_tray_pct(pb, opdone, optotal);
+    dh_widget_set_text(pctw, pb);
+    dh_widget_add_child(title, pctw);
+    dh_widget_add_child(tray, title);
+
+    var bar = dh_progress_new(CRAB_TRAY_BAR_H);
+    dh_widget_set_flex(bar, 1);
+    # ⛔ THE TOTAL IS PASSED THROUGH UNTOUCHED, INCLUDING -1. dhancha reads `den <= 0` as
+    # INDETERMINATE, which is exactly what crab means when the source could not be stat'd — and on a
+    # host build that is the normal answer. Substituting a guessed denominator here to "make the bar
+    # look right" would be crab lying about what it knows.
+    dh_progress_set(bar, opdone, optotal);
+    dh_widget_add_child(tray, bar);
+    dh_widget_add_child(root, tray);
+    return tray;
+}
+
 # ⚠ `lstate` / `rstate` come from `crab_pane_state(count, crab_listing_err())`, captured by the
 # caller AT LISTING TIME. They are parameters and not globals for one reason: `crab_listing_err`
 # reports the LAST readdir, and crab lists two panes — so a global read at render time would give
 # both panes the right pane's state. The capture has to happen next to the listing that produced it.
-fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate): i64 {
+# ⚠ `opname` / `opdone` / `optotal` are the transfer tray's state, passed in for the same reason
+# `lstate`/`rstate` are: this file sits BELOW `app.cyr`, which owns the operation record. `opname == 0`
+# (or an empty string) means nothing is running and the tray costs no pixels and no widgets.
+fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal): i64 {
     if (surf == 0) { return 0; }
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
@@ -695,7 +801,16 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
 
     var panes = dh_widget_new(BOX);
     dh_widget_set_layout(panes, BOX_H);         # two columns side by side
-    dh_widget_set_pref(panes, 0, h - 24);       # reserve 24px for the status line
+    # ⭐⭐ THE TRANSFER TRAY (M4, v0.7.3) takes its own reserved band, so the panes shrink by exactly
+    # its height rather than the tray floating over rows. `CRAB_TRAY_H` is 0 when nothing is running,
+    # which is how the tray costs a still crab no pixels and no widgets at all.
+    # ⛔ A STRIP ABOVE THE STATUS LINE, NOT A RIGHT-HAND INSPECTOR COLUMN. The canvas draws the tray
+    # in an inspector, but that column is M5 and does not exist yet — lifting its POSITION now would
+    # mean building half of M5 to hold one bar. The canvas's own 420px variant already drops the
+    # tray's detail line, so a compact form is a drawn variant rather than a compromise.
+    var trayh = 0;
+    if (crab_tray_wanted(opname) == 1) { trayh = CRAB_TRAY_H; }
+    dh_widget_set_pref(panes, 0, h - 24 - trayh);   # reserve 24px for the status line, + the tray
     # ⭐⭐ ONE PANE OR TWO — the M4 ratification. See `crab_two_panes_fit`.
     # ⛔ IN SOLO MODE THE PANE THAT IS NOT SHOWN GETS NO WIDGETS AND ITS LIST POINTER STAYS 0, which
     # `crab_hit` relies on: it walks parents comparing against `crab_llst` / `crab_rlst`, and its
@@ -725,6 +840,8 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
 
     var abuf = lbuf; var asel = sel_l; var asz = lsizes; var amt = lmtimes; var acnt = ln;
     if (active_pane == 1) { abuf = rbuf; asel = sel_r; asz = rsizes; amt = rmtimes; acnt = rn; }
+    # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
+    if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal); }
     var status = dh_widget_new(LABEL);
     dh_widget_set_bg(status, dh_theme_panel());   # status line
     dh_widget_set_pref(status, 0, 22);
