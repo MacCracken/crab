@@ -87,7 +87,7 @@ fn main(): i64 {
     # asserts on that, and then dumps `sds` at the very end, AFTER `sds2` exists. One shared target
     # would make the dump show the wrong picture, silently.
     var surf1 = dh_surface_new(w, h);
-    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var sds = crab_render(surf1, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp, rsizes, rmtimes, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
 
     # ---- the ACTIVE pane's selection is accented, the inactive pane's is muted --------------
     # ⛔ THE ONE QUESTION A TWO-PANE FILE MANAGER MUST ANSWER ON SCREEN: which pane do my arrow keys
@@ -153,7 +153,7 @@ fn main(): i64 {
     var s2 = alloc(8); store64(s2, 0);
     var s3 = alloc(8); store64(s3, 0);
     var surf2 = dh_surface_new(w, h);
-    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var sds2 = crab_render(surf2, 0, 0, 11, 0, big, 12, lp, bsz, bmt, rbuf, 3, rp, rsizes, rmtimes, s2, s3, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     # ⚠ AND THE TWO REALLY ARE DISTINCT — the guard on the paragraph above. If a future change made
     # `crab_render` share one target again, every assertion below would silently be reading `sds2`
     # while the checks above had already passed against a picture that no longer exists.
@@ -189,7 +189,7 @@ fn main(): i64 {
     var e0 = alloc(CRAB_REC_SZ);
     var esz = alloc(8); var emt = alloc(8);
     var sds3 = crab_render(surf3, 0, 0, 0, 0, e0, 0, lp, esz, emt, rbuf, 3, rp, rsizes, rmtimes,
-      s4, s5, CRAB_PANE_GONE, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+      s4, s5, CRAB_PANE_GONE, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     check(sds3 == sds, 0);
     check(sds3 == sds2, 0);
     # The notice sits in the first row slot: below the 28px path header and the 18px column header.
@@ -222,7 +222,7 @@ fn main(): i64 {
     var ssr = alloc(8); store64(ssr, 0);
     var ssurf = dh_surface_new(380, 220);
     var ssds = crab_render(ssurf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
-      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     check(ssds != 0, 1);
     check(crab_llst != 0, 1);                # active_pane 0 -> the LEFT pane is the one drawn
     check(crab_rlst, 0);                     # ...and the right pane was never built
@@ -235,7 +235,7 @@ fn main(): i64 {
     # ⭐ AND THE OTHER HALF OF THE SWITCH: active_pane 1 draws B and leaves A unbuilt.
     var ssurf2 = dh_surface_new(380, 220);
     crab_render(ssurf2, 0, 1, 1, 0, lbuf, 3, lp, lsizes, lmtimes, rbuf, 3, rp,
-      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+      rsizes, rmtimes, ssl, ssr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     check(crab_rlst != 0, 1);
     check(crab_llst, 0);
 

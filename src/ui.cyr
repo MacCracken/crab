@@ -448,6 +448,301 @@ fn crab_mark_clear(marks, count): i64 {
     return 0;
 }
 
+# =================================================================================================
+# M4 — THE EDIT BUFFER. Typing a name, owned by crab.
+# =================================================================================================
+#
+# ⛔⛔ crab DOES NOT USE dhancha's `TEXTINPUT`, AND THIS IS THE THIRD FEATURE WITH THE SAME MISMATCH.
+# `dh_text_new` allocates its buffer with the GLOBAL allocator so it survives frames — but the
+# WIDGET holding it is `dh_falloc`'d and dies at every `dh_frame_begin`. So an immediate-mode app
+# that rebuilds its tree each frame must call `dh_text_new` each frame, and each call leaks a fresh
+# buffer into an allocator with no `free()`. TEXTINPUT is built for a RETAINED tree.
+# ⚠ That is the same structural shape as `dh_dispatch` (a press held as a widget pointer, operator
+# ruling 2026-08-27) and as drag (`_dh_drag_src`, fixed in dhancha 0.9.21 by refusing to start).
+# Three features, one mismatch. **Worth telling dhancha; not worth crab pretending otherwise.**
+# ⇒ crab owns the buffer, the length and the caret, in globals that outlive a frame — exactly as it
+# owns pane index, row index and the operation record. The toolkit draws the string.
+# ⚠ AND IT LIVES IN `ui.cyr`, NOT `app.cyr`, FOR THE REASON RECORDED AT THE MARK PREDICATES ABOVE:
+# the render path calls it, and `ui.cyr` is what `render_test.cyr` includes alone. Third time in this
+# milestone — the rule is that anything the render path touches must be at or below this file.
+
+enum CrabEdit {
+    CRAB_EDIT_CAP = 64;        # = CRAB_NAME_MAX: a name that cannot be typed cannot be created
+}
+
+var crab_ebuf = 0;
+var crab_elen = 0;
+var crab_ecar = 0;
+
+fn crab_edit_buf(): i64 {
+    if (crab_ebuf == 0) { crab_ebuf = alloc(CRAB_EDIT_CAP); }
+    if (crab_ebuf != 0) { store8(crab_ebuf + crab_elen, 0); }
+    return crab_ebuf;
+}
+
+fn crab_edit_len(): i64 { return crab_elen; }
+fn crab_edit_caret(): i64 { return crab_ecar; }
+
+# @public — start editing with `init` (0 or "" for an empty field). -> the length seeded.
+fn crab_edit_start(init): i64 {
+    var b = crab_edit_buf();
+    if (b == 0) { return 0; }
+    crab_elen = 0;
+    crab_ecar = 0;
+    if (init != 0) {
+        var i = 0;
+        while (i < (CRAB_EDIT_CAP - 1)) {
+            var c = load8(init + i);
+            if (c == 0) { i = CRAB_EDIT_CAP; }
+            else { store8(b + i, c); i = i + 1; crab_elen = i; }
+        }
+    }
+    store8(b + crab_elen, 0);
+    # ⚠ The caret starts at the END, not at 0. Renaming almost always means appending or trimming a
+    # suffix; starting at the front means every rename begins with a trip across the name.
+    crab_ecar = crab_elen;
+    return crab_elen;
+}
+
+# @public — insert one byte at the caret. -> 1 if it went in, 0 if the field was full.
+#
+# ⛔ A FULL FIELD REFUSES; IT DOES NOT TRUNCATE OR OVERWRITE. The cap is `CRAB_NAME_MAX`, so a name
+# that cannot be typed is a name the filesystem could not hold anyway — and silently dropping the
+# keystroke the operator just made is better than silently dropping a character they typed earlier.
+fn crab_edit_insert(ch): i64 {
+    var b = crab_edit_buf();
+    if (b == 0) { return 0; }
+    if (ch <= 0) { return 0; }
+    if (crab_elen >= (CRAB_EDIT_CAP - 1)) { return 0; }
+    var i = crab_elen;
+    while (i > crab_ecar) { store8(b + i, load8(b + i - 1)); i = i - 1; }
+    store8(b + crab_ecar, ch);
+    crab_elen = crab_elen + 1;
+    crab_ecar = crab_ecar + 1;
+    store8(b + crab_elen, 0);
+    return 1;
+}
+
+# @public — delete the byte BEFORE the caret. -> 1 if one went, 0 at the start of the field.
+fn crab_edit_backspace(): i64 {
+    var b = crab_edit_buf();
+    if (b == 0) { return 0; }
+    if (crab_ecar <= 0) { return 0; }
+    var i = crab_ecar - 1;
+    while (i < (crab_elen - 1)) { store8(b + i, load8(b + i + 1)); i = i + 1; }
+    crab_elen = crab_elen - 1;
+    crab_ecar = crab_ecar - 1;
+    store8(b + crab_elen, 0);
+    return 1;
+}
+
+# @public — move the caret by `d`, clamped to the field. -> the new position.
+fn crab_edit_move(d): i64 {
+    var n = crab_ecar + d;
+    if (n < 0) { n = 0; }
+    if (n > crab_elen) { n = crab_elen; }
+    crab_ecar = n;
+    return crab_ecar;
+}
+
+# @public — the printable character for HID usage `u`, or 0 if it is not one. `shift` = 1 for upper.
+#
+# ⛔⛔ crab RECEIVES HID USAGES, NOT CHARACTERS, AND NOTHING ELSE IN THE STACK TRANSLATES THEM. The
+# compositor forwards the raw usage (which is what makes `u == 0x28` mean Enter everywhere in this
+# file), so a field that takes typing needs this map and there is nowhere else to put it.
+# ⚠ THE MAP IS US QWERTY, DELIBERATELY AND VISIBLY. agnos's HID layer installs "US QWERTY" tables at
+# boot and nothing in the stack carries a layout preference, so this matches what the kernel already
+# assumes rather than inventing a second answer. A real layout story is a kernel/compositor arc.
+# ⚠ ONLY WHAT A FILENAME NEEDS. Letters, digits, and the punctuation that appears in names — not a
+# full keyboard. A key that yields 0 is simply ignored by the caller, which is the right default for
+# a field that names a file.
+fn crab_key_char(u, shift): i64 {
+    if ((u >= 0x04) && (u <= 0x1D)) {                  # a..z
+        if (shift != 0) { return 65 + (u - 0x04); }
+        return 97 + (u - 0x04);
+    }
+    if ((u >= 0x1E) && (u <= 0x26)) {                  # 1..9
+        if (shift != 0) { return 0; }                  # the shifted row is symbols crab does not need
+        return 49 + (u - 0x1E);
+    }
+    if (u == 0x27) { if (shift != 0) { return 0; } return 48; }   # 0
+    if (u == 0x2C) { return 32; }                      # space
+    if (u == 0x2D) { if (shift != 0) { return 95; } return 45; }  # - / _
+    if (u == 0x37) { return 46; }                      # .
+    return 0;
+}
+
+# =================================================================================================
+# M4 — THE CONTEXT MENU'S MODEL. Which commands apply, and what each one is called.
+# =================================================================================================
+#
+# ⭐ dhancha 0.9.23 ships MENU as a configured LIST plus an overlay layer with real placement, so
+# crab supplies only what dhancha cannot know: WHICH commands are legal on the thing under the
+# pointer, and what they are named.
+# ⛔ THE MENU IS NOT A SECOND SET OF VERBS. Every entry maps to the key binding that already exists,
+# and the shortcut column says so — a menu that could do something the keyboard cannot is a second
+# implementation of the same commands, drifting from the first. It is a DISCOVERY surface.
+enum CrabMenuItem {
+    CRAB_MI_OPEN   = 0;
+    CRAB_MI_COPY   = 1;
+    CRAB_MI_MOVE   = 2;
+    CRAB_MI_RENAME = 3;
+    CRAB_MI_DELETE = 4;
+    CRAB_MI_NEWDIR = 5;
+    CRAB_MI_COUNT  = 6;
+}
+
+# @public — the label for item `i`, or "" out of range. Never 0.
+fn crab_menu_label(i): i64 {
+    if (i == CRAB_MI_OPEN)   { return "Open"; }
+    if (i == CRAB_MI_COPY)   { return "Copy to other pane"; }
+    if (i == CRAB_MI_MOVE)   { return "Move to other pane"; }
+    if (i == CRAB_MI_RENAME) { return "Rename..."; }
+    if (i == CRAB_MI_DELETE) { return "Delete"; }
+    if (i == CRAB_MI_NEWDIR) { return "New folder..."; }
+    return "";
+}
+
+# @public — the accelerator shown beside item `i`, or "" if it has none.
+# ⚠ These are the REAL bindings, not decoration. If a key moves, this moves with it or the menu
+# starts lying — and a menu that lies about a shortcut is worse than one that shows none.
+fn crab_menu_key(i): i64 {
+    if (i == CRAB_MI_OPEN)   { return "Enter"; }
+    if (i == CRAB_MI_COPY)   { return "c"; }
+    if (i == CRAB_MI_MOVE)   { return "m"; }
+    if (i == CRAB_MI_RENAME) { return "r"; }
+    if (i == CRAB_MI_DELETE) { return "d"; }
+    if (i == CRAB_MI_NEWDIR) { return "n"; }
+    return "";
+}
+
+# @public — does item `i` apply, given the pane's state? 1 = show it live, 0 = show it greyed.
+#
+# ⛔ GREYED, NOT HIDDEN, AND THAT IS THE WHOLE POINT OF THE PREDICATE. A menu whose entries move
+# around depending on what is selected forces the operator to re-read it every time; one whose
+# entries stay put teaches their positions. The canvas's own menus keep a stable shape.
+# ⚠ `count == 0` is an EMPTY PANE, where only "New folder" applies — everything else needs a row.
+fn crab_menu_enabled(i, count, isdir, marked): i64 {
+    if (i == CRAB_MI_NEWDIR) { return 1; }             # always: it needs no selection
+    if (count <= 0) { return 0; }                      # every other verb needs a row
+    if (i == CRAB_MI_OPEN) {
+        # ⚠ Open on a directory means DESCEND, which is always legal; on a file it means run, which
+        # crab refuses for a non-ELF — but that refusal is the operator's to discover by trying,
+        # not a reason to grey the entry. Greying "Open" on every data file would read as broken.
+        return 1;
+    }
+    if (i == CRAB_MI_RENAME) {
+        # ⛔ RENAME IS SINGLE-TARGET. With a mark set the operator means the SET, and renaming a set
+        # is the batch sheet — a different command with a different surface.
+        if (marked > 1) { return 0; }
+        return 1;
+    }
+    return 1;
+}
+
+# ⚠ The batch expansion's destination, allocated once — it outlives no frame but it is written once
+# per entry in a loop, and a per-entry `alloc` would leak one buffer per file renamed.
+var crab_bdst = 0;
+fn crab_batch_dst(): i64 {
+    if (crab_bdst == 0) { crab_bdst = alloc(CRAB_EDIT_CAP); }
+    return crab_bdst;
+}
+
+# @public — expand a batch-rename `pattern` for entry `idx` (1-based) whose current name is `orig`,
+# into `dst` (cap `CRAB_EDIT_CAP`). -> the length written, or -1 if it did not fit.
+#
+# ⭐ TWO SUBSTITUTIONS AND NOTHING ELSE: `#` is the sequence number, `*` is the original name.
+# That is enough for the renames people actually do — prefix, suffix, and number a set — and every
+# addition past it is a small language nobody asked for. `photo-#` and `*-backup` cover the cases
+# the canvas draws.
+# ⛔ THE RESULT IS STILL RUN THROUGH `crab_name_ok` BY THE CALLER. A pattern is operator input, and
+# `*` splices in a name that came from a readdir record — so a pattern can produce `..` or a name
+# with a separator, which is exactly what the guard exists to refuse.
+# ⚠ REFUSES RATHER THAN TRUNCATES. A truncated name is a DIFFERENT name, and a batch that silently
+# renamed forty files to forty truncated names would be worse than one that stopped.
+fn crab_batch_name(dst, pattern, idx, orig): i64 {
+    if (dst == 0) { return 0 - 1; }
+    if (pattern == 0) { return 0 - 1; }
+    var lim = CRAB_EDIT_CAP - 1;
+    var w = 0;
+    var i = 0;
+    var ch = load8(pattern + i);
+    while (ch != 0) {
+        if (ch == 35) {                                  # '#' — the sequence number
+            var nb = dh_falloc(24);
+            var nl = crab_u2s(nb, idx);
+            var k = 0;
+            while (k < nl) {
+                if (w >= lim) { store8(dst + w, 0); return 0 - 1; }
+                store8(dst + w, load8(nb + k)); w = w + 1; k = k + 1;
+            }
+        } else {
+            if (ch == 42) {                              # '*' — the original name
+                var j = 0;
+                var oc = 0;
+                if (orig != 0) { oc = load8(orig + j); }
+                while (oc != 0) {
+                    if (w >= lim) { store8(dst + w, 0); return 0 - 1; }
+                    store8(dst + w, oc); w = w + 1; j = j + 1;
+                    oc = load8(orig + j);
+                }
+            } else {
+                if (w >= lim) { store8(dst + w, 0); return 0 - 1; }
+                store8(dst + w, ch); w = w + 1;
+            }
+        }
+        i = i + 1;
+        ch = load8(pattern + i);
+    }
+    store8(dst + w, 0);
+    return w;
+}
+
+# @public — the next / previous ENABLED menu item from `i`, wrapping. -> the new index.
+#
+# ⛔ THE KEYBOARD MUST SKIP A GREYED ENTRY, or the highlight lands on something Enter cannot do and
+# the menu appears to ignore a keypress. dhancha's `dh_list_move_sel` already steps over `INERT`
+# rows for the same reason; this is the model-side answer so the selection crab passes IN is
+# already a legal one.
+# ⚠ WRAPPING, not clamping, and that is the opposite of a file list: a menu is six items the
+# operator can see all of, so running off the end and continuing is faster than stopping. A pane of
+# 1024 rows is the case where wrapping would lose your place.
+# ⚠ The scan is capped by the item count, so a menu with nothing enabled returns `i` rather than
+# spinning.
+fn crab_menu_next(i, count, isdir, marked): i64 {
+    var n = i;
+    var g = 0;
+    while (g < CRAB_MI_COUNT) {
+        n = n + 1;
+        if (n >= CRAB_MI_COUNT) { n = 0; }
+        if (crab_menu_enabled(n, count, isdir, marked) == 1) { return n; }
+        g = g + 1;
+    }
+    return i;
+}
+
+fn crab_menu_prev(i, count, isdir, marked): i64 {
+    var n = i;
+    var g = 0;
+    while (g < CRAB_MI_COUNT) {
+        n = n - 1;
+        if (n < 0) { n = CRAB_MI_COUNT - 1; }
+        if (crab_menu_enabled(n, count, isdir, marked) == 1) { return n; }
+        g = g + 1;
+    }
+    return i;
+}
+
+# @public — the menu's title: what the commands will act on.
+# ⚠ "3 marked" beats the file's name when a set is marked, because the verbs act on the SET — a menu
+# headed with one name while Delete removes nine is the most dangerous label in the app.
+fn crab_menu_target(marked, name): i64 {
+    if (marked > 1) { return "the marked entries"; }
+    if (name == 0) { return "this folder"; }
+    if (load8(name) == 0) { return "this folder"; }
+    return name;
+}
+
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
 fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo, marks): i64 {
@@ -822,6 +1117,24 @@ fn crab_tray_pct(dst, done, total): i64 {
 
 # ⚠ Tray geometry. 4px bar with 5px above and 4px below, plus an 18px title line — the mockup's own
 # proportions, lifted as GEOMETRY rather than as position or colour.
+enum CrabMenuGeom {
+    CRAB_MENU_W    = 210;
+    CRAB_MENU_KEYW = 54;
+    CRAB_SHEET_H   = 96;
+}
+
+# ⛔ ONE SPEC, ALLOCATED ONCE AND RESET — `dh_cols_new` is on the GLOBAL allocator, so a spec built
+# inside the render path is a 40-byte-per-frame leak. Same rule the pane specs follow.
+var crab_mspec = 0;
+fn crab_mspec_init(): i64 {
+    if (crab_mspec == 0) { crab_mspec = dh_cols_new(DH_COLS_MAX); }
+    return crab_mspec;
+}
+
+# ⚠ The menu's LIST, recorded for hit-testing — refreshed every frame like `crab_llst`/`crab_rlst`.
+var crab_mlst = 0;
+fn crab_menu_list(): i64 { return crab_mlst; }
+
 enum CrabTray {
     CRAB_TRAY_H      = 31;
     CRAB_TRAY_BAR_H  = 4;
@@ -910,6 +1223,98 @@ fn crab_tray(root, w, opname, opdone, optotal, oprate, opeta): i64 {
     return tray;
 }
 
+# ⭐⭐ THE OVERLAY LAYER (M4, dhancha 0.9.23). The context menu and the rename field both live here.
+#
+# ⛔ THE LAYER IS THE LAST CHILD OF THE ROOT, AND THAT IS LOAD-BEARING IN BOTH PASSES. `dh_hit_test`
+# prunes any subtree whose root does not contain the point, and the painter culls identically — so a
+# popup parented to the ROW that spawned it would be invisible and unclickable together. A
+# full-window layer added last wins the click and the pixel by construction, and it is also what
+# makes the popup MODAL: it swallows every hit the popup itself does not take, so the panes beneath
+# are unreachable for exactly as long as it is in the tree. dhancha holds no modal state; the tree
+# IS the state.
+#
+# ⚠ `menu_x`/`menu_y` are where the operator asked for it. `dh_place_at_point` FLIPS rather than
+# slides near an edge, so the pointer is never left sitting on top of the menu it opened.
+fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mmarked, mname,
+  editopen, editlabel): i64 {
+    var layer = dh_overlay_new();
+    dh_widget_set_pref(layer, w, h);
+    if (menuopen != 0) {
+        crab_mspec_init();
+        dh_cols_reset(crab_mspec, 2);
+        dh_cols_set_width(crab_mspec, 0, 0);
+        dh_cols_set_width(crab_mspec, 1, CRAB_MENU_KEYW);
+        var m = dh_menu_new(22);
+        var i = 0;
+        while (i < CRAB_MI_COUNT) {
+            var row = dh_menu_item(m, crab_mspec, crab_menu_label(i), crab_menu_key(i));
+            # ⚠ A DISABLED ENTRY IS GREYED AND INERT, not hidden — entries that move around force
+            # the operator to re-read the menu every time. `DH_FLAG_INERT` makes dhancha skip it with
+            # the keyboard and miss it with the mouse, so "greyed" is not merely cosmetic.
+            if (crab_menu_enabled(i, mcount, misdir, mmarked) == 0) {
+                dh_widget_set_fg(row, dh_theme_faint());
+                dh_widget_set_inert(row, 1);
+            }
+            # ⛔ A separator before the destructive verb, so Delete is never the key you land on by
+            # overshooting Rename.
+            if (i == CRAB_MI_RENAME) { dh_menu_sep(m); }
+            i = i + 1;
+        }
+        dh_list_select(m, menusel);
+        var mr = alloc(32);
+        dh_place_at_point(mr, menux, menuy, CRAB_MENU_W, dh_menu_pref_h(m), w, h, 4);
+        dh_widget_set_pref(m, load64(mr + 16), load64(mr + 24));
+        dh_widget_set_offset(m, load64(mr + 0), load64(mr + 8));
+        dh_widget_add_child(layer, m);
+        crab_mlst = m;
+    } else { crab_mlst = 0; }
+    if (editopen != 0) {
+        # ⚠ A SHEET, NOT A ROW-ALIGNED FIELD. Inline-over-the-row is what the canvas draws, but it
+        # needs the row's laid-out rect, and the row is rebuilt after this runs. A pinned sheet is
+        # unambiguous, works identically in solo and dual pane, and is a form the canvas itself draws
+        # at its small size.
+        dh_widget_set_scrim(layer, 1);
+        var sh = dh_sheet_new();
+        dh_widget_set_layout(sh, BOX_V);
+        var lab = dh_widget_new(LABEL);
+        dh_widget_set_pref(lab, 0, 20);
+        dh_widget_set_text(lab, editlabel);
+        dh_widget_add_child(sh, lab);
+        var fld = dh_widget_new(LABEL);
+        dh_widget_set_pref(fld, 0, 24);
+        dh_widget_set_bg(fld, dh_theme_widget());
+        # ⚠ The caret is drawn INTO the string, because crab owns the buffer rather than dhancha —
+        # see the ⛔ on `crab_edit_buf`. `_` at the caret is the CP437 font's most legible marker.
+        var eb = dh_falloc(CRAB_EDIT_CAP + 4);
+        var ei2 = 0;
+        var ec = crab_edit_caret();
+        var el = crab_edit_len();
+        var src = crab_edit_buf();
+        var o2 = 0;
+        while (ei2 < el) {
+            if (ei2 == ec) { store8(eb + o2, 95); o2 = o2 + 1; }
+            store8(eb + o2, load8(src + ei2)); o2 = o2 + 1;
+            ei2 = ei2 + 1;
+        }
+        if (ec >= el) { store8(eb + o2, 95); o2 = o2 + 1; }
+        store8(eb + o2, 0);
+        dh_widget_set_text(fld, eb);
+        dh_widget_add_child(sh, fld);
+        var hint = dh_widget_new(LABEL);
+        dh_widget_set_pref(hint, 0, 18);
+        dh_widget_set_fg(hint, dh_theme_mute());
+        dh_widget_set_text(hint, "Enter = confirm    Esc = cancel");
+        dh_widget_add_child(sh, hint);
+        var sr = alloc(32);
+        dh_place_pinned(sr, 0, CRAB_SHEET_H, w, h, DH_PIN_BOTTOM, 24);
+        dh_widget_set_pref(sh, load64(sr + 16), load64(sr + 24));
+        dh_widget_set_offset(sh, load64(sr + 0), load64(sr + 8));
+        dh_widget_add_child(layer, sh);
+    }
+    dh_widget_add_child(root, layer);
+    return layer;
+}
+
 # ⚠ `lstate` / `rstate` come from `crab_pane_state(count, crab_listing_err())`, captured by the
 # caller AT LISTING TIME. They are parameters and not globals for one reason: `crab_listing_err`
 # reports the LAST readdir, and crab lists two panes — so a global read at render time would give
@@ -917,7 +1322,7 @@ fn crab_tray(root, w, opname, opdone, optotal, oprate, opeta): i64 {
 # ⚠ `opname` / `opdone` / `optotal` are the transfer tray's state, passed in for the same reason
 # `lstate`/`rstate` are: this file sits BELOW `app.cyr`, which owns the operation record. `opname == 0`
 # (or an empty string) means nothing is running and the tray costs no pixels and no widgets.
-fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal, oprate, opeta, lmarks, rmarks): i64 {
+fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, opname, opdone, optotal, oprate, opeta, lmarks, rmarks, menuopen, menux, menuy, menusel, editopen, editlabel): i64 {
     if (surf == 0) { return 0; }
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
@@ -996,6 +1401,21 @@ fn crab_render(surf, font, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, l
     if (crab_notice != 0) { dh_widget_set_text(status, crab_notice); }
     else { dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt)); }
     dh_widget_add_child(root, status);
+
+    # ⭐ THE OVERLAY GOES LAST — after the status line and after everything else — because sibling
+    # order IS z-order in both the paint and the hit-test. See `crab_overlay`.
+    var mcnt = ln; var msel2 = sel_l; var mmk = lmarks; var mbuf = lbuf;
+    if (active_pane == 1) { mcnt = rn; msel2 = sel_r; mmk = rmarks; mbuf = rbuf; }
+    var misdir = 0;
+    var mname = "";
+    if (mcnt > 0) {
+        misdir = load8(mbuf + msel2 * CRAB_REC_SZ + CRAB_REC_TYPE);
+        mname = mbuf + msel2 * CRAB_REC_SZ;
+    }
+    if ((menuopen != 0) || (editopen != 0)) {
+        crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcnt, misdir,
+          crab_mark_count(mmk, mcnt), mname, editopen, editlabel);
+    } else { crab_mlst = 0; }
 
     # ⚠ RECORDED FOR HIT-TESTING, and refreshed here every frame — see the ⛔ on `crab_root`.
     crab_root = root;

@@ -80,7 +80,7 @@ fn t_render(w, h): i64 {
     # own surface. Sharing one here would make two `t_render()` results alias and any test comparing
     # them would be comparing a frame with itself.
     var surf = dh_surface_new(w, h);
-    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    return crab_render(surf, 0, 0, 1, 0, lbuf, 3, lp, lsizes, lmt, rbuf, 3, rp, rsizes, rmt, sl, sr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
 }
 
 # Count pixels violating the `#92` premultiplied contract. Returns the violation count; 0 = compliant.
@@ -449,7 +449,7 @@ fn main() {
     var rb = alloc(8); store64(rb, 0);
 
     # Frame A: left pane active, selection 0.
-    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var fa = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert(fa != 0, "frame A rendered into the caller's surface");
     var nbytes = rw * rh * 4;
     var snap = alloc(nbytes);
@@ -459,7 +459,7 @@ fn main() {
 
     # Frame B: the OTHER pane active, a different selection — a visibly different picture.
     store64(ra, 0); store64(rb, 0);
-    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var fb = crab_render(rsurf, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert_eq(fb, fa, "the surface hands back the SAME render target — this is the reuse");
     var diff = 0;
     bi = 0;
@@ -473,7 +473,7 @@ fn main() {
 
     # Frame A again, into the same reused target. Every byte must match the snapshot.
     store64(ra, 0); store64(rb, 0);
-    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var fa2 = crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert_eq(fa2, fa, "...still the same target on the third render");
     var residue = 0;
     bi = 0;
@@ -487,7 +487,7 @@ fn main() {
     bi = 0;
     while (bi < nbytes) { store8(apix + bi, 0x5A); bi = bi + 1; }
     store64(ra, 0); store64(rb, 0);
-    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(rsurf, 0, 0, 0, 0, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     var survived = 0;
     bi = 0;
     while (bi < nbytes) {
@@ -499,7 +499,7 @@ fn main() {
     # ⚠ AND TWO SURFACES STILL GIVE TWO PICTURES — the escape hatch `src/render_test.cyr` depends on.
     var rsurf2 = dh_surface_new(rw, rh);
     store64(ra, 0); store64(rb, 0);
-    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var fc = crab_render(rsurf2, 0, 1, 2, 1, rl, 3, "/bin", rlz, rlm, rr, 3, "/", rrz, rrm, ra, rb, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert(fc != fa, "a second surface renders into its OWN target, not the first one's");
 
     # ================================================================
@@ -539,7 +539,7 @@ fn main() {
     dh_frame_arena_set(0);
     assert_eq(dh_frame_arena_get(), 0, "the frame arena can be uninstalled");
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert(dh_frame_arena_get() != 0, "a render installs one BY ITSELF — no step for main() to forget");
     assert_eq(dh_frame_arena_get(), crab_frame_arena(), "...crab's own, not some other arena");
 
@@ -553,10 +553,10 @@ fn main() {
     assert(tiny != 0, "a deliberately tiny arena is created");
     dh_frame_arena_set(tiny);
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     var n0 = alloc_used();
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert(alloc_used() - n0 > 0,
       "a frame that cannot fit its arena SPILLS to the global heap instead of failing");
 
@@ -574,7 +574,7 @@ fn main() {
 
     # Warm-up: the first arena'd frame establishes what one frame costs.
     store64(asl, 0); store64(asr, 0);
-    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     var one_frame = arena_used(farena);
     assert(one_frame > 0, "the frame really landed in the arena");
     var cap0 = arena_capacity_total(farena);
@@ -583,7 +583,7 @@ fn main() {
     var af = 0;
     while (af < 20) {
         store64(asl, 0); store64(asr, 0);
-        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+        crab_render(asurf, 0, 0, 0, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
         af = af + 1;
     }
     # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
@@ -600,7 +600,7 @@ fn main() {
     # ⛔ AND THE PIXELS ARE STILL RIGHT. A frame whose widgets were freed mid-render would still
     # produce *a* surface; this is the check that it produces the right one.
     store64(asl, 0); store64(asr, 0);
-    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    var asds = crab_render(asurf, 0, 0, 1, 0, al, 3, "/bin", alz, alm, ar2, 3, "/", arz, arm, asl, asr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
     assert(asds != 0, "an arena'd frame still renders");
     t_bad_alpha = 0; t_bad_premul = 0;
     assert_eq(t_scan_premul(sd_surface_pixels(asds), aw * ah), 0,
@@ -823,7 +823,7 @@ fn main() {
     }
     var hsl = alloc(8); store64(hsl, 0);
     var hsr = alloc(8); store64(hsr, 0);
-    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0);
+    crab_render(hsurf, 0, 0, 0, 0, hl, 3, "/bin", hlz, hlm, hrr, 3, "/", hrz, hrm, hsl, hsr, CRAB_PANE_OK, CRAB_PANE_OK, 0, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0, 0, 0, 0, 0, 0, "");
 
     var hb = alloc(16);
     # The pane row band starts below the 28px header; rows are 26px tall. Sample the middle of the
@@ -1994,6 +1994,189 @@ fn main() {
     # --- coverage: an idle record reports nothing rather than stale state --------------------------
     assert_eq(crab_op_active(), 0, "idle");
     assert(t_streq(crab_op_name(), ""), "an idle record has no name — not the last one it carried");
+
+    # --- M4: the edit buffer, owned by crab -------------------------------------------------------
+    # ⛔ crab does NOT use dhancha's TEXTINPUT: `dh_text_new` allocates its buffer globally but the
+    # WIDGET is arena'd and dies each frame, so building one per frame leaks. Third dhancha feature
+    # with that retained-mode assumption, after `dh_dispatch` and drag.
+    assert_eq(crab_edit_start(0), 0, "an empty field starts empty");
+    assert_eq(crab_edit_caret(), 0, "...with the caret at 0");
+    assert_eq(crab_edit_start("notes.txt"), 9, "seeding takes the whole name");
+    assert(t_streq(crab_edit_buf(), "notes.txt"), "...verbatim");
+    # ⚠ THE CARET STARTS AT THE END. Renaming is almost always appending or trimming a suffix;
+    # starting at 0 makes every rename begin with a trip across the name.
+    assert_eq(crab_edit_caret(), 9, "the caret starts at the END, not the front");
+    # backspace from the end trims
+    assert_eq(crab_edit_backspace(), 1, "backspace removes");
+    assert_eq(crab_edit_backspace(), 1, "...twice");
+    assert_eq(crab_edit_backspace(), 1, "...three times");
+    assert_eq(crab_edit_backspace(), 1, "...four times");
+    assert(t_streq(crab_edit_buf(), "notes"), "'.txt' is gone");
+    assert_eq(crab_edit_len(), 5, "...and the length followed");
+    # insert at the end
+    crab_edit_insert(45); crab_edit_insert(50);
+    assert(t_streq(crab_edit_buf(), "notes-2"), "typing appends at the caret");
+    # ⛔ INSERT IN THE MIDDLE — the case a naive append-only buffer gets wrong.
+    crab_edit_start("ac");
+    crab_edit_move(0 - 1);
+    assert_eq(crab_edit_caret(), 1, "the caret moved back one");
+    assert_eq(crab_edit_insert(98), 1, "insert mid-string");
+    assert(t_streq(crab_edit_buf(), "abc"), "...lands between, not at the end");
+    assert_eq(crab_edit_caret(), 2, "...and the caret advanced past it");
+    # ⛔ BACKSPACE IN THE MIDDLE removes the byte BEFORE the caret, not the last byte.
+    crab_edit_start("abc");
+    crab_edit_move(0 - 1);
+    crab_edit_backspace();
+    assert(t_streq(crab_edit_buf(), "ac"), "backspace takes the byte before the caret");
+    # caret clamping
+    crab_edit_start("ab");
+    assert_eq(crab_edit_move(0 - 99), 0, "the caret clamps at the front");
+    assert_eq(crab_edit_backspace(), 0, "...and backspace there does nothing");
+    assert_eq(crab_edit_move(99), 2, "...and clamps at the end");
+    # ⛔ A FULL FIELD REFUSES rather than truncating — silently dropping the key just typed beats
+    # silently dropping a character typed earlier.
+    crab_edit_start(0);
+    var ei = 0;
+    while (ei < CRAB_EDIT_CAP + 10) { crab_edit_insert(97); ei = ei + 1; }
+    assert_eq(crab_edit_len(), CRAB_EDIT_CAP - 1, "the field fills to its cap and stops");
+    assert_eq(crab_edit_insert(97), 0, "...and refuses the next keystroke");
+    assert_eq(load8(crab_edit_buf() + crab_edit_len()), 0, "...still NUL-terminated");
+    # ⚠ The cap IS CRAB_NAME_MAX: a name that cannot be typed could not be stored anyway.
+    assert_eq(CRAB_EDIT_CAP, CRAB_NAME_MAX, "the field cap is the name cap");
+
+    # --- the HID keymap ----------------------------------------------------------------------------
+    # ⛔ crab receives HID USAGES, not characters, and nothing else in the stack translates them.
+    assert_eq(crab_key_char(0x04, 0), 97, "usage 0x04 is 'a'");
+    assert_eq(crab_key_char(0x04, 1), 65, "...and 'A' with shift");
+    assert_eq(crab_key_char(0x1D, 0), 122, "usage 0x1D is 'z'");
+    assert_eq(crab_key_char(0x1D, 1), 90, "...and 'Z'");
+    assert_eq(crab_key_char(0x1E, 0), 49, "usage 0x1E is '1'");
+    assert_eq(crab_key_char(0x27, 0), 48, "usage 0x27 is '0' — NOT the character after '9'");
+    assert_eq(crab_key_char(0x2C, 0), 32, "space");
+    assert_eq(crab_key_char(0x2D, 0), 45, "'-'");
+    assert_eq(crab_key_char(0x2D, 1), 95, "...and '_' with shift, which names really use");
+    assert_eq(crab_key_char(0x37, 0), 46, "'.' — the extension separator");
+    # ⚠ A key that is not a filename character yields 0 and the caller ignores it. That is the right
+    # default for a field that names a file: Enter, Esc and the arrows must NOT become text.
+    assert_eq(crab_key_char(0x28, 0), 0, "Enter is not a character");
+    assert_eq(crab_key_char(0x29, 0), 0, "...nor Esc");
+    assert_eq(crab_key_char(0x2A, 0), 0, "...nor Backspace");
+    assert_eq(crab_key_char(0x50, 0), 0, "...nor an arrow");
+    assert_eq(crab_key_char(0, 0), 0, "...nor usage 0");
+    # ⛔ AND A TYPED NAME MUST STILL PASS THE NAME GUARD — the field cannot type a '/' at all, which
+    # is the escape `crab_name_ok` refuses, but the guard is what enforces it.
+    crab_edit_start("..");
+    assert_eq(crab_name_ok(crab_edit_buf()), 0, "a typed '..' is still refused by the name guard");
+    crab_edit_start("ok.txt");
+    assert_eq(crab_name_ok(crab_edit_buf()), 1, "...and an ordinary typed name passes");
+
+    # --- M4: the context menu's model --------------------------------------------------------------
+    # ⛔ THE MENU IS NOT A SECOND SET OF VERBS. Every entry maps to a key binding that already
+    # exists, and the accelerator column says which — a menu that could do something the keyboard
+    # cannot is a second implementation drifting from the first.
+    var mi = 0;
+    while (mi < CRAB_MI_COUNT) {
+        assert(load8(crab_menu_label(mi)) != 0, "every menu item has a label");
+        assert(load8(crab_menu_key(mi)) != 0, "...and an accelerator");
+        mi = mi + 1;
+    }
+    assert_eq(load8(crab_menu_label(CRAB_MI_COUNT)), 0, "out of range is the empty string, not garbage");
+    assert_eq(load8(crab_menu_key(0 - 1)), 0, "...in both directions");
+    # ⚠ The labels must differ, or the menu is decorative.
+    assert_eq(t_streq(crab_menu_label(CRAB_MI_COPY), crab_menu_label(CRAB_MI_MOVE)), 0, "copy and move read differently");
+    assert_eq(t_streq(crab_menu_key(CRAB_MI_COPY), crab_menu_key(CRAB_MI_MOVE)), 0, "...and their keys differ");
+    # ⚠ THE ACCELERATORS MUST MATCH THE REAL BINDINGS. If a key moves and this does not, the menu
+    # starts lying — and a menu that lies about a shortcut is worse than one showing none.
+    assert(t_streq(crab_menu_key(CRAB_MI_COPY), "c"), "copy really is c");
+    assert(t_streq(crab_menu_key(CRAB_MI_MOVE), "m"), "move really is m");
+    assert(t_streq(crab_menu_key(CRAB_MI_DELETE), "d"), "delete really is d");
+    assert(t_streq(crab_menu_key(CRAB_MI_RENAME), "r"), "rename really is r");
+    assert(t_streq(crab_menu_key(CRAB_MI_NEWDIR), "n"), "new folder really is n");
+
+    # --- what applies, and what is greyed ----------------------------------------------------------
+    # ⛔ GREYED, NOT HIDDEN. Entries that move around force the operator to re-read the menu every
+    # time; entries that stay put teach their positions.
+    assert_eq(crab_menu_enabled(CRAB_MI_NEWDIR, 0, 0, 0), 1, "New folder applies to an EMPTY pane");
+    assert_eq(crab_menu_enabled(CRAB_MI_COPY, 0, 0, 0), 0, "...but copy needs a row");
+    assert_eq(crab_menu_enabled(CRAB_MI_DELETE, 0, 0, 0), 0, "...and so does delete");
+    assert_eq(crab_menu_enabled(CRAB_MI_COPY, 5, 0, 0), 1, "with a row, copy applies");
+    # ⛔ RENAME IS SINGLE-TARGET. With a mark set the operator means the SET, and renaming a set is
+    # the batch sheet — a different command with a different surface.
+    assert_eq(crab_menu_enabled(CRAB_MI_RENAME, 5, 0, 0), 1, "rename applies to one entry");
+    assert_eq(crab_menu_enabled(CRAB_MI_RENAME, 5, 0, 1), 1, "...and to a single mark");
+    assert_eq(crab_menu_enabled(CRAB_MI_RENAME, 5, 0, 3), 0, "...but NOT to a marked set");
+    assert_eq(crab_menu_enabled(CRAB_MI_DELETE, 5, 0, 3), 1, "...while delete happily takes the set");
+    # ⚠ Open stays live on a data file: crab refuses a non-ELF at the point of trying, and greying
+    # Open on every data file would read as broken.
+    assert_eq(crab_menu_enabled(CRAB_MI_OPEN, 5, 0, 0), 1, "Open stays live on a file");
+    assert_eq(crab_menu_enabled(CRAB_MI_OPEN, 5, 1, 0), 1, "...and on a directory");
+
+    # --- navigation skips greyed entries and WRAPS -------------------------------------------------
+    # ⛔ The keyboard must skip a greyed entry, or the highlight lands where Enter can do nothing and
+    # the menu appears to ignore a keypress.
+    assert_eq(crab_menu_next(CRAB_MI_OPEN, 5, 0, 0), CRAB_MI_COPY, "Down moves to the next item");
+    assert_eq(crab_menu_prev(CRAB_MI_COPY, 5, 0, 0), CRAB_MI_OPEN, "Up moves back");
+    # With a marked set, Rename is greyed and must be stepped OVER in both directions.
+    assert_eq(crab_menu_next(CRAB_MI_MOVE, 5, 0, 3), CRAB_MI_DELETE, "Down steps over the greyed Rename");
+    assert_eq(crab_menu_prev(CRAB_MI_DELETE, 5, 0, 3), CRAB_MI_MOVE, "...and Up steps back over it");
+    # ⚠ WRAPPING, not clamping — six items the operator can see at once, so running off the end and
+    # continuing is faster than stopping. A 1024-row pane is where wrapping would lose your place.
+    assert_eq(crab_menu_next(CRAB_MI_NEWDIR, 5, 0, 0), CRAB_MI_OPEN, "Down from the last wraps to the first");
+    assert_eq(crab_menu_prev(CRAB_MI_OPEN, 5, 0, 0), CRAB_MI_NEWDIR, "...and Up from the first wraps to the last");
+    # ⛔ On an EMPTY pane only New folder is live, so navigation lands there from anywhere.
+    assert_eq(crab_menu_next(CRAB_MI_OPEN, 0, 0, 0), CRAB_MI_NEWDIR, "on an empty pane, Down finds the only live entry");
+    assert_eq(crab_menu_prev(CRAB_MI_OPEN, 0, 0, 0), CRAB_MI_NEWDIR, "...and so does Up");
+    # ⚠ A menu with NOTHING enabled returns where it started rather than spinning.
+    assert_eq(crab_menu_next(CRAB_MI_COPY, 0, 0, 0), CRAB_MI_NEWDIR, "the scan terminates");
+
+    # --- the menu's title says what the verbs will act on ------------------------------------------
+    # ⛔ "3 marked" beats the file's name when a set is marked: a menu headed with ONE name while
+    # Delete removes nine is the most dangerous label in the app.
+    assert(t_streq(crab_menu_target(3, "one.txt"), "the marked entries"), "a marked SET names the set");
+    assert(t_streq(crab_menu_target(0, "one.txt"), "one.txt"), "...and a single entry names itself");
+    assert(t_streq(crab_menu_target(1, "one.txt"), "one.txt"), "...as does exactly one mark");
+    assert(t_streq(crab_menu_target(0, 0), "this folder"), "...and an empty pane names the folder");
+
+    # --- M4: the batch-rename pattern --------------------------------------------------------------
+    # ⭐ TWO SUBSTITUTIONS AND NOTHING ELSE: `#` is the sequence number, `*` is the original name.
+    # That covers prefix, suffix and numbering — the renames people actually do — and every addition
+    # past it is a small language nobody asked for.
+    var bp = alloc(CRAB_EDIT_CAP);
+    assert_eq(crab_batch_name(bp, "photo", 1, "old.txt"), 5, "a literal pattern is itself");
+    assert(t_streq(bp, "photo"), "...verbatim");
+    assert(crab_batch_name(bp, "photo-#", 1, "old.txt") > 0, "'#' expands");
+    assert(t_streq(bp, "photo-1"), "...to the sequence number");
+    crab_batch_name(bp, "photo-#", 12, "old.txt");
+    assert(t_streq(bp, "photo-12"), "...multi-digit");
+    assert(crab_batch_name(bp, "*", 1, "old.txt") > 0, "'*' expands");
+    assert(t_streq(bp, "old.txt"), "...to the original name");
+    crab_batch_name(bp, "*-backup", 1, "notes");
+    assert(t_streq(bp, "notes-backup"), "a suffix pattern");
+    crab_batch_name(bp, "v#-*", 3, "img");
+    assert(t_streq(bp, "v3-img"), "...and both together");
+    crab_batch_name(bp, "##", 7, "x");
+    assert(t_streq(bp, "77"), "'#' twice expands twice — no special-casing");
+    crab_batch_name(bp, "*", 1, 0);
+    assert(t_streq(bp, ""), "a null original expands to nothing, not a fault");
+    assert_eq(crab_batch_name(0, "x", 1, "y"), 0 - 1, "a null destination refuses");
+    assert_eq(crab_batch_name(bp, 0, 1, "y"), 0 - 1, "...and a null pattern");
+    # ⛔ REFUSES RATHER THAN TRUNCATES. A truncated name is a DIFFERENT name, and a batch that
+    # silently renamed forty files to forty truncated names is worse than one that stopped.
+    var blong = alloc(CRAB_EDIT_CAP * 2);
+    var bl = 0;
+    while (bl < (CRAB_EDIT_CAP + 20)) { store8(blong + bl, 120); bl = bl + 1; }
+    store8(blong + bl, 0);
+    assert_eq(crab_batch_name(bp, blong, 1, "y"), 0 - 1, "a pattern past the cap refuses");
+    assert_eq(crab_batch_name(bp, "*", 1, blong), 0 - 1, "...and so does an expansion past it");
+    assert_eq(load8(bp + CRAB_EDIT_CAP - 1), 0, "...still NUL-terminated at the cap");
+    # ⛔ AND THE RESULT STILL FACES THE NAME GUARD. `*` splices in a readdir name, so a pattern
+    # really can produce `..` — the guard is what refuses it, not the expander.
+    crab_batch_name(bp, "*", 1, "..");
+    assert_eq(crab_name_ok(bp), 0, "a pattern that produces '..' is refused by the name guard");
+    crab_batch_name(bp, "a/#", 1, "x");
+    assert_eq(crab_name_ok(bp), 0, "...and one carrying a separator");
+    crab_batch_name(bp, "file-#", 1, "x");
+    assert_eq(crab_name_ok(bp), 1, "...while an ordinary expansion passes");
 
     # --- the path cap -----------------------------------------------------------------------------
     # ⚠ A name that cannot be joined within CRAB_PATH_MAX is refused, never truncated — a truncated

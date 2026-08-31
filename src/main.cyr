@@ -54,6 +54,17 @@ fn main(): i64 {
     # ⭐ MULTI-SELECT MARKS (M4) — one BYTE per entry, parallel to the record buffer, per pane.
     # ⛔ CLEARED ON EVERY RE-LISTING. A mark is an index, and an index means nothing once the
     # directory has been read again — see the ⛔ in `src/ui.cyr`.
+    # ⭐⭐ THE OVERLAY'S STATE (M4), IN crab's OWN VARIABLES. dhancha holds no "which popup is open" —
+    # a widget pointer there would die at `dh_frame_begin`, the same failure as drag in 0.9.21. The
+    # popup exists because these say so, and the layer being in the tree IS the modality.
+    var menu_open = 0;
+    var menu_x = 0;
+    var menu_y = 0;
+    var menu_sel = 0;
+    # ⚠ `edit_open` doubles as the MODE: 1 = rename the selected entry, 2 = create a folder. The two
+    # share the field, the keys and the sheet; only the commit differs.
+    var edit_open = 0;
+    var edit_label = "";
     var lmarks = alloc(CRAB_MAX_ENTRIES);
     var rmarks = alloc(CRAB_MAX_ENTRIES);
     var lsizes = alloc(CRAB_MAX_ENTRIES * 8);             # per-entry byte sizes (parallel to lbuf)
@@ -150,7 +161,7 @@ fn main(): i64 {
     # in `main.cyr` is reachable from `tests/crab.tcyr`, so deleting the install broke no test while
     # restoring a 77 KB-per-frame leak. `crab_render` now owns and installs it — see `src/ui.cyr`.
 
-    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks);
+    var sds = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
@@ -482,43 +493,65 @@ fn main(): i64 {
                 }
                 if (crab_key_acts(dh_event_b(ev)) == 1) {
                     crab_say("crab: key press\n");
-                    # ============ M4 — FILE OPERATIONS ============================================
-                    # ⛔⛔ THE CONFIRMATION IS RESOLVED BEFORE ANY OTHER KEY IS LOOKED AT, and it
-                    # consumes the keypress. Letting `y` fall through to the bindings below would
-                    # make the confirming keystroke ALSO do whatever `y` means later — and the
-                    # answer to "delete this file?" must do exactly one thing.
-                    if (confirm_del == 1) {
-                        confirm_del = 0;
-                        crab_clear_notice();
-                        if (u == 0x1C) {                                   # y — go ahead
-                            var dpath = lpath; var dbuf2 = lbuf; var dsel = sel_l; var dcnt = ln;
-                            if (active_pane == 1) { dpath = rpath; dbuf2 = rbuf; dsel = sel_r; dcnt = rn; }
-                            var dmk = lmarks; if (active_pane == 1) { dmk = rmarks; }
-                            var dmarked = crab_mark_count(dmk, dcnt);
-                            if ((dcnt > 0) && (dmarked > 0)) {
-                                # ⭐ MARKED DELETE. Queued by NAME first, because each `crab_fs_delete`
-                                # is followed by nothing that re-lists — but the NEXT one indexes the
-                                # same buffer, and deleting by index while the buffer still describes
-                                # the pre-delete listing is only safe because nothing re-reads it in
-                                # between. Queuing by name removes that "only safe because" entirely.
-                                crab_queue_marked(dbuf2, dmk, dcnt);
-                                var dfails = 0;
-                                var dok = 0;
-                                var dnm = crab_queue_next();
-                                while (dnm != 0) {
-                                    # ⚠ The type byte must be read BEFORE the queue advanced past the
-                                    # record, so it is re-derived from the name's index instead.
-                                    var di2 = crab_index_of(dbuf2, dcnt, dnm);
-                                    var dis = 0;
-                                    if (di2 >= 0) { dis = load8(dbuf2 + di2 * CRAB_REC_SZ + CRAB_REC_TYPE); }
-                                    var rcm = crab_fs_delete(dpath, dnm, dis, pathscr);
-                                    if (rcm == CRAB_FS_OK) { dok = dok + 1; } else { dfails = dfails + 1; }
-                                    dnm = crab_queue_next();
+                    # ⚠ The pane facts the menu's enable rules need, read once per keypress.
+                    var mcnt2 = ln; var mmkp = lmarks; var mbufp = lbuf; var mselp = sel_l;
+                    if (active_pane == 1) { mcnt2 = rn; mmkp = rmarks; mbufp = rbuf; mselp = sel_r; }
+                    var misdir2 = 0;
+                    if (mcnt2 > 0) { misdir2 = load8(mbufp + mselp * CRAB_REC_SZ + CRAB_REC_TYPE); }
+                    var mmark2 = crab_mark_count(mmkp, mcnt2);
+                    # ⭐⭐ THE EDIT FIELD TAKES EVERY KEY WHILE IT IS OPEN, and returns before any binding
+                    # below sees one. ⛔ A field that let `d` through would delete the file being renamed.
+                    # Same shape as the delete confirmation one layer up: a modal surface owns the keyboard
+                    # until it closes, and the layer being in the tree is what makes it modal on screen.
+                    if (edit_open != 0) {
+                        if (u == 0x29) {                                   # Esc — abandon
+                            edit_open = 0;
+                            crab_set_notice("cancelled");
+                        } else {
+                            if (u == 0x28) {                                   # Enter — commit
+                                var epath = lpath; if (active_pane == 1) { epath = rpath; }
+                                var erc = 0;
+                                if (edit_open == 3) {
+                                    # ⛔ QUEUE BY NAME FIRST. Each rename leaves the pane
+                                    # buffer describing the PRE-rename
+                                    # listing, so renaming the second entry by index would be safe only by accident.
+                                    var bmk = lmarks; var bbuf = lbuf; var bcnt = ln;
+                                    if (active_pane == 1) { bmk = rmarks; bbuf = rbuf; bcnt = rn; }
+                                    crab_queue_marked(bbuf, bmk, bcnt);
+                                    var bi = 1;
+                                    var bfail = 0;
+                                    var bdst = crab_batch_dst();
+                                    var bnm = crab_queue_next();
+                                    while (bnm != 0) {
+                                        if (crab_batch_name(bdst, crab_edit_buf(), bi, bnm) < 0) { bfail = bfail + 1; }
+                                        else {
+                                            # ⚠ The expansion still faces the name guard —
+                                            # `*` splices in a readdir name, so a
+                                            # pattern really can produce `..` or a name carrying a separator.
+                                            if (crab_fs_rename(epath, bnm, bdst, pathscr,
+                                                pathscr2, statbuf) != CRAB_FS_OK) {
+                                                bfail = bfail + 1;
+                                            }
+                                        }
+                                        bi = bi + 1;
+                                        bnm = crab_queue_next();
+                                    }
+                                    crab_queue_reset();
+                                    if (bfail > 0) { erc = CRAB_FS_ESYS; } else { erc = CRAB_FS_OK; }
+                                } else {
+                                    if (edit_open == 2) {
+                                        erc = crab_fs_mkdir(epath, crab_edit_buf(), pathscr, statbuf);
+                                    } else {
+                                        var erec = lbuf + sel_l * CRAB_REC_SZ;
+                                        if (active_pane == 1) { erec = rbuf + sel_r * CRAB_REC_SZ; }
+                                        crab_strcpy_n(namescr, erec, CRAB_NAME_MAX);
+                                        erc = crab_fs_rename(epath, namescr, crab_edit_buf(),
+                                          pathscr, pathscr2, statbuf);
+                                    }
                                 }
-                                crab_queue_reset();
-                                if (dfails > 0) { crab_set_notice("some entries could not be deleted"); }
-                                else { crab_set_notice("done"); }
-                                crab_say("crab: delete marked\n");
+                                crab_set_notice(crab_fs_msg(erc));
+                                crab_say("crab: edit commit -> "); crab_say(crab_fs_msg(erc)); crab_say("\n");
+                                edit_open = 0;
                                 ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                 crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
                                 lstate = crab_pane_state(ln, crab_listing_err());
@@ -528,32 +561,53 @@ fn main(): i64 {
                                 if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                 if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
                             }
-                            if ((dcnt > 0) && (dmarked == 0)) {
-                                var drec = dbuf2 + dsel * CRAB_REC_SZ;
-                                var ddir = load8(drec + CRAB_REC_TYPE);
-                                # ⛔ COPY THE NAME OUT BEFORE THE RE-LISTING OVERWRITES THE RECORD.
-                                # `crab_relist` readdirs straight back into this buffer, so a name
-                                # still pointing into it afterwards describes a different file.
-                                crab_strcpy_n(namescr, drec, CRAB_NAME_MAX);
-                                # ⭐ A FOLDER IS A RECURSIVE DELETE NOW (M4). ⛔ It is the single
-                                # most destructive thing crab can do and it is NOT undoable — which
-                                # is why it sits behind the same y-confirmation, why the prompt says
-                                # "and everything in it", and why Esc stops it mid-walk.
-                                var rcd = 0;
-                                if (ddir != 0) {
-                                    rcd = crab_walk_begin(CRAB_OP_DTREE, dpath, namescr, 0,
-                                      pathscr, pathscr2, statbuf);
-                                    if (rcd == CRAB_FS_OK) { crab_set_notice("deleting folder..."); }
-                                    else { crab_set_notice(crab_fs_msg(rcd)); }
-                                } else {
-                                    rcd = crab_fs_delete(dpath, namescr, ddir, pathscr);
-                                    crab_set_notice(crab_fs_msg(rcd));
-                                }
-                                crab_say("crab: delete "); crab_say(namescr);
-                                crab_say(" -> "); crab_say(crab_fs_msg(rcd)); crab_say("\n");
-                                # ⚠ A tree delete is still RUNNING here — the idle tick relists when
-                                # it finishes. Relisting now would readdir a directory mid-removal.
-                                if (crab_op_active() == 0) {
+                            if (u == 0x2A) { crab_edit_backspace(); }           # Backspace
+                            if (u == 0x50) { crab_edit_move(0 - 1); }           # Left
+                            if (u == 0x4F) { crab_edit_move(1); }               # Right
+                            # ⚠ `mods` carries press/release, not shift — crab asked for FULL_KEYS, so there is no
+                            # shift state on the wire yet. Names type lower-case until the compositor forwards
+                            # modifiers; the map already takes the flag.
+                            var ech = crab_key_char(u, 0);
+                            if (ech != 0) { crab_edit_insert(ech); }
+                        }
+                    } else {
+                        # ============ M4 — FILE OPERATIONS ============================================
+                        # ⛔⛔ THE CONFIRMATION IS RESOLVED BEFORE ANY OTHER KEY IS LOOKED AT, and it
+                        # consumes the keypress. Letting `y` fall through to the bindings below would
+                        # make the confirming keystroke ALSO do whatever `y` means later — and the
+                        # answer to "delete this file?" must do exactly one thing.
+                        if (confirm_del == 1) {
+                            confirm_del = 0;
+                            crab_clear_notice();
+                            if (u == 0x1C) {                                   # y — go ahead
+                                var dpath = lpath; var dbuf2 = lbuf; var dsel = sel_l; var dcnt = ln;
+                                if (active_pane == 1) { dpath = rpath; dbuf2 = rbuf; dsel = sel_r; dcnt = rn; }
+                                var dmk = lmarks; if (active_pane == 1) { dmk = rmarks; }
+                                var dmarked = crab_mark_count(dmk, dcnt);
+                                if ((dcnt > 0) && (dmarked > 0)) {
+                                    # ⭐ MARKED DELETE. Queued by NAME first, because each `crab_fs_delete`
+                                    # is followed by nothing that re-lists — but the NEXT one indexes the
+                                    # same buffer, and deleting by index while the buffer still describes
+                                    # the pre-delete listing is only safe because nothing re-reads it in
+                                    # between. Queuing by name removes that "only safe because" entirely.
+                                    crab_queue_marked(dbuf2, dmk, dcnt);
+                                    var dfails = 0;
+                                    var dok = 0;
+                                    var dnm = crab_queue_next();
+                                    while (dnm != 0) {
+                                        # ⚠ The type byte must be read BEFORE the queue advanced past the
+                                        # record, so it is re-derived from the name's index instead.
+                                        var di2 = crab_index_of(dbuf2, dcnt, dnm);
+                                        var dis = 0;
+                                        if (di2 >= 0) { dis = load8(dbuf2 + di2 * CRAB_REC_SZ + CRAB_REC_TYPE); }
+                                        var rcm = crab_fs_delete(dpath, dnm, dis, pathscr);
+                                        if (rcm == CRAB_FS_OK) { dok = dok + 1; } else { dfails = dfails + 1; }
+                                        dnm = crab_queue_next();
+                                    }
+                                    crab_queue_reset();
+                                    if (dfails > 0) { crab_set_notice("some entries could not be deleted"); }
+                                    else { crab_set_notice("done"); }
+                                    crab_say("crab: delete marked\n");
                                     ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                     crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
                                     lstate = crab_pane_state(ln, crab_listing_err());
@@ -563,196 +617,31 @@ fn main(): i64 {
                                     if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                     if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
                                 }
-                            }
-                        } else { crab_say("crab: delete cancelled\n"); }
-                    } else {
-                        # ⚠ EVERY OTHER KEY CLEARS A STALE NOTICE. Without this the result of the last
-                        # operation would sit over the status line for the rest of the session, and the
-                        # operator would be reading an answer to a question they have stopped asking.
-                        # ⛔ AND NAVIGATION LIVES INSIDE THIS `else`, NOT ABOVE IT. It used to sit before
-                        # the confirmation gate, so an arrow or Enter answering "delete this?" ALSO moved
-                        # the selection or descended — and then the gate cancelled, having already acted.
-                        # The comment above this gate claimed keys were resolved here first; they were not.
-                        if (crab_get_notice() != 0) { crab_clear_notice(); }
-                        # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
-                        # OPERATOR CANNOT STOP IS A WORSE CONTROL THAN A BLOCKING ONE: the blocking
-                        # version at least ended by itself. Shipped in the same change as the
-                        # stepping, not after it.
-                        # ⚠ Checked BEFORE every other binding and consumes the key, so Esc during a
-                        # transfer cannot also mean whatever Esc comes to mean later.
-                        # ⭐⭐ SPACE MARKS AND ADVANCES (M4 multi-select) — the Norton Commander
-                        # gesture crab's whole layout descends from. Marking without advancing means
-                        # two keys per file; advancing without marking is what the arrow keys do.
-                        # ⚠ It advances even on the LAST row (where it cannot move), so the mark
-                        # still lands — a toggle that silently did nothing at the bottom of a pane
-                        # would look like a dropped keypress.
-                        if (u == 0x2C) {                                       # Space
-                            if (active_pane == 0) {
-                                crab_mark_toggle(lmarks, sel_l, ln);
-                                if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; }
-                            } else {
-                                crab_mark_toggle(rmarks, sel_r, rn);
-                                if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; }
-                            }
-                        }
-                        if (u == 0x29) {                                       # Esc
-                            if (crab_op_active() == 1) {
-                                crab_copy_cancel();
-                                crab_set_notice("transfer cancelled");
-                                crab_say("crab: transfer cancelled\n");
-                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                lstate = crab_pane_state(ln, crab_listing_err());
-                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                rstate = crab_pane_state(rn, crab_listing_err());
-                                if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
-                                if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
-                            }
-                        }
-                        if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
-                        if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
-                        if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                            if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                            if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
-                        }
-                        if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                            if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                            if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
-                        }
-                        # ⭐⭐ ENTER ON A FILE IS NO LONGER SILENT (M4). It used to reach
-                        # `crab_descend`, which refuses a non-directory and returns -1 — and this
-                        # site dropped that -1 with no else arm. So Enter on a file did nothing and
-                        # SAID nothing, which the operator cannot tell from a keypress crab never
-                        # received. That silence is what the roadmap's M4 section opens by naming.
-                        # ⚠ THE TYPE BYTE DECIDES, NOT THE RETURN VALUE. Branching on `crab_descend`'s
-                        # -1 would conflate "not a directory" with "the path was too long" — two
-                        # different answers, and one of them must not launch anything.
-                        if (u == 0x28) {                                       # Enter — descend, or OPEN
-                            var epath = lpath; var ebuf = lbuf; var esel = sel_l; var ecnt = ln;
-                            if (active_pane == 1) { epath = rpath; ebuf = rbuf; esel = sel_r; ecnt = rn; }
-                            if (ecnt <= 0) { crab_set_notice("nothing to open"); }
-                            else {
-                                if (load8(ebuf + esel * CRAB_REC_SZ + CRAB_REC_TYPE) != 0) {
-                                    if (active_pane == 0) {
-                                        var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr,
-                                          lsizes, lmtimes, statbuf);
-                                        if (nl >= 0) {
-                                            ln = nl;
-                                            crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                            lstate = crab_pane_state(ln, crab_listing_err());
-                                            sel_l = 0;
-                                            crab_log_cd(lpath);
-                                        } else { crab_set_notice("cannot open that folder"); }
-                                    }
-                                    if (active_pane == 1) {
-                                        var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr,
-                                          rsizes, rmtimes, statbuf);
-                                        if (nr >= 0) {
-                                            rn = nr;
-                                            crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                            rstate = crab_pane_state(rn, crab_listing_err());
-                                            sel_r = 0;
-                                            crab_log_cd(rpath);
-                                        } else { crab_set_notice("cannot open that folder"); }
-                                    }
-                                } else {
-                                    crab_strcpy_n(namescr, ebuf + esel * CRAB_REC_SZ, CRAB_NAME_MAX);
-                                    var rco = crab_fs_launch(epath, namescr, pathscr);
-                                    crab_set_notice(crab_fs_msg(rco));
-                                    crab_say("crab: open "); crab_say(namescr);
-                                    crab_say(" -> "); crab_say(crab_fs_msg(rco)); crab_say("\n");
-                                }
-                            }
-                        }
-                        if (u == 0x07) {                                       # d — delete, with a confirmation
-                            var qcnt = ln; if (active_pane == 1) { qcnt = rn; }
-                            var qmk = lmarks; if (active_pane == 1) { qmk = rmarks; }
-                            var nmark = crab_mark_count(qmk, qcnt);
-                            if (qcnt > 0) {
-                                confirm_del = 1;
-                                # ⛔ THE PROMPT MUST SAY HOW MANY. "delete the selected entry?" in
-                                # front of a nine-file marked set is the most dangerous sentence in
-                                # the app — the operator answers the question they were asked.
-                                if (nmark > 0) { crab_set_notice("delete the MARKED entries?  y = yes, any other key = no"); }
-                                else {
-                                    # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected
-                                    # entry?" in front of a directory is technically true and
-                                    # practically a lie — the operator answers the question asked.
-                                    var qrec = lbuf + sel_l * CRAB_REC_SZ;
-                                    if (active_pane == 1) { qrec = rbuf + sel_r * CRAB_REC_SZ; }
-                                    if (load8(qrec + CRAB_REC_TYPE) != 0) {
-                                        crab_set_notice("delete this FOLDER and everything in it?  y = yes");
+                                if ((dcnt > 0) && (dmarked == 0)) {
+                                    var drec = dbuf2 + dsel * CRAB_REC_SZ;
+                                    var ddir = load8(drec + CRAB_REC_TYPE);
+                                    # ⛔ COPY THE NAME OUT BEFORE THE RE-LISTING OVERWRITES THE RECORD.
+                                    # `crab_relist` readdirs straight back into this buffer, so a name
+                                    # still pointing into it afterwards describes a different file.
+                                    crab_strcpy_n(namescr, drec, CRAB_NAME_MAX);
+                                    # ⭐ A FOLDER IS A RECURSIVE DELETE NOW (M4). ⛔ It is the single
+                                    # most destructive thing crab can do and it is NOT undoable — which
+                                    # is why it sits behind the same y-confirmation, why the prompt says
+                                    # "and everything in it", and why Esc stops it mid-walk.
+                                    var rcd = 0;
+                                    if (ddir != 0) {
+                                        rcd = crab_walk_begin(CRAB_OP_DTREE, dpath, namescr, 0,
+                                          pathscr, pathscr2, statbuf);
+                                        if (rcd == CRAB_FS_OK) { crab_set_notice("deleting folder..."); }
+                                        else { crab_set_notice(crab_fs_msg(rcd)); }
                                     } else {
-                                        crab_set_notice("delete the selected entry?  y = yes, any other key = no");
+                                        rcd = crab_fs_delete(dpath, namescr, ddir, pathscr);
+                                        crab_set_notice(crab_fs_msg(rcd));
                                     }
-                                }
-                            } else { crab_set_notice("nothing selected to delete"); }
-                        }
-                        # ⭐ COPY AND MOVE GO TO THE OTHER PANE, WHICH IS WHAT THE SECOND PANE IS FOR.
-                        # This is the Norton-Commander idiom crab's whole layout is built on: the
-                        # destination is not typed, it is the directory already open opposite. It also
-                        # means M4's first write operations need no text entry at all.
-                        # ⚠ NOT BOUND TO F5/F6. aethersafha takes F5 for maximize (`win_notify_resize`),
-                        # so a client binding it would never see the key.
-                        if ((u == 0x06) || (u == 0x10)) {                      # c — copy / m — move
-                            var srcp = lpath; var dstp = rpath; var sbuf2 = lbuf; var ssel = sel_l; var scnt = ln;
-                            if (active_pane == 1) { srcp = rpath; dstp = lpath; sbuf2 = rbuf; ssel = sel_r; scnt = rn; }
-                            if (scnt <= 0) { crab_set_notice("nothing selected"); }
-                            else {
-                                var srec = sbuf2 + ssel * CRAB_REC_SZ;
-                                # ⛔ DIRECTORIES ARE REFUSED HERE, NOT DEEPER. `crab_fs_copy` would open a
-                                # directory and read it as a byte stream — on ext2 that yields raw dirent
-                                # bytes, so the "copy" would produce a corrupt FILE where a folder was
-                                # asked for. Recursive copy needs the transfer tray to show and stop it.
-                                if (load8(srec + CRAB_REC_TYPE) != 0) {
-                                    # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
-                                    # acceptable: it shows what is happening and Esc stops it.
-                                    crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
-                                    var rct = crab_walk_begin(CRAB_OP_CTREE, srcp, namescr, dstp,
-                                      pathscr, pathscr2, statbuf);
-                                    if (rct == CRAB_FS_OK) { crab_set_notice("copying folder..."); }
-                                    else { crab_set_notice(crab_fs_msg(rct)); }
-                                    crab_say("crab: copy tree "); crab_say(namescr); crab_say("\n");
-                                } else {
-                                    crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
-                                    # ⭐ MARKS OUTRANK THE CURSOR, and with nothing marked the cursor IS the
-                                    # selection — so an operator who never presses Space sees no change at all.
-                                    var smk = lmarks; if (active_pane == 1) { smk = rmarks; }
-                                    var smarked = crab_mark_count(smk, scnt);
-                                    if (smarked > 0) {
-                                        var qkind = CRAB_OP_COPY;
-                                        if (u == 0x10) { qkind = CRAB_OP_MOVE; }
-                                        crab_queue_marked(sbuf2, smk, scnt);
-                                        crab_queue_dirs(qkind, srcp, dstp);
-                                        var qn0 = crab_queue_advance(pathscr, pathscr2, statbuf);
-                                        if (qn0 == 1) { crab_set_notice("transferring..."); }
-                                        else { crab_set_notice("nothing could be transferred"); }
-                                        crab_say("crab: transfer marked\n");
-                                    }
-                                    var rcc = 0;
-                                    # ⭐ A MOVE STILL TRIES `rename` FIRST and only steps when it
-                                    # refuses — the common case (both panes on one filesystem) never
-                                    # reads a byte, finishes instantly, and shows no bar at all.
-                                    var started = 0;
-                                    if (smarked > 0) { started = 0 - 1; }
-                                    if ((smarked == 0) && (u == 0x10)) {
-                                        rcc = crab_fs_move(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
-                                        if (rcc == CRAB_FS_OK) { started = 0; }
-                                        else { started = 1; }
-                                    }
-                                    if ((smarked == 0) && (u != 0x10)) { started = 1; }
-                                    if (started == 1) {
-                                        var okind = CRAB_OP_COPY;
-                                        if (u == 0x10) { okind = CRAB_OP_MOVE; }
-                                        rcc = crab_copy_begin(okind, srcp, namescr, dstp, pathscr, pathscr2, statbuf);
-                                        # ⚠ OK here means STARTED, not finished — the idle tick
-                                        # carries it from now on and reports the outcome.
-                                        if (rcc == CRAB_FS_OK) { crab_set_notice("transferring..."); }
-                                        else { crab_set_notice(crab_fs_msg(rcc)); }
-                                    } else { if (started == 0) { crab_set_notice(crab_fs_msg(rcc)); } }
-                                    if (u == 0x06) { crab_say("crab: copy "); } else { crab_say("crab: move "); }
-                                    crab_say(namescr); crab_say(" -> "); crab_say(crab_fs_msg(rcc)); crab_say("\n");
+                                    crab_say("crab: delete "); crab_say(namescr);
+                                    crab_say(" -> "); crab_say(crab_fs_msg(rcd)); crab_say("\n");
+                                    # ⚠ A tree delete is still RUNNING here — the idle tick relists when
+                                    # it finishes. Relisting now would readdir a directory mid-removal.
                                     if (crab_op_active() == 0) {
                                         ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                         crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
@@ -764,89 +653,358 @@ fn main(): i64 {
                                         if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
                                     }
                                 }
+                            } else { crab_say("crab: delete cancelled\n"); }
+                        } else {
+                            # ⚠ EVERY OTHER KEY CLEARS A STALE NOTICE. Without this the result of the last
+                            # operation would sit over the status line for the rest of the session, and the
+                            # operator would be reading an answer to a question they have stopped asking.
+                            # ⛔ AND NAVIGATION LIVES INSIDE THIS `else`, NOT ABOVE IT. It used to sit before
+                            # the confirmation gate, so an arrow or Enter answering "delete this?" ALSO moved
+                            # the selection or descended — and then the gate cancelled, having already acted.
+                            # The comment above this gate claimed keys were resolved here first; they were not.
+                            if (crab_get_notice() != 0) { crab_clear_notice(); }
+                            # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
+                            # OPERATOR CANNOT STOP IS A WORSE CONTROL THAN A BLOCKING ONE: the blocking
+                            # version at least ended by itself. Shipped in the same change as the
+                            # stepping, not after it.
+                            # ⚠ Checked BEFORE every other binding and consumes the key, so Esc during a
+                            # transfer cannot also mean whatever Esc comes to mean later.
+                            # ⭐⭐ SPACE MARKS AND ADVANCES (M4 multi-select) — the Norton Commander
+                            # gesture crab's whole layout descends from. Marking without advancing means
+                            # two keys per file; advancing without marking is what the arrow keys do.
+                            # ⚠ It advances even on the LAST row (where it cannot move), so the mark
+                            # still lands — a toggle that silently did nothing at the bottom of a pane
+                            # would look like a dropped keypress.
+                            if (u == 0x2C) {                                       # Space
+                                if (active_pane == 0) {
+                                    crab_mark_toggle(lmarks, sel_l, ln);
+                                    if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; }
+                                } else {
+                                    crab_mark_toggle(rmarks, sel_r, rn);
+                                    if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; }
+                                }
                             }
-                        }
-                        # ============ end M4 =========================================================
-                        if (u == 0x16) {                                       # s — cycle the sort mode
-                            # ⛔ RE-SORT BOTH PANES, not the active one. The mode is a property of the VIEW,
-                            # and two panes ordered differently is a display that cannot be reasoned about —
-                            # the operator would have to remember which pane they pressed `s` in.
-                            # ⭐ AND *#34* PAID FOR THE SELECTION FOLLOWING THE RE-SORT. An earlier cut
-                            # reset both panes to 0 and said so; with `crab_index_of` the cursor stays on
-                            # the file the operator was looking at, which is the point of re-sorting.
-                            # ⛔ CAPTURE BOTH NAMES BEFORE EITHER SORT — `crab_sort_entries` permutes in
-                            # place, so a name read after the first sort is already the wrong row's.
-                            var lkeep = alloc(CRAB_NAME_MAX);
-                            var rkeep = alloc(CRAB_NAME_MAX);
-                            if (ln > 0) { crab_strcpy_n(lkeep, lbuf + sel_l * CRAB_REC_SZ, CRAB_NAME_MAX); }
-                            if (rn > 0) { crab_strcpy_n(rkeep, rbuf + sel_r * CRAB_REC_SZ, CRAB_NAME_MAX); }
-                            var sm = crab_sort_cycle();
-                            # ⛔ A SIZE OR MTIME ORDER CANNOT BE COMPUTED FROM PARTIAL DATA (*#03*). The
-                            # deferred sweep may still have entries pending, and sorting on the -2 marker
-                            # would tie every unstat'd file at the bottom and then visibly reshuffle the
-                            # list as batches landed. So this mode change pays the storm, once, on the
-                            # keypress that asked for it — and NAME and KIND still pay nothing.
-                            if (crab_sort_needs_stats(sm) == 1) {
-                                crab_stat_batch(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf, ln);
-                                crab_stat_batch(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf, rn);
-                            }
-                            crab_sort_entries(lbuf, lsizes, lmtimes, ln, sm);
-                            crab_sort_entries(rbuf, rsizes, rmtimes, rn, sm);
-                            # ⛔⛔ A RE-SORT PERMUTES THE ENTRIES, SO EVERY MARK NOW POINTS AT A
-                            # DIFFERENT FILE. This is the subtlest way a mark set goes stale — the
-                            # listing did not change, only its ORDER, so nothing else here notices.
-                            # `crab_index_of` follows the CURSOR through the permutation because it
-                            # tracks one name; doing that for an arbitrary mark set means carrying
-                            # every marked name through the sort, which is the queue's job.
-                            crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                            crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                            sel_l = 0;
-                            sel_r = 0;
-                            if (ln > 0) { var nl = crab_index_of(lbuf, ln, lkeep); if (nl >= 0) { sel_l = nl; } }
-                            if (rn > 0) { var nr = crab_index_of(rbuf, rn, rkeep); if (nr >= 0) { sel_r = nr; } }
-                            crab_say("crab: sort ");
-                            crab_say(crab_sort_name(sm));
-                            crab_say("\n");
-                        }
-                        if (u == 0x2A) {                                       # Backspace — ascend to the parent
-                            # ⭐ SELECTION MEMORY (*#34*). Capture the leaf BEFORE the ascend — the ascend rewrites
-                            # `path` in place, so afterwards there is nothing left to look for.
-                            # ⚠ `crab_index_of` answering -1 is a REAL outcome, not a failure: the directory can have
-                            # been removed or renamed between the two readdirs. Landing on 0 is right there; guessing
-                            # an index is not.
-                            if (active_pane == 0) {
-                                var lleaf = crab_leaf_name(lpath, namescr, CRAB_NAME_MAX);
-                                var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                if (al >= 0) {
-                                    ln = al;
+                            if (u == 0x29) {                                       # Esc
+                                if (crab_op_active() == 1) {
+                                    crab_copy_cancel();
+                                    crab_set_notice("transfer cancelled");
+                                    crab_say("crab: transfer cancelled\n");
+                                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                     crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
                                     lstate = crab_pane_state(ln, crab_listing_err());
-                                    sel_l = 0;
-                                    if (lleaf >= 0) { var li = crab_index_of(lbuf, ln, namescr); if (li >= 0) { sel_l = li; } }
-                                    crab_log_cd(lpath);
-                                }
-                            }
-                            if (active_pane == 1) {
-                                var rleaf = crab_leaf_name(rpath, namescr, CRAB_NAME_MAX);
-                                var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                if (ar >= 0) {
-                                    rn = ar;
+                                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
                                     crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
                                     rstate = crab_pane_state(rn, crab_listing_err());
-                                    sel_r = 0;
-                                    if (rleaf >= 0) { var ri = crab_index_of(rbuf, rn, namescr); if (ri >= 0) { sel_r = ri; } }
-                                    crab_log_cd(rpath);
+                                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
                                 }
                             }
-                        }
-                    }                                  # end of the M4 confirmation `else`
+                            if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
+                            if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
+                            if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                                if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                                if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                            }
+                            if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                                if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                                if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                            }
+                            # ⭐⭐ ENTER ON A FILE IS NO LONGER SILENT (M4). It used to reach
+                            # `crab_descend`, which refuses a non-directory and returns -1 — and this
+                            # site dropped that -1 with no else arm. So Enter on a file did nothing and
+                            # SAID nothing, which the operator cannot tell from a keypress crab never
+                            # received. That silence is what the roadmap's M4 section opens by naming.
+                            # ⚠ THE TYPE BYTE DECIDES, NOT THE RETURN VALUE. Branching on `crab_descend`'s
+                            # -1 would conflate "not a directory" with "the path was too long" — two
+                            # different answers, and one of them must not launch anything.
+                            if (u == 0x28) {                                       # Enter — descend, or OPEN
+                                var epath = lpath; var ebuf = lbuf; var esel = sel_l; var ecnt = ln;
+                                if (active_pane == 1) { epath = rpath; ebuf = rbuf; esel = sel_r; ecnt = rn; }
+                                if (ecnt <= 0) { crab_set_notice("nothing to open"); }
+                                else {
+                                    if (load8(ebuf + esel * CRAB_REC_SZ + CRAB_REC_TYPE) != 0) {
+                                        if (active_pane == 0) {
+                                            var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr,
+                                              lsizes, lmtimes, statbuf);
+                                            if (nl >= 0) {
+                                                ln = nl;
+                                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                                lstate = crab_pane_state(ln, crab_listing_err());
+                                                sel_l = 0;
+                                                crab_log_cd(lpath);
+                                            } else { crab_set_notice("cannot open that folder"); }
+                                        }
+                                        if (active_pane == 1) {
+                                            var nr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr,
+                                              rsizes, rmtimes, statbuf);
+                                            if (nr >= 0) {
+                                                rn = nr;
+                                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                                rstate = crab_pane_state(rn, crab_listing_err());
+                                                sel_r = 0;
+                                                crab_log_cd(rpath);
+                                            } else { crab_set_notice("cannot open that folder"); }
+                                        }
+                                    } else {
+                                        crab_strcpy_n(namescr, ebuf + esel * CRAB_REC_SZ, CRAB_NAME_MAX);
+                                        var rco = crab_fs_launch(epath, namescr, pathscr);
+                                        crab_set_notice(crab_fs_msg(rco));
+                                        crab_say("crab: open "); crab_say(namescr);
+                                        crab_say(" -> "); crab_say(crab_fs_msg(rco)); crab_say("\n");
+                                    }
+                                }
+                            }
+                            # ⭐⭐ THE MENU OWNS THE KEYBOARD WHILE OPEN — the same rule as
+                            # the edit field and the delete confirmation. ⛔ Checked BEFORE
+                            # every binding below and it consumes the key, so `d` while the
+                            # menu is open moves the highlight rather than deleting anything.
+                            if (menu_open != 0) {
+                                if (u == 0x29) { menu_open = 0; u = 0; }           # Esc — dismiss
+                                else {
+                                    if ((u == 0x52) || (u == 0x0E)) {
+                                        menu_sel = crab_menu_prev(menu_sel, mcnt2, misdir2, mmark2);
+                                        u = 0;
+                                    }
+                                    else { if ((u == 0x51) || (u == 0x0D)) {
+                                            menu_sel = crab_menu_next(menu_sel, mcnt2, misdir2, mmark2);
+                                            u = 0;
+                                        }
+                                        else { if (u == 0x28) {
+                                                menu_open = 0;
+                                                # ⚠ THE MENU DOES NOT REIMPLEMENT THE VERBS. It
+                                                # rewrites `u` to the key the entry names and falls
+                                                # through, so there is exactly ONE implementation of
+                                                # each command and the accelerator column cannot
+                                                # drift from what the entry actually does.
+                                                u = 0;
+                                                if (menu_sel == CRAB_MI_COPY) { u = 0x06; }
+                                                if (menu_sel == CRAB_MI_MOVE) { u = 0x10; }
+                                                if (menu_sel == CRAB_MI_RENAME) { u = 0x15; }
+                                                if (menu_sel == CRAB_MI_DELETE) { u = 0x07; }
+                                                if (menu_sel == CRAB_MI_NEWDIR) { u = 0x11; }
+                                                if (menu_sel == CRAB_MI_OPEN) { u = 0x28; }
+                                            } else { u = 0; } } }
+                                }
+                            }
+                            # ⭐ r — RENAME the selected entry. `crab_fs_rename` has existed and been asserted since
+                            # 0.7.1; this is the field that finally reaches it.
+                            if (u == 0x15) {                                       # r
+                                var rcnt = ln; var rrec = lbuf + sel_l * CRAB_REC_SZ;
+                                if (active_pane == 1) { rcnt = rn; rrec = rbuf + sel_r * CRAB_REC_SZ; }
+                                # ⭐⭐ A MARKED SET IS THE BATCH SHEET, NOT A RENAME. Renaming a set one name at a
+                                # time is not what the operator asked for — which is why the menu greys single Rename
+                                # the moment more than one entry is marked.
+                                if (mmark2 > 1) {
+                                    crab_edit_start("*");
+                                    edit_open = 3;
+                                    edit_label = "Rename pattern:  # = number, * = old name";
+                                } else {
+                                    if (rcnt > 0) {
+                                        crab_edit_start(rrec);
+                                        edit_open = 1;
+                                        edit_label = "Rename to:";
+                                    } else { crab_set_notice("nothing selected to rename"); }
+                                }
+                            }
+                            # ⭐ n — NEW FOLDER. Same field, same keys, different commit.
+                            if (u == 0x11) {                                       # n
+                                crab_edit_start(0);
+                                edit_open = 2;
+                                edit_label = "New folder name:";
+                            }
+                            # ⭐ THE CONTEXT MENU. ⚠ Opened from the KEYBOARD as well as the
+                            # pointer — a menu only a
+                            # mouse can reach is invisible to an operator who never touches one, and crab is
+                            # keyboard-first by construction.
+                            if (u == 0x65) {                                       # the Menu key
+                                menu_open = 1;
+                                menu_sel = 0;
+                                menu_x = ptr_x;
+                                menu_y = ptr_y;
+                            }
+                            if (u == 0x07) {                                       # d — delete, with a confirmation
+                                var qcnt = ln; if (active_pane == 1) { qcnt = rn; }
+                                var qmk = lmarks; if (active_pane == 1) { qmk = rmarks; }
+                                var nmark = crab_mark_count(qmk, qcnt);
+                                if (qcnt > 0) {
+                                    confirm_del = 1;
+                                    # ⛔ THE PROMPT MUST SAY HOW MANY. "delete the selected entry?" in
+                                    # front of a nine-file marked set is the most dangerous sentence in
+                                    # the app — the operator answers the question they were asked.
+                                    if (nmark > 0) { crab_set_notice("delete the MARKED entries?  y = yes, any other key = no"); }
+                                    else {
+                                        # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected
+                                        # entry?" in front of a directory is technically true and
+                                        # practically a lie — the operator answers the question asked.
+                                        var qrec = lbuf + sel_l * CRAB_REC_SZ;
+                                        if (active_pane == 1) { qrec = rbuf + sel_r * CRAB_REC_SZ; }
+                                        if (load8(qrec + CRAB_REC_TYPE) != 0) {
+                                            crab_set_notice("delete this FOLDER and everything in it?  y = yes");
+                                        } else {
+                                            crab_set_notice("delete the selected entry?  y = yes, any other key = no");
+                                        }
+                                    }
+                                } else { crab_set_notice("nothing selected to delete"); }
+                            }
+                            # ⭐ COPY AND MOVE GO TO THE OTHER PANE, WHICH IS WHAT THE SECOND PANE IS FOR.
+                            # This is the Norton-Commander idiom crab's whole layout is built on: the
+                            # destination is not typed, it is the directory already open opposite. It also
+                            # means M4's first write operations need no text entry at all.
+                            # ⚠ NOT BOUND TO F5/F6. aethersafha takes F5 for maximize (`win_notify_resize`),
+                            # so a client binding it would never see the key.
+                            if ((u == 0x06) || (u == 0x10)) {                      # c — copy / m — move
+                                var srcp = lpath; var dstp = rpath; var sbuf2 = lbuf; var ssel = sel_l; var scnt = ln;
+                                if (active_pane == 1) { srcp = rpath; dstp = lpath; sbuf2 = rbuf; ssel = sel_r; scnt = rn; }
+                                if (scnt <= 0) { crab_set_notice("nothing selected"); }
+                                else {
+                                    var srec = sbuf2 + ssel * CRAB_REC_SZ;
+                                    # ⛔ DIRECTORIES ARE REFUSED HERE, NOT DEEPER. `crab_fs_copy` would open a
+                                    # directory and read it as a byte stream — on ext2 that yields raw dirent
+                                    # bytes, so the "copy" would produce a corrupt FILE where a folder was
+                                    # asked for. Recursive copy needs the transfer tray to show and stop it.
+                                    if (load8(srec + CRAB_REC_TYPE) != 0) {
+                                        # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
+                                        # acceptable: it shows what is happening and Esc stops it.
+                                        crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
+                                        var rct = crab_walk_begin(CRAB_OP_CTREE, srcp, namescr, dstp,
+                                          pathscr, pathscr2, statbuf);
+                                        if (rct == CRAB_FS_OK) { crab_set_notice("copying folder..."); }
+                                        else { crab_set_notice(crab_fs_msg(rct)); }
+                                        crab_say("crab: copy tree "); crab_say(namescr); crab_say("\n");
+                                    } else {
+                                        crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
+                                        # ⭐ MARKS OUTRANK THE CURSOR, and with nothing marked the cursor IS the
+                                        # selection — so an operator who never presses Space sees no change at all.
+                                        var smk = lmarks; if (active_pane == 1) { smk = rmarks; }
+                                        var smarked = crab_mark_count(smk, scnt);
+                                        if (smarked > 0) {
+                                            var qkind = CRAB_OP_COPY;
+                                            if (u == 0x10) { qkind = CRAB_OP_MOVE; }
+                                            crab_queue_marked(sbuf2, smk, scnt);
+                                            crab_queue_dirs(qkind, srcp, dstp);
+                                            var qn0 = crab_queue_advance(pathscr, pathscr2, statbuf);
+                                            if (qn0 == 1) { crab_set_notice("transferring..."); }
+                                            else { crab_set_notice("nothing could be transferred"); }
+                                            crab_say("crab: transfer marked\n");
+                                        }
+                                        var rcc = 0;
+                                        # ⭐ A MOVE STILL TRIES `rename` FIRST and only steps when it
+                                        # refuses — the common case (both panes on one filesystem) never
+                                        # reads a byte, finishes instantly, and shows no bar at all.
+                                        var started = 0;
+                                        if (smarked > 0) { started = 0 - 1; }
+                                        if ((smarked == 0) && (u == 0x10)) {
+                                            rcc = crab_fs_move(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
+                                            if (rcc == CRAB_FS_OK) { started = 0; }
+                                            else { started = 1; }
+                                        }
+                                        if ((smarked == 0) && (u != 0x10)) { started = 1; }
+                                        if (started == 1) {
+                                            var okind = CRAB_OP_COPY;
+                                            if (u == 0x10) { okind = CRAB_OP_MOVE; }
+                                            rcc = crab_copy_begin(okind, srcp, namescr, dstp, pathscr, pathscr2, statbuf);
+                                            # ⚠ OK here means STARTED, not finished — the idle tick
+                                            # carries it from now on and reports the outcome.
+                                            if (rcc == CRAB_FS_OK) { crab_set_notice("transferring..."); }
+                                            else { crab_set_notice(crab_fs_msg(rcc)); }
+                                        } else { if (started == 0) { crab_set_notice(crab_fs_msg(rcc)); } }
+                                        if (u == 0x06) { crab_say("crab: copy "); } else { crab_say("crab: move "); }
+                                        crab_say(namescr); crab_say(" -> "); crab_say(crab_fs_msg(rcc)); crab_say("\n");
+                                        if (crab_op_active() == 0) {
+                                            ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                            crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                            lstate = crab_pane_state(ln, crab_listing_err());
+                                            rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                            crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                            rstate = crab_pane_state(rn, crab_listing_err());
+                                            if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                            if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                        }
+                                    }
+                                }
+                            }
+                            # ============ end M4 =========================================================
+                            if (u == 0x16) {                                       # s — cycle the sort mode
+                                # ⛔ RE-SORT BOTH PANES, not the active one. The mode is a property of the VIEW,
+                                # and two panes ordered differently is a display that cannot be reasoned about —
+                                # the operator would have to remember which pane they pressed `s` in.
+                                # ⭐ AND *#34* PAID FOR THE SELECTION FOLLOWING THE RE-SORT. An earlier cut
+                                # reset both panes to 0 and said so; with `crab_index_of` the cursor stays on
+                                # the file the operator was looking at, which is the point of re-sorting.
+                                # ⛔ CAPTURE BOTH NAMES BEFORE EITHER SORT — `crab_sort_entries` permutes in
+                                # place, so a name read after the first sort is already the wrong row's.
+                                var lkeep = alloc(CRAB_NAME_MAX);
+                                var rkeep = alloc(CRAB_NAME_MAX);
+                                if (ln > 0) { crab_strcpy_n(lkeep, lbuf + sel_l * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                if (rn > 0) { crab_strcpy_n(rkeep, rbuf + sel_r * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                var sm = crab_sort_cycle();
+                                # ⛔ A SIZE OR MTIME ORDER CANNOT BE COMPUTED FROM PARTIAL DATA (*#03*). The
+                                # deferred sweep may still have entries pending, and sorting on the -2 marker
+                                # would tie every unstat'd file at the bottom and then visibly reshuffle the
+                                # list as batches landed. So this mode change pays the storm, once, on the
+                                # keypress that asked for it — and NAME and KIND still pay nothing.
+                                if (crab_sort_needs_stats(sm) == 1) {
+                                    crab_stat_batch(lpath, lbuf, ln, lsizes, lmtimes, pathscr, statbuf, ln);
+                                    crab_stat_batch(rpath, rbuf, rn, rsizes, rmtimes, pathscr, statbuf, rn);
+                                }
+                                crab_sort_entries(lbuf, lsizes, lmtimes, ln, sm);
+                                crab_sort_entries(rbuf, rsizes, rmtimes, rn, sm);
+                                # ⛔⛔ A RE-SORT PERMUTES THE ENTRIES, SO EVERY MARK NOW POINTS AT A
+                                # DIFFERENT FILE. This is the subtlest way a mark set goes stale — the
+                                # listing did not change, only its ORDER, so nothing else here notices.
+                                # `crab_index_of` follows the CURSOR through the permutation because it
+                                # tracks one name; doing that for an arbitrary mark set means carrying
+                                # every marked name through the sort, which is the queue's job.
+                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                sel_l = 0;
+                                sel_r = 0;
+                                if (ln > 0) { var nl = crab_index_of(lbuf, ln, lkeep); if (nl >= 0) { sel_l = nl; } }
+                                if (rn > 0) { var nr = crab_index_of(rbuf, rn, rkeep); if (nr >= 0) { sel_r = nr; } }
+                                crab_say("crab: sort ");
+                                crab_say(crab_sort_name(sm));
+                                crab_say("\n");
+                            }
+                            if (u == 0x2A) {                                       # Backspace — ascend to the parent
+                                # ⭐ SELECTION MEMORY (*#34*). Capture the leaf BEFORE the ascend — the ascend rewrites
+                                # `path` in place, so afterwards there is nothing left to look for.
+                                # ⚠ `crab_index_of` answering -1 is a REAL outcome, not a failure: the directory can have
+                                # been removed or renamed between the two readdirs. Landing on 0 is right there; guessing
+                                # an index is not.
+                                if (active_pane == 0) {
+                                    var lleaf = crab_leaf_name(lpath, namescr, CRAB_NAME_MAX);
+                                    var al = crab_ascend(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                    if (al >= 0) {
+                                        ln = al;
+                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                        lstate = crab_pane_state(ln, crab_listing_err());
+                                        sel_l = 0;
+                                        if (lleaf >= 0) { var li = crab_index_of(lbuf, ln, namescr); if (li >= 0) { sel_l = li; } }
+                                        crab_log_cd(lpath);
+                                    }
+                                }
+                                if (active_pane == 1) {
+                                    var rleaf = crab_leaf_name(rpath, namescr, CRAB_NAME_MAX);
+                                    var ar = crab_ascend(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                    if (ar >= 0) {
+                                        rn = ar;
+                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                        rstate = crab_pane_state(rn, crab_listing_err());
+                                        sel_r = 0;
+                                        if (rleaf >= 0) { var ri = crab_index_of(rbuf, rn, namescr); if (ri >= 0) { sel_r = ri; } }
+                                        crab_log_cd(rpath);
+                                    }
+                                }
+                            }
+                        }                                  # end of the M4 confirmation `else`
+                    }                                  # end of the EDIT-FIELD `else`
                 }
             }
             # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run
             # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
             # into a surface the compositor had just destroyed, and leaking a full render to do it.
             if (running == 1) {
-                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks);
+                var s2 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
                     setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
@@ -913,7 +1071,7 @@ fn main(): i64 {
                         if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                     }
                     crab_say("crab: key repeat\n");
-                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks);
+                    var s3 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
                 }
@@ -961,7 +1119,7 @@ fn main(): i64 {
                 }
                 # ⚠ REDRAW EVERY STEP, not only on completion — the bar moving IS the point, and a
                 # tray that updates once at the end is the blocking copy with extra steps.
-                var s5 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks);
+                var s5 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
             }
@@ -982,7 +1140,7 @@ fn main(): i64 {
                         crab_say("crab: stat-drain complete\n");
                     }
                 }
-                var s4 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks);
+                var s4 = crab_render(surf, 0, active_pane, sel_l, sel_r, lbuf, ln, lpath, lsizes, lmtimes, rbuf, rn, rpath, rsizes, rmtimes, scroll_l, scroll_r, lstate, rstate, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta(), lmarks, rmarks, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }
             }

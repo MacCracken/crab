@@ -2,6 +2,106 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.5] - 2026-08-31 — the context menu, inline rename, and the batch sheet
+
+**M4's last three items**, unblocked by dhancha 0.9.23's MENU, overlay layer and SHEET.
+
+### Added — the context menu
+
+⛔ **THE MENU IS NOT A SECOND SET OF VERBS.** Every entry maps to a key binding that already exists,
+and activating one **rewrites `u` to that key and falls through** — so there is exactly one
+implementation of each command and the accelerator column cannot drift from what the entry does. It
+is a **discovery** surface, not a parallel command path.
+
+⛔ **Entries are GREYED, never hidden.** A menu whose entries move around depending on the selection
+forces the operator to re-read it every time; one whose entries stay put teaches their positions. A
+greyed entry is `DH_FLAG_INERT` (dhancha 0.9.23), so the keyboard steps over it and the mouse misses
+it — "greyed" is not merely cosmetic.
+⚠ **Navigation WRAPS**, unlike a file list: six items the operator can see at once, so running off
+the end and continuing is faster than stopping. A 1024-row pane is where wrapping would lose your
+place.
+⛔ **Rename is greyed the moment more than one entry is marked** — with a set marked the operator
+means the *set*, and renaming a set is the batch sheet, a different command with a different surface.
+⚠ **Opened from the keyboard as well as the pointer.** A menu only a mouse can reach is invisible to
+an operator who never touches one, and crab is keyboard-first by construction.
+⚠ A separator sits before Delete, so the destructive verb is never the entry you land on by
+overshooting Rename.
+
+### Added — inline rename and New folder
+
+`r` renames the selected entry, `n` creates a folder. `crab_fs_rename` and `crab_fs_mkdir` have
+existed and been asserted **since 0.7.1**; this is the field that finally reaches them.
+
+⛔⛔ **crab DOES NOT USE dhancha's `TEXTINPUT`, AND THIS IS THE THIRD FEATURE WITH THE SAME
+MISMATCH.** `dh_text_new` allocates its buffer with the *global* allocator so it survives frames —
+but the **widget** holding it is `dh_falloc`'d and dies at every `dh_frame_begin`. An immediate-mode
+app that rebuilds its tree each frame must therefore call `dh_text_new` each frame, and each call
+leaks a fresh buffer into an allocator with no `free()`. TEXTINPUT is built for a **retained** tree.
+⚠ Same structural shape as `dh_dispatch` (a press held as a widget pointer, operator ruling
+2026-08-27) and as drag (`_dh_drag_src`, which dhancha 0.9.21 fixed by refusing to start). **Three
+features, one mismatch — worth telling dhancha.**
+⇒ crab owns the buffer, the length and the caret, exactly as it owns pane index, row index and the
+operation record.
+
+⛔ **The field takes every key while it is open** and returns before any binding below sees one — a
+field that let `d` through would delete the file being renamed.
+⚠ **The caret starts at the END.** Renaming is almost always appending or trimming a suffix;
+starting at 0 makes every rename begin with a trip across the name.
+⚠ **A full field refuses rather than truncating** — silently dropping the key just typed beats
+silently dropping a character typed earlier. The cap **is** `CRAB_NAME_MAX`: a name that cannot be
+typed could not be stored anyway.
+⛔ **crab receives HID usages, not characters**, and nothing else in the stack translates them — so
+`crab_key_char` exists and is US QWERTY, matching the tables agnos's HID layer installs at boot
+rather than inventing a second answer. ⚠ **Shift is not on the wire yet**: `mods` carries
+press/release, so names type lower-case until the compositor forwards modifiers. The map already
+takes the flag.
+
+### Added — the batch-rename sheet
+
+`r` on a marked set opens a pattern field. **Two substitutions and nothing else**: `#` is the
+sequence number, `*` is the original name. That covers prefix, suffix and numbering — the renames
+people actually do — and every addition past it is a small language nobody asked for.
+⛔ **Queued by name, not by index**, for the same reason multi-select copy is: each rename leaves the
+pane buffer describing the *pre*-rename listing.
+⛔ **The expansion still faces `crab_name_ok`.** `*` splices in a readdir name, so a pattern really
+can produce `..` or a name carrying a separator — the guard refuses it, not the expander.
+⚠ **Refuses rather than truncates**: a truncated name is a *different* name, and a batch that
+silently renamed forty files to forty truncated names is worse than one that stopped.
+
+### Added — the overlay layer
+
+⛔ **The layer is the LAST child of the root, and that is load-bearing in both passes.** `dh_hit_test`
+prunes any subtree whose root does not contain the point and the painter culls identically — so a
+popup parented to the row that spawned it would be invisible and unclickable **together**. A
+full-window layer added last wins the click and the pixel by construction.
+⭐ **It is also what makes the popup modal**: it swallows every hit the popup does not take, so the
+panes beneath are unreachable for exactly as long as it is in the tree. **dhancha holds no modal
+state — the tree IS the state.**
+⚠ The rename sheet is **pinned**, not drawn over its row. Inline-over-the-row is what the canvas
+draws, but it needs the row's laid-out rect and the row is rebuilt after the overlay runs. A pinned
+sheet is unambiguous, identical in solo and dual pane, and a form the canvas itself draws at its
+small size.
+
+### Verified
+
+**694 → 757 passing**; `render_test` 26/26; reference coverage **86 %** (137/159); both targets
+build; `fmt --check` clean.
+⭐ **Five mutations, each of which fails the suite**: Rename staying live on a marked set; menu
+navigation clamping instead of wrapping; navigation ignoring the enabled predicate and landing on a
+greyed entry; the edit field truncating instead of refusing; and the batch expander truncating.
+
+⛔ **A brace error inside `#ifdef CYRIUS_TARGET_AGNOS` compiled clean on the host and failed only on
+`--agnos`.** The whole event loop lives in that region, so **a host build proves nothing about the
+key handling** — build both, every time. Caught here; recorded so it is not re-learned.
+
+### ⚠ Known debt, stated rather than left to be discovered
+
+**`crab_render` now takes 33 parameters.** Each one arrived for a good reason and follows the
+established rule that state flows *down* rather than being reached *up* for — but 33 is past the
+point where a struct would read better, and every new panel adds two or three more. It is not
+changed here because doing so touches every call site and every test in the same commit as three new
+features; it is the first cleanup of the next slot.
+
 ## [0.7.4] - 2026-08-31 — M4 complete: recursion, multi-select, rate and ETA
 
 ### Added — recursive copy and delete, as a stepped walk

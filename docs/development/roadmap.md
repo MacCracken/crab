@@ -543,8 +543,15 @@ oracle, not the cursor.
   ✅ **SHIPPED in v0.7.3** — the copy is stepped off the idle tick, Esc cancels it, the source is
   stat'd for a real denominator, and the bar is dhancha 0.9.22's `PROGRESS`. ⛔ The widget was never
   the gate; crab's own synchronous copy was. ⚠ **Rate and ETA are still absent** — see below.
-- **Context menu**, **inline rename**, **batch-rename sheet** — the canvas's own "not yet drawn" list.
-  **Gate: dhancha** context menu + modal sheet.
+- ⭐⭐ **Context menu · inline rename · batch-rename sheet — DONE (v0.7.5).** The dhancha gate closed
+  at **0.9.23** (MENU over LIST, the overlay layer, the sheet panel and real placement).
+  ⛔ **The menu is a DISCOVERY surface, not a second command path** — activating an entry rewrites
+  the key event and falls through, so there is exactly one implementation of each verb.
+  ⛔ **crab does not use dhancha's `TEXTINPUT`**: its buffer is global but its widget is arena'd, so
+  an immediate-mode app leaks a buffer per frame. Third dhancha feature assuming a retained tree,
+  after `dh_dispatch` and drag. crab owns the edit buffer, as it owns everything else stateful.
+  ⚠ **Shift is not on the wire**, so typed names are lower-case until the compositor forwards
+  modifiers — `crab_key_char` already takes the flag.
 - ⭐⭐ **Drag between panes — DONE (2026-08-31), in crab's own model.** Press a row, drag past a
   4 px Manhattan threshold, release over the other pane; the file **moves** (matching the `m` key,
   and `crab_fs_move` already picks rename-or-copy+delete). Both panes re-list, the status line says
