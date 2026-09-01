@@ -140,6 +140,10 @@ fn main(): i64 {
     # the panes their MODIFIED column. A view that reflows the moment the app starts is a view the
     # operator did not ask for.
     var pv_open = 0;
+    # ⭐ THE VIEW MODE (M5). ⚠ ONE MODE FOR BOTH PANES, like the sort order — a view is a property of
+    # how the operator is reading, and two panes in different modes is a display they would have to
+    # remember having toggled.
+    var view_mode = CRAB_VIEW_LIST;
     var sel_l = 0;
     var sel_r = 0;
     # ⭐ Scroll offsets are APP state (0.4.10). The widget tree is rebuilt every frame, so the LIST
@@ -190,6 +194,7 @@ fn main(): i64 {
 
     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     crab_rs_preview(rs, pv_open);
+    crab_rs_view(rs, view_mode);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -742,15 +747,72 @@ fn main(): i64 {
                                     if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
                                 }
                             }
-                            if ((u == 0x50) || (u == 0x0B)) { active_pane = 0; }   # Left / h
-                            if ((u == 0x4F) || (u == 0x0F)) { active_pane = 1; }   # Right / l
+                            # ⭐⭐ THE GRID VIEW CHANGES WHAT AN ARROW MEANS, AND ONLY IN GRID MODE.
+                            # ⛔ In a grid, Left/Right must move the CURSOR — a 2-D arrangement the
+                            # operator can see has to answer the arrow that was pressed. But
+                            # Left/Right also switch panes, and that binding predates this view.
+                            # ⇒ In grid mode the ARROWS navigate the grid and `h`/`l` keep switching
+                            # panes; in list mode nothing changes at all. crab has had the vim
+                            # aliases since M2, so the pane switch never becomes unreachable.
+                            # ⚠ THE STEP IS THE COLUMN COUNT THE PANE WAS LAID OUT WITH, read back
+                            # from the widget rather than recomputed — `dh_grid_cols` reads the
+                            # RESOLVED width, so "down" moves by the number of columns the operator
+                            # can actually see. Recomputing it here from `panew` would be a second
+                            # answer, free to disagree by one at exactly the widths that matter.
+                            var gstep = 1;
+                            if (view_mode == CRAB_VIEW_GRID) {
+                                var apw = crab_pane_widget(active_pane);
+                                if (apw != 0) { gstep = dh_grid_cols(apw); }
+                                if (gstep < 1) { gstep = 1; }
+                            }
+                            if (u == 0x0B) { active_pane = 0; }                    # h — always a pane switch
+                            if (u == 0x0F) { active_pane = 1; }                    # l — always a pane switch
+                            if (u == 0x50) {                                       # Left
+                                if (view_mode == CRAB_VIEW_GRID) {
+                                    if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                                    if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                                } else { active_pane = 0; }
+                            }
+                            if (u == 0x4F) {                                       # Right
+                                if (view_mode == CRAB_VIEW_GRID) {
+                                    if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                                    if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                                } else { active_pane = 1; }
+                            }
                             if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                                if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                                if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                                # ⚠ CLAMPED AT THE TOP ROW RATHER THAN REFUSED. dhancha's
+                                # `dh_grid_move_sel` refuses a move off the edge, which is right for
+                                # a widget; crab holds the selection itself (the 2026-08-27 ruling),
+                                # and clamping keeps a partial top row reachable.
+                                if (active_pane == 0) { if (sel_l >= gstep) { sel_l = sel_l - gstep; } else { sel_l = 0; } }
+                                if (active_pane == 1) { if (sel_r >= gstep) { sel_r = sel_r - gstep; } else { sel_r = 0; } }
                             }
                             if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                                if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                                if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                                if (active_pane == 0) {
+                                    if (sel_l + gstep <= crab_maxsel(ln)) { sel_l = sel_l + gstep; }
+                                    else { sel_l = crab_maxsel(ln); }
+                                }
+                                if (active_pane == 1) {
+                                    if (sel_r + gstep <= crab_maxsel(rn)) { sel_r = sel_r + gstep; }
+                                    else { sel_r = crab_maxsel(rn); }
+                                }
+                            }
+                            if (u == 0x0A) {                                       # g — toggle the view
+                                if (view_mode == CRAB_VIEW_LIST) {
+                                    view_mode = CRAB_VIEW_GRID;
+                                    crab_say("crab: view grid\n");
+                                } else {
+                                    view_mode = CRAB_VIEW_LIST;
+                                    crab_say("crab: view list\n");
+                                }
+                                # ⛔ THE SCROLL OFFSETS ARE RESET. A list offset is a pixel count in
+                                # rows of 26; a grid's is in rows of 32 holding three entries each.
+                                # Carrying one across means landing somewhere unrelated to what was
+                                # on screen — and `scroll_to` would clamp it, so it would not even
+                                # look like a bug, just a jump nobody could explain.
+                                store64(scroll_l, 0);
+                                store64(scroll_r, 0);
+                                crab_clear_notice();
                             }
                             # ⭐⭐ ENTER ON A FILE IS NO LONGER SILENT (M4). It used to reach
                             # `crab_descend`, which refuses a non-directory and returns -1 — and this
@@ -1069,6 +1131,7 @@ fn main(): i64 {
                 crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
+                crab_rs_view(rs, view_mode);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1157,6 +1220,7 @@ fn main(): i64 {
                     crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
+                    crab_rs_view(rs, view_mode);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1226,6 +1290,7 @@ fn main(): i64 {
                 crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
+                crab_rs_view(rs, view_mode);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1276,6 +1341,7 @@ fn main(): i64 {
                         crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
                         crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                         crab_rs_preview(rs, pv_open);
+                        crab_rs_view(rs, view_mode);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                         crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
@@ -1310,6 +1376,7 @@ fn main(): i64 {
                 crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
+                crab_rs_view(rs, view_mode);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only

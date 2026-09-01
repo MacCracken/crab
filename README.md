@@ -124,6 +124,10 @@ than a second set of verbs — every entry maps to a key binding that already ex
 tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
 Esc cancels them**, so a recursive copy never freezes the window.
 
+**Two views** (M5): `g` toggles both panes between the list and a **grid** of names — same
+information a list row's NAME column carries, three columns instead of one. ⚠ In grid mode the arrow
+keys navigate the grid and `h`/`l` switch panes; in list mode nothing changes.
+
 **The preview column** (M5): `p` opens a right-hand inspector for the selected entry — NAME · KIND ·
 SIZE · MODIFIED · DIMENSIONS · CAMERA · SHOT, and a **thumbnail** for PNG, JPEG, GIF and BMP.
 Camera and shutter time come from a JPEG's EXIF, in either byte order. ⭐ Dimensions are read

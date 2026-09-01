@@ -2,12 +2,65 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — M5: the preview column, thumbnails, EXIF, the render-state record, and a fuzz harness that reads its input
+## [Unreleased] — M5: the preview column, thumbnails, EXIF, the GRID view, and a fuzz harness that reads its input
 
 ⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
 M5 is *started*, not done: the preview pane and thumbnails are both in — the latter by operator
 ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
 the sidebar — are unchanged and still genuinely gated.
+
+### Added — the GRID view (`g`), on dhancha 0.9.25
+
+crab's first alternate view. `g` toggles both panes between the list and a wrapping grid of names.
+
+⛔ **THE CELL SIZE IS DERIVED, NOT CHOSEN** — the same discipline behind `crab_two_panes_fit`'s 600
+and the preview's 303. A cell is exactly `CRAB_COL_NAME_MIN` wide (the NAME column's own floor, below
+which a name cannot tell real files apart) and exactly one list row tall. **So a grid cell shows
+precisely what a list row's NAME column shows, and the only thing the view changes is how many fit** —
+which is the honest description of what it is for. A pane 374 px wide gets 3 columns; at 187 (two
+panes at the shipped 380) it gets 2.
+
+⛔ **NO COLUMN HEADER IN GRID MODE**, and it is *skipped* rather than built-and-removed: the header
+names NAME/SIZE/MODIFIED and a grid shows only names, so it would describe columns that are not
+there. (dhancha has no `remove_child` — the right shape for an immediate-mode tree, and it forced the
+honest structure instead of a build-then-undo.)
+
+⛔⛔ **THE GRID VIEW CHANGES WHAT AN ARROW MEANS, AND ONLY IN GRID MODE.** A 2-D arrangement the
+operator can see has to answer the arrow that was pressed — but Left/Right also switch panes, and
+that binding predates this view. ⇒ In grid mode the **arrows navigate** and **`h`/`l` still switch
+panes**; in list mode nothing changes at all. crab has had the vim aliases since M2, so the pane
+switch never becomes unreachable.
+⚠ **The vertical step is the column count the pane was LAID OUT with**, read back through
+`dh_grid_cols` rather than recomputed from `panew` — a second answer would be free to disagree by one
+at exactly the widths that matter, and the operator would see the cursor skip a row with nothing to
+explain it.
+⛔ **Toggling resets both scroll offsets.** A list offset is a pixel count in rows of 26; a grid's is
+in rows of 32 holding three entries each. Carrying one across lands somewhere unrelated to what was
+on screen — and `scroll_to` would clamp it, so it would not even look like a bug, just a jump nobody
+could explain.
+
+⚠ **NOT a thumbnail gallery, and that is a budget decision rather than a layout one.** A gallery of
+40 images at 256×256 is ~28 MB of *permanent* decode spend against a 32 MB session ceiling — see the
+thumbnail entry below. The preview column still shows the selected entry's thumbnail, which costs one
+decode instead of forty.
+
+⚠ **`crab_hit` walks the pane's children directly** instead of calling `dh_list_row_at` per index.
+⛔ **Not a bug fix** — that accessor is a plain nth-child walk with no kind check, so it answered
+correctly for a GRID too. It is O(n) instead of O(n²) (half a million pointer hops per click at the
+1024-entry cap), and it stops depending on an accessor *named for one kind* happening to work for
+another.
+
+### Changed — dhancha 0.9.25
+
+`GRID` is a real widget kind now: wrapping layout, cell selection, arrow keys that move by a whole
+row, keep-visible at minimum move, and hit-testing from the laid-out cells. ⛔ **It earns a kind by
+dhancha's own rule** — the one 0.9.23 applied when it *refused* one to MENU and SHEET: composing a
+grid from boxes would make the app paint its own selection highlight, which means crab naming
+`accent`, which ADR 0001 forbids. The highlight is dhancha's, and `render_test` asserts it appears.
+⚠ **Check 4 re-run at this bump**: every `path` override disabled, 7 deps / 0 errors, the lock going
+3 → **7 commit-pinned** (the tell that the overrides were really off), both targets built, 1,035
+tests green, and **both binaries byte-identical** to the path-resolved ones. Only that last equality
+is evidence; the other three checks would each have passed 0.4.13.
 
 ### Added — CAMERA and SHOT: EXIF, and the bounds that make reading it safe
 

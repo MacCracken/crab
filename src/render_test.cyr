@@ -342,6 +342,64 @@ fn main(): i64 {
     var tpw = (760 - CRAB_PV_W - CRAB_PANE_GAP) / 2;
     check(rt_band_has(tds, 0, 399, 0, tpw + tpw - 1, 0x00A0B0C0), 0);
 
+    # ---- M5: the GRID view paints, and paints its own selection -------------------------------
+    # ⛔ THE SELECTION HIGHLIGHT IS dhancha's, NOT crab's, AND THAT IS WHY GRID IS A KIND.
+    # A grid composed from boxes would have crab paint this rectangle, which means crab naming
+    # `accent` — and ADR 0001 forbids crab naming any colour. So the assertion is that the ACCENT
+    # appears in the pane, drawn by the toolkit from the selection crab merely set.
+    var gvb = alloc(16 * CRAB_REC_SZ);
+    rt_entry(gvb, 0, "aethersafha", 1);
+    rt_entry(gvb, 1, "bhumi", 1);
+    rt_entry(gvb, 2, "chitra", 1);
+    rt_entry(gvb, 3, "dhancha", 1);
+    rt_entry(gvb, 4, "kashi", 1);
+    rt_entry(gvb, 5, "rekha", 1);
+    var gvz = alloc(16 * 8); var gvm = alloc(16 * 8);
+    var gvi = 0;
+    while (gvi < 16) { store64(gvz + gvi * 8, 4096); store64(gvm + gvi * 8, 1756600000); gvi = gvi + 1; }
+    var gvl = alloc(8); store64(gvl, 0);
+    var gvr = alloc(8); store64(gvr, 0);
+    var gvsurf = dh_surface_new(640, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gvb, 6, lp, gvz, gvm, CRAB_PANE_OK, 0, 2, gvl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, gvr);
+    crab_rs_view(rs, CRAB_VIEW_GRID);
+    var gvds = crab_render(gvsurf, 0, rs);
+    check(gvds != 0, 1);
+    check(dh_widget_kind(crab_pane_widget(0)), GRID);
+    # ⭐ THE ACCENT IS ON SCREEN, in the left pane's CELL band, painted by dhancha.
+    # ⛔ BELOW y=28, AND THAT IS THE WHOLE ASSERTION. The active pane's PATH HEADER is also painted
+    # `dh_theme_accent()` — so a band starting at 0 finds the accent whether or not the selection
+    # was ever highlighted. A first draft did exactly that, and the mutation deleting
+    # `dh_focus_set(grd)` passed against it: the check was measuring the header.
+    check(rt_band_has(gvds, 30, 200, 0, 300, dh_theme_accent()), 1);
+    # ⛔ AND THE INACTIVE PANE'S SELECTION IS **MUTED**, not accented — the one question a two-pane
+    # file manager must answer on screen is which pane the arrow keys drive, and two accented cells
+    # cannot answer it. The right pane is at index 0 with `active_pane` 0, so its highlight is
+    # `line`, and the accent must not appear in its band.
+    check(rt_band_has(gvds, 30, 200, 330, 630, dh_theme_accent()), 0);
+
+    # ⛔ NO COLUMN HEADER IN GRID MODE. The header names NAME/SIZE/MODIFIED and a grid shows only
+    # names, so a header there would describe columns that are not present. Compared against the
+    # LIST render of the same data: the header band differs between the two views.
+    var lvsurf = dh_surface_new(640, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gvb, 6, lp, gvz, gvm, CRAB_PANE_OK, 0, 2, gvl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, gvr);
+    crab_rs_view(rs, CRAB_VIEW_LIST);
+    var lvds = crab_render(lvsurf, 0, rs);
+    check(lvds != 0, 1);
+    check(dh_widget_kind(crab_pane_widget(0)), LIST);
+    var gvpx = sd_surface_pixels(gvds);
+    var lvpx = sd_surface_pixels(lvds);
+    var gvk = 0;
+    var gvdiff = 0;
+    while (gvk < 640 * 300 * 4) {
+        if (load8(gvpx + gvk) != load8(lvpx + gvk)) { gvdiff = 1; gvk = 640 * 300 * 4; }
+        gvk = gvk + 1;
+    }
+    check(gvdiff, 1);
+
     # ---- M5: CAMERA and SHOT reach the surface ----------------------------------------------
     # ⛔ ASSERTED AS A DIFFERENCE, NOT A COLOUR. crab names no colour (ADR 0001), and text ink is
     # unreliable to sample — whether a glyph lights a given scan line depends on the letterform,

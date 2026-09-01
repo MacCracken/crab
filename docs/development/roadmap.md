@@ -155,15 +155,14 @@ not quietly lose them.
   over a large mapped heap, so four planted bounds bugs all survived a harness that checked only
   "returns 0 or 1". A printable poison tail past the fixture now catches the ones whose bytes reach
   the output; ⛔ two guards are caught by nothing and the harness says which.
-- ⭐ **Grid view — the dhancha half is BUILT (0.9.25).** `dh_grid_new` / `_add` / `_select` /
-  `_move_sel` / `_scroll_to_sel` / `_index_at`, with the wrap arithmetic, the row-wise arrow keys and
-  the selection highlight all inside the toolkit — so crab names no colour and re-derives no
-  geometry. ⛔ **It earned a kind by dhancha's own rule**, the one 0.9.23 applied when it refused one
-  to MENU and SHEET: composing a grid from boxes would make the app paint its own highlight.
-  ⚠ **crab's half is not built.** A Grid view needs a view-mode switch, cells built from the readdir
-  records, and a decision about thumbnails in cells — ⛔ **which the decode budget constrains**: a
-  gallery of 40 images at 256x256 is ~28 MB of permanent spend against a 32 MB session ceiling. An
-  icon grid costs nothing; a thumbnail gallery is a budget question before it is a layout one.
+- ✅ **Grid view — SHIPPED, both halves.** dhancha 0.9.25 added the `GRID` kind (wrap arithmetic,
+  cell selection, row-wise arrows, keep-visible, hit-test); crab's `g` toggles both panes onto it.
+  ⛔ **It earned a kind by dhancha's own rule** — the one 0.9.23 applied when it refused one to MENU
+  and SHEET: composing a grid from boxes would make the app paint its own selection highlight, which
+  means crab naming `accent`, which ADR 0001 forbids.
+  ⚠ **Cells are names, not thumbnails**, and that is a budget decision: 40 cells at 256x256 is
+  ~28 MB of permanent decode against a 32 MB session ceiling. The preview column carries the one
+  thumbnail. A true gallery is a separate view and a separate ruling.
 - ✅ **Thumbnails — SHIPPED (unreleased).** 64x64, PNG/JPEG/GIF/BMP, decoded off the idle tick and
   box-filtered down. `chitra 1.0.0` is declared.
   ⛔⛔ **THE GATE ON THIS LINE WAS FALSE TWICE, IN OPPOSITE DIRECTIONS, AND THAT IS THE LESSON.**
@@ -226,7 +225,7 @@ not quietly lose them.
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| ~~Grid view~~ | M5 | ✅ **UNGATED as of dhancha 0.9.25** — `GRID` is a real kind now: wrapping layout, cell selection, row-wise arrow keys, keep-visible, hit-test. ⚠ crab must wait for the tag to be pushed before bumping. | 2026-08-31 ⭐ built |
+| ~~Grid view~~ | M5 | ✅ **SHIPPED both halves.** dhancha 0.9.25 added the `GRID` kind; crab's `g` view is built on it. | 2026-08-31 ⭐ done |
 | Columns (miller) view | M5 | **dhancha** COLUMNS — still absent (`dh_columns_new`: 0 hits in `dist/`) | 2026-08-31 ⭐ re-derived |
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra 1.0.0 is declared. Cost paid: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |

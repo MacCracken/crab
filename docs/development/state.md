@@ -92,11 +92,11 @@ demands and the one this file broke twice.
 
 ## Source
 
-**7,272 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**7,513 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +1,904 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+⚠ +2,145 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
 - `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
@@ -138,7 +138,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
 - `src/render_test.cyr` — a standalone harness: renders the production surface and dumps BGRA to
-  `build/crab-render.bin`. **46** `check()` assertions *(unreleased; 26 at 0.7.5)*.
+  `build/crab-render.bin`. **53** `check()` assertions *(unreleased; 26 at 0.7.5)*.
   ⭐ **IT NOW PRINTS ITS OWN CHECK COUNT.** It returned `g_fails` and printed only its dump line, so
   it exited **0** whether it ran 26 checks or none — while this file and the handoff quoted a count
   for three cuts that nothing in the program printed. `crab render_test: 35 checks, 0 failed`.
@@ -290,7 +290,7 @@ errors**, host and `--agnos` both build, **253/0**).
 | rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.24 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| dhancha | 0.9.25 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
 | chitra  | 1.0.1  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
@@ -355,7 +355,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,035 passed / 0 failed**
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,057 passed / 0 failed**
   *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
@@ -411,8 +411,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,007,320 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,031,008 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,015,576 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,039,312 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -543,9 +543,9 @@ _None — top-level application._
 **thumbnails**, and **EXIF** (camera + shot) — plus *deferral #12* (the fuzz harness) closed, a
 shipped per-frame leak in `crab_overlay` fixed, dhancha bumped to 0.9.24 and chitra to 1.0.1.
 
-⛔ **What remains in M5 is gated on dhancha, and the gate is real** — `dh_grid_new`,
-`dh_columns_new`, `dh_tree_new` and a menu BAR are all absent from `dist/dhancha.cyr`
-(re-derived 2026-08-31).
+⛔ **What remains in M5 is gated on dhancha, and the gate is real** — `dh_columns_new` and
+`dh_tree_new` are absent from `dist/dhancha.cyr` (re-derived 2026-08-31). ⭐ `dh_grid_new` is NOT:
+GRID shipped in 0.9.25 and crab's Grid view is built on it.
 
 **Available now, in no particular order — sequencing is the operator's:**
 
@@ -560,14 +560,12 @@ shipped per-frame leak in `crab_overlay` fixed, dhancha bumped to 0.9.24 and chi
 - **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
   agnos has no `AO_EXCL`. Filed (⚠ at `0x2000`; the first filing proposed `0x400`, which is
   `AO_APPEND`). See *Known gaps*.
-- ⭐ **The Grid view is UNGATED as of dhancha 0.9.25** — `GRID` is a real kind: wrapping layout,
-  cell selection, arrow keys that move by a whole row, keep-visible, hit-testing from the laid-out
-  cells. crab's half is unbuilt: a view-mode switch, cells from the readdir records, and a decision
-  about thumbnails in cells.
-  ⛔ **That last one is a budget question before it is a layout one.** A gallery of 40 images at
-  256x256 is ~28 MB of permanent decode spend against a 32 MB session ceiling. An icon grid costs
-  nothing; a thumbnail gallery would exhaust the budget on one directory.
-  ⚠ crab must wait for 0.9.25 to be pushed before bumping its tag (the phantom-tag rule).
+- ✅ **The Grid view is IN** (`g`), on dhancha 0.9.25's GRID kind. Cells are derived from the NAME
+  column's own floor, so the view changes only how many entries fit; no column header, because a
+  grid shows only names. ⛔ In grid mode the ARROWS navigate and `h`/`l` keep switching panes —
+  list mode is unchanged. ⚠ **Not a thumbnail gallery**: 40 cells at 256x256 is ~28 MB of permanent
+  decode against a 32 MB ceiling, so cells are names and the preview column carries the one
+  thumbnail. That is a budget decision, not a layout one.
 - **Still gated on dhancha** — Columns (miller) and the sidebar TREE, plus the menu BAR for M6.
   Re-derived 2026-08-31: `dh_columns_new`, `dh_tree_new` and a menu BAR are all absent from
   `dist/dhancha.cyr`. ⭐ **Those gates are REAL**, unlike the three false ones on record.

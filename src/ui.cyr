@@ -197,6 +197,20 @@ enum CrabCol {
     CRAB_TH_TOO_BIG   = 2;       # refused by the per-image budget, BEFORE allocating
     CRAB_TH_SPENT     = 3;       # the session decode budget is exhausted
     CRAB_TH_BAD       = 4;       # a decoder error on a file crab was willing to try
+    # ⭐⭐ THE VIEW MODE (M5, dhancha 0.9.25's GRID).
+    CRAB_VIEW_LIST    = 0;
+    CRAB_VIEW_GRID    = 1;
+    # ⛔ THE CELL SIZE IS DERIVED FROM THE COLUMN RULE, NOT CHOSEN — the same discipline that
+    # produced `crab_two_panes_fit`'s 600 and the preview's 303. A cell is exactly as wide as the
+    # NAME column's own floor (`CRAB_COL_NAME_MIN`, 10 characters — below which a name cannot tell
+    # the files in a real directory apart) and exactly as tall as a list row. So a grid cell shows
+    # precisely what a list row's NAME column shows, and the ONLY thing the view changes is how many
+    # of them fit. That is the honest description of what this view is for.
+    # ⚠ A pane 374 px wide gets 3 columns; at 187 (two panes at the shipped 380) it gets 2. Against
+    # ~7 visible list rows that is 3x the entries on screen, which is the whole point.
+    CRAB_GRID_CELL_W  = 90;
+    CRAB_GRID_CELL_H  = 26;
+    CRAB_GRID_GAP     = 6;
     CRAB_PV_ROW_H     = 18;     # a preview line, matching the column header's row height
     CRAB_PV_HDR_H     = 28;     # ...and its header, matching a PANE header so the two tops line up
 }
@@ -371,6 +385,33 @@ enum CrabPaneState {
 # ⚠ COUNT WINS OVER ERROR, DELIBERATELY. A walk that returned entries and *then* failed has real
 # rows to show, and replacing them with a notice would hide data crab already holds. The error only
 # decides the notice when there is nothing to draw.
+# One GRID cell: the entry's name, truncated to the cell, with a directory's trailing `/`.
+#
+# ⛔ IT SHOWS EXACTLY WHAT A LIST ROW'S NAME COLUMN SHOWS, and that is the point rather than a
+# limitation. The grid trades the SIZE and MODIFIED columns for entries-per-screen; a cell that
+# tried to keep them would be a list row with extra steps and would fit two per pane.
+# ⚠ A MARKED CELL KEEPS ITS BACKGROUND, exactly as a marked row does — and for the same reason the
+# row's comment gives: dhancha paints selection and focus from the container's own state, so a cell
+# that set a background unconditionally would paint over the toolkit's highlight and the selection
+# would silently stop showing. Only a marked cell sets one.
+# ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so the string
+# must die with the widget — one frame.
+fn crab_grid_cell(g, rec, is_dir, marked): i64 {
+    var cell = dh_widget_new(LABEL);
+    if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
+    var chars = crab_col_chars(CRAB_GRID_CELL_W);
+    var disp = dh_falloc(CRAB_NAME_MAX + 4);
+    var n = crab_name_cell(disp, rec, chars);
+    # ⚠ The trailing `/` marks a directory, as in the list. It is appended only when there is room,
+    # so a name that already fills the cell is not silently one character longer than it can draw.
+    if (is_dir == 1) {
+        if (n < chars) { store8(disp + n, 47); store8(disp + n + 1, 0); }
+    }
+    dh_widget_set_text(cell, disp);
+    dh_grid_add(g, cell);
+    return cell;
+}
+
 fn crab_pane_state(count, err): i64 {
     if (count > 0) { return CRAB_PANE_OK; }
     if (err == 0) { return CRAB_PANE_EMPTY; }
@@ -767,7 +808,7 @@ fn crab_menu_target(marked, name): i64 {
 
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
-fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo, marks): i64 {
+fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo, marks, view): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
@@ -810,6 +851,40 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     if (ncols >= 2) { dh_cols_set_width(spec, 1, CRAB_COL_SIZE_W); }
     if (ncols >= 3) { dh_cols_set_width(spec, 2, CRAB_COL_MTIME_W); }
     var namechars = crab_col_chars(panew - dh_cols_fixed_total(spec));
+
+    # ⭐⭐ THE GRID VIEW (M5, dhancha 0.9.25).
+    # ⛔ NO COLUMN HEADER IN GRID MODE, and it is skipped rather than built-and-removed: a grid shows
+    # only names, so a header naming NAME/SIZE/MODIFIED would describe columns that are not there.
+    # A header that lies about the content below it is worse than no header. (dhancha has no
+    # `remove_child` — which is the right shape for an immediate-mode tree, and forced the honest
+    # structure here rather than a build-then-undo.)
+    if (view == CRAB_VIEW_GRID) {
+        var grd = dh_grid_new(CRAB_GRID_CELL_W, CRAB_GRID_CELL_H, CRAB_GRID_GAP);
+        dh_widget_set_flex(grd, 1);
+        var gi = 0;
+        while (gi < count) {
+            var grec = buf + gi * CRAB_REC_SZ;
+            crab_grid_cell(grd, grec, load8(grec + CRAB_REC_TYPE), crab_marked(marks, gi, count));
+            gi = gi + 1;
+        }
+        # ⚠ THE EMPTY-PANE NOTICE IS A CELL HERE TOO, and inert for the same reason it is
+        # unselectable in the list: a highlighted "This folder is empty" reads as a file with that
+        # name, and Enter on it would descend into nothing.
+        if (count == 0) {
+            var gnote = crab_pane_state_label(state);
+            if (load8(gnote) != 0) {
+                var gc = dh_widget_new(LABEL);
+                dh_widget_set_text(gc, gnote);
+                dh_grid_add(grd, gc);
+                dh_widget_set_inert(gc, 1);
+            }
+        }
+        if (count > 0) { dh_grid_select(grd, sel); }
+        if (active != 0) { dh_focus_set(grd); }
+        dh_widget_add_child(col, grd);
+        dh_widget_add_child(root, col);
+        return grd;
+    }
     # ⛔ THE COLUMN HEADER SITS OUTSIDE THE LIST, which is what keeps it from scrolling away and from
     # ever being a selectable row. A header the operator can select is a file that does not exist.
     var chdr = dh_table_header(spec);
@@ -819,7 +894,6 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     if (ncols >= 2) { dh_table_cell(chdr, spec, 1, "SIZE"); }
     if (ncols >= 3) { dh_table_cell(chdr, spec, 2, "MODIFIED"); }
     dh_widget_add_child(col, chdr);
-
 
     var lst = dh_list_new(26);                 # row height matches crab_row's pref
     dh_widget_set_flex(lst, 1);                # the list takes the column's remaining height
@@ -1012,6 +1086,18 @@ fn crab_spec_init(): i64 {
     return 0;
 }
 
+# @public — the widget a pane was last rendered as (a LIST or, in grid mode, a GRID). -> 0 if that
+# pane was not drawn — which is the solo-window case, and `crab_hit` relies on it.
+#
+# ⚠ EXPOSED SO THE EVENT LOOP CAN ASK THE GRID HOW MANY COLUMNS IT HAS. Navigation must step by the
+# column count the pane was LAID OUT with, not one recomputed from `panew` — the second answer would
+# be free to disagree by one at exactly the widths where it matters, and the operator would see the
+# cursor skip a row with nothing to explain it.
+fn crab_pane_widget(which): i64 {
+    if (which == 1) { return crab_rlst; }
+    return crab_llst;
+}
+
 fn crab_hit(x, y, out16): i64 {
     store64(out16, 0 - 1);
     store64(out16 + 8, 0 - 1);
@@ -1035,17 +1121,25 @@ fn crab_hit(x, y, out16): i64 {
     }
     if (pane < 0) { return 0; }
     if (child == 0) { return 1; }                 # inside the list, but not on a row
+    # ⚠ WALK THE CHILDREN DIRECTLY RATHER THAN CALLING `dh_list_row_at` PER INDEX. Two reasons, and
+    # ⛔ **neither is "it was broken"** — `dh_list_row_at` is a plain nth-child walk with no kind
+    # check, so it answers correctly for a GRID today. Saying otherwise would be inventing a bug.
+    #   1. It is O(n) instead of O(n²): the old form restarted the walk from the first child on every
+    #      index, which at the 1024-entry cap is half a million pointer hops per click.
+    #   2. It stops depending on an accessor NAMED FOR ONE KIND happening to be kind-agnostic. A
+    #      future `dh_list_row_at` that checked the kind would be a reasonable change in dhancha and
+    #      would silently break every click in a grid pane here.
     var lst = crab_llst;
     if (pane == 1) { lst = crab_rlst; }
     var i = 0;
-    var r = dh_list_row_at(lst, i);
+    var r = dh_widget_first_child(lst);
     while (r != 0) {
         if (r == child) {
             store64(out16 + 8, i);
             return 1;
         }
         i = i + 1;
-        r = dh_list_row_at(lst, i);
+        r = dh_widget_next_sibling(r);
     }
     return 1;
 }
@@ -2167,7 +2261,11 @@ enum CrabRs {
     # and an absent line is not drawn at all rather than drawn as a dash.
     CRAB_RS_PVCAM    = 280;
     CRAB_RS_PVSHOT   = 288;
-    CRAB_RS_SZ       = 296;
+    # ⭐ THE VIEW MODE. ⚠ ONE MODE FOR BOTH PANES, like the sort order and for the same reason: a
+    # view is a property of how the operator is reading, and two panes in different modes is a
+    # display that cannot be reasoned about — they would have to remember which pane they toggled.
+    CRAB_RS_VIEW     = 296;
+    CRAB_RS_SZ       = 304;
 }
 
 var crab_rs_rec = 0;
@@ -2274,6 +2372,13 @@ fn crab_rs_thumb(rs, pixels, state): i64 {
 # @public — the selected image's EXIF camera and shot time, as cstrings the CALLER keeps alive for
 # the frame. ⛔ The read that produces them lives in `app.cyr` (it needs a syscall); this file only
 # carries them, like the pane state, the tray and the dimensions.
+# @public — the view mode: `CRAB_VIEW_LIST` or `CRAB_VIEW_GRID`. Applies to both panes.
+fn crab_rs_view(rs, view): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_VIEW, view);
+    return 1;
+}
+
 fn crab_rs_exif(rs, camera, shot): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_PVCAM, camera);
@@ -2343,6 +2448,7 @@ fn crab_render(surf, font, rs): i64 {
     var pvh      = load64(rs + CRAB_RS_PVH);
     var pvthumb  = load64(rs + CRAB_RS_PVTHUMB);
     var pvtstate = load64(rs + CRAB_RS_PVTSTATE);
+    var pvview   = load64(rs + CRAB_RS_VIEW);
     var pvcam    = load64(rs + CRAB_RS_PVCAM);
     var pvshot   = load64(rs + CRAB_RS_PVSHOT);
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
@@ -2409,16 +2515,16 @@ fn crab_render(surf, font, rs): i64 {
     var llst = 0;
     var rlst = 0;
     if (twopanes == 1) {
-        llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0, lmarks);
-        rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0, rmarks);
+        llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0, lmarks, pvview);
+        rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0, rmarks, pvview);
     } else {
         # ⚠ THE SWITCHER IS THE KEYS crab ALREADY HAS. Left/Right (and h/l) set `active_pane`, which
         # in solo mode changes which pane is drawn rather than which of two is accented. No new
         # binding, and the gesture is the one an operator already knows from the two-pane view.
         if (active_pane == 0) {
-            llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, 1, lstate, 1, lmarks);
+            llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, 1, lstate, 1, lmarks, pvview);
         } else {
-            rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1, rmarks);
+            rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1, rmarks, pvview);
         }
     }
     # ⭐ THE PREVIEW IS THE LAST CHILD OF `panes`, so it sits to the RIGHT of whichever panes were
@@ -2473,10 +2579,20 @@ fn crab_render(surf, font, rs): i64 {
     # ⚠ THE ORDER IS LOAD-BEARING: `scroll_to_sel` needs the list's laid-out HEIGHT to know what
     # "visible" means, so it must run after the first layout — and the offset it produces moves the
     # rows, so a second layout is required before anything is drawn.
-    dh_list_scroll_to(llst, load64(scroll_l));
-    dh_list_scroll_to(rlst, load64(scroll_r));
-    dh_list_scroll_to_sel(llst);
-    dh_list_scroll_to_sel(rlst);
+    # ⚠ THE GRID HAS ITS OWN SCROLL ARITHMETIC and it is not the list's: a list's keep-visible works
+    # in rows, a grid's in rows of CELLS, and `dh_list_scroll_to_sel` on a grid would compute the
+    # offset from a row height the grid does not have. Same round-trip, different function.
+    if (pvview == CRAB_VIEW_GRID) {
+        dh_grid_scroll_to(llst, load64(scroll_l));
+        dh_grid_scroll_to(rlst, load64(scroll_r));
+        dh_grid_scroll_to_sel(llst);
+        dh_grid_scroll_to_sel(rlst);
+    } else {
+        dh_list_scroll_to(llst, load64(scroll_l));
+        dh_list_scroll_to(rlst, load64(scroll_r));
+        dh_list_scroll_to_sel(llst);
+        dh_list_scroll_to_sel(rlst);
+    }
     store64(scroll_l, dh_widget_scroll_y(llst));
     store64(scroll_r, dh_widget_scroll_y(rlst));
     dh_layout_apply(root, w, h);

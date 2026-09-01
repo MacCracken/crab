@@ -2343,6 +2343,7 @@ fn main() {
     t_preview_dims();
     t_thumbnails();
     t_exif();
+    t_gridview();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3216,6 +3217,110 @@ fn t_exif_nosub(b): i64 {
     store8(b + 72, 48); store8(b + 73, 57); store8(b + 74, 0); store8(b + 75, 255); store8(b + 76, 192); store8(b + 77, 0); store8(b + 78, 17); store8(b + 79, 8); store8(b + 80, 0); store8(b + 81, 4); store8(b + 82, 0); store8(b + 83, 8);
     store8(b + 84, 3); store8(b + 85, 1); store8(b + 86, 17); store8(b + 87, 0); store8(b + 88, 2); store8(b + 89, 17); store8(b + 90, 1); store8(b + 91, 3); store8(b + 92, 17); store8(b + 93, 1); store8(b + 94, 255); store8(b + 95, 217);
     return 96;
+}
+
+# M5 — the GRID view: the cell, the mode threading, and hit-testing through a grid pane.
+#
+# ⛔ THE VIEW CHANGES WHAT A PANE **IS**, and three things downstream read that. `crab_hit` walks up
+# to the pane widget and then finds the index by walking children — it used `dh_list_row_at`, which
+# answers 0 for a GRID at every index, so every click would have reported "in the pane, on no entry":
+# indistinguishable from a click that landed in a gap. The scroll round-trip is the same shape.
+fn t_gridview(): i64 {
+    test_group("crab — M5: the GRID view");
+    # ⚠ Its own record — `rs` in `main` is a different function's local. The singleton is the same
+    # underlying memory either way; what matters is that this group resets it before each scenario.
+    var rs = crab_rs();
+    # ⛔ THE CELL SIZE IS DERIVED, NOT CHOSEN — a cell is exactly the NAME column's own floor wide
+    # (below which a name cannot tell real files apart) and exactly a list row tall. So the view
+    # changes only HOW MANY entries fit, which is the honest description of what it is for.
+    assert_eq(CRAB_GRID_CELL_W, CRAB_COL_NAME_MIN, "a grid cell is as wide as the NAME column's floor");
+    assert_eq(CRAB_GRID_CELL_H, 26, "...and as tall as a list row");
+
+    var gb = alloc(16 * CRAB_REC_SZ);
+    t_entry(gb, 0, "bin", 1);
+    t_entry(gb, 1, "notes.txt", 0);
+    t_entry(gb, 2, "a-very-long-filename.txt", 0);
+    var gz = alloc(16 * 8); var gm = alloc(16 * 8);
+    var gi = 0;
+    while (gi < 16) { store64(gz + gi * 8, 4096); store64(gm + gi * 8, 1788136000); gi = gi + 1; }
+    var gsl = alloc(8); store64(gsl, 0);
+    var gsr = alloc(8); store64(gsr, 0);
+    var rb = alloc(16 * CRAB_REC_SZ);
+    t_entry(rb, 0, "boot", 1);
+
+    # ---- grid mode builds a GRID; list mode builds a LIST -----------------------------------------
+    var gsurf = dh_surface_new(760, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 1, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GRID);
+    assert(crab_render(gsurf, 0, rs) != 0, "the grid view renders");
+    var gp = crab_pane_widget(0);
+    assert(gp != 0, "the left pane was built");
+    assert_eq(dh_widget_kind(gp), GRID, "...as a GRID");
+    assert_eq(dh_grid_count(gp), 3, "...holding one cell per entry");
+    # ⚠ The column count comes from the LAID-OUT width, which is what navigation must step by.
+    assert(dh_grid_cols(gp) >= 1, "the grid reports a column count");
+    assert_eq(dh_grid_selected(gp), 1, "the selection reached the grid");
+
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 1, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_LIST);
+    assert(crab_render(gsurf, 0, rs) != 0, "the list view still renders");
+    assert_eq(dh_widget_kind(crab_pane_widget(0)), LIST, "...and the pane is a LIST again");
+    # ⚠ THE DEFAULT IS LIST. `crab_rs_reset` zeroes the field and `CRAB_VIEW_LIST` is 0, so a caller
+    # that never sets a view gets the view crab has always had.
+    crab_rs_reset(rs);
+    assert_eq(load64(rs + CRAB_RS_VIEW), CRAB_VIEW_LIST, "reset leaves the view as LIST");
+
+    # ---- crab_hit through a GRID pane -------------------------------------------------------------
+    # ⚠ WHAT THIS PINS, STATED ACCURATELY: that a click in a grid pane resolves to the right ENTRY
+    # INDEX. ⛔ It does **not** pin a regression — `dh_list_row_at` is a plain nth-child walk with no
+    # kind check, so the pre-M5 form answered correctly for a GRID too. A first draft of this comment
+    # claimed otherwise and was wrong; the mutation that "restored" the old form passed, which is how
+    # it was caught. The change is O(n) instead of O(n²), and it removes a dependency on an accessor
+    # named for one kind happening to work for another.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GRID);
+    crab_render(gsurf, 0, rs);
+    var g2 = crab_pane_widget(0);
+    var c0 = dh_grid_cell_at(g2, 0);
+    var c1 = dh_grid_cell_at(g2, 1);
+    var hb = alloc(16);
+    assert_eq(crab_hit(dh_widget_x(c0) + 2, dh_widget_y(c0) + 2, hb), 1, "a click inside cell 0 hits the pane");
+    assert_eq(load64(hb), 0, "...pane 0");
+    assert_eq(load64(hb + 8), 0, "...and entry 0");
+    assert_eq(crab_hit(dh_widget_x(c1) + 2, dh_widget_y(c1) + 2, hb), 1, "a click inside cell 1 hits the pane");
+    assert_eq(load64(hb + 8), 1, "...and entry 1, not the pane-with-no-entry answer");
+
+    # ---- the cell itself ---------------------------------------------------------------------------
+    # ⚠ A directory keeps its trailing `/`, and a long name keeps the `~` truncation marker — the
+    # same two signals a list row carries, because the grid must not say less about an entry than
+    # the view the operator just switched away from.
+    var lc = dh_grid_cell_at(g2, 2);
+    assert(lc != 0, "the long-name cell exists");
+    var lt = dh_widget_text(lc);
+    assert(lt != 0, "...and carries text");
+    assert(crab_cstr_len(lt, CRAB_NAME_MAX) <= crab_col_chars(CRAB_GRID_CELL_W) + 1,
+      "a long name is truncated to the cell");
+    var dc = dh_grid_cell_at(g2, 0);
+    var dt = dh_widget_text(dc);
+    assert(t_streq(dt, "bin/") == 1, "a directory cell keeps its trailing slash");
+
+    # ⚠ `crab_pane_widget` answers 0 for a pane that was not drawn — the solo-window case, which
+    # `crab_hit` relies on to keep a click out of a pane nobody can see.
+    var ssurf = dh_surface_new(380, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GRID);
+    crab_render(ssurf, 0, rs);
+    assert(crab_pane_widget(0) != 0, "solo: the active pane is built");
+    assert_eq(crab_pane_widget(1), 0, "solo: the pane that was not drawn has no widget");
+    return 0;
 }
 
 # --- 0.5.0 test helpers ---
