@@ -1170,6 +1170,52 @@ fn crab_spec_init(): i64 {
     return 0;
 }
 
+# @public — the index range a GRID pane is actually SHOWING. Writes first at `out16`, last at
+# `out16 + 8`; both -1 when nothing is visible. -> 1 if a range was written.
+#
+# ⛔⛔ SECURITY AUDIT F1 (2026-08-31) — THIS EXISTS TO BOUND WHAT GETS PARSED, not to save work.
+# The gallery's idle-tick fill used to walk EVERY entry in the pane, so opening a folder ran
+# ~22,500 lines of `chitra` + `sankoch` over every image in it — measured at 8 decodes for opening a
+# folder against 1 for selecting an entry. Those decoders run in-process, unsandboxed, on bytes
+# someone else chose, over an allocator with no guard pages. The two budgets bound MEMORY; nothing
+# bounded the code paths a crafted file could reach.
+# ⇒ **crab now parses what the operator can SEE.** Scrolling is consent; opening a folder is not.
+#
+# ⚠ READ FROM THE LAID-OUT WIDGET, not recomputed from the pane width — `dh_grid_cols` reports the
+# column count layout actually used, and a second answer would be free to disagree by one at exactly
+# the widths that matter.
+# ⚠ ONE ROW OF OVERSCAN EACH WAY, deliberately. A thumbnail that only begins decoding once its cell
+# is fully on screen arrives after the operator has already looked at it; one row of lead-in is the
+# difference between "fills as you scroll" and "fills after you stop". It widens the exposure by a
+# row, which is a real cost and is the reason it is one row and not five.
+fn crab_grid_visible(g, out16, count): i64 {
+    store64(out16, 0 - 1);
+    store64(out16 + 8, 0 - 1);
+    if (g == 0) { return 0; }
+    if (count <= 0) { return 0; }
+    var cols = dh_grid_cols(g);
+    if (cols < 1) { cols = 1; }
+    var ch = dh_grid_cell_h(g);
+    var gap = dh_widget_gap(g);
+    var step = ch + gap;
+    if (step < 1) { return 0; }
+    var pad = dh_widget_padding(g);
+    var view = dh_widget_h(g) - pad - pad;
+    if (view <= 0) { return 0; }
+    var off = dh_widget_scroll_y(g);
+    if (off < 0) { off = 0; }
+    var firstrow = off / step - 1;                  # one row of overscan above
+    if (firstrow < 0) { firstrow = 0; }
+    var lastrow = (off + view) / step + 1;          # ...and one below
+    var first = firstrow * cols;
+    var last = (lastrow + 1) * cols - 1;
+    if (last > count - 1) { last = count - 1; }
+    if (first > last) { return 0; }
+    store64(out16, first);
+    store64(out16 + 8, last);
+    return 1;
+}
+
 # @public — the widget a pane was last rendered as (a LIST or, in grid mode, a GRID). -> 0 if that
 # pane was not drawn — which is the solo-window case, and `crab_hit` relies on it.
 #

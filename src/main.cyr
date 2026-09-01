@@ -1341,9 +1341,23 @@ fn main(): i64 {
             if (view_mode == CRAB_VIEW_GALLERY) {
                 var qpath = lpath; var qbuf = lbuf; var qcnt = ln;
                 if (active_pane == 1) { qpath = rpath; qbuf = rbuf; qcnt = rn; }
-                var qi = 0;
+                # ⛔⛔ SECURITY AUDIT F1 — ONLY WHAT THE OPERATOR CAN SEE. This walk covered the whole
+                # pane, so opening a folder ran the decoders over every image in it. `chitra` +
+                # `sankoch` are ~22,500 lines running in-process on bytes someone else chose, and the
+                # budgets bound memory rather than the code paths a crafted file reaches.
+                # ⇒ Scrolling is consent; opening a folder is not.
+                # ⚠ A pane that was not drawn (solo mode) has no widget and no visible range, so it
+                # decodes nothing at all — which is correct: nothing of it is on screen.
+                var qvis = crab_vis_buf();
+                var qfirst = 0;
+                var qlast = 0 - 1;
+                if (crab_grid_visible(crab_pane_widget(active_pane), qvis, qcnt) == 1) {
+                    qfirst = load64(qvis);
+                    qlast = load64(qvis + 8);
+                }
+                var qi = qfirst;
                 var qdid = 0;
-                while (qi < qcnt) {
+                while (qi <= qlast) {
                     var qrec = qbuf + qi * CRAB_REC_SZ;
                     if (load8(qrec + CRAB_REC_TYPE) == 0) {
                         if (crab_is_image(qrec) == 1) {
@@ -1351,7 +1365,7 @@ fn main(): i64 {
                                 if (crab_tc_find(pathscr) < 0) {
                                     crab_thumb_step(qpath, qrec, pathscr);
                                     qdid = 1;
-                                    qi = qcnt;
+                                    qi = qlast;
                                 }
                             }
                         }

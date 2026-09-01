@@ -2,12 +2,79 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — M5: the preview column, thumbnails, EXIF, and the GRID and GALLERY views
+## [0.7.6] - 2026-08-31 — M5: preview, thumbnails, EXIF, GRID and GALLERY — and every audit finding closed
 
-⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
-M5 is *started*, not done: the preview pane and thumbnails are both in — the latter by operator
-ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
-the sidebar — are unchanged and still genuinely gated.
+### Fixed — F1: the gallery parses what the operator can SEE, not what they opened
+
+⛔⛔ **THE AUDIT'S HEADLINE, AND A TRUST-MODEL CHANGE RATHER THAN A BUG.** The gallery's idle-tick
+fill walked **every entry in the pane**, so opening a folder ran ~22,500 lines of `chitra` +
+`sankoch` over every image in it — in-process, unsandboxed, on bytes someone else chose, over an
+allocator with **no guard pages**. Measured: **8 decodes and 1,033,768 permanent bytes for opening a
+folder, against 1 and 165,256 for selecting an entry.** The per-image and session budgets bound
+**memory**; nothing bounded the code paths a crafted file could reach.
+
+⇒ `crab_grid_visible` reports the index range the pane is actually showing, and the fill walks only
+that. **Scrolling is consent; opening a folder is not.**
+⚠ **One row of overscan each way, deliberately** — a thumbnail that only starts decoding once its
+cell is fully on screen arrives after the operator has already looked at it. It widens the exposure
+by a row, which is a real cost and is why it is one row and not five.
+⚠ Read from the laid-out widget (`dh_grid_cols`), never recomputed from the pane width: a second
+answer would be free to disagree by one at exactly the widths that matter.
+⚠ A pane that was not drawn reports **no** range and decodes nothing — correct, because none of it
+is on screen.
+
+### Fixed — F2: no check-then-act before a spawn. The ORDER is the fix.
+
+⛔⛔ `crab_fs_launch` read the ELF magic, **closed the file**, then called `spawn_path` — which opens
+it again. Between the two opens the file could be replaced, so the bytes crab vetted were not
+necessarily the bytes the kernel ran.
+⛔ **It cannot be closed by spawning the checked descriptor**: agnos has no `fexecve`, no `execveat`
+and no fd-taking spawn — `spawn_path`(43) takes a path and nothing else (ABI verified 2026-08-31).
+⇒ **So crab stops checking first.** The kernel's `elf_load_from_file` already rejects a non-ELF,
+which means the pre-check was never a security boundary — it duplicated a decision the kernel makes
+anyway, and duplicating it *earlier* is precisely what created the window. The magic read moves to
+the **failure** path, where it is a diagnostic rather than a gate. **There is no window left because
+there is no longer a check to act on.**
+⚠ The cost is one wasted syscall when the operator hits Enter on a text file. That is a mistake's
+price, not a hazard. `CRAB_FS_ENOEXEC` still reads differently from `CRAB_FS_ESYS`.
+
+### Fixed — F4: an untyped directory is re-dispatched, not reported as a failure
+
+The record's type byte comes from `DT_DIR` on the host and `ftype == 2` on agnos; a filesystem
+answering `DT_UNKNOWN` leaves it 0, so a real directory arrived as a leaf, `unlink` refused it, and a
+recursive delete reported a failure instead of descending. On a failed unlink the walk now marks the
+record and rewinds the batch index by one, so the next step takes the descend branch.
+⛔ **It cannot loop**: the mark is written once (the retry takes the type-1 branch, which never
+returns there), and an entry that is genuinely not a directory fails its readdir one step later with
+the honest error. `CRAB_WALK_STEPS_MAX` is the backstop under all of it. It costs nothing when the
+backend types correctly — the retry only ever runs after a syscall that already failed.
+⚠ The decision is lifted into `crab_walk_retry_as_dir` so the suite can assert it; **the trigger
+cannot be produced from a host test** (the host's `getdents64` types directories correctly), so the
+wiring is held by review. Stated rather than implied.
+
+### F3 — the coverage gap closed, and a **false finding** corrected
+
+⛔⛔ **The audit's first draft reported an unbounded read in `crab_batch_name`. It was wrong**, and
+the correction is kept in the document rather than deleted. `w` and `j` increment together, so the
+destination cap trips before the read index reaches `CRAB_NAME_MAX` — verified empirically with a
+poison-tailed unterminated record. What is real: the safety is a coincidence of two constants that
+can move independently, now **asserted** (`CRAB_EDIT_CAP <= CRAB_NAME_MAX`), and the expander was the
+last parser over non-authored bytes with no fuzz coverage — now closed.
+
+### Added — the audit itself
+
+[`docs/audit/2026-08-31-audit.md`](docs/audit/2026-08-31-audit.md), crab's first, closing a v1.0
+criterion. It records what was checked and found **sound** as well as the findings — notably that a
+recursive delete **cannot descend a symlink**, safe by construction with no `lstat`.
+
+⚠ **Every finding is now closed**: F1 and F2 by a design change, F4 by a re-dispatch, F3 by coverage
+plus the correction of its own claim.
+
+---
+
+⚠ **M5 is substantially in**: the preview column, thumbnails, EXIF, and the GRID and GALLERY views.
+Thumbnails were adopted by operator ruling on a measured +115 % binary cost (below). What remains of
+M5 is proportional text (**rekha**); Columns is not gated on dhancha at all — see the gate table.
 
 ### Added — the first security audit (`docs/audit/2026-08-31-audit.md`)
 

@@ -2346,6 +2346,7 @@ fn main() {
     t_gridview();
     t_gallery();
     t_batch_bounds();
+    t_audit_fixes();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3553,6 +3554,107 @@ fn t_batch_bounds(): i64 {
     assert_eq(crab_batch_name(0, "*", 1, "x"), 0 - 1, "a null destination is refused");
     assert_eq(crab_batch_name(dst, 0, 1, "x"), 0 - 1, "a null pattern is refused");
     assert(crab_batch_name(dst, "plain", 1, 0) > 0, "a null original is survivable");
+    return 0;
+}
+
+# The 2026-08-31 security audit's findings, fixed and pinned (0.7.6).
+fn t_audit_fixes(): i64 {
+    test_group("crab — audit 0.7.6: F1 visible-only decode, F2 no check-then-act, F4 untyped dirs");
+    var rs = crab_rs();
+
+    # ---- F1: the gallery parses what the operator can SEE ---------------------------------------
+    # ⛔⛔ THE FINDING WAS A TRUST-MODEL CHANGE, NOT A BUG. The fill walked EVERY entry, so opening a
+    # folder ran ~22,500 lines of `chitra` + `sankoch` over every image in it — measured at 8 decodes
+    # for opening a folder against 1 for selecting an entry, on bytes someone else chose, over an
+    # allocator with no guard pages. The budgets bound MEMORY; nothing bounded the code paths a
+    # crafted file reached. ⇒ Scrolling is consent; opening a folder is not.
+    var vb = alloc(16);
+    var gb = alloc(64 * CRAB_REC_SZ);
+    var gi = 0;
+    while (gi < 40) { t_entry(gb, gi, "x.png", 0); gi = gi + 1; }
+    var gz = alloc(64 * 8); var gm = alloc(64 * 8);
+    gi = 0;
+    while (gi < 64) { store64(gz + gi * 8, 512); store64(gm + gi * 8, 1788136000); gi = gi + 1; }
+    var gsl = alloc(8); store64(gsl, 0);
+    var gsr = alloc(8); store64(gsr, 0);
+    var rb2 = alloc(16 * CRAB_REC_SZ);
+    t_entry(rb2, 0, "boot", 1);
+    # A short window: 40 entries, only a few rows of which fit.
+    var gsurf = dh_surface_new(760, 260);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 40, "/g", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb2, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GALLERY);
+    crab_render(gsurf, 0, rs);
+    var gp = crab_pane_widget(0);
+    assert_eq(crab_grid_visible(gp, vb, 40), 1, "a drawn gallery reports a visible range");
+    var first = load64(vb);
+    var last = load64(vb + 8);
+    assert_eq(first, 0, "at the top, the range starts at 0");
+    # ⛔ THE RANGE MUST BE A STRICT SUBSET — that IS the fix. A range covering all 40 would mean the
+    # fill still parses every file in the folder.
+    assert(last < 39, "...and does NOT reach the last entry: a folder is not consent to parse it all");
+    assert(last >= 0, "...but is not empty either");
+    # ⚠ Scrolling moves the window, which is what makes scrolling the consent.
+    dh_grid_scroll_to(gp, 200);
+    assert_eq(crab_grid_visible(gp, vb, 40), 1, "a scrolled gallery still reports a range");
+    assert(load64(vb) > first, "...and the range MOVED with the scroll");
+    # ⚠ Degenerate inputs report nothing rather than a range that decodes something.
+    assert_eq(crab_grid_visible(0, vb, 40), 0, "a pane that was not drawn has no visible range");
+    assert_eq(load64(vb), 0 - 1, "...and writes -1, so a caller's loop runs zero times");
+    assert_eq(crab_grid_visible(gp, vb, 0), 0, "an empty pane has no visible range");
+    # ⛔ AND THE RANGE IS CLAMPED TO THE ENTRY COUNT — a window taller than the content must not
+    # hand back indices past the end, which the fill would then join into paths.
+    var tsurf = dh_surface_new(760, 900);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/g", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb2, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GALLERY);
+    crab_render(tsurf, 0, rs);
+    assert_eq(crab_grid_visible(crab_pane_widget(0), vb, 3), 1, "a tall window over 3 entries");
+    assert_eq(load64(vb + 8), 2, "...reports the LAST entry, never past it");
+
+    # ---- F2: no check-then-act before the spawn --------------------------------------------------
+    # ⛔⛔ THE ORDER IS THE FIX. crab read the ELF magic, closed the file, then called `spawn_path` —
+    # which opens it AGAIN, so the bytes crab vetted were not necessarily the bytes the kernel ran.
+    # It cannot be closed by spawning the checked descriptor: agnos has no `fexecve`, no `execveat`
+    # and no fd-taking spawn (ABI verified 2026-08-31). ⇒ crab spawns first and reads the magic only
+    # to EXPLAIN a failure. There is no window because there is no longer a check to act on.
+    # ⚠ On the host `spawn_path` does not exist, so the failure arm is always taken — which is
+    # exactly the arm the diagnostic lives on, and the one these assertions exercise.
+    var scr = alloc(CRAB_PATH_MAX);
+    var dir = "build";
+    crab_fs_delete(dir, "auditnotelf.txt", 0, scr);
+    crab_fs_path(scr, dir, "auditnotelf.txt");
+    var fd = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd >= 0, "the non-ELF fixture is created");
+    sys_write(fd, "#!/bin/sh\necho hi\n", 18);
+    sys_close(fd);
+    assert_eq(crab_fs_launch(dir, "auditnotelf.txt", scr), CRAB_FS_ENOEXEC,
+      "a non-ELF still reports ENOEXEC — the diagnostic survived the reordering");
+    # ⛔ AND THE REFUSALS THAT COME BEFORE ANY I/O ARE UNCHANGED: they are the ones that must not even
+    # open the file.
+    assert_eq(crab_fs_launch(dir, "..", scr), CRAB_FS_EBADNAME, "'..' is refused before anything opens");
+    assert_eq(crab_fs_launch(dir, "a/b", scr), CRAB_FS_EBADNAME, "...and a separator");
+    assert(t_streq(crab_fs_msg(CRAB_FS_ENOEXEC), crab_fs_msg(CRAB_FS_ESYS)) == 0,
+      "no-handler and kernel-refused still read differently");
+    crab_fs_delete(dir, "auditnotelf.txt", 0, scr);
+
+    # ---- F4: an untyped directory is re-dispatched, not reported as a failure --------------------
+    # ⛔ The record's type byte comes from `DT_DIR` on the host and `ftype == 2` on agnos; a
+    # filesystem answering `DT_UNKNOWN` leaves it 0, so a real directory arrives as a leaf, `unlink`
+    # refuses it, and a recursive delete reported a failure instead of descending.
+    assert_eq(crab_walk_retry_as_dir(0), 1, "a LEAF-typed entry whose unlink failed is retried as a directory");
+    # ⛔ `== 0`, NOT `!= 1`. An entry that ALREADY said directory and still failed is a real error;
+    # retrying it takes the descend branch a second time and masks the failure behind a readdir that
+    # also fails — one step later and with a worse message.
+    assert_eq(crab_walk_retry_as_dir(1), 0, "an entry already typed as a directory is NOT retried");
+    assert_eq(crab_walk_retry_as_dir(7), 0, "...nor a raw ext2 ftype a future backend might pass through");
+    # ⚠ WHAT THIS DOES NOT PROVE, said plainly rather than left to be assumed: that the walk still
+    # consults the predicate. Reaching that needs a filesystem answering `DT_UNKNOWN`, and the host's
+    # `getdents64` types directories correctly — so the trigger cannot be produced here at all. The
+    # decision is pinned; the wiring is held by review and by the ⛔ at the call site. Same
+    # irreducible shape as the idle-tick wiring and the agnos event loop.
     return 0;
 }
 

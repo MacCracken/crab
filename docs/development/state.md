@@ -24,20 +24,12 @@
 
 ## Version
 
-**0.7.5** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.6** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
 
-⛔ **THERE IS UNRELEASED WORK ON TOP OF 0.7.5 AND `VERSION` DELIBERATELY DOES NOT SAY SO.** M5's
-first slice — the render-state record, the preview column, header-only image dimensions, a real fuzz
-harness and a per-frame leak fix — is in the tree under `[Unreleased]` in the CHANGELOG. **The
-operator drives version and toolchain bumps**; nothing here is committed or tagged.
-⚠ Every number below marked *(unreleased)* is the working tree's, not 0.7.5's. Re-derive rather than
-trust: `wc -l src/*.cyr`, `cyrius test`, `stat -c%s build/crab`.
-
-⭐ M4 is now substantially in: `open`, the small-window ratification, and drag between panes, on top
-of 0.7.1's write layer. ⚠ **Semver would normally make new user-facing features a MINOR**; this is
-the third time this project has put feature work in a patch by operator ruling (M2 shipped in 0.6.1,
-and 0.7.1 carried M4's first slice). **M4's completion still targets v0.8.0** — the roadmap's ladder
-is unchanged, and these numbers were ruled, not derived.
+⭐ **M5 is substantially in** — the preview column, thumbnails, EXIF, and the GRID and GALLERY
+views — and **every finding of the 2026-08-31 security audit is closed**. ⚠ **Semver would normally
+make new user-facing features a MINOR**; this is the fourth time this project has put feature work in
+a patch by operator ruling. **Nothing is committed, tagged or pushed** — the operator drives that.
 
 ⛔ **0.7.2 exists because 0.7.1's CHANGELOG section was being edited after its tag was pushed.**
 Three commits landed past `4ac21eb` while their notes were still being written into the released
@@ -92,7 +84,7 @@ demands and the one this file broke twice.
 
 ## Source
 
-**7,784 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**7,915 lines** across **six** files *(0.7.6; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
@@ -138,7 +130,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
 - `src/render_test.cyr` — a standalone harness: renders the production surface and dumps BGRA to
-  `build/crab-render.bin`. **53** `check()` assertions *(unreleased; 26 at 0.7.5)*.
+  `build/crab-render.bin`. **53** `check()` assertions *(0.7.6; 26 at 0.7.5)*.
   ⭐ **IT NOW PRINTS ITS OWN CHECK COUNT.** It returned `g_fails` and printed only its dump line, so
   it exited **0** whether it ran 26 checks or none — while this file and the handoff quoted a count
   for three cuts that nothing in the program printed. `crab render_test: 35 checks, 0 failed`.
@@ -355,8 +347,8 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,119 passed / 0 failed**
-  *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,138 passed / 0 failed**
+  *(0.7.6; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
   (exit 139) part-way through, having printed the group header, with every prior assertion passed.
@@ -411,8 +403,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,019,760 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,043,520 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,019,784 B** *(0.7.6; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,047,624 B** *(0.7.6; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -444,8 +436,11 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   in-process on attacker-chosen bytes. Measured at 8 decodes per folder opened against 1 per entry
   selected. The per-image and session budgets bound **memory**; nothing bounds the code paths a
   crafted 64x64 PNG reaches.
-  ⚠ F2 (a TOCTOU between the ELF check and spawn — a UX gate, not a boundary) and F4 (a
-  `DT_UNKNOWN` type making a recursive delete fail SAFE) are recorded and unfixed by choice.
+  ✅ **Every finding is CLOSED in 0.7.6.** F1 by parsing only what is on screen (`crab_grid_visible`);
+  F2 by inverting the order — crab spawns first and reads the ELF magic only to explain a failure, so
+  there is no check left to race; F4 by re-dispatching an untyped directory instead of reporting a
+  failure. ⚠ agnos has no `fexecve`/`execveat`/fd-spawn, which is why F2 is fixed by removing the
+  check rather than by spawning the checked descriptor.
   ⛔⛔ **F3's first draft was a FALSE FINDING and the audit keeps it, corrected.** It claimed an
   unbounded read in `crab_batch_name` that the code cannot perform — the destination cap bounds the
   read below `CRAB_NAME_MAX`. Caught by planting the implied mutation and watching the suite stay

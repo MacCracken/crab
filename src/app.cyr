@@ -1185,6 +1185,23 @@ fn crab_truncation_note(n, total): i64 {
 # new hat. Only zero-AND-unmoved is a fault.
 # ⚠ `k < 0` is NOT this function's business: a negative is the kernel's own error signal and the
 # callers act on it differently (the listing walk falls back to `#81`, the counter gives up).
+# @public — an `unlink` just failed on an entry the record typed as a LEAF. Should the walk retry it
+# as a DIRECTORY? 1 = yes.
+#
+# ⛔ LIFTED OUT AS A PREDICATE SO THE SUITE CAN ASSERT IT — the same answer this codebase gives for
+# `crab_readdir_stalled`, `crab_walk_cursor_for` and `crab_truncation_note`: the DECISION is testable
+# even when the situation that triggers it cannot be produced from a host test.
+# ⚠ AND THE LIMIT IS STATED: reaching this needs a filesystem that answers `DT_UNKNOWN`, and the
+# host's `getdents64` types directories correctly. So the arithmetic is pinned here; the wiring is
+# held by review and by the ⛔ at the call site.
+# ⛔ `== 0`, NOT `!= 1`. A byte that already said "directory" and still failed to unlink is a real
+# error — retrying it as a directory would take the descend branch a second time and mask the
+# failure behind a readdir that also fails, one step later and with a worse message.
+fn crab_walk_retry_as_dir(typebyte): i64 {
+    if (typebyte == 0) { return 1; }
+    return 0;
+}
+
 fn crab_readdir_stalled(k, was, now): i64 {
     if (k != 0) { return 0; }                        # records came back — progress, by definition
     if (now != was) { return 0; }                    # cursor moved — progress through the dir file
@@ -1903,6 +1920,13 @@ fn crab_thumb_forget(): i64 {
     return 0;
 }
 
+var crab_vis = 0;
+# ⚠ Two cells for the gallery's visible index range, allocated once — `alloc` has no `free()`.
+fn crab_vis_buf(): i64 {
+    if (crab_vis == 0) { crab_vis = alloc(16); }
+    return crab_vis;
+}
+
 fn crab_thumb_key_buf(): i64 {
     if (crab_th_key == 0) { crab_th_key = alloc(CRAB_PATH_MAX + 4); }
     return crab_th_key;
@@ -2074,18 +2098,32 @@ fn crab_fs_launch(dir, name, pathscr): i64 {
     var l = crab_fs_path(pathscr, dir, name);
     if (l < 0) { return l; }
     if (l > CRAB_SPAWN_PATH_MAX) { return CRAB_FS_ESPAWNLEN; }
-    var isexe = crab_is_elf(pathscr, l);
-    if (isexe < 0) { return CRAB_FS_ESYS; }
-    if (isexe == 0) { return CRAB_FS_ENOEXEC; }
+    # ⛔⛔ SECURITY AUDIT F2 (2026-08-31) — SPAWN FIRST, EXPLAIN AFTERWARDS. THE ORDER IS THE FIX.
+    # This used to read the ELF magic, close the file, and then call `spawn_path` — which opens it
+    # again. Between those two opens the file could be replaced, so the bytes crab vetted were not
+    # necessarily the bytes the kernel ran. A classic check-then-act race.
+    # ⛔ IT CANNOT BE CLOSED BY SPAWNING THE DESCRIPTOR crab CHECKED: agnos has no `fexecve`, no
+    # `execveat` and no fd-taking spawn — `spawn_path`(43) takes a path and nothing else (verified
+    # against the ABI table, 2026-08-31).
+    # ⇒ SO crab STOPS CHECKING FIRST. The kernel's `elf_load_from_file` already rejects a non-ELF,
+    # which means the pre-check was never a security boundary — it duplicated a decision the kernel
+    # makes anyway, and duplicating it EARLIER is precisely what created the window.
+    # ⭐ The magic read moves to the FAILURE path, where it is a diagnostic rather than a gate: it
+    # answers "why did that not run" for the operator, and nothing acts on it. **There is no window
+    # left, because there is no longer a check to act on.**
+    # ⚠ THE COST IS ONE WASTED SYSCALL when the operator hits Enter on a text file — the kernel
+    # attempts a load and refuses. That is a mistake's price, not a hazard.
     var pid = 0 - 1;
     #ifdef CYRIUS_TARGET_AGNOS
     pid = sys_spawn_path(pathscr, l);
     #endif
-    # ⚠ On the host there is no `spawn_path`, and crab does NOT substitute fork+exec: a file manager
-    # that launches a real process out of a unit test is a test that can hang a build machine. The
-    # ELF gate above is the part with a decision in it, and that part IS tested here.
-    if (pid < 0) { return CRAB_FS_ESYS; }
-    return CRAB_FS_OK;
+    if (pid >= 0) { return CRAB_FS_OK; }
+    # ⚠ On the host there is no `spawn_path`, so this arm is always taken and the ELF read is what
+    # the suite exercises. crab does NOT substitute fork+exec: a file manager that launches a real
+    # process out of a unit test is a test that can hang a build machine.
+    var isexe = crab_is_elf(pathscr, l);
+    if (isexe == 0) { return CRAB_FS_ENOEXEC; }
+    return CRAB_FS_ESYS;
 }
 
 # =================================================================================================
@@ -2749,7 +2787,27 @@ fn crab_walk_step(): i64 {
             } else {
                 if (kind == CRAB_OP_DTREE) {
                     if (crab_fs_unlink_raw(r + CRAB_OP_CURS, sl2) < 0) {
+                        # ⛔⛔ SECURITY AUDIT F4 (2026-08-31) — AN UNLINK THAT FAILS MAY BE A
+                        # DIRECTORY THE BACKEND DID NOT TYPE. The record's type byte is set from
+                        # `DT_DIR` on the host and `ftype == 2` on agnos; a filesystem that answers
+                        # `DT_UNKNOWN` leaves it 0, so a real directory arrives as a leaf, `unlink`
+                        # refuses it, and the delete reported a failure instead of descending.
+                        # ⇒ RE-DISPATCH THE SAME ENTRY AS A DIRECTORY: mark the record and rewind the
+                        # batch index by one, so the next step takes the descend branch. The paths
+                        # are restored first, because the next step re-joins them from the parent.
+                        # ⛔ THIS CANNOT LOOP. The mark is written once — the retry takes the type-1
+                        # branch, which never returns here — and if the entry is genuinely not a
+                        # directory (a permission failure, a busy file), the descend's readdir fails
+                        # and the walk stops with the honest error one step later. `CRAB_WALK_STEPS_MAX`
+                        # is the backstop under all of it.
+                        # ⚠ IT COSTS NOTHING WHEN THE BACKEND TYPES CORRECTLY: the retry only ever
+                        # runs after a syscall that already failed.
                         crab_walk_restore(r, slot);
+                        if (crab_walk_retry_as_dir(load8(rec + CRAB_REC_TYPE)) == 1) {
+                            store8(rec + CRAB_REC_TYPE, 1);
+                            store64(slot + CRAB_WS_IDX, idx);
+                            return 0;
+                        }
                         return crab_walk_stop(r, CRAB_FS_ESYS);
                     }
                     store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
