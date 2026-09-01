@@ -578,8 +578,21 @@ GRID shipped in 0.9.25 and crab's Grid view is built on it.
   neither bar of dhancha's kind rule. **What it is actually gated on is crab's two-pane model** —
   the source/destination pairing the whole M4 write layer rests on. That is a design question and
   belongs to crab, not to dhancha.
-- **Still genuinely gated on dhancha** — the sidebar TREE and the menu BAR (M6). Re-derived
-  2026-08-31: `dh_tree_new` and a menu BAR are absent from `dist/dhancha.cyr`.
+- ⛔ **BOTH M6 GATES WERE WRONG, AND IN DIFFERENT WAYS — re-derived 2026-08-31.**
+  - **The sidebar's "Gate: dhancha TREE" is FALSE — the fifth false gate on record.** Every piece
+    exists: `LIST` (scroll, selection, toolkit-painted highlight), `DH_FLAG_INERT` (section headers
+    the keyboard steps over), `PROGRESS` (capacity bars), padding (indent). Expansion state is app
+    state either way — crab owns its interaction state by the 2026-08-27 ruling — and the small
+    window's drawer is `dh_place_pinned` plus the overlay layer, both shipped in 0.9.23.
+    ⇒ **The sidebar is buildable in crab today, with no dhancha work at all.**
+  - **The menu bar's gate was REAL but MIS-NAMED.** What was missing was not a `MENU BAR` kind but a
+    **horizontal selectable strip**: composing one from a `BOX_H` of labels makes the app paint the
+    current item's highlight, which means naming `accent`, which ADR 0001 forbids. dhancha 0.9.26
+    adds `dh_list_new_h` — the same container laid the other way — which serves a menu bar, a tab
+    strip, a toolbar and crab's own A/B switcher. ⚠ crab pins 0.9.25 until 0.9.26 is pushed.
+  ⇒ **Five false gates now.** A gate is a claim about another repository, and this one was wrong
+  about *existence* (TREE), about *price* (thumbnails), and about *what was actually missing*
+  (MENU BAR). Re-derive all three before believing a line.
 
 ### What is verified, and what is not
 
