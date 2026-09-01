@@ -1828,14 +1828,45 @@ var crab_th_buf = 0;
 var crab_th_key = 0;
 var crab_th_file = 0;
 var crab_th_state = 0;
+var crab_th_slot = 0 - 1;
 var crab_th_spent = 0;
 
 # @public — the 64x64 BGRA thumbnail buffer. Allocated ONCE for the process.
 # ⚠ One buffer, not a cache of many: the preview describes ONE entry, and an N-entry cache would
 # need an eviction policy for a caller that does not exist. Same reasoning as the operation record.
+# @public — the 64x64 BGRA thumbnail for the entry `crab_thumb_step` was last asked about.
+# ⛔ IT IS A CACHE SLOT, NOT A SCRATCH BUFFER (M5). The gallery needs dozens of thumbnails live at
+# once, so a single buffer would have every cell showing the last one decoded. `crab_th_slot` records
+# which entry the last step was ABOUT, so the preview shows that entry rather than whatever the idle
+# tick happened to decode most recently while the operator was looking elsewhere.
 fn crab_thumb_pixels(): i64 {
-    if (crab_th_buf == 0) { crab_th_buf = alloc(CRAB_THUMB_BYTES); }
+    var p = crab_tc_pixels(crab_th_slot);
+    if (p != 0) { return p; }
+    # No slot yet — hand back a zeroed scratch so a caller can draw nothing rather than deref 0.
+    if (crab_th_buf == 0) {
+        crab_th_buf = alloc(CRAB_THUMB_BYTES);
+        if (crab_th_buf != 0) {
+            var i = 0;
+            while (i < CRAB_THUMB_BYTES) { store8(crab_th_buf + i, 0); i = i + 1; }
+        }
+    }
     return crab_th_buf;
+}
+
+# Record `st` for the slot the current step claimed, and return it. ⛔ EVERY exit after a claim goes
+# through here: a slot left at `CRAB_TH_NONE` is a slot the next tick will try to decode again, which
+# on a file that cannot be read is an infinite retry that also re-opens it.
+fn crab_th_finish(st): i64 {
+    crab_th_state = st;
+    var b = crab_tc_base();
+    if (b != 0) {
+        if (crab_th_slot >= 0) {
+            if (crab_th_slot < CRAB_TC_N) {
+                store64(b + crab_th_slot * CRAB_TC_SLOT + CRAB_TC_STATE, st);
+            }
+        }
+    }
+    return st;
 }
 
 fn crab_thumb_state(): i64 { return crab_th_state; }
@@ -1865,6 +1896,8 @@ fn crab_thumb_over_budget(spent): i64 {
 # here would turn the session budget into a per-directory one and the ceiling would never bind.
 fn crab_thumb_forget(): i64 {
     crab_th_state = CRAB_TH_NONE;
+    crab_th_slot = 0 - 1;
+    crab_tc_clear();
     var k = crab_th_key;
     if (k != 0) { store8(k, 0); }
     return 0;
@@ -1965,27 +1998,34 @@ fn crab_thumb_step(dir, name, pathscr): i64 {
     if (key == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
     if (pathscr == 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
     if (crab_fs_path(pathscr, dir, name) < 0) { crab_th_state = CRAB_TH_NONE; return crab_th_state; }
-    # Already answered for this exact path — including a remembered REFUSAL, which must not be
-    # retried: a file too big to decode is still too big on the next idle tick, and re-deciding it
-    # every tick would be a spin.
-    if (crab_streq_n(key, pathscr, CRAB_PATH_MAX) == 1) { return crab_th_state; }
+    # ⭐ THE CACHE ANSWERS FIRST — including a remembered REFUSAL, which must not be retried: a file
+    # too big to decode is still too big on the next idle tick, and re-deciding it every tick would
+    # be a spin that also re-reads the file.
+    # ⚠ `crab_th_slot` is what `crab_thumb_pixels` reads, so the preview always shows the entry the
+    # last step was ABOUT rather than whatever happened to be decoded most recently.
+    var hit = crab_tc_find(pathscr);
+    if (hit >= 0) {
+        crab_th_slot = hit;
+        crab_th_state = crab_tc_state(hit);
+        return crab_th_state;
+    }
     crab_strcpy_n(key, pathscr, CRAB_PATH_MAX);
+    crab_th_slot = crab_tc_claim(pathscr);
     crab_th_state = CRAB_TH_NONE;
     # ⛔ THE SESSION CEILING IS CHECKED BEFORE THE FILE IS EVEN OPENED. Past it, no decode may run,
     # so there is nothing to gain by reading the bytes.
-    if (crab_thumb_over_budget(crab_th_spent) == 1) {
-        crab_th_state = CRAB_TH_SPENT;
-        return crab_th_state;
-    }
+    if (crab_thumb_over_budget(crab_th_spent) == 1) { return crab_th_finish(CRAB_TH_SPENT); }
     var fbuf = crab_thumb_file_buf();
-    if (fbuf == 0) { return crab_th_state; }
+    if (fbuf == 0) { return crab_th_finish(CRAB_TH_BAD); }
     var fd = crab_fs_open_r(pathscr, crab_cstr_len(pathscr, CRAB_PATH_MAX));
-    if (fd < 0) { return crab_th_state; }
+    # ⚠ A file crab cannot open is recorded as BAD rather than left as NONE — otherwise the tick
+    # retries it forever, opening a file it already knows it cannot read.
+    if (fd < 0) { return crab_th_finish(CRAB_TH_BAD); }
     var got = sys_read(fd, fbuf, CRAB_THUMB_FILE_MAX);
     sys_close(fd);
-    if (got <= 0) { return crab_th_state; }
+    if (got <= 0) { return crab_th_finish(CRAB_TH_BAD); }
     var err = crab_thumb_err_buf();
-    if (err == 0) { return crab_th_state; }
+    if (err == 0) { return crab_th_finish(CRAB_TH_BAD); }
     # ⭐ THE PRE-CHECKED ENTRY POINT. A refusal here costs 16 bytes; the same file through
     # `chitra_image_decode` costs up to 26 MB, permanently, to arrive at the same answer.
     var before = alloc_used();
@@ -1994,23 +2034,18 @@ fn crab_thumb_step(dir, name, pathscr): i64 {
     if (img == 0) {
         # ⚠ TWO DIFFERENT NOTHINGS, AND THE OPERATOR IS TOLD WHICH. "too large" is a property of the
         # file and will never change; a decoder error is a property of this build and might.
-        if (chitra_err_code(load64(err)) == CHITRA_ERR_BUDGET) { crab_th_state = CRAB_TH_TOO_BIG; }
-        else { crab_th_state = CRAB_TH_BAD; }
-        return crab_th_state;
+        if (chitra_err_code(load64(err)) == CHITRA_ERR_BUDGET) { return crab_th_finish(CRAB_TH_TOO_BIG); }
+        return crab_th_finish(CRAB_TH_BAD);
     }
     var iw = chitra_image_width(img);
     var ih = chitra_image_height(img);
-    if (crab_thumb_scale(chitra_image_pixels(img), iw, ih) == 0) {
-        crab_th_state = CRAB_TH_BAD;
-        return crab_th_state;
-    }
+    if (crab_thumb_scale(chitra_image_pixels(img), iw, ih) == 0) { return crab_th_finish(CRAB_TH_BAD); }
     # ⚠ CALLED FOR FORM, NOT FOR EFFECT — `chitra_image_free` is a no-op in 1.0.0 and reclaims
     # exactly 0 bytes (measured). It is called anyway so that the day it does something, crab
     # already does the right thing; the ⛔ at the top of this section is what stops anyone reading
     # this line as a reason to believe the memory came back.
     chitra_image_free(img);
-    crab_th_state = CRAB_TH_OK;
-    return crab_th_state;
+    return crab_th_finish(CRAB_TH_OK);
 }
 
 var crab_th_err = 0;

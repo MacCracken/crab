@@ -2,12 +2,68 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — M5: the preview column, thumbnails, EXIF, the GRID view, and a fuzz harness that reads its input
+## [Unreleased] — M5: the preview column, thumbnails, EXIF, and the GRID and GALLERY views
 
 ⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
 M5 is *started*, not done: the preview pane and thumbnails are both in — the latter by operator
 ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
 the sidebar — are unchanged and still genuinely gated.
+
+### Added — the GALLERY view, and the thumbnail cache behind it
+
+`g` now cycles **list → grid → gallery**. A gallery cell is the grid cell with a thumbnail above the
+name — everything else (wrap, selection, arrows, keep-visible, hit-test) is dhancha's `GRID` and is
+shared, which is what made the kind worth building.
+
+⛔⛔ **THE VIEW NEVER TRIGGERS WORK; THE IDLE TICK DOES.** The render path cannot decode — decoding
+needs syscalls and lives in `app.cyr`, above `ui.cyr` — and a decode costs ~2.5× an image's RGBA size
+*permanently*. So a cell shows a picture when the tick has already produced one, and a name until
+then. **Opening a gallery of a thousand files costs one frame**; the pictures arrive at one per tick
+and the operator watches them land. Same shape as the deferred stat sweep and the stepped copy.
+⛔ **And it stops by itself, three ways** — the walk ends at the entry count, refusals are cached so a
+declined file is never retried, and the session budget refuses every decode once spent. None of
+those needs a flag. ⚠ The active pane only: filling both would halve the rate at which the pane the
+operator is looking at fills in.
+
+⛔ **THE BAND IS RESERVED WHETHER OR NOT THERE IS A PICTURE** — otherwise a cell changes height when
+its thumbnail lands and the whole grid reflows under the operator's eye mid-scroll.
+
+### Added — `crab_tc_*`: a 64-slot thumbnail cache
+
+⛔ **IT CACHES THE RESULT, WHICH IS THE ONLY THING WORTH CACHING.** The 16 KB downsampled thumbnail is
+cheap; the decode that produced it is not, and its memory never comes back. Caching results means a
+gallery scrolled back over costs nothing. ⛔ **It caches REFUSALS too** — "too large" and "cannot
+decode" are permanent facts about a file, so re-deciding one on the next tick would be a spin that
+also re-reads it.
+⚠ **Fixed slots, allocated once, replaced round-robin**: 64 × (path + state + 64×64 BGRA) ≈ 1.07 MB
+taken once. A growable cache on an allocator with no `free()` is not a cache, it is a leak with a
+lookup function. Round-robin rather than LRU because a gallery is browsed in index order, so the
+oldest slot *is* the one furthest from the eye.
+
+⛔ **THE CACHE LIVES IN `ui.cyr`, NOT `app.cyr`, AND THAT IS THE INCLUDE-ORDER RULE AGAIN** — the
+gallery looks up a thumbnail for every visible cell while building the widget tree, which is the
+render path, and the render path may never call up. Storage and lookup came down (they are pure);
+only the decode stayed. **Fifth time this rule has decided where something goes**, and it has cost
+this project four wrong guesses.
+
+⭐ **The preview and the gallery now share one mechanism.** The decoder used to own a single buffer —
+a gallery on that would have shown every cell the last thing decoded. `crab_thumb_pixels` returns the
+slot the last step was *about*, so the preview shows that entry rather than whatever the tick decoded
+while the operator was looking elsewhere.
+
+⚠ **Measured**: 8 real 128×96 PNGs decoded and displayed for **1,075,160 bytes** of permanent spend
+— comfortably inside the 32 MB session ceiling, which is what makes a gallery of an ordinary photo
+directory affordable at all.
+
+### Re-derived — the "dhancha COLUMNS" gate is FALSE
+
+⛔ **The roadmap listed a miller-columns view as gated on a dhancha COLUMNS widget. It is not.**
+Columns is a `BOX_H` of `LIST`s: each already carries its own selection and scroll, and each already
+has its highlight painted by the toolkit — so the app never names a colour. It clears **neither** bar
+of dhancha's own rule, exactly like MENU and SHEET, which 0.9.23 refused a kind and composed instead.
+⇒ **The fourth false gate this project has recorded.** What Columns is actually gated on is crab's
+own two-pane model — the source/destination pairing the entire M4 write layer rests on — which is a
+design question, not a dependency. Recorded as such.
 
 ### Added — the GRID view (`g`), on dhancha 0.9.25
 

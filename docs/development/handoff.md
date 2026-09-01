@@ -1,4 +1,4 @@
-# Handoff — **M5: preview, thumbnails, EXIF and the GRID view are all in.**
+# Handoff — **M5: preview, thumbnails, EXIF, GRID and GALLERY are all in.**
 
 > ⭐ **Updated 2026-08-31**, after M5's first slice and the chitra adoption. Everything below the
 > *What landed* table is kept from the 0.7.5 handoff because the reasoning is still the reasoning —
@@ -46,13 +46,14 @@ Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md) under `[Unreleased
 |---|---|
 | `crab_render` | **32 positional parameters → one record.** Filled by `crab_rs_pane` (11 params, indexed by pane), `_op`, `_chrome`, `_preview`, `_dims`. ⛔ The point is not brevity: at 32 `i64` arguments across 23 call sites, a miscounted comma shifted everything after it and still compiled. And `crab_rs_reset` now owns the three **`-1` = cannot be said yet** defaults that every one of those sites used to spell by hand — `0` there would make the tray render a real `0 B/s`. |
 | Preview column | `p` toggles it. NAME · KIND · SIZE · MODIFIED · DIMENSIONS. ⛔ Width rule **derived** from crab's own column rule (*it may not cost a pane its SIZE column* → 303 px), not lifted from the canvas. Refuses out loud below that, via `crab_set_notice`. |
+| Gallery view | `g` cycles list → grid → gallery. ⛔ **The view never triggers a decode — the idle tick does, one per tick**, so opening a gallery of a thousand files costs one frame. Stops three ways: the walk ends, refusals are cached, the budget refuses once spent. Backed by a 64-slot ~1.07 MB allocate-once cache holding results AND refusals. ⛔ The cache lives in `ui.cyr` because the render path looks one up per cell — **fifth time that rule decided a placement**. |
 | Grid view | `g` toggles both panes onto dhancha 0.9.25's `GRID`. ⛔ Cell size DERIVED from the NAME column's floor, so the view changes only how many entries fit. No column header (a grid shows only names). ⛔ **Arrows navigate in grid mode; `h`/`l` still switch panes** — list mode unchanged. ⚠ **Not a gallery**: 40 thumbnail cells is ~28 MB of permanent decode against a 32 MB ceiling. |
 | EXIF | CAMERA and SHOT, both byte orders, verified against an independent parser. ⛔⛔ **The most attacker-controlled parser crab has** — byte order, entry count and value offsets are ALL chosen by the file. Sub-IFD followed exactly once, never recursively. ⚠ Its fuzz round was **vacuous at first**: an out-of-bounds read does not crash on a bump allocator over a large mapped heap, so four planted bounds bugs survived. A printable poison tail fixed it — and the mutator had to be stopped from writing the poison byte itself. |
 | Thumbnails | 64x64, PNG/JPEG/GIF/BMP, **decoded off the idle tick** — at most one per tick, because chitra's entry point is a single call that cannot be resumed the way `crab_copy_step` can. Memoised on the full path **including a remembered refusal**; a closed preview decodes nothing. ⛔ Four differently-named nothings, because "too large" is a property of the FILE, "budget spent" of the SESSION, and "cannot decode" of this BUILD. |
 | Image dimensions | `crab_img_dims` — PNG/JPEG/GIF/BMP from header bytes, **no decoder, no dependency**. Verified against real files against `identify`: 137×42, 1×1, 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real 384×288 JPEG whose SOF sits past an APP0 block. |
 | Fuzz harness | ✅ **Deferral #12 CLOSED.** 60,000 deterministic rounds. It caught a real segfault in `crab_img_dims` the day it was written. |
 | Leak fixed | ⛔ `crab_overlay` used `alloc(32)` not `dh_falloc(32)` on both the menu and sheet branches — **32 B per frame, shipped in 0.7.5**, invisible because the zero-allocation gate never opened an overlay. |
-| Numbers | tests **757 → 1,057/0** · `render_test` **26 → 53** checks · coverage **86 %** (183/212) · source **5,368 → 7,513** lines · host **1,015,576 B** · `--agnos` **1,039,312 B** · fmt clean · both targets build |
+| Numbers | tests **757 → 1,106/0** · `render_test` **26 → 53** checks · coverage **87 %** (193/220) · source **5,368 → 7,784** lines · host **1,019,760 B** · `--agnos` **1,043,520 B** · fmt clean · both targets build |
 
 ### ⛔⛔ THE FOUR LESSONS FROM THIS SLICE, EACH CHEAP AND EACH EXPENSIVE TO RE-LEARN
 

@@ -200,6 +200,12 @@ enum CrabCol {
     # ⭐⭐ THE VIEW MODE (M5, dhancha 0.9.25's GRID).
     CRAB_VIEW_LIST    = 0;
     CRAB_VIEW_GRID    = 1;
+    # ⭐⭐ THE GALLERY (M5) — the grid, with the thumbnail crab already knows how to decode.
+    # ⛔ THE CELL IS TALLER, NOT WIDER: `CRAB_THUMB_H` for the picture plus a list row for the name.
+    # Widening it would cost columns for a thumbnail that is 64 px regardless.
+    CRAB_VIEW_GALLERY = 2;
+    CRAB_GAL_CELL_W   = 90;      # = CRAB_COL_NAME_MIN, so the name stays as legible as a grid cell's
+    CRAB_GAL_CELL_H   = 90;      # = CRAB_THUMB_H (64) + CRAB_GRID_CELL_H (26)
     # ⛔ THE CELL SIZE IS DERIVED FROM THE COLUMN RULE, NOT CHOSEN — the same discipline that
     # produced `crab_two_panes_fit`'s 600 and the preview's 303. A cell is exactly as wide as the
     # NAME column's own floor (`CRAB_COL_NAME_MIN`, 10 characters — below which a name cannot tell
@@ -408,6 +414,62 @@ fn crab_grid_cell(g, rec, is_dir, marked): i64 {
         if (n < chars) { store8(disp + n, 47); store8(disp + n + 1, 0); }
     }
     dh_widget_set_text(cell, disp);
+    dh_grid_add(g, cell);
+    return cell;
+}
+
+# One GALLERY cell: the thumbnail above, the name below.
+#
+# ⛔ THE THUMBNAIL COMES FROM THE CACHE, AND A MISS DRAWS NOTHING RATHER THAN WAITING. The render
+# path cannot decode — decoding needs syscalls and lives in `app.cyr`, above this file, and it costs
+# ~2.5x an image's RGBA size permanently. So a cell shows a picture when the idle tick has already
+# produced one and shows just its name until then. That is what makes a gallery affordable: the
+# view never triggers work, it only displays work already done.
+# ⚠ A cell whose entry is not an image, or whose decode was refused, is simply a name in a taller
+# cell — deliberately not a placeholder glyph, which would need crab to name a colour.
+fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
+    var cell = dh_widget_new(BOX);
+    dh_widget_set_layout(cell, BOX_V);
+    if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
+    var pix = 0;
+    if (is_dir == 0) {
+        if (crab_is_image(rec) == 1) {
+            # ⚠ The join is per cell per frame. `crab_join_n` is bounded and the cache scan is 64
+            # slots, so this is a constant per visible cell — and the alternative, threading a
+            # per-entry array down from `app.cyr`, would need one built every frame anyway.
+            var jp = dh_falloc(CRAB_PATH_MAX);
+            if (crab_join_n(jp, CRAB_PATH_MAX, dirpath, rec) >= 0) {
+                var slot = crab_tc_find(jp);
+                if (slot >= 0) {
+                    if (crab_tc_state(slot) == CRAB_TH_OK) { pix = crab_tc_pixels(slot); }
+                }
+            }
+        }
+    }
+    if (pix != 0) {
+        var cv = dh_canvas_new(&crab_thumb_draw, pix);
+        dh_widget_set_pref(cv, CRAB_THUMB_W, CRAB_THUMB_H);
+        dh_widget_set_flex(cv, 0);
+        dh_widget_add_child(cell, cv);
+    } else {
+        # ⚠ THE BAND IS RESERVED EVEN WITH NO PICTURE, so a cell does not change height when its
+        # thumbnail lands and the whole grid does not reflow under the operator's eye mid-scroll.
+        var gap = dh_widget_new(BOX);
+        dh_widget_set_pref(gap, 0, CRAB_THUMB_H);
+        dh_widget_set_flex(gap, 0);
+        dh_widget_add_child(cell, gap);
+    }
+    var lab = dh_widget_new(LABEL);
+    dh_widget_set_pref(lab, 0, CRAB_GRID_CELL_H);
+    dh_widget_set_flex(lab, 0);
+    var chars = crab_col_chars(CRAB_GAL_CELL_W);
+    var disp = dh_falloc(CRAB_NAME_MAX + 4);
+    var n = crab_name_cell(disp, rec, chars);
+    if (is_dir == 1) {
+        if (n < chars) { store8(disp + n, 47); store8(disp + n + 1, 0); }
+    }
+    dh_widget_set_text(lab, disp);
+    dh_widget_add_child(cell, lab);
     dh_grid_add(g, cell);
     return cell;
 }
@@ -858,13 +920,22 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     # A header that lies about the content below it is worse than no header. (dhancha has no
     # `remove_child` — which is the right shape for an immediate-mode tree, and forced the honest
     # structure here rather than a build-then-undo.)
-    if (view == CRAB_VIEW_GRID) {
-        var grd = dh_grid_new(CRAB_GRID_CELL_W, CRAB_GRID_CELL_H, CRAB_GRID_GAP);
+    if (view != CRAB_VIEW_LIST) {
+        # ⭐ THE GALLERY IS THE GRID WITH A TALLER CELL AND A DIFFERENT CELL BUILDER. Everything else
+        # — wrap, selection, arrows, keep-visible, hit-test — is dhancha's GRID and is shared, which
+        # is the whole reason the kind was worth building.
+        var cellw = CRAB_GRID_CELL_W;
+        var cellh = CRAB_GRID_CELL_H;
+        if (view == CRAB_VIEW_GALLERY) { cellw = CRAB_GAL_CELL_W; cellh = CRAB_GAL_CELL_H; }
+        var grd = dh_grid_new(cellw, cellh, CRAB_GRID_GAP);
         dh_widget_set_flex(grd, 1);
         var gi = 0;
         while (gi < count) {
             var grec = buf + gi * CRAB_REC_SZ;
-            crab_grid_cell(grd, grec, load8(grec + CRAB_REC_TYPE), crab_marked(marks, gi, count));
+            var gdir = load8(grec + CRAB_REC_TYPE);
+            var gmk = crab_marked(marks, gi, count);
+            if (view == CRAB_VIEW_GALLERY) { crab_gal_cell(grd, path, grec, gdir, gmk); }
+            else { crab_grid_cell(grd, grec, gdir, gmk); }
             gi = gi + 1;
         }
         # ⚠ THE EMPTY-PANE NOTICE IS A CELL HERE TOO, and inert for the same reason it is
@@ -2196,6 +2267,120 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, ts
     return col;
 }
 
+# ⛔ THE CACHE LIVES HERE, NOT IN `app.cyr`, AND THAT IS THE INCLUDE-ORDER RULE AGAIN. The GALLERY
+# view looks up a thumbnail for EVERY visible cell while it builds the widget tree — that is the
+# render path, and the render path may never call up into `app.cyr`. So the storage and the lookup
+# come down to `ui.cyr` (they are pure: `crab_join_n` and `crab_streq_n` are in `path.cyr`, below
+# this file) and only the DECODE, which needs syscalls and chitra, stays up there.
+# ⚠ Same split as `crab_img_dims` (here) against `crab_preview_dims` (there). Fifth time this rule
+# has decided where something goes; it has cost this project four wrong guesses.
+# ⭐⭐ THE THUMBNAIL CACHE (M5, the gallery). ONE decoded thumbnail was enough for a preview that
+# describes a single selection; a gallery shows dozens at once.
+#
+# ⛔⛔ IT CACHES THE **RESULT**, WHICH IS THE ONLY THING WORTH CACHING HERE. A decode costs ~2.5x the
+# image's RGBA size and that memory never comes back (`chitra_image_free` is a no-op over a bump
+# allocator) — so the 16 KB downsampled thumbnail is cheap and the decode that produced it is not.
+# Caching results means a gallery scrolled back over costs nothing; caching nothing would re-decode
+# and re-charge the session budget every time the operator moved.
+# ⚠ AND IT CACHES REFUSALS TOO. "Too large" and "cannot decode" are permanent facts about a file, so
+# re-deciding one on the next idle tick would be a spin that also re-reads the file.
+#
+# ⛔ FIXED SLOTS, ALLOCATED ONCE, REPLACED ROUND-ROBIN. 64 x (path + state + 64x64 BGRA) is ~1.07 MB
+# taken once for the process. A growable cache on an allocator with no `free()` is not a cache, it
+# is a leak with a lookup function — the same reason the sort scratch, the copy buffer and the
+# operation record are all singletons.
+# ⚠ Round-robin rather than LRU: a gallery is browsed in index order, so the oldest slot IS the one
+# furthest from the eye, and an LRU's bookkeeping would cost more than the miss it prevents.
+enum CrabTCache {
+    CRAB_TC_N       = 64;
+    CRAB_TC_PATH    = 0;                # CRAB_PATH_MAX bytes
+    CRAB_TC_STATE   = 256;              # a CRAB_TH_* value
+    CRAB_TC_PIX     = 264;              # CRAB_THUMB_BYTES of BGRA
+    CRAB_TC_SLOT    = 16648;            # 264 + 16384
+}
+
+var crab_tc = 0;
+var crab_tc_next = 0;
+
+fn crab_tc_base(): i64 {
+    if (crab_tc == 0) {
+        crab_tc = alloc(CRAB_TC_N * CRAB_TC_SLOT);
+        if (crab_tc != 0) {
+            var i = 0;
+            while (i < CRAB_TC_N) {
+                store8(crab_tc + i * CRAB_TC_SLOT + CRAB_TC_PATH, 0);
+                store64(crab_tc + i * CRAB_TC_SLOT + CRAB_TC_STATE, CRAB_TH_NONE);
+                i = i + 1;
+            }
+        }
+    }
+    return crab_tc;
+}
+
+# @public — the slot holding `path`, or -1. ⚠ A linear scan of 64 slots on the idle tick; a hash
+# would need a second structure to keep in step with the round-robin replacement, for a search that
+# is already bounded by a constant.
+fn crab_tc_find(path): i64 {
+    var b = crab_tc_base();
+    if (b == 0) { return 0 - 1; }
+    if (path == 0) { return 0 - 1; }
+    var i = 0;
+    while (i < CRAB_TC_N) {
+        var sl = b + i * CRAB_TC_SLOT;
+        if (load8(sl + CRAB_TC_PATH) != 0) {
+            if (crab_streq_n(sl + CRAB_TC_PATH, path, CRAB_PATH_MAX) == 1) { return i; }
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# @public — claim a slot for `path`, evicting the next one round-robin. -> the slot index.
+fn crab_tc_claim(path): i64 {
+    var b = crab_tc_base();
+    if (b == 0) { return 0 - 1; }
+    var i = crab_tc_next;
+    crab_tc_next = crab_tc_next + 1;
+    if (crab_tc_next >= CRAB_TC_N) { crab_tc_next = 0; }
+    var sl = b + i * CRAB_TC_SLOT;
+    crab_strcpy_n(sl + CRAB_TC_PATH, path, CRAB_PATH_MAX);
+    store64(sl + CRAB_TC_STATE, CRAB_TH_NONE);
+    return i;
+}
+
+fn crab_tc_state(i): i64 {
+    var b = crab_tc_base();
+    if (b == 0) { return CRAB_TH_NONE; }
+    if (i < 0) { return CRAB_TH_NONE; }
+    if (i >= CRAB_TC_N) { return CRAB_TH_NONE; }
+    return load64(b + i * CRAB_TC_SLOT + CRAB_TC_STATE);
+}
+
+# @public — the 64x64 BGRA pixels of slot `i`, or 0.
+fn crab_tc_pixels(i): i64 {
+    var b = crab_tc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_TC_N) { return 0; }
+    return b + i * CRAB_TC_SLOT + CRAB_TC_PIX;
+}
+
+# @public — empty the whole cache. Called from `crab_relist` beside the other invalidations, and for
+# the same reason: every key here is a PATH, and crab is a program that makes a path mean a
+# different file. ⚠ The session SPEND is deliberately not reset — those bytes are still gone.
+fn crab_tc_clear(): i64 {
+    var b = crab_tc_base();
+    if (b == 0) { return 0; }
+    var i = 0;
+    while (i < CRAB_TC_N) {
+        store8(b + i * CRAB_TC_SLOT + CRAB_TC_PATH, 0);
+        store64(b + i * CRAB_TC_SLOT + CRAB_TC_STATE, CRAB_TH_NONE);
+        i = i + 1;
+    }
+    crab_tc_next = 0;
+    return 0;
+}
+
 # ⭐⭐ THE RENDER-STATE RECORD (M5). `crab_render` took **32 positional parameters** and every one of
 # them arrived for a good reason — state flows DOWN into this file rather than being reached UP for,
 # because `ui.cyr` sits below `app.cyr` and the render path must never call back up. That rule is not
@@ -2582,7 +2767,7 @@ fn crab_render(surf, font, rs): i64 {
     # ⚠ THE GRID HAS ITS OWN SCROLL ARITHMETIC and it is not the list's: a list's keep-visible works
     # in rows, a grid's in rows of CELLS, and `dh_list_scroll_to_sel` on a grid would compute the
     # offset from a row height the grid does not have. Same round-trip, different function.
-    if (pvview == CRAB_VIEW_GRID) {
+    if (pvview != CRAB_VIEW_LIST) {
         dh_grid_scroll_to(llst, load64(scroll_l));
         dh_grid_scroll_to(rlst, load64(scroll_r));
         dh_grid_scroll_to_sel(llst);

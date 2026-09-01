@@ -92,11 +92,11 @@ demands and the one this file broke twice.
 
 ## Source
 
-**7,513 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**7,784 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +2,145 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+⚠ +2,416 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
 - `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
@@ -355,7 +355,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,057 passed / 0 failed**
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,106 passed / 0 failed**
   *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
@@ -411,8 +411,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,015,576 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,039,312 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,019,760 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,043,520 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -560,15 +560,26 @@ GRID shipped in 0.9.25 and crab's Grid view is built on it.
 - **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
   agnos has no `AO_EXCL`. Filed (⚠ at `0x2000`; the first filing proposed `0x400`, which is
   `AO_APPEND`). See *Known gaps*.
+- ✅ **The Gallery view is IN.** `g` cycles list → grid → gallery. ⛔ **The view never triggers a
+  decode — the idle tick does, one per tick** — so opening a gallery of a thousand files costs one
+  frame and the pictures land progressively. Backed by a 64-slot (~1.07 MB, allocate-once) cache
+  that stores results **and refusals**. ⚠ Measured: 8 real PNGs for 1,075,160 B of permanent spend,
+  well inside the 32 MB ceiling.
+  ⛔ **The cache lives in `ui.cyr`, not `app.cyr`** — the gallery looks one up per visible cell while
+  building the tree, which is the render path. **Fifth time that rule has decided placement.**
 - ✅ **The Grid view is IN** (`g`), on dhancha 0.9.25's GRID kind. Cells are derived from the NAME
   column's own floor, so the view changes only how many entries fit; no column header, because a
   grid shows only names. ⛔ In grid mode the ARROWS navigate and `h`/`l` keep switching panes —
   list mode is unchanged. ⚠ **Not a thumbnail gallery**: 40 cells at 256x256 is ~28 MB of permanent
   decode against a 32 MB ceiling, so cells are names and the preview column carries the one
   thumbnail. That is a budget decision, not a layout one.
-- **Still gated on dhancha** — Columns (miller) and the sidebar TREE, plus the menu BAR for M6.
-  Re-derived 2026-08-31: `dh_columns_new`, `dh_tree_new` and a menu BAR are all absent from
-  `dist/dhancha.cyr`. ⭐ **Those gates are REAL**, unlike the three false ones on record.
+- ⛔ **The "dhancha COLUMNS" gate is FALSE — the fourth on record.** Columns is a `BOX_H` of
+  `LIST`s: each already has its own selection, scroll and toolkit-painted highlight, so it clears
+  neither bar of dhancha's kind rule. **What it is actually gated on is crab's two-pane model** —
+  the source/destination pairing the whole M4 write layer rests on. That is a design question and
+  belongs to crab, not to dhancha.
+- **Still genuinely gated on dhancha** — the sidebar TREE and the menu BAR (M6). Re-derived
+  2026-08-31: `dh_tree_new` and a menu BAR are absent from `dist/dhancha.cyr`.
 
 ### What is verified, and what is not
 

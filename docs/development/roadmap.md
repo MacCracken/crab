@@ -155,6 +155,13 @@ not quietly lose them.
   over a large mapped heap, so four planted bounds bugs all survived a harness that checked only
   "returns 0 or 1". A printable poison tail past the fixture now catches the ones whose bytes reach
   the output; ⛔ two guards are caught by nothing and the harness says which.
+- ✅ **Gallery view — SHIPPED.** `g` cycles list → grid → gallery. A cell is the grid cell with a
+  thumbnail above the name; everything else is dhancha's GRID, shared.
+  ⛔ **The view never triggers a decode — the idle tick does, one per tick**, so opening a gallery of
+  a thousand files costs one frame. It stops by itself three ways: the walk ends, refusals are
+  cached, and the session budget refuses once spent.
+  ⚠ Backed by a 64-slot, ~1.07 MB, allocate-once thumbnail cache that stores results **and
+  refusals** — the 16 KB result is cheap and the decode that made it is not.
 - ✅ **Grid view — SHIPPED, both halves.** dhancha 0.9.25 added the `GRID` kind (wrap arithmetic,
   cell selection, row-wise arrows, keep-visible, hit-test); crab's `g` toggles both panes onto it.
   ⛔ **It earned a kind by dhancha's own rule** — the one 0.9.23 applied when it refused one to MENU
@@ -226,7 +233,7 @@ not quietly lose them.
 | item | milestone | gated on | verified |
 |---|---|---|---|
 | ~~Grid view~~ | M5 | ✅ **SHIPPED both halves.** dhancha 0.9.25 added the `GRID` kind; crab's `g` view is built on it. | 2026-08-31 ⭐ done |
-| Columns (miller) view | M5 | **dhancha** COLUMNS — still absent (`dh_columns_new`: 0 hits in `dist/`) | 2026-08-31 ⭐ re-derived |
+| Columns (miller) view | M5 | ⛔ **FALSE GATE — the FOURTH.** Not dhancha: columns is a `BOX_H` of `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight, so it clears neither bar of dhancha's kind rule (as MENU and SHEET did not). **It is gated on crab's two-pane model** — the source/destination pairing the M4 write layer rests on. A design question, not a dependency. | 2026-08-31 ⭐ re-derived |
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra 1.0.0 is declared. Cost paid: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
 | Sidebar | M6 | **dhancha** TREE widget (`dh_tree_new`: 0 hits) + a drawer overlay for the small window | 2026-08-31 ⭐ re-derived |

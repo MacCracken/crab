@@ -797,14 +797,16 @@ fn main(): i64 {
                                     else { sel_r = crab_maxsel(rn); }
                                 }
                             }
-                            if (u == 0x0A) {                                       # g — toggle the view
-                                if (view_mode == CRAB_VIEW_LIST) {
-                                    view_mode = CRAB_VIEW_GRID;
-                                    crab_say("crab: view grid\n");
-                                } else {
-                                    view_mode = CRAB_VIEW_LIST;
-                                    crab_say("crab: view list\n");
-                                }
+                            if (u == 0x0A) {                                       # g — cycle the view
+                                # ⚠ A CYCLE, NOT A TOGGLE, and one key rather than three. Three views
+                                # is still few enough that stepping through them is faster than
+                                # remembering which key is which — the same argument the sort key
+                                # makes for its four modes.
+                                view_mode = view_mode + 1;
+                                if (view_mode > CRAB_VIEW_GALLERY) { view_mode = CRAB_VIEW_LIST; }
+                                if (view_mode == CRAB_VIEW_LIST) { crab_say("crab: view list\n"); }
+                                if (view_mode == CRAB_VIEW_GRID) { crab_say("crab: view grid\n"); }
+                                if (view_mode == CRAB_VIEW_GALLERY) { crab_say("crab: view gallery\n"); }
                                 # ⛔ THE SCROLL OFFSETS ARE RESET. A list offset is a pixel count in
                                 # rows of 26; a grid's is in rows of 32 holding three entries each.
                                 # Carrying one across means landing somewhere unrelated to what was
@@ -1325,6 +1327,55 @@ fn main(): i64 {
         # file it has already declined.
         # ⛔ ONLY WHILE THE PREVIEW IS OPEN. A closed preview decodes nothing and spends nothing,
         # which matters more here than anywhere else in crab: the spend is PERMANENT.
+        # ⭐⭐ THE GALLERY'S FILL — one decode per idle tick, in index order, and it stops on its own.
+        # ⛔ THE VIEW NEVER TRIGGERS WORK; THE TICK DOES. `crab_pane` draws whatever the cache
+        # already holds and draws a name where it holds nothing, so opening a gallery of a thousand
+        # files costs one frame. The pictures arrive at one per tick and the operator watches them
+        # land — the same shape as the deferred stat sweep and the stepped copy.
+        # ⛔ AND IT STOPS BY ITSELF, THREE WAYS: the walk ends at the entry count, `crab_thumb_step`
+        # caches refusals so a file it declined is never retried, and the session budget refuses
+        # every decode once it is spent. None of those needs a flag here.
+        # ⚠ THE ACTIVE PANE ONLY. Filling both would double the tick's cost and halve the rate at
+        # which the pane the operator is looking at fills in.
+        if ((running == 1) && (ev == 0)) {
+            if (view_mode == CRAB_VIEW_GALLERY) {
+                var qpath = lpath; var qbuf = lbuf; var qcnt = ln;
+                if (active_pane == 1) { qpath = rpath; qbuf = rbuf; qcnt = rn; }
+                var qi = 0;
+                var qdid = 0;
+                while (qi < qcnt) {
+                    var qrec = qbuf + qi * CRAB_REC_SZ;
+                    if (load8(qrec + CRAB_REC_TYPE) == 0) {
+                        if (crab_is_image(qrec) == 1) {
+                            if (crab_fs_path(pathscr, qpath, qrec) >= 0) {
+                                if (crab_tc_find(pathscr) < 0) {
+                                    crab_thumb_step(qpath, qrec, pathscr);
+                                    qdid = 1;
+                                    qi = qcnt;
+                                }
+                            }
+                        }
+                    }
+                    qi = qi + 1;
+                }
+                # ⚠ REDRAW ONLY WHEN A PICTURE ACTUALLY LANDED. Repainting on every tick once the
+                # gallery is full turns the idle loop into a busy loop drawing the same frame.
+                if (qdid == 1) {
+                    crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                    crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                    crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                    crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                    crab_rs_preview(rs, pv_open);
+                    crab_rs_view(rs, view_mode);
+                    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
+                    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                    var s7 = crab_render(surf, 0, rs);
+                    if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                    else { setu_buf_write(buf_id, sd_surface_pixels(s7), nbytes); }
+                }
+            }
+        }
         if ((running == 1) && (ev == 0)) {
             if (pv_open == 1) {
                 var tpath = lpath; var tbuf = lbuf; var tsel = sel_l; var tcnt = ln;

@@ -2344,6 +2344,7 @@ fn main() {
     t_thumbnails();
     t_exif();
     t_gridview();
+    t_gallery();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3258,6 +3259,8 @@ fn t_gridview(): i64 {
     var gp = crab_pane_widget(0);
     assert(gp != 0, "the left pane was built");
     assert_eq(dh_widget_kind(gp), GRID, "...as a GRID");
+    # ⚠ Grid cells are built by `crab_grid_cell` — a LABEL per entry, not the gallery's BOX.
+    assert_eq(dh_widget_kind(dh_grid_cell_at(gp, 0)), LABEL, "a GRID cell is a single LABEL");
     assert_eq(dh_grid_count(gp), 3, "...holding one cell per entry");
     # ⚠ The column count comes from the LAID-OUT width, which is what navigation must step by.
     assert(dh_grid_cols(gp) >= 1, "the grid reports a column count");
@@ -3320,6 +3323,179 @@ fn t_gridview(): i64 {
     crab_render(ssurf, 0, rs);
     assert(crab_pane_widget(0) != 0, "solo: the active pane is built");
     assert_eq(crab_pane_widget(1), 0, "solo: the pane that was not drawn has no widget");
+    return 0;
+}
+
+# M5 — the GALLERY view and the thumbnail cache behind it.
+#
+# ⛔ THE CACHE IS WHAT MAKES A GALLERY AFFORDABLE. A decode costs ~2.5x an image's RGBA size and that
+# memory never comes back, so the 16 KB result is cheap and re-deriving it is not. Caching results
+# means a gallery scrolled back over costs nothing; caching refusals means a file crab declined is
+# never re-opened on the next idle tick.
+fn t_gallery(): i64 {
+    test_group("crab — M5: the GALLERY view and its thumbnail cache");
+    var rs = crab_rs();
+
+    # ---- the cache -------------------------------------------------------------------------------
+    # ⚠ Allocated once for the process, like every other cache and scratch here — 64 slots of
+    # ~16.6 KB is ~1.07 MB taken once. A growable cache on an allocator with no `free()` is not a
+    # cache, it is a leak with a lookup function.
+    assert(crab_tc_base() != 0, "the cache is allocated");
+    assert_eq(crab_tc_base(), crab_tc_base(), "...once, and returned as the same base every time");
+    crab_tc_clear();
+    assert_eq(crab_tc_find("/a/one.png"), 0 - 1, "an empty cache finds nothing");
+    assert_eq(crab_tc_find(0), 0 - 1, "...and a null path finds nothing");
+    var s1 = crab_tc_claim("/a/one.png");
+    assert(s1 >= 0, "a slot is claimed");
+    assert_eq(crab_tc_find("/a/one.png"), s1, "...and is found by its path");
+    assert_eq(crab_tc_state(s1), CRAB_TH_NONE, "a fresh slot has no state yet");
+    assert(crab_tc_pixels(s1) != 0, "...but it has pixels to write into");
+    var s2 = crab_tc_claim("/a/two.png");
+    assert(s2 != s1, "a second claim takes a different slot");
+    assert_eq(crab_tc_find("/a/two.png"), s2, "...found by its own path");
+    assert_eq(crab_tc_find("/a/one.png"), s1, "...and the first is still there");
+    # ⛔ SLOTS MUST NOT ALIAS. Two cells showing the same picture is the bug this prevents, and it
+    # would look like a decoder fault rather than a cache one.
+    assert(crab_tc_pixels(s1) != crab_tc_pixels(s2), "two slots have distinct pixel buffers");
+    assert_eq(crab_tc_pixels(0 - 1), 0, "an invalid slot has no pixels");
+    assert_eq(crab_tc_pixels(CRAB_TC_N), 0, "...nor one past the end");
+    assert_eq(crab_tc_state(0 - 1), CRAB_TH_NONE, "an invalid slot has no state");
+
+    # ⚠ ROUND-ROBIN REPLACEMENT, not LRU: a gallery is browsed in index order, so the oldest slot is
+    # the one furthest from the eye and an LRU's bookkeeping would cost more than the miss it avoids.
+    # Claiming N+1 entries must evict the first.
+    crab_tc_clear();
+    var ci = 0;
+    var pbuf = alloc(64);
+    while (ci < CRAB_TC_N + 1) {
+        var pn = 0;
+        var pfx = "/x/";
+        var pk = 0;
+        while (load8(pfx + pk) != 0) { store8(pbuf + pn, load8(pfx + pk)); pn = pn + 1; pk = pk + 1; }
+        pn = pn + crab_u2s(pbuf + pn, ci);
+        store8(pbuf + pn, 0);
+        crab_tc_claim(pbuf);
+        ci = ci + 1;
+    }
+    assert_eq(crab_tc_find("/x/0"), 0 - 1, "after N+1 claims the FIRST entry was evicted");
+    assert(crab_tc_find("/x/1") >= 0, "...and the second survives");
+    assert(crab_tc_find("/x/64") >= 0, "...as does the newest");
+    # ⚠ `crab_tc_clear` empties everything — called from `crab_relist` beside the other
+    # invalidations, because every key here is a PATH and crab makes paths mean different files.
+    crab_tc_clear();
+    assert_eq(crab_tc_find("/x/1"), 0 - 1, "clearing empties the cache");
+
+    # ---- the decoder writes into a cache slot ----------------------------------------------------
+    # ⛔ THE PREVIEW AND THE GALLERY SHARE ONE MECHANISM. Before the cache the decoder owned a single
+    # buffer, so a gallery would have shown every cell the last thing decoded.
+    var scr = alloc(CRAB_PATH_MAX);
+    var dir = "build";
+    var png = alloc(128);
+    var pl = t_write_tiny_png(png);
+    crab_fs_delete(dir, "galtest.png", 0, scr);
+    crab_fs_path(scr, dir, "galtest.png");
+    var fd = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(fd >= 0, "the gallery fixture is created");
+    sys_write(fd, png, pl);
+    sys_close(fd);
+    crab_thumb_forget();
+    assert_eq(crab_thumb_step(dir, "galtest.png", scr), CRAB_TH_OK, "the fixture decodes");
+    crab_fs_path(scr, dir, "galtest.png");
+    var gs = crab_tc_find(scr);
+    assert(gs >= 0, "...into a cache slot found by its full path");
+    assert_eq(crab_tc_state(gs), CRAB_TH_OK, "...with the state recorded IN the slot");
+    assert_eq(crab_thumb_pixels(), crab_tc_pixels(gs), "crab_thumb_pixels points AT that slot");
+    # ⛔ A REFUSAL IS RECORDED TOO, or the idle tick retries a file it already declined — every tick,
+    # re-opening it each time.
+    var big = alloc(128);
+    var bl = t_write_huge_ihdr_png(big);
+    crab_fs_delete(dir, "galhuge.png", 0, scr);
+    crab_fs_path(scr, dir, "galhuge.png");
+    var fd2 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    sys_write(fd2, big, bl);
+    sys_close(fd2);
+    assert_eq(crab_thumb_step(dir, "galhuge.png", scr), CRAB_TH_TOO_BIG, "an oversized file is refused");
+    crab_fs_path(scr, dir, "galhuge.png");
+    var hs = crab_tc_find(scr);
+    assert(hs >= 0, "...and still takes a slot");
+    assert_eq(crab_tc_state(hs), CRAB_TH_TOO_BIG, "...recording the REFUSAL, so it is never retried");
+    # ⛔ `crab_th_finish` is the single exit that writes the state INTO the slot. Every path after a
+    # claim goes through it — a slot left at `CRAB_TH_NONE` is one the next tick decodes again,
+    # which on an unreadable file is an infinite retry that re-opens it each time.
+    assert_eq(crab_th_finish(CRAB_TH_BAD), CRAB_TH_BAD, "crab_th_finish returns the state it records");
+    assert_eq(crab_tc_state(hs), CRAB_TH_BAD, "...and writes it into the CURRENT slot");
+    assert_eq(crab_thumb_state(), CRAB_TH_BAD, "...and into the module state the preview reads");
+    crab_th_finish(CRAB_TH_TOO_BIG);
+    var spent0 = crab_thumb_spent();
+    assert_eq(crab_thumb_step(dir, "galhuge.png", scr), CRAB_TH_TOO_BIG, "the refusal answers from cache");
+    assert_eq(crab_thumb_spent(), spent0, "...and spends nothing");
+
+    # ---- the view --------------------------------------------------------------------------------
+    var gbuf = alloc(16 * CRAB_REC_SZ);
+    t_entry(gbuf, 0, "galtest.png", 0);
+    t_entry(gbuf, 1, "notes.txt", 0);
+    # ⛔ A THIRD ENTRY THAT IS AN IMAGE, IS **IN THE CACHE**, AND WAS **REFUSED**. Without it the
+    # state check in `crab_gal_cell` is unexercised: a `.txt` never reaches the lookup, and an
+    # uncached image misses it — so a mutation that drew a canvas regardless of state SURVIVED.
+    # This is the case where it matters: the slot exists but its pixels were never written, so a
+    # canvas over it paints whatever the previous occupant of that slot left behind.
+    t_entry(gbuf, 2, "galhuge.png", 0);
+    var gz = alloc(16 * 8); var gm = alloc(16 * 8);
+    var zi = 0;
+    while (zi < 16) { store64(gz + zi * 8, 512); store64(gm + zi * 8, 1788136000); zi = zi + 1; }
+    var gsl = alloc(8); store64(gsl, 0);
+    var gsr = alloc(8); store64(gsr, 0);
+    var rbb = alloc(16 * CRAB_REC_SZ);
+    t_entry(rbb, 0, "boot", 1);
+    var gsurf = dh_surface_new(760, 320);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gbuf, 3, dir, gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rbb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GALLERY);
+    assert(crab_render(gsurf, 0, rs) != 0, "the gallery renders");
+    var gp = crab_pane_widget(0);
+    assert_eq(dh_widget_kind(gp), GRID, "a gallery pane is a GRID — the same kind the grid view uses");
+    assert_eq(dh_grid_cell_h(gp), CRAB_GAL_CELL_H, "...with the TALLER gallery cell");
+    assert_eq(dh_grid_cell_w(gp), CRAB_GAL_CELL_W, "...and the gallery cell width");
+    assert_eq(dh_grid_count(gp), 3, "one cell per entry");
+    # ⛔ A CACHED IMAGE GETS A CANVAS; A NON-IMAGE GETS THE RESERVED BAND. The band is reserved either
+    # way so a cell does not change height when its thumbnail lands and the grid does not reflow
+    # under the operator's eye mid-scroll.
+    var cell0 = dh_grid_cell_at(gp, 0);
+    var cell1 = dh_grid_cell_at(gp, 1);
+    assert_eq(dh_widget_kind(dh_widget_first_child(cell0)), CANVAS, "the cached image cell draws a CANVAS");
+    assert_eq(dh_widget_kind(dh_widget_first_child(cell1)), BOX, "the .txt cell reserves a plain BOX");
+    assert_eq(dh_widget_h(dh_widget_first_child(cell0)), CRAB_THUMB_H, "the canvas is the thumbnail's height");
+    # ⛔ AND A CACHED-BUT-REFUSED IMAGE DRAWS NO CANVAS. Its slot exists and its pixels were never
+    # written; a canvas over it would paint the previous occupant of that slot.
+    var cell2 = dh_grid_cell_at(gp, 2);
+    assert(crab_tc_find(scr) >= 0, "the refused entry really is in the cache");
+    assert_eq(dh_widget_kind(dh_widget_first_child(cell2)), BOX,
+      "a cached-but-REFUSED image reserves the band and draws no canvas");
+    # ⛔ THE CELL SIZE IS DERIVED: the picture plus one list row.
+    assert_eq(CRAB_GAL_CELL_H, CRAB_THUMB_H + CRAB_GRID_CELL_H, "a gallery cell is a thumbnail plus a name row");
+    assert_eq(CRAB_GAL_CELL_W, CRAB_COL_NAME_MIN, "...and as wide as the NAME column's floor");
+    # ⚠ AN UNCACHED IMAGE ALSO GETS THE RESERVED BAND, not a canvas — the view never triggers a
+    # decode, it only shows work the idle tick has already done.
+    crab_tc_clear();
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gbuf, 3, dir, gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rbb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, CRAB_VIEW_GALLERY);
+    crab_render(gsurf, 0, rs);
+    var gp2 = crab_pane_widget(0);
+    assert_eq(dh_widget_kind(dh_widget_first_child(dh_grid_cell_at(gp2, 0))), BOX,
+      "an image with no cached thumbnail reserves the band and draws no canvas");
+
+    # ⚠ THE VIEW CONSTANTS CYCLE IN ORDER — `g` steps list -> grid -> gallery -> list, and the
+    # wrap in `src/main.cyr` is `> CRAB_VIEW_GALLERY`.
+    assert_eq(CRAB_VIEW_LIST, 0, "list is the default view");
+    assert_eq(CRAB_VIEW_GRID, 1, "grid is next");
+    assert_eq(CRAB_VIEW_GALLERY, 2, "gallery is last, so the cycle wraps past it");
+
+    crab_fs_delete(dir, "galtest.png", 0, scr);
+    crab_fs_delete(dir, "galhuge.png", 0, scr);
+    crab_tc_clear();
     return 0;
 }
 

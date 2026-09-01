@@ -124,9 +124,12 @@ than a second set of verbs — every entry maps to a key binding that already ex
 tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
 Esc cancels them**, so a recursive copy never freezes the window.
 
-**Two views** (M5): `g` toggles both panes between the list and a **grid** of names — same
-information a list row's NAME column carries, three columns instead of one. ⚠ In grid mode the arrow
-keys navigate the grid and `h`/`l` switch panes; in list mode nothing changes.
+**Three views** (M5): `g` cycles **list → grid → gallery**. The grid is names, three columns instead
+of one; the **gallery** adds a thumbnail above each name. ⚠ In grid and gallery modes the arrow keys
+navigate and `h`/`l` switch panes; in list mode nothing changes.
+⛔ **A gallery never blocks on decoding.** Pictures are decoded one per idle tick and cached, so
+opening a folder of a thousand files costs one frame and the thumbnails fill in as you look at them —
+and stop on their own when the session's decode budget is spent.
 
 **The preview column** (M5): `p` opens a right-hand inspector for the selected entry — NAME · KIND ·
 SIZE · MODIFIED · DIMENSIONS · CAMERA · SHOT, and a **thumbnail** for PNG, JPEG, GIF and BMP.
