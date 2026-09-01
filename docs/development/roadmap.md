@@ -122,8 +122,13 @@ not quietly lose them.
   already pays the toll explicitly (`setuwin__hid_to_evdev` exists for exactly this). crab reads raw
   usages and is correct today *because* it never uses `dh_dispatch`; anything that starts to would
   inherit the mismatch. ⇒ **Fix it in one place or document it in three.**
-- **The idle poll's per-cycle buffer** (*deferral #09*). The steady-state frame allocates nothing,
-  but an empty poll still costs a buffer. **Gate: dhancha** — hoist it, or accept a caller-owned one.
+- ✅ **CLOSED — the idle poll's per-cycle buffer** (*deferral #09*). ⛔ **This was carried as OPEN
+  here and in the gate table, one of them stamped `verified: 2026-08-31`, while the fix had been in
+  the declared graph for nine releases.** `dh_setu_poll_event` was hoisted onto a per-process scratch
+  buffer in **dhancha 0.9.16** and consumed at crab **0.6.1** (`lib/dhancha.cyr:4314–4368`; the idle
+  path returns before any allocation). ⇒ **A stale OPEN is not harmless — #09 is the stated
+  precondition for the mascot line (*#29*) and any self-repainting element, so this entry was
+  blocking work that was already free.** Found by measurement, not by a gate; that absence is *#37*.
 - **The idle mascot line** (*deferral #29*) — unblocked since the allocation gate closed.
 
 ### M5 — Views (v0.9.0) — **STARTED; the two ungated items are in**
@@ -146,7 +151,10 @@ not quietly lose them.
 > made late and cheaply.
 
 - **Grid**, **Columns** (miller), **Gallery** — the canvas's four-way view switcher.
-  ⛔ **Gate: dhancha** GRID / COLUMNS widgets — verified absent (`grep '^fn dh_grid_new' → 0`).
+  ⛔ **NO dhancha GATE SURVIVES ON THIS LINE — it was stale in BOTH halves** (corrected 2026-09-01).
+  GRID shipped in 0.9.25 and crab calls `dh_grid_new` at [`src/ui.cyr:943`](../../src/ui.cyr); the
+  old text *"verified absent (`grep '^fn dh_grid_new' → 0`)"* contradicted this section's own
+  fourth bullet. COLUMNS was **never** a dhancha gate — see the table below.
   ⚠ `CANVAS` (0.9.9) exists and could carry app-drawn grids, but the toolkit is the right home:
   *"the rule lived in three apps, now it lives once."*
 - ✅ **Preview pane** with real metadata — **SHIPPED (unreleased)**. `p` toggles a right-hand
@@ -180,7 +188,9 @@ not quietly lose them.
   ~28 MB of permanent decode against a 32 MB session ceiling. The preview column carries the one
   thumbnail. A true gallery is a separate view and a separate ruling.
 - ✅ **Thumbnails — SHIPPED (unreleased).** 64x64, PNG/JPEG/GIF/BMP, decoded off the idle tick and
-  box-filtered down. `chitra 1.0.0` is declared.
+  box-filtered down. **`chitra 1.0.1` is declared** (⚠ not 1.0.0 — corrected 2026-09-01; the
+  manifest, `cyrius.lock` (`b777d34e8ef2`) and `sha256(lib/chitra.cyr)` all agree on 1.0.1. The
+  1.0.0 mentions elsewhere in this file are historical narrative about the false gate and stand).
   ⛔⛔ **THE GATE ON THIS LINE WAS FALSE TWICE, IN OPPOSITE DIRECTIONS, AND THAT IS THE LESSON.**
   First it read *"Gate: an image decoder; none exists in the stack today"* — chitra 1.0.0 was
   released and shipping. Then the correction implied that made it free. **Measured**: declaring it
@@ -243,16 +253,16 @@ not quietly lose them.
 |---|---|---|---|
 | ~~Grid view~~ | M5 | ✅ **SHIPPED both halves.** dhancha 0.9.25 added the `GRID` kind; crab's `g` view is built on it. | 2026-08-31 ⭐ done |
 | Columns (miller) view | M5 | ⛔ **FALSE GATE — the FOURTH.** Not dhancha: columns is a `BOX_H` of `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight, so it clears neither bar of dhancha's kind rule (as MENU and SHEET did not). **It is gated on crab's two-pane model** — the source/destination pairing the M4 write layer rests on. A design question, not a dependency. | 2026-08-31 ⭐ re-derived |
-| ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra 1.0.0 is declared. Cost paid: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
+| ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra **1.0.1** is declared (⚠ *not* 1.0.0, as this row and ~10 other places said). ⚠ The cost figures below are from the **pre-grid/gallery tree** and no longer describe the binary: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
 | Sidebar — PLACES | M6 | ⛔ **FALSE GATE (the fifth).** Not dhancha: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers, `PROGRESS` gives bars, padding gives indent. Buildable in crab today. | 2026-08-31 ⭐ re-derived |
-| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **RE-AIMED: gated on DATA, not on a widget.** There is **no `statfs`/`statvfs` anywhere** — not in cyrius's syscall tables, not in agnos's ABI, where `mount`/`umount` are documented no-op **stubs**. crab cannot learn a filesystem's size, its free space, or what is mounted. Filed against agnos. | 2026-08-31 ⭐ re-derived |
+| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **RE-AIMED TWICE, AND IT IS TWO GATES.** *Capacity*: agnos shipped **`statfs`#103** in 1.56.56 and all three backends answer it since **1.56.57**, naming crab as the consumer; agnos's issue is **archived**. What is now missing is cyrius's stdlib peer **`sys_statfs`** — filed 🟡 OPEN, affecting the `6.5.36` pin crab declares — so this is gated on **cyrius**, not agnos (crab could call #103 by raw number today, as agnos's selftests do). *Enumeration*: still fully open — `mount`#23/`umount`#24 remain documented no-op **stubs**, so crab cannot learn **what is mounted** (*deferral #44*). | 2026-09-01 ⭐ re-derived |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
-| Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ⚠ crab must wait for 0.9.26 to be pushed. | 2026-08-31 ⭐ built |
+| Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ✅ **The wait is over**: 0.9.26 is pushed (`cb855c8`) and crab's manifest declares it as of 2026-09-01, verified by check four. ⚠ crab consumes none of it yet. | 2026-09-01 ⭐ resolvable |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
 | Duplicate detection | M7 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
 | Assisted search | M8 | **daimon** local-only embedding | 2026-08-31 |
-| The idle poll's per-cycle buffer | M2 residue | **dhancha** — hoist it or take a caller-owned one | 2026-08-31 |
+| ~~The idle poll's per-cycle buffer~~ | M2 residue | ✅ **CLOSED, AND IT HAD BEEN FOR NINE RELEASES.** Hoisted in dhancha **0.9.16**, consumed at crab **0.6.1**. ⛔ This row's `verified` stamp said 2026-08-31 while the fix was already in the declared graph — a re-derivation that re-derived nothing. *#09.* | 2026-09-01 ⭐ measured |
 
 **Ungated and available now**, listed because a gated table invites the assumption that everything is:
 ~~preview pane (M5)~~ **shipped** · the 🦀 menu (M6) · smart-folder *plumbing* without the index (M7)
@@ -264,6 +274,35 @@ kind of thing as a gate. It has its own row in the table above so it stops being
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
 and **daimon 2.1.2 exists locally** with vector/RAG stores. *Deferral #18* has been open since the
 roadmap was written: **declare the dependency or stop promising the AI arc.**
+
+## Filed 2026-09-01 — the 0.7.6 verification sweep (*deferrals #40–#47*)
+
+> ⛔ **Every row below was MEASURED against tag `0.7.6` (`26f38ed`) with the pinned toolchain**
+> (`cyrius 6.5.36`, self-reporting `manifest-pin: 6.5.36`), not read off a document. They are here
+> because the sweep that found them found them **outside the ledger** — which is the same absence
+> *#37* names: nothing gates a claim, so a defect with no number has nowhere to be sequenced.
+>
+> ⚠ **The `pinned for` column is a PROPOSAL, not a schedule.** Version numbers are the operator's to
+> direct — the milestone→version mapping in this file has already been wrong twice, and M4 rode four
+> patch numbers by ruling. The column exists so no row is open-ended, not to commit a release date.
+
+| # | subject | pinned for |
+|---|---|---|
+| **#40** | ⛔⛔ **`cyrius test` DOES NOT RUN `[build].test`, AND CI's COMMENT SAYS IT DOES.** *Proven by mutation, not inferred*: `src/test.cyr` rewritten to `return 1` in a scratch tree left `cyrius test` at **1138/0, exit 0**. [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) asserts the opposite — *"bare `cyrius test` picks up the `[build].test` entry AND auto-discovers `tests/*.tcyr`"*. Only `tests/crab.tcyr` is compiled and run. ⇒ This makes *#17* **worse than filed**: the file is not merely redundant, CI tells the next reader it is a live gate. `src/test.cyr`'s own comment is the accurate one. | **0.7.7** — doc + comment fix, no code |
+| **#41** | ⛔ **The fuzz harness cannot contradict a stale claim about itself.** `cyrius fuzz` prints `fuzz: ok` and **no round count**. Docs say **60,000** in six places; the harness drives **100,000** — five `while (round < FZ_ROUNDS)` loops at [`tests/crab.fcyr`](../../tests/crab.fcyr) 176/191/230/292/349 at `FZ_ROUNDS = 20000`, with no break. Two loops were added mid-cut (EXIF, batch-rename) and no output could say so. ⇒ **Exactly the failure `render_test` was fixed for at 0.7.6** — it now prints its 53 checks. Make the fuzzer print its rounds. | **0.7.7** — one print + doc sweep |
+| **#42** | ⚠ **The deferral ledger is short by five.** [`CHANGELOG.md`](../../CHANGELOG.md) records *"**39 deferrals** were harvested"*; exactly **34** numbers are ever cited in any blob of any commit reachable from `--all` (#01–#07, #09–#21, #23–#26, #28, #29, #32–#39). **#08, #22, #27, #30, #31 have no anchor anywhere in history** — they were assigned at the harvest and never transcribed, so no subject can be recovered. ⇒ Correct the count to 34 and say the five were never written down. Nothing is lost by admitting it; a reader hunting five phantom items loses an afternoon. ⛔ **New numbers start at #40, not in the gaps** — reusing a harvested number would make the ledger lie twice. | **0.7.7** — CHANGELOG correction |
+| **#43** | ⛔⛔ **A `path` DEP GETS NO `cyrius.lock` COMMIT PIN, SO A DECLARED-TAG/VENDORED-RECORD DIVERGENCE IS INVISIBLE TO EVERY GATE EXCEPT CHECK FOUR.** **This shipped**: tag `0.7.6` committed a `lib/dhancha.cyr` byte-identical to dhancha **0.9.26**'s `dist/` while `cyrius.cyml` declared **0.9.25**. Not the 0.4.13 phantom-tag failure — 0.9.25 was real and the declared graph built green — but the record and the declaration disagreed *in a released artifact*, and the lock could not catch it because four of seven deps carry `path` and get no `commit` line (lock reads **3 commit-pinned**; disabling the overrides takes it to **7**, which is the tell). ⇒ Closed for dhancha by the 0.9.26 bump; the **class** is what needs the gate, and that gate is *#19*. | **0.8.0** — with *#19*'s automation |
+| **#44** | ⚠ **crab cannot learn what is MOUNTED, and that half of the VOLUMES gate is unfiled.** agnos `mount`#23 / `umount`#24 are documented **no-op stubs** and the mount table is not reachable from ring 3. The *capacity* half has moved — agnos **1.56.56/57 ships `statfs`#103** and names crab as its consumer — so the sidebar can draw a bar for a path it is *told* about, but cannot enumerate volumes. ⇒ Sidebar VOLUMES is **two** gates, and only one is closing. File the enumeration half against agnos. | **M6** — gate-bound, not date-bound |
+| **#45** | ⛔ **crab's OWN 9 px monospace assumption is load-bearing, and the roadmap names only dhancha's caret.** [`src/ui.cyr:175`](../../src/ui.cyr) `CRAB_COL_CHARW = 9` feeds `crab_col_chars` (ui.cyr:257–260, `px / CRAB_COL_CHARW`), which decides how many characters a NAME column holds — which drives the **`~` truncation rule** that exists so two different files never render as one identical row (the 0.5.0 fix). Under a proportional face `px / 9` over-reports for wide glyphs and **the truncation marker stops being honest**. That is correctness, not cosmetics, and the column-set ladder (`CRAB_COL_NAME_MIN = 90` = "10 chars", `crab_cols_for_width`) rests on the same constant. ⇒ Add it to the proportional-text gate; it is crab-side work no upstream release delivers. | with **proportional text** (gated) |
+| **#46** | ⚠ **`cyrius lint` exits 0 no matter what it finds, so it could not gate even if CI ran it.** Measured at `0.7.6`: **12 untracked deferrals** (app.cyr 79/1554/1636/2015, ui.cyr 62/126/2228, main.cyr ×3, fcyr ×1, tcyr ×1) and **85 `line exceeds 120 characters` warnings**, `rc=0` on all nine files. ⇒ Two items, not one: adopt the 12 into this ledger (or delete them), and decide whether lint failing should be a gate. Pairs with *#36*. | **0.7.7** — adopt; gate with *#36* |
+| **#47** | ⚠ **The held-key repeat rate was never given a number.** [`CHANGELOG.md`](../../CHANGELOG.md) `[0.6.1]` records an observed **~1 repeat per 1.6 s hold against ~20 expected**, filed as a *hypothesis* (frame cost) rather than a deferral, so it has sat outside the ledger for five releases. ⚠ It is agnos-runtime behaviour: no host test can see it, which ties it to *#16*. | **M6** — with *#16*'s harness |
+
+### ⛔ Corrections to entries already in this file, made in the same sweep
+
+- **The `dh_grid_new` gate line is stale in BOTH halves and no dhancha gate survives on it.** M5's first bullet still reads *"Gate: dhancha GRID / COLUMNS widgets — verified absent (`grep '^fn dh_grid_new' → 0`)"*. `dh_grid_new` is at dhancha `src/grid.cyr:31`, vendored byte-identically into `lib/dhancha.cyr:1472`, and **called live from [`src/ui.cyr:943`](../../src/ui.cyr)**. The COLUMNS half was never a dhancha gate either (see the table row). ⚠ **The same section already says GRID shipped four bullets later — the file contradicts itself in place.**
+- ⛔⛔ **`path` no longer masks a stale pin — the manifest declares dhancha `0.9.26`** (bumped 2026-09-01). Check four re-run with all four `path` lines disabled: **7 deps / 0 errors**, lock **3 → 7 commit-pinned**, both targets build, **1138 / 0**, `render_test` **53 / 0**, and — the clause that had gone dead — the declared-graph binaries are **byte-identical** to the path-resolved ones (host `1,019,784` / `d7bd8125…`, agnos `1,047,624` / `93f5c139…`). ⇒ The menu bar's *"crab must wait for 0.9.26 to be pushed"* clause is **retired**; `dh_list_new_h` is resolvable from the declared graph today. crab still consumes none of it.
+- **chitra is pinned `1.0.1`, not `1.0.0`** — asserted as 1.0.0 in ~11 live places across this file, the CHANGELOG and `src/`. The manifest, the lock (`b777d34e8ef2`) and `sha256(lib/chitra.cyr)` all agree on 1.0.1. ⚠ The thumbnail row's `+537,112 B / +115.2 %` figures are from the **pre-grid/gallery tree** and no longer describe the binary.
+- **The VOLUMES row's aim has moved off agnos.** `statfs`#103 exists and answers on all three backends since agnos 1.56.57; agnos's own issue is **archived**. What is missing is cyrius's stdlib peer `sys_statfs` — filed 🟡 OPEN against cyrius, affecting the `6.5.36` pin crab declares. crab could call #103 by raw syscall number today, as agnos's selftests do. ⇒ Gated on **cyrius**, plus *#44* for enumeration.
 
 ## Cross-cutting (not a milestone — do these continuously)
 
@@ -320,7 +359,7 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
   is the gate that would have caught a broken dependency graph, and it is the reason `path` currently
   masks one.
 - CI runs neither `fuzz`, `bench`, `lint`, `fmt --check`, `vet`, `deny` nor `coverage`. *Deferral #36.*
-- ✅ **CLOSED (unreleased) — the fuzz harness reads its input.** *Deferral #12.* 60,000 deterministic
+- ✅ **CLOSED — the fuzz harness reads its input.** *Deferral #12.* **100,000** deterministic
   rounds over mutated format headers, random bytes, degenerate and negative lengths, and arbitrary
   bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len`. It asserts an invariant, not just
   the absence of a crash, and it caught a real segfault in `crab_img_dims` the day it was written.

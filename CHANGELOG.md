@@ -2,6 +2,100 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+> ⛔ **THIS SECTION EXISTS SO THE 0.7.6 SECTION BELOW IS NEVER TOUCHED.** 0.7.2 exists because
+> 0.7.1's section was still being edited after its tag was pushed; `0.7.6` is tagged at `26f38ed`
+> and on the remote, so it is now a record, not a scratchpad — **including where it is wrong.** Two
+> corrections below apply to text inside released sections and are therefore made *here*.
+> ⚠ **`VERSION` is untouched and nothing is committed or tagged** — the operator drives all of that,
+> including which number this becomes.
+
+### Changed — the declared graph moves to dhancha 0.9.26, and check four gets its evidence back
+
+⭐ `cyrius.cyml` declares **dhancha 0.9.26** (was 0.9.25). `dh_list_new_h` — the horizontal
+selectable strip — is now resolvable from the *declared* graph, which **retires M6's menu-bar gate**
+in fact rather than in principle. ⚠ crab consumes none of it yet.
+
+⛔⛔ **AND IT CLOSES A DIVERGENCE THAT SHIPPED IN 0.7.6.** `path` wins over `tag`, so the released
+tag committed a `lib/dhancha.cyr` **byte-identical to 0.9.26's `dist/`** while the manifest declared
+**0.9.25**. Not the 0.4.13 phantom-tag failure — 0.9.25 was real and the declared graph built green
+— but the committed record and the declaration disagreed *in a released artifact*, and **no gate
+could see it**: four of seven deps carry `path`, and a `path` dep gets no `cyrius.lock` commit line.
+⇒ Filed as *deferral #43*; the class needs *#19*'s automation, not another manual pass.
+
+**Check four re-run in full** (all four `path` lines disabled so `cyrius deps` must clone the tags):
+7 deps / 0 errors · lock **3 → 7 commit-pinned** (the tell the overrides were really off) · host
+**1,019,784 B** · `--agnos` **1,047,624 B** · **1138 / 0** · `render_test` **53 / 0**.
+⭐ **And the clause that had gone dead is alive again: the declared-graph binaries are BYTE-IDENTICAL
+to the path-resolved ones** (`d7bd8125…` / `93f5c139…`). Before the bump they were not — host
+differed by 16 B and both differed in ~650,000 bytes. *That equality is the evidence; the rest is
+consistent with it.*
+
+⚠ 0.9.26 also fixes a nineteen-release-old latent bug crab was **not** hitting, and why it was not is
+worth keeping: `dh_list_new(row_h)` stored the row height in `DH_W_PREF_H` — the list's own preferred
+height — so any `dh_widget_set_pref` on a LIST silently rewrote it and every scroll figure derived
+from it. **The list did not break; it scrolled wrong.** crab's single list (`src/ui.cyr`
+`dh_list_new(26)`) takes `dh_widget_set_flex(lst, 1)` and never a pref, so it was clear *by
+construction* rather than by care.
+
+### Fixed — the fuzz harness reports how much work it did (*deferral #41*)
+
+⛔⛔ **SIX DOCUMENTS SAID 60,000 ROUNDS. IT DRIVES 100,000, AND NOTHING IT PRINTED COULD SAY SO.**
+`cyrius fuzz` emitted `fuzz: ok` and no magnitude, so when two loops were added mid-cut (the EXIF
+round, then the batch-rename round) the old figure went stale in every document at once with a green
+run agreeing with all of them. It now prints `fuzz: rounds 100000`.
+⚠ **Counted, not computed** — `5 * FZ_ROUNDS` would be the same unverifiable claim, moved into code.
+Rounds advance through `fz_round()`, so a sixth loop written in the same idiom is counted, and one
+that is not looks unlike its five neighbours at the point it is written.
+⇒ **This is exactly the failure `render_test` was fixed for in 0.7.6**, when it began printing its 53
+checks after years of exiting 0 whether it ran 26 or none. Same shape, different harness.
+
+### Fixed — CI's Test step no longer claims a gate that does not exist (*deferrals #17, #40*)
+
+⛔⛔ **`cyrius test` DOES NOT RUN `[build].test`, AND THE COMMENT SAID IT DID.** Proven by mutation,
+not inferred: `src/test.cyr` rewritten to `return 1` in a scratch tree left the step at **1138
+passed, 0 failed, exit 0**. Only `tests/crab.tcyr` is compiled and run. That makes *#17* worse than
+filed — the file is not merely redundant, **CI told the next reader it was a live gate**. The comment
+now states what the step actually gates, and what it does not: no `--agnos` build (*#15*), no
+`render_test` (*#14*), no fuzz/bench/lint/fmt/coverage (*#36*).
+
+### Fixed — three live claims about `chitra 1.0.0`, one of them load-bearing
+
+crab pins **chitra 1.0.1**. Corrected where the text was a claim about the *current* dependency:
+`docs/development/roadmap.md`, `src/ui.cyr` (the supported-format set), and — the one that matters —
+⛔ **`src/app.cyr`, which asserted an upstream defect the declared version no longer has.** 1.0.0
+spent **26,617,512 bytes** to return a bare `CHITRA_ERR_INFLATE`; 1.0.1 refuses from the header in
+under 64 KiB with `CHITRA_ERR_INFLATE_LIMIT`. crab's behaviour is unchanged — the per-image budget
+already kept it clear of that cliff — but **a comment asserting a fixed upstream bug is how a budget
+gets called redundant and deleted**, so the history is kept and labelled as history.
+⚠ The other eight `chitra 1.0.0` mentions are historical narrative about the false gate and are
+correct as written. They are deliberately untouched.
+
+### Docs — the verification sweep, and eight new deferrals (*#40–#47*)
+
+Every state claim in the repo was re-measured against `0.7.6` with the pinned toolchain. `roadmap.md`
+gains a **Filed 2026-09-01** section carrying *#40–#47*, each **pinned to a repair release**, plus
+in-place corrections to entries that had gone stale:
+
+- ⛔⛔ ***Deferral #09 was carried as OPEN in two places, one stamped `verified: 2026-08-31`, while
+  the fix had been in the declared graph for nine releases.*** `dh_setu_poll_event` was hoisted onto
+  a per-process scratch buffer in **dhancha 0.9.16** and consumed at crab **0.6.1**. ⇒ **A stale OPEN
+  is not harmless**: #09 is the stated precondition for the mascot line (*#29*) and any
+  self-repainting element, so the entry was blocking work that was already free.
+- The M5 gate line *"Gate: dhancha GRID / COLUMNS — verified absent"* was stale in **both** halves,
+  and contradicted its own section four bullets later. **No dhancha gate survives on it.**
+- Sidebar VOLUMES is **two** gates and has re-aimed: agnos ships `statfs`#103 (all three backends
+  since 1.56.57, naming crab as the consumer) and its issue is archived, so *capacity* now waits on
+  **cyrius**'s missing `sys_statfs` peer — while *enumeration* is untouched, because `mount`#23 /
+  `umount`#24 remain documented no-op stubs (*#44*).
+- ⚠ **Two corrections that belong to released sections and are therefore recorded HERE, not there:**
+  `[0.5.0]`'s *"**39 deferrals** were harvested"* is wrong — exactly **34** numbers are cited in any
+  blob of any commit reachable from `--all`; **#08, #22, #27, #30 and #31 have no anchor anywhere in
+  history** and no subject can be recovered (*#42*). And `[0.7.6]`'s *"60,000 rounds"* is the same
+  error the fuzz fix above corrects. ⛔ **New deferrals start at #40, never in those five gaps** —
+  reusing a harvested number would make the ledger lie twice.
+
 ## [0.7.6] - 2026-08-31 — M5: preview, thumbnails, EXIF, GRID and GALLERY — and every audit finding closed
 
 ### Fixed — F1: the gallery parses what the operator can SEE, not what they opened

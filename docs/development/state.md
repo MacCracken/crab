@@ -29,7 +29,10 @@
 ⭐ **M5 is substantially in** — the preview column, thumbnails, EXIF, and the GRID and GALLERY
 views — and **every finding of the 2026-08-31 security audit is closed**. ⚠ **Semver would normally
 make new user-facing features a MINOR**; this is the fourth time this project has put feature work in
-a patch by operator ruling. **Nothing is committed, tagged or pushed** — the operator drives that.
+a patch by operator ruling. ⛔ **CORRECTED 2026-09-01: 0.7.6 IS committed, tagged (`26f38ed`) and pushed.** This line said
+"Nothing is committed, tagged or pushed" — true when written, false by the time it was read, and
+nothing gated it (*deferral #37*, verbatim). The operator still drives every version decision;
+what changed is that this one was already made.
 
 ⛔ **0.7.2 exists because 0.7.1's CHANGELOG section was being edited after its tag was pushed.**
 Three commits landed past `4ac21eb` while their notes were still being written into the released
@@ -88,7 +91,7 @@ demands and the one this file broke twice.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +2,416 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+⚠ +2,416 over 0.7.5 *(shipped in 0.7.6)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
 - `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
@@ -282,7 +285,7 @@ errors**, host and `--agnos` both build, **253/0**).
 | rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.25 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| dhancha | 0.9.26 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
 | chitra  | 1.0.1  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
@@ -386,9 +389,10 @@ separate change, not bundled into a version bump.
   Current: merge **88.6 µs** vs insertion **5.66 ms** at 256 scrambled; merge **38.3 µs** vs
   insertion **1.28 ms** at the real iron 122. ⛔ Still nothing writes `docs/benchmarks.md` from it —
   that is the v1.0 criterion, and it is the half that is missing.
-- `tests/crab.fcyr` — ✅ **A REAL FUZZ HARNESS as of the unreleased work (*deferral #12* CLOSED).**
+- `tests/crab.fcyr` — ✅ **A REAL FUZZ HARNESS as of 0.7.6 (*deferral #12* CLOSED).**
   It was a scaffold that read none of its input, so `cyrius fuzz` PASSED against anything. It now
-  drives **60,000 rounds** over mutated format headers, random bytes, degenerate/negative lengths,
+  drives **100,000 rounds** (⛔ measured and printed by the harness itself since *#41*; this line said
+  60,000, as five others did) over mutated format headers, random bytes, degenerate/negative lengths,
   and arbitrary bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len` — deterministic
   from a fixed seed, asserting an invariant rather than only the absence of a crash.
   ⛔⛔ **ITS OWN FIRST DRAFT WAS VACUOUS AND THAT IS THE LESSON.** An LCG's low bits have period 2^k,
@@ -452,7 +456,7 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⛔ **CI never builds `--agnos`** — the target that ships. Every `#ifdef CYRIUS_TARGET_AGNOS` region
   is unguarded by the gate, and 0.7.5 proved the cost: a brace error there compiled clean on the host
   and failed only on `--agnos`. *Deferral #15.*
-- ✅ **CLOSED (unreleased) — the fuzz harness now reads its input.** *Deferral #12.* 60,000 rounds
+- ✅ **CLOSED — the fuzz harness now reads its input.** *Deferral #12.* **100,000** rounds
   over mutated headers, random bytes and degenerate lengths, deterministic from a fixed seed. It
   caught a real segfault in `crab_img_dims` the day it was written.
   ⚠ **What it still does NOT cover**: `crab_readdir_into` (agnos-only, needs a syscall), the write
@@ -460,7 +464,7 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
   description, the `[deps]` comment and the README all commit to daimon; `cyrius.cyml` declares no
   daimon dep, and **daimon 2.1.2 exists locally**. *Deferral #18.*
-- ✅ **CLOSED (unreleased) — `crab_render` takes one record, not 32 positional parameters.** (The
+- ✅ **CLOSED in 0.7.6 — `crab_render` takes one record, not 32 positional parameters.** (The
   count here said 33; it was 32.) `crab_rs_pane` / `_op` / `_chrome` / `_preview` / `_dims` fill it,
   max arity 11, and `crab_rs_reset` owns the three `-1`-means-unknown defaults that 23 call sites
   used to spell by hand.
@@ -472,7 +476,7 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⚠ **crab cannot recreate a symlink.** A recursive copy copies whatever `open`+`read` yields through
   one. `sys_symlink` exists but crab cannot *learn* a source is a link without `readlink`'s ambiguous
   negative. Moves when agnos `lstat`#102 gets its cyrius peer.
-- ✅ **CLOSED (unreleased) — `README.md` § Status.** It said *"Shipping, and read-only"*, which M4
+- ✅ **CLOSED in 0.7.6 — `README.md` § Status.** It said *"Shipping, and read-only"*, which M4
   falsified, and quoted the retired 256-entry cap. Now states the write layer, the preview column,
   and what is genuinely absent. ⚠ **It has been wrong in both directions now**; the replacement text
   carries that warning itself.
@@ -482,7 +486,7 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   PERMISSIVE ONE.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, which refuses
   an existing file and returns `EEXIST` — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with
   **no `AO_EXCL`**, so on agnos the same call TRUNCATES an existing file. Every host assertion about
-  "crab will not overwrite" is therefore a claim about the host only. Found (unreleased) while
+  "crab will not overwrite" is therefore a claim about the host only. Found during 0.7.6 while
   testing the preview's dimension cache; pinned by a host assertion, **not changed** — altering
   write semantics is an operator decision, and a recursive copy is what would notice.
 - ⛔⛔ **EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE BINARY SIZE — IS THE LIVE
@@ -594,7 +598,8 @@ GRID shipped in 0.9.25 and crab's Grid view is built on it.
     **horizontal selectable strip**: composing one from a `BOX_H` of labels makes the app paint the
     current item's highlight, which means naming `accent`, which ADR 0001 forbids. dhancha 0.9.26
     adds `dh_list_new_h` — the same container laid the other way — which serves a menu bar, a tab
-    strip, a toolbar and crab's own A/B switcher. ⚠ crab pins 0.9.25 until 0.9.26 is pushed.
+    strip, a toolbar and crab's own A/B switcher. ✅ **crab pins 0.9.26 as of 2026-09-01** — it is
+    pushed (`cb855c8`) and check four passes against the declared graph. ⚠ crab consumes none of it yet.
   ⇒ **Five false gates now.** A gate is a claim about another repository, and this one was wrong
   about *existence* (TREE), about *price* (thumbnails), and about *what was actually missing*
   (MENU BAR). Re-derive all three before believing a line.

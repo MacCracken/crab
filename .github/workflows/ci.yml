@@ -42,9 +42,13 @@ jobs:
           cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
       - name: Test
-        # v5.6.28: bare `cyrius test` picks up the [build].test entry
-        # AND auto-discovers tests/*.tcyr — avoids the previous
-        # `cyrius test src/test.cyr` form that hard-failed when the
-        # stub didn't exist (Issue 1) and also wouldn't ever exercise
-        # tests/${proj}.tcyr.
+        # ⛔⛔ THIS COMMENT USED TO SAY `cyrius test` "picks up the [build].test entry AND
+        # auto-discovers tests/*.tcyr". THE FIRST HALF IS FALSE, and it mattered: it told every
+        # reader that src/test.cyr was a live gate. MEASURED 2026-09-01 on the pinned 6.5.36 by
+        # mutation — src/test.cyr rewritten to `return 1` in a scratch tree left this step at
+        # **1138 passed, 0 failed, exit 0**. Only tests/crab.tcyr is compiled and run.
+        # ⇒ [build].test is inert, not a gate (*deferrals #17, #40*). src/test.cyr's own header
+        # comment is the accurate one.
+        # ⚠ AND THIS STEP IS THE WHOLE AUTOMATED GATE: no --agnos build (*#15*), no render_test
+        # and its 53 pixel checks (*#14*), no fuzz/bench/lint/fmt/coverage (*#36*).
         run: cyrius test

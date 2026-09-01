@@ -1816,7 +1816,13 @@ fn crab_preview_dims(dir, name, out, pathscr): i64 {
 # silently showing nothing — a feature that stops working without saying so reads as a bug.
 #
 # ⭐⭐ AND THE PER-IMAGE BUDGET KEEPS crab ON THE WORKING SIDE OF AN UPSTREAM DEFECT.
-# chitra 1.0.0 FAILS with `CHITRA_ERR_INFLATE` on any PNG whose decompressed scanline data exceeds
+# ⚠ CORRECTED 2026-09-01 — THIS DESCRIBED A DEFECT THE DECLARED VERSION NO LONGER HAS. chitra
+# **1.0.1** (the tag crab pins) refuses such a PNG **from the header, in under 64 KiB**, with its own
+# `CHITRA_ERR_INFLATE_LIMIT`; it is 1.0.0 that spent 26,617,512 bytes to return a bare
+# `CHITRA_ERR_INFLATE`. crab's behaviour is unchanged either way — the per-image budget already kept
+# it clear of that cliff — but a comment asserting an upstream bug that has been fixed is how a
+# budget gets called redundant and deleted. The history, for that reason:
+# chitra 1.0.0 FAILED with `CHITRA_ERR_INFLATE` on any PNG whose decompressed scanline data exceeds
 # **16 MiB** — bracketed exactly: 2200x2200 (14,522,200 B inflated) decodes, 2370x2370 (16,853,070)
 # does not. That is ~5.6 megapixels of RGB, so an ordinary phone photo saved as PNG fails — and it
 # fails EXPENSIVELY, spending 26.6 MB on the way to returning 0. chitra advertises

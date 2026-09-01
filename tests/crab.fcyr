@@ -37,6 +37,13 @@ var fz_fails = 0;
 var fz_recognised = 0;
 var fz_exif_ok = 0;
 var fz_batch_ok = 0;
+# ⛔⛔ THE HARNESS MUST COUNT ITS OWN ROUNDS, AND THE REASON IS `render_test`'s. This file printed
+# `fuzz: ok` and NOTHING ELSE, so six documents claimed **60,000 rounds** while it drove 100,000 —
+# two loops (EXIF, batch-rename) were added mid-cut and no output could contradict the old number.
+# A harness whose own report cannot disagree with a stale claim about it is a harness nobody can
+# check. ⚠ COUNTED, NOT COMPUTED: `5 * FZ_ROUNDS` would be the same unverifiable claim in code.
+# (*Deferral #41*.)
+var fz_rounds: i64 = 0;
 
 fn fz_next(): i64 {
     fz_state = (fz_state * 1103515245 + 12345) - ((fz_state * 1103515245 + 12345) / FZ_MOD) * FZ_MOD;
@@ -56,6 +63,14 @@ fn fz_next(): i64 {
 # statement about its own corpus and nothing else.
 fn fz_byte(): i64 { var v = fz_next() / 8192; return v - (v / 256) * 256; }
 fn fz_upto(n): i64 { if (n <= 0) { return 0; } var v = fz_next() / 8192; return v - (v / n) * n; }
+
+# ⚠ EVERY ROUND LOOP ADVANCES THROUGH HERE rather than with a bare `round + 1`, so a sixth round
+# added later is counted by using the same idiom as the five beside it — and one that is not is
+# visibly unlike its neighbours at the point it is written.
+fn fz_round(round): i64 {
+    fz_rounds = fz_rounds + 1;
+    return round + 1;
+}
 
 fn fz_fail(msg): i64 {
     fz_fails = fz_fails + 1;
@@ -183,7 +198,7 @@ fn main() {
         # ⚠ A LENGTH THAT LIES SHORT is the truncated-file case and must be refused, not read past.
         var len = fz_upto(FZ_BUFSZ + 1);
         fz_check_dims(crab_img_dims(buf, len, out), out);
-        round = round + 1;
+        round = fz_round(round);
     }
 
     # ---- round 2: wholly random bytes -------------------------------------------------------
@@ -192,7 +207,7 @@ fn main() {
         var i = 0;
         while (i < 64) { store8(buf + i, fz_byte()); i = i + 1; }
         fz_check_dims(crab_img_dims(buf, fz_upto(65), out), out);
-        round = round + 1;
+        round = fz_round(round);
     }
 
     # ---- round 3: degenerate lengths --------------------------------------------------------
@@ -262,7 +277,7 @@ fn main() {
         # ⚠ And the reshaper, over whatever the parser just produced — including a value the file
         # chose the length and contents of.
         crab_exif_when(exd, exd, 64);
-        round = round + 1;
+        round = fz_round(round);
     }
     # ⛔⛔ WHAT THE POISON TAIL CATCHES, AND WHAT IT CANNOT — measured by planting six bugs.
     #   CAUGHT here: the value-offset bound widened; inline values dereferenced as offsets; the byte
@@ -326,7 +341,7 @@ fn main() {
         # ⛔ And whatever comes out still faces the guard between a keypress and `rename`.
         var bok = crab_name_ok(bd);
         if (bok != 0) { if (bok != 1) { fz_fail("FAIL: crab_name_ok returned neither 0 nor 1"); } }
-        round = round + 1;
+        round = fz_round(round);
     }
     if (fz_batch_ok == 0) {
         fz_fails = fz_fails + 1;
@@ -358,7 +373,7 @@ fn main() {
         var im = crab_is_image(name);
         if (im != 0) { if (im != 1) { fz_fail("FAIL: crab_is_image returned neither 0 nor 1"); } }
         crab_cstr_len(name, CRAB_NAME_MAX);
-        round = round + 1;
+        round = fz_round(round);
     }
 
     # ⛔ NON-VACUITY. A harness that rejected every input would report zero failures and prove
@@ -369,6 +384,10 @@ fn main() {
         println("FAIL: the corpus never produced a single valid header — the fuzzer tested nothing");
     }
 
+    # ⭐ SAY HOW MUCH WORK WAS DONE, PASS OR FAIL. A green line with no magnitude is what let the
+    # docs drift by 40,000 rounds unchallenged.
+    syscall(1, 1, "fuzz: rounds ", 13);
+    println_int(fz_rounds);
     if (fz_fails == 0) { println("fuzz: ok"); return 0; }
     println("fuzz: FAILED");
     return 1;

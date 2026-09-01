@@ -1595,7 +1595,7 @@ fn crab_ext_eq(ext, el, lit): i64 {
 
 # @public — is `name` one of the raster formats this stack can actually decode? 1 = yes.
 #
-# ⛔ THE SET IS DERIVED FROM chitra, NOT INVENTED HERE. chitra 1.0.0 decodes exactly PNG, JPEG, GIF
+# ⛔ THE SET IS DERIVED FROM chitra, NOT INVENTED HERE. chitra 1.0.1 decodes exactly PNG, JPEG, GIF
 # and BMP — `chitra_image_decode` sniffs those four signatures and REJECTS anything else with no
 # fall-through — so this is the set for which crab can ever show dimensions or a thumbnail. Naming a
 # fifth extension here would promise a preview the stack cannot produce.

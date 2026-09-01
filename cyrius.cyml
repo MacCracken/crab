@@ -134,6 +134,22 @@ path = "../dhancha"
 # crab's event loop is inside `#ifdef CYRIUS_TARGET_AGNOS` and CI builds only the host target
 # (roadmap *deferral #15*), so that state goes GREEN through CI while being unable to build what
 # ships. #15 is the gate that would have caught it.
+# ⭐ 0.9.25 — the `GRID` kind: wrapping layout, cell selection, row-wise arrows, keep-visible and
+#            hit-test. crab's `g` view is built on it (`src/ui.cyr` `dh_grid_new`).
+# ⭐ 0.9.26 — `dh_list_new_h` (a horizontal selectable strip) + `DH_W_SCROLL_X`. ⛔ This is what
+#            actually retires M6's "Gate: dhancha MENU BAR": what was missing was never a menu-bar
+#            kind but a row of items with the current one highlighted — which also serves a tab
+#            strip, a toolbar and crab's own A/B switcher. crab consumes NONE of it yet.
+# ⚠ 0.9.26 ALSO FIXES A NINETEEN-RELEASE-OLD LATENT BUG crab was NOT hitting, and the reason it was
+# not is worth keeping: `dh_list_new(row_h)` stored the row height in `DH_W_PREF_H`, the list's own
+# preferred height, so any `dh_widget_set_pref` on a LIST silently rewrote its row height and every
+# scroll figure derived from it. **The list did not break; it scrolled wrong.** crab's single list
+# (`src/ui.cyr` `dh_list_new(26)`) takes `dh_widget_set_flex(lst, 1)` and never a pref, so it was
+# clear by construction rather than by care. Row height now lives in `DH_W_CELL_H`.
+# ⛔ THE BUMP 0.9.25 -> 0.9.26 ALSO CLOSES A DIVERGENCE THAT SHIPPED IN crab 0.7.6: `path` wins, so
+# the released tag committed a `lib/dhancha.cyr` that is byte-for-byte 0.9.26's `dist/` while this
+# line still said 0.9.25. `cyrius.lock` cannot catch that — a `path` dep gets no commit pin — so
+# nothing but check four would ever have said so. (Deferral #43.)
 # ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins and a green local build proves
 # nothing about the declared graph: sibling `VERSION` = 0.9.17; `git rev-parse 0.9.17` == HEAD in
 # `../dhancha` (b297604); `git ls-remote --tags` shows `refs/tags/0.9.17` at that same commit; and —
@@ -146,7 +162,7 @@ path = "../dhancha"
 # `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
 # refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
 # "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
-tag    = "0.9.25"
+tag    = "0.9.26"
 modules = ["dist/dhancha.cyr"]
 
 [deps.setu]
