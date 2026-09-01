@@ -92,11 +92,11 @@ demands and the one this file broke twice.
 
 ## Source
 
-**6,829 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**7,272 lines** across **six** files *(unreleased; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
-⚠ +1,461 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
+⚠ +1,904 over 0.7.5 *(unreleased)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
 - `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
@@ -138,7 +138,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   a row that keeps a background paints over the toolkit's highlight and selection silently stops
   showing.
 - `src/render_test.cyr` — a standalone harness: renders the production surface and dumps BGRA to
-  `build/crab-render.bin`. **40** `check()` assertions *(unreleased; 26 at 0.7.5)*.
+  `build/crab-render.bin`. **46** `check()` assertions *(unreleased; 26 at 0.7.5)*.
   ⭐ **IT NOW PRINTS ITS OWN CHECK COUNT.** It returned `g_fails` and printed only its dump line, so
   it exited **0** whether it ran 26 checks or none — while this file and the handoff quoted a count
   for three cuts that nothing in the program printed. `crab render_test: 35 checks, 0 failed`.
@@ -355,7 +355,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **966 passed / 0 failed**
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,035 passed / 0 failed**
   *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
@@ -411,8 +411,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,003,168 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,026,872 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,011,496 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,035,200 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -496,6 +496,15 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⚠ **chitra 1.0.1 is prepared but NOT pinned here** — the tag must exist on a remote first (the
   2026-08-28 phantom-tag rule). It makes the >16 MiB PNG failure cheap and correctly named; crab's
   per-image budget already keeps it clear of that path, so nothing is blocked.
+- ⛔ **TWO EXIF GUARDS ARE CAUGHT BY NOTHING, AND THE FUZZ HARNESS SAYS SO.** `crab_ex_ifd`'s
+  per-entry bound (`e + 12 > len`) is the single most important line in that parser, and deleting it
+  leaves both gates green: the overread lands in the poison tail, reads as tag `0x7E7E`, matches
+  nothing, and returns nothing — **the bytes only reach control flow**, and a detector that watches
+  the output cannot see them. The `CRAB_EX_MAX_ENTRIES` cap is bounded by that same line, so it
+  limits work rather than reach. Both are held by review.
+  ⚠ **This is why an out-of-bounds read is hard to fuzz here at all**: cyrius's allocator is a bump
+  allocator over a large mapped heap, so reading past a buffer returns garbage instead of faulting.
+  The poison tail catches overreads that reach the OUTPUT; nothing catches the rest.
 - ⛔ **`crab_thumb_draw`'s clip test is unexercised defence, and `render_test` says so.** Deleting
   the clip comparisons leaves the suite green: dhancha's BOX_V compresses its children rather than
   overflowing them, so no cheap fixture produces a canvas laid out partially outside its column.

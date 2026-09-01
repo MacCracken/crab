@@ -342,6 +342,77 @@ fn main(): i64 {
     var tpw = (760 - CRAB_PV_W - CRAB_PANE_GAP) / 2;
     check(rt_band_has(tds, 0, 399, 0, tpw + tpw - 1, 0x00A0B0C0), 0);
 
+    # ---- M5: CAMERA and SHOT reach the surface ----------------------------------------------
+    # ⛔ ASSERTED AS A DIFFERENCE, NOT A COLOUR. crab names no colour (ADR 0001), and text ink is
+    # unreliable to sample — whether a glyph lights a given scan line depends on the letterform,
+    # which is why text checks here use `rt_band_has` rather than `rt_row_has`. Rendering the SAME
+    # scene twice, once with EXIF strings and once without, and requiring the pixels to differ
+    # proves the strings reached the surface without this test claiming to know what they look like.
+    # ⚠ Two surfaces, because `dh_surface_render` may hand back the same target twice (dhancha
+    # 0.9.14) — a single surface would compare a frame with itself.
+    var e1 = dh_surface_new(760, 420);
+    var e2 = dh_surface_new(760, 420);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    var eds1 = crab_render(e1, 0, rs);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    # ⛔ CAMERA ALONE, then SHOT alone — never both at once. A combined check passes when only ONE
+    # row is drawn, and a mutation deleting the CAMERA row entirely survived exactly that way: SHOT
+    # still differed from the baseline, so "something changed" stayed true.
+    crab_rs_exif(rs, "Canon EOS R5", "");
+    var eds2 = crab_render(e2, 0, rs);
+    check(eds1 != 0, 1);
+    check(eds2 != 0, 1);
+    check(eds1 == eds2, 0);
+    var epx1 = sd_surface_pixels(eds1);
+    var epx2 = sd_surface_pixels(eds2);
+    var ei = 0;
+    var echanged = 0;
+    while (ei < 760 * 420 * 4) {
+        if (load8(epx1 + ei) != load8(epx2 + ei)) { echanged = 1; ei = 760 * 420 * 4; }
+        ei = ei + 1;
+    }
+    check(echanged, 1);
+    # ...and now SHOT alone, against the same baseline.
+    var e4 = dh_surface_new(760, 420);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    crab_rs_exif(rs, "", "2026-07-04 18:22");
+    var eds4 = crab_render(e4, 0, rs);
+    var epx4 = sd_surface_pixels(eds4);
+    var ek = 0;
+    var echanged4 = 0;
+    while (ek < 760 * 420 * 4) {
+        if (load8(epx1 + ek) != load8(epx4 + ek)) { echanged4 = 1; ek = 760 * 420 * 4; }
+        ek = ek + 1;
+    }
+    check(echanged4, 1);
+
+    # ⛔ AND AN EMPTY STRING MUST CHANGE NOTHING — the rows are ABSENT, not drawn as a dash. A
+    # "CAMERA: —" under every screenshot is a promise the preview keeps failing.
+    var e3 = dh_surface_new(760, 420);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    crab_rs_preview(rs, 1);
+    crab_rs_exif(rs, "", "");
+    var eds3 = crab_render(e3, 0, rs);
+    var epx3 = sd_surface_pixels(eds3);
+    var ej = 0;
+    var esame = 1;
+    while (ej < 760 * 420 * 4) {
+        if (load8(epx1 + ej) != load8(epx3 + ej)) { esame = 0; ej = 760 * 420 * 4; }
+        ej = ej + 1;
+    }
+    check(esame, 1);
+
     # ⛔ THE CLIP TEST IN `crab_thumb_draw` IS UNEXERCISED DEFENCE, AND THIS SAYS SO RATHER THAN
     # PRETENDING OTHERWISE. It is required — `dh_draw_widget` cannot clip pixels it did not write,
     # so a canvas that ignored its clip would paint over its neighbours and the toolkit could not

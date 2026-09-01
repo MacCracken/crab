@@ -2342,6 +2342,7 @@ fn main() {
     t_preview();
     t_preview_dims();
     t_thumbnails();
+    t_exif();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -2990,6 +2991,231 @@ fn t_write_huge_ihdr_png(b): i64 {
     store8(b + 48, 0); store8(b + 49, 238); store8(b + 50, 72); store8(b + 51, 93); store8(b + 52, 135); store8(b + 53, 0); store8(b + 54, 0); store8(b + 55, 0); store8(b + 56, 0); store8(b + 57, 73); store8(b + 58, 69); store8(b + 59, 78);
     store8(b + 60, 68); store8(b + 61, 174); store8(b + 62, 66); store8(b + 63, 96); store8(b + 64, 130);
     return 65;
+}
+
+# M5 — EXIF: the CAMERA and SHOT lines, and the bounds that make reading them safe.
+#
+# ⛔⛔ THIS IS THE MOST DANGEROUS PARSER crab HAS. `crab_img_dims` reads fields at fixed offsets;
+# EXIF is a TIFF directory with a **byte order chosen by the file**, an **entry count chosen by the
+# file**, and values reached through **offsets chosen by the file**. Every one is a chance to read
+# where the file points instead of where the data is — and `crab_jpeg_dims` already proved that a
+# correct bounds check on an index says nothing about the base it is applied to.
+fn t_exif(): i64 {
+    test_group("crab — M5: EXIF, in both byte orders, with every offset from the file");
+    var b = alloc(512);
+    var dst = alloc(128);
+
+    # ---- the endian-aware reads, asserted directly ---------------------------------------------
+    # ⛔ THE BYTE ORDER IS CHOSEN BY THE FILE, so these two are the hinge the whole parser turns on.
+    # They are covered indirectly by every fixture below, but "the II file came out right" cannot
+    # distinguish a correct pair from a swapped one on a palindromic value — and this parser reads
+    # BOTH orders, from the same code, in the same session.
+    var eb = alloc(8);
+    store8(eb, 0x12); store8(eb + 1, 0x34); store8(eb + 2, 0x56); store8(eb + 3, 0x78);
+    assert_eq(crab_ex_u16(eb, 0, 1), 0x3412, "II (le=1) reads least-significant first");
+    assert_eq(crab_ex_u16(eb, 0, 0), 0x1234, "MM (le=0) reads most-significant first — the REVERSE");
+    assert_eq(crab_ex_u32(eb, 0, 1), 0x78563412, "II u32");
+    assert_eq(crab_ex_u32(eb, 0, 0), 0x12345678, "MM u32");
+
+    # ---- the shared JPEG segment walker ---------------------------------------------------------
+    # ⛔ ONE WALKER, TWO PARSERS. `crab_img_dims` and `crab_exif_tiff` both walk the marker chain;
+    # two copies would drift, and this walk is where the bugs have been — a cursor dereferenced as
+    # an address, and a fill-byte skip that restarted at the SOI.
+    var jb = alloc(64);
+    var jo = alloc(24);
+    var ji = 0;
+    while (ji < 64) { store8(jb + ji, 0); ji = ji + 1; }
+    store8(jb, 255); store8(jb + 1, 216);                  # SOI
+    store8(jb + 2, 255); store8(jb + 3, 224);              # APP0
+    store8(jb + 4, 0); store8(jb + 5, 8);                  # ...8 bytes long
+    store8(jb + 12, 255); store8(jb + 13, 217);            # EOI
+    var jp = crab_jpeg_seg(jb, 64, 2, jo);
+    assert_eq(load64(jo), 0xE0, "the walker reports the APP0 marker");
+    assert_eq(load64(jo + 8), 6, "...its payload offset (past the 2-byte length)");
+    assert_eq(load64(jo + 16), 6, "...and its payload length (8 minus the length field)");
+    assert_eq(jp, 12, "...and the cursor lands on the next marker");
+    assert_eq(crab_jpeg_seg(jb, 64, jp, jo), 0 - 1, "EOI ends the walk");
+    assert_eq(load64(jo), 0xD9, "...and is still reported");
+    # ⚠ A STANDALONE MARKER CARRIES NO LENGTH — reading one after SOI would read the NEXT marker's
+    # bytes as a size.
+    assert_eq(crab_jpeg_seg(jb, 64, 0, jo), 2, "SOI is standalone: the cursor advances by 2");
+    assert_eq(load64(jo + 16), 0, "...and it reports no payload");
+    # ⛔ A SEGMENT RUNNING PAST THE BUFFER IS CLAMPED, NOT REJECTED. crab reads at most 64 KiB of a
+    # file, so the last segment in the buffer is routinely truncated by the READ rather than the
+    # file — rejecting it would make a readable SOF unreachable whenever the budget cut after it.
+    store8(jb + 4, 0); store8(jb + 5, 200);                # APP0 claims 200 bytes
+    assert(crab_jpeg_seg(jb, 20, 2, jo) > 0, "a segment past the buffer still reports");
+    assert_eq(load64(jo + 16), 14, "...with its payload length CLAMPED to what is there");
+    assert_eq(crab_jpeg_seg(jb, 64, 0 - 1, jo), 0 - 1, "a negative cursor is refused");
+    assert_eq(crab_jpeg_seg(jb, 2, 2, jo), 0 - 1, "a cursor at the end is refused");
+    assert_eq(crab_jpeg_seg(jb, 64, 2, 0), 0 - 1, "a null output record is refused");
+
+    # ---- little-endian ("II") ----
+    var n1 = t_exif_le(b);
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, dst, 128), 1, "II: Make is found");
+    # ⛔ AN **INLINE** VALUE. A TIFF entry stores a value of four bytes or fewer inside the entry
+    # itself; anything longer lives at an offset. "HP\0" is three bytes, so this is the inline path —
+    # and a parser that read it as an offset would dereference the text as a pointer.
+    # ⚠ THE FIXTURE HAD NO INLINE VALUE UNTIL THIS ONE, and a mutation that deleted the inline branch
+    # entirely SURVIVED the whole suite and the fuzzer. A fixture where every value takes the same
+    # path tests one path.
+    assert(t_streq(dst, "HP") == 1, "II: ...and reads the INLINE value 'HP'");
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MODEL, dst, 128), 1, "II: Model is found");
+    assert(t_streq(dst, "EOS R5") == 1, "II: ...and reads the OUT-OF-LINE value 'EOS R5'");
+    # ⛔ THE SUB-IFD IS FOLLOWED. DateTimeOriginal lives in the Exif sub-IFD, not IFD0 — a parser
+    # that walked only IFD0 would find Make and Model and silently never find the shutter time.
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_DTORIG, dst, 128), 1, "II: DateTimeOriginal, via the SUB-IFD");
+    assert(t_streq(dst, "2026:07:04 18:22:31") == 1, "II: ...and reads the shutter time");
+    # A tag that is not there answers 0 and leaves an EMPTY string, not stale bytes.
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_DATETIME, dst, 128), 0, "II: an absent tag is not found");
+    assert_eq(load8(dst), 0, "...and the destination is emptied, not left holding the last value");
+
+    # ---- big-endian ("MM") — the same file in the other byte order ----
+    # ⛔ THE BYTE ORDER IS CHOSEN BY THE FILE. A parser that assumed one reads every field of the
+    # other backwards: the magic becomes 10752 instead of 42, and offsets point into nothing.
+    var n2 = t_exif_be(b);
+    assert_eq(crab_exif_str(b, n2, CRAB_EX_MAKE, dst, 128), 1, "MM: Make is found");
+    assert(t_streq(dst, "NIKON CORPORATION") == 1, "MM: ...and reads a value longer than 4 bytes");
+    assert_eq(crab_exif_str(b, n2, CRAB_EX_MODEL, dst, 128), 1, "MM: Model is found");
+    assert(t_streq(dst, "NIKON Z 8") == 1, "MM: ...'NIKON Z 8'");
+    assert_eq(crab_exif_str(b, n2, CRAB_EX_DTORIG, dst, 128), 1, "MM: the sub-IFD works here too");
+    assert(t_streq(dst, "2025:12:25 09:15:00") == 1, "MM: ...and reads the shutter time");
+
+    # ---- a file with no sub-IFD: IFD0's own DateTime, and no pointer to follow ----
+    var n3 = t_exif_nosub(b);
+    assert_eq(crab_exif_str(b, n3, CRAB_EX_MAKE, dst, 128), 1, "no sub-IFD: Make still found");
+    assert(t_streq(dst, "Sony") == 1, "...'Sony'");
+    assert_eq(crab_exif_str(b, n3, CRAB_EX_DATETIME, dst, 128), 1, "IFD0's own DateTime is found");
+    assert(t_streq(dst, "2024:03:01 07:08:09") == 1, "...and reads it");
+    assert_eq(crab_exif_str(b, n3, CRAB_EX_DTORIG, dst, 128), 0,
+      "DateTimeOriginal is absent, and a missing sub-IFD pointer is not followed to offset 0");
+
+    # ---- truncation, corruption and refusal ----
+    # ⛔ EVERY ONE OF THESE IS A BOUNDS CHECK, not a nicety. The values live at offsets the file
+    # chose, so a truncated buffer is the ordinary case — crab reads at most 64 KiB of any file.
+    var t = 0;
+    while (t < n1) {
+        # Every prefix of a valid file must refuse or answer, never read past the end.
+        crab_exif_str(b, t, CRAB_EX_MAKE, dst, 128);
+        crab_exif_str(b, t, CRAB_EX_DTORIG, dst, 128);
+        t = t + 1;
+    }
+    assert_eq(1, 1, "every truncation of a valid EXIF file is survived");
+    t_exif_le(b);
+    assert_eq(crab_exif_str(b, 0, CRAB_EX_MAKE, dst, 128), 0, "a zero length finds nothing");
+    assert_eq(crab_exif_str(b, 0 - 1, CRAB_EX_MAKE, dst, 128), 0, "a negative length is refused");
+    assert_eq(crab_exif_str(0, n1, CRAB_EX_MAKE, dst, 128), 0, "a null buffer is refused");
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, 0, 128), 0, "a null destination is refused");
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, dst, 1), 0, "a one-byte destination cannot hold a NUL");
+    # ⚠ A TINY DESTINATION TRUNCATES RATHER THAN OVERRUNNING. 'Canon' is 5 bytes + NUL.
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MODEL, dst, 4), 1, "a 4-byte destination still answers");
+    assert(t_streq(dst, "EOS") == 1, "...truncated to fit, with room for the NUL");
+    # ⛔ THE MAGIC IS THE PROOF THE BYTE ORDER WAS READ RIGHT, and corrupting it must refuse rather
+    # than walk offsets derived from a misread header. The TIFF header starts at byte 12.
+    t_exif_le(b);
+    store8(b + 14, 43);
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, dst, 128), 0, "a TIFF magic that is not 42 is refused");
+    t_exif_le(b);
+    store8(b + 12, 88); store8(b + 13, 88);
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, dst, 128), 0, "a byte order that is neither II nor MM is refused");
+    # ⛔ AND A NON-Exif APP1 IS NOT MISTAKEN FOR ONE. XMP uses APP1 too, with a different signature,
+    # so the six-byte `Exif\0\0` identifier is checked rather than the marker being trusted.
+    # ⚠ THE 'E' IS AT BYTE 6, NOT 4: SOI(2) + marker(2) + length(2) + identifier(6) puts the TIFF
+    # header at 12. A first draft corrupted byte 4 — the segment LENGTH — which only made the segment
+    # claim to run past the buffer, something the walker legitimately clamps. The test failed and the
+    # parser was right.
+    t_exif_le(b);
+    store8(b + 6, 88);
+    assert_eq(crab_exif_str(b, n1, CRAB_EX_MAKE, dst, 128), 0, "an APP1 that is not 'Exif' is skipped");
+    # A PNG is not a JPEG and is refused at the signature.
+    var png = alloc(64);
+    store8(png, 137); store8(png + 1, 80); store8(png + 2, 78); store8(png + 3, 71);
+    assert_eq(crab_exif_str(png, 64, CRAB_EX_MAKE, dst, 128), 0, "a PNG carries no JPEG APP1");
+
+    # ---- the timestamp reshaping ----
+    # ⛔ TWO DATE ROWS IN ONE COLUMN MUST NOT DISAGREE ABOUT WHAT A DATE LOOKS LIKE. MODIFIED renders
+    # `2026-08-31 00:26` via `crab_mtime_str`; EXIF stores `2026:07:04 18:22:31`, which is both a
+    # different separator and three characters too long for a 153 px column — it drew as
+    # `2026:07:04 18:22:` with the seconds sheared off mid-field.
+    assert_eq(crab_exif_when(dst, "2026:07:04 18:22:31", 128), 1, "an EXIF timestamp is reshaped");
+    assert(t_streq(dst, "2026-07-04 18:22") == 1, "...into crab's own date format, seconds dropped");
+    # ⚠ A VALUE THAT IS NOT EXIF-SHAPED IS SHOWN AS THE CAMERA WROTE IT, not reformatted into
+    # nonsense. This string came out of a file; guessing at it is worse than passing it through.
+    assert_eq(crab_exif_when(dst, "sometime last tuesday", 128), 0, "an unrecognised shape is not reshaped");
+    assert(t_streq(dst, "sometime last tuesday") == 1, "...and is copied through unchanged");
+    assert_eq(crab_exif_when(dst, "2026-07-04 18:22", 128), 0, "an ALREADY-dashed value is left alone");
+    assert_eq(crab_exif_when(dst, "", 128), 0, "an empty value reshapes to nothing");
+    assert_eq(load8(dst), 0, "...and leaves an empty string");
+    assert_eq(crab_exif_when(0, "2026:07:04 18:22:31", 128), 0, "a null destination is refused");
+    assert_eq(crab_exif_when(dst, 0, 128), 0, "a null source is refused");
+    assert_eq(crab_exif_when(dst, "2026:07:04 18:22:31", 1), 0, "a cap too small for a NUL is refused");
+    # ⚠ A SHORT-BUT-COLON-SHAPED value must not be reshaped from bytes that are not there.
+    assert_eq(crab_exif_when(dst, "2026:07:04", 128), 0, "a value shorter than 16 chars is not reshaped");
+    # ⚠ `crab_exif_tiff` locates the TIFF header; the layout is SOI(2) + marker(2) + length(2) +
+    # `Exif\0\0`(6), so it is at byte 12 in these fixtures.
+    t_exif_le(b);
+    assert_eq(crab_exif_tiff(b, n1), 12, "the TIFF header is found at byte 12");
+    assert_eq(crab_exif_tiff(b, 8), 0 - 1, "...and not in a buffer too short to hold it");
+    assert_eq(crab_exif_tiff(0, n1), 0 - 1, "a null buffer has no TIFF header");
+    assert_eq(crab_exif_tiff(png, 64), 0 - 1, "a PNG has no JPEG APP1");
+
+    # ⚠ Allocated once for the process — `alloc` has no `free()`, and both of these sit on a path
+    # the preview reaches whenever the selection moves to an image.
+    assert(crab_jseg_buf() != 0, "the segment scratch is created");
+    assert_eq(crab_jseg_buf(), crab_jseg_buf(), "...and is a singleton");
+    assert(crab_exif_sub_buf() != 0, "the sub-IFD cell is created");
+    assert_eq(crab_exif_sub_buf(), crab_exif_sub_buf(), "...and is a singleton");
+    assert(crab_exif_raw_buf() != 0, "the timestamp scratch is created");
+    assert_eq(crab_exif_raw_buf(), crab_exif_raw_buf(), "...and is a singleton");
+    return 0;
+}
+
+# A real little-endian ("II") Exif JPEG: Make/Model in IFD0, DateTimeOriginal in the Exif sub-IFD.
+fn t_exif_le(b): i64 {
+    store8(b + 0, 255); store8(b + 1, 216); store8(b + 2, 255); store8(b + 3, 225); store8(b + 4, 0); store8(b + 5, 103); store8(b + 6, 69); store8(b + 7, 120); store8(b + 8, 105); store8(b + 9, 102); store8(b + 10, 0); store8(b + 11, 0);
+    store8(b + 12, 73); store8(b + 13, 73); store8(b + 14, 42); store8(b + 15, 0); store8(b + 16, 8); store8(b + 17, 0); store8(b + 18, 0); store8(b + 19, 0); store8(b + 20, 3); store8(b + 21, 0); store8(b + 22, 15); store8(b + 23, 1);
+    store8(b + 24, 2); store8(b + 25, 0); store8(b + 26, 3); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 0); store8(b + 30, 72); store8(b + 31, 80); store8(b + 32, 0); store8(b + 33, 0); store8(b + 34, 16); store8(b + 35, 1);
+    store8(b + 36, 2); store8(b + 37, 0); store8(b + 38, 7); store8(b + 39, 0); store8(b + 40, 0); store8(b + 41, 0); store8(b + 42, 68); store8(b + 43, 0); store8(b + 44, 0); store8(b + 45, 0); store8(b + 46, 105); store8(b + 47, 135);
+    store8(b + 48, 4); store8(b + 49, 0); store8(b + 50, 1); store8(b + 51, 0); store8(b + 52, 0); store8(b + 53, 0); store8(b + 54, 50); store8(b + 55, 0); store8(b + 56, 0); store8(b + 57, 0); store8(b + 58, 0); store8(b + 59, 0);
+    store8(b + 60, 0); store8(b + 61, 0); store8(b + 62, 1); store8(b + 63, 0); store8(b + 64, 3); store8(b + 65, 144); store8(b + 66, 2); store8(b + 67, 0); store8(b + 68, 20); store8(b + 69, 0); store8(b + 70, 0); store8(b + 71, 0);
+    store8(b + 72, 75); store8(b + 73, 0); store8(b + 74, 0); store8(b + 75, 0); store8(b + 76, 0); store8(b + 77, 0); store8(b + 78, 0); store8(b + 79, 0); store8(b + 80, 69); store8(b + 81, 79); store8(b + 82, 83); store8(b + 83, 32);
+    store8(b + 84, 82); store8(b + 85, 53); store8(b + 86, 0); store8(b + 87, 50); store8(b + 88, 48); store8(b + 89, 50); store8(b + 90, 54); store8(b + 91, 58); store8(b + 92, 48); store8(b + 93, 55); store8(b + 94, 58); store8(b + 95, 48);
+    store8(b + 96, 52); store8(b + 97, 32); store8(b + 98, 49); store8(b + 99, 56); store8(b + 100, 58); store8(b + 101, 50); store8(b + 102, 50); store8(b + 103, 58); store8(b + 104, 51); store8(b + 105, 49); store8(b + 106, 0); store8(b + 107, 255);
+    store8(b + 108, 192); store8(b + 109, 0); store8(b + 110, 17); store8(b + 111, 8); store8(b + 112, 0); store8(b + 113, 4); store8(b + 114, 0); store8(b + 115, 8); store8(b + 116, 3); store8(b + 117, 1); store8(b + 118, 17); store8(b + 119, 0);
+    store8(b + 120, 2); store8(b + 121, 17); store8(b + 122, 1); store8(b + 123, 3); store8(b + 124, 17); store8(b + 125, 1); store8(b + 126, 255); store8(b + 127, 217);
+    return 128;
+}
+
+# The same, big-endian ("MM"), with a Make longer than the four bytes an entry can hold inline —
+# so the value is reached through an offset rather than read out of the entry.
+fn t_exif_be(b): i64 {
+    store8(b + 0, 255); store8(b + 1, 216); store8(b + 2, 255); store8(b + 3, 225); store8(b + 4, 0); store8(b + 5, 124); store8(b + 6, 69); store8(b + 7, 120); store8(b + 8, 105); store8(b + 9, 102); store8(b + 10, 0); store8(b + 11, 0);
+    store8(b + 12, 77); store8(b + 13, 77); store8(b + 14, 0); store8(b + 15, 42); store8(b + 16, 0); store8(b + 17, 0); store8(b + 18, 0); store8(b + 19, 8); store8(b + 20, 0); store8(b + 21, 3); store8(b + 22, 1); store8(b + 23, 15);
+    store8(b + 24, 0); store8(b + 25, 2); store8(b + 26, 0); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 18); store8(b + 30, 0); store8(b + 31, 0); store8(b + 32, 0); store8(b + 33, 68); store8(b + 34, 1); store8(b + 35, 16);
+    store8(b + 36, 0); store8(b + 37, 2); store8(b + 38, 0); store8(b + 39, 0); store8(b + 40, 0); store8(b + 41, 10); store8(b + 42, 0); store8(b + 43, 0); store8(b + 44, 0); store8(b + 45, 86); store8(b + 46, 135); store8(b + 47, 105);
+    store8(b + 48, 0); store8(b + 49, 4); store8(b + 50, 0); store8(b + 51, 0); store8(b + 52, 0); store8(b + 53, 1); store8(b + 54, 0); store8(b + 55, 0); store8(b + 56, 0); store8(b + 57, 50); store8(b + 58, 0); store8(b + 59, 0);
+    store8(b + 60, 0); store8(b + 61, 0); store8(b + 62, 0); store8(b + 63, 1); store8(b + 64, 144); store8(b + 65, 3); store8(b + 66, 0); store8(b + 67, 2); store8(b + 68, 0); store8(b + 69, 0); store8(b + 70, 0); store8(b + 71, 20);
+    store8(b + 72, 0); store8(b + 73, 0); store8(b + 74, 0); store8(b + 75, 96); store8(b + 76, 0); store8(b + 77, 0); store8(b + 78, 0); store8(b + 79, 0); store8(b + 80, 78); store8(b + 81, 73); store8(b + 82, 75); store8(b + 83, 79);
+    store8(b + 84, 78); store8(b + 85, 32); store8(b + 86, 67); store8(b + 87, 79); store8(b + 88, 82); store8(b + 89, 80); store8(b + 90, 79); store8(b + 91, 82); store8(b + 92, 65); store8(b + 93, 84); store8(b + 94, 73); store8(b + 95, 79);
+    store8(b + 96, 78); store8(b + 97, 0); store8(b + 98, 78); store8(b + 99, 73); store8(b + 100, 75); store8(b + 101, 79); store8(b + 102, 78); store8(b + 103, 32); store8(b + 104, 90); store8(b + 105, 32); store8(b + 106, 56); store8(b + 107, 0);
+    store8(b + 108, 50); store8(b + 109, 48); store8(b + 110, 50); store8(b + 111, 53); store8(b + 112, 58); store8(b + 113, 49); store8(b + 114, 50); store8(b + 115, 58); store8(b + 116, 50); store8(b + 117, 53); store8(b + 118, 32); store8(b + 119, 48);
+    store8(b + 120, 57); store8(b + 121, 58); store8(b + 122, 49); store8(b + 123, 53); store8(b + 124, 58); store8(b + 125, 48); store8(b + 126, 48); store8(b + 127, 0); store8(b + 128, 255); store8(b + 129, 192); store8(b + 130, 0); store8(b + 131, 17);
+    store8(b + 132, 8); store8(b + 133, 0); store8(b + 134, 4); store8(b + 135, 0); store8(b + 136, 8); store8(b + 137, 3); store8(b + 138, 1); store8(b + 139, 17); store8(b + 140, 0); store8(b + 141, 2); store8(b + 142, 17); store8(b + 143, 1);
+    store8(b + 144, 3); store8(b + 145, 17); store8(b + 146, 1); store8(b + 147, 255); store8(b + 148, 217);
+    return 149;
+}
+
+# IFD0 only: its own DateTime, and NO sub-IFD pointer to follow.
+fn t_exif_nosub(b): i64 {
+    store8(b + 0, 255); store8(b + 1, 216); store8(b + 2, 255); store8(b + 3, 225); store8(b + 4, 0); store8(b + 5, 71); store8(b + 6, 69); store8(b + 7, 120); store8(b + 8, 105); store8(b + 9, 102); store8(b + 10, 0); store8(b + 11, 0);
+    store8(b + 12, 73); store8(b + 13, 73); store8(b + 14, 42); store8(b + 15, 0); store8(b + 16, 8); store8(b + 17, 0); store8(b + 18, 0); store8(b + 19, 0); store8(b + 20, 2); store8(b + 21, 0); store8(b + 22, 15); store8(b + 23, 1);
+    store8(b + 24, 2); store8(b + 25, 0); store8(b + 26, 5); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 0); store8(b + 30, 38); store8(b + 31, 0); store8(b + 32, 0); store8(b + 33, 0); store8(b + 34, 50); store8(b + 35, 1);
+    store8(b + 36, 2); store8(b + 37, 0); store8(b + 38, 20); store8(b + 39, 0); store8(b + 40, 0); store8(b + 41, 0); store8(b + 42, 43); store8(b + 43, 0); store8(b + 44, 0); store8(b + 45, 0); store8(b + 46, 0); store8(b + 47, 0);
+    store8(b + 48, 0); store8(b + 49, 0); store8(b + 50, 83); store8(b + 51, 111); store8(b + 52, 110); store8(b + 53, 121); store8(b + 54, 0); store8(b + 55, 50); store8(b + 56, 48); store8(b + 57, 50); store8(b + 58, 52); store8(b + 59, 58);
+    store8(b + 60, 48); store8(b + 61, 51); store8(b + 62, 58); store8(b + 63, 48); store8(b + 64, 49); store8(b + 65, 32); store8(b + 66, 48); store8(b + 67, 55); store8(b + 68, 58); store8(b + 69, 48); store8(b + 70, 56); store8(b + 71, 58);
+    store8(b + 72, 48); store8(b + 73, 57); store8(b + 74, 0); store8(b + 75, 255); store8(b + 76, 192); store8(b + 77, 0); store8(b + 78, 17); store8(b + 79, 8); store8(b + 80, 0); store8(b + 81, 4); store8(b + 82, 0); store8(b + 83, 8);
+    store8(b + 84, 3); store8(b + 85, 1); store8(b + 86, 17); store8(b + 87, 0); store8(b + 88, 2); store8(b + 89, 17); store8(b + 90, 1); store8(b + 91, 3); store8(b + 92, 17); store8(b + 93, 1); store8(b + 94, 255); store8(b + 95, 217);
+    return 96;
 }
 
 # --- 0.5.0 test helpers ---

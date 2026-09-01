@@ -146,8 +146,15 @@ not quietly lose them.
   SIZE column* → **303 px**), not lifted from the canvas — the same discipline that produced
   `crab_two_panes_fit`'s 600. ⚠ Opening it can collapse two panes into one, which is the ratified
   small-window rule answering a narrower pane area rather than a second behaviour.
-  ⚠ **Not yet**: camera and shot metadata. That is EXIF, and EXIF is a second parser over untrusted
-  bytes — worth its own slot with the fuzz harness pointed at it, not a bullet appended to this one.
+  ✅ **Camera and shot metadata — SHIPPED (unreleased).** EXIF `Make`/`Model` and
+  `DateTimeOriginal`, in both byte orders, verified against an independent parser.
+  ⛔⛔ **It got its own slot with the fuzz harness pointed at it, and that was the right call.** EXIF
+  is a TIFF directory whose **byte order, entry count and value offsets are all chosen by the file**
+  — three independent ways to read where the file points rather than where the data is. The first
+  version of its fuzz round was **vacuous**: an out-of-bounds read does not crash on a bump allocator
+  over a large mapped heap, so four planted bounds bugs all survived a harness that checked only
+  "returns 0 or 1". A printable poison tail past the fixture now catches the ones whose bytes reach
+  the output; ⛔ two guards are caught by nothing and the harness says which.
 - ✅ **Thumbnails — SHIPPED (unreleased).** 64x64, PNG/JPEG/GIF/BMP, decoded off the idle tick and
   box-filtered down. `chitra 1.0.0` is declared.
   ⛔⛔ **THE GATE ON THIS LINE WAS FALSE TWICE, IN OPPOSITE DIRECTIONS, AND THAT IS THE LESSON.**

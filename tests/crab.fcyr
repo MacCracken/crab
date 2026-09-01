@@ -25,11 +25,17 @@ enum CrabFuzz {
     FZ_MOD      = 2147483648;
     FZ_BUFSZ    = 512;
     FZ_ROUNDS   = 20000;
+    # ⚠ The EXIF fixture is ~134 bytes; the rest of this arena is poison, so a value-offset read that
+    # strays even slightly past the declared length lands in it. Bigger is a better detector — a
+    # wild u32 offset can outrun any arena, but the near misses are the ones a fuzzer will find.
+    FZ_EXIF_ARENA = 65536;
+    FZ_POISON   = 126;
 }
 
 var fz_state = 0;
 var fz_fails = 0;
 var fz_recognised = 0;
+var fz_exif_ok = 0;
 
 fn fz_next(): i64 {
     fz_state = (fz_state * 1103515245 + 12345) - ((fz_state * 1103515245 + 12345) / FZ_MOD) * FZ_MOD;
@@ -89,6 +95,45 @@ fn fz_seed_header(buf, which): i64 {
     store8(buf + 22, 0); store8(buf + 23, 17); store8(buf + 24, 8);
     store8(buf + 25, 4); store8(buf + 27, 6);
     return 0;
+}
+
+# ⛔ A VALUE CARRYING THE POISON BYTE CAME FROM PAST THE DECLARED LENGTH. That is the whole
+# detector: the parser is told the file is `elen` bytes, everything after it is `~`, and a correct
+# parser can never return one.
+fn fz_check_poison(dst, what): i64 {
+    var i = 0;
+    while (i < 64) {
+        var c = load8(dst + i);
+        if (c == 0) { return 0; }
+        if (c == FZ_POISON) {
+            fz_fails = fz_fails + 1;
+            println("FAIL: an EXIF value contains the poison byte -- read past the declared length");
+            println(what);
+            return 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# A real little-endian Exif JPEG: Make/Model in IFD0, DateTimeOriginal in the Exif sub-IFD.
+# ⚠ Byte-identical to `t_exif_le` in `tests/crab.tcyr` — the fuzz harness and the suite are separate
+# programs and cannot share a helper, so the bytes are duplicated deliberately. ⛔ If one changes,
+# change both: a fuzzer seeded from a file the suite no longer considers valid is a fuzzer exploring
+# a shape nothing else tests.
+fn fz_seed_exif(b): i64 {
+    store8(b + 0, 255); store8(b + 1, 216); store8(b + 2, 255); store8(b + 3, 225); store8(b + 4, 0); store8(b + 5, 103); store8(b + 6, 69); store8(b + 7, 120); store8(b + 8, 105); store8(b + 9, 102); store8(b + 10, 0); store8(b + 11, 0);
+    store8(b + 12, 73); store8(b + 13, 73); store8(b + 14, 42); store8(b + 15, 0); store8(b + 16, 8); store8(b + 17, 0); store8(b + 18, 0); store8(b + 19, 0); store8(b + 20, 3); store8(b + 21, 0); store8(b + 22, 15); store8(b + 23, 1);
+    store8(b + 24, 2); store8(b + 25, 0); store8(b + 26, 3); store8(b + 27, 0); store8(b + 28, 0); store8(b + 29, 0); store8(b + 30, 72); store8(b + 31, 80); store8(b + 32, 0); store8(b + 33, 0); store8(b + 34, 16); store8(b + 35, 1);
+    store8(b + 36, 2); store8(b + 37, 0); store8(b + 38, 7); store8(b + 39, 0); store8(b + 40, 0); store8(b + 41, 0); store8(b + 42, 68); store8(b + 43, 0); store8(b + 44, 0); store8(b + 45, 0); store8(b + 46, 105); store8(b + 47, 135);
+    store8(b + 48, 4); store8(b + 49, 0); store8(b + 50, 1); store8(b + 51, 0); store8(b + 52, 0); store8(b + 53, 0); store8(b + 54, 50); store8(b + 55, 0); store8(b + 56, 0); store8(b + 57, 0); store8(b + 58, 0); store8(b + 59, 0);
+    store8(b + 60, 0); store8(b + 61, 0); store8(b + 62, 1); store8(b + 63, 0); store8(b + 64, 3); store8(b + 65, 144); store8(b + 66, 2); store8(b + 67, 0); store8(b + 68, 20); store8(b + 69, 0); store8(b + 70, 0); store8(b + 71, 0);
+    store8(b + 72, 75); store8(b + 73, 0); store8(b + 74, 0); store8(b + 75, 0); store8(b + 76, 0); store8(b + 77, 0); store8(b + 78, 0); store8(b + 79, 0); store8(b + 80, 69); store8(b + 81, 79); store8(b + 82, 83); store8(b + 83, 32);
+    store8(b + 84, 82); store8(b + 85, 53); store8(b + 86, 0); store8(b + 87, 50); store8(b + 88, 48); store8(b + 89, 50); store8(b + 90, 54); store8(b + 91, 58); store8(b + 92, 48); store8(b + 93, 55); store8(b + 94, 58); store8(b + 95, 48);
+    store8(b + 96, 52); store8(b + 97, 32); store8(b + 98, 49); store8(b + 99, 56); store8(b + 100, 58); store8(b + 101, 50); store8(b + 102, 50); store8(b + 103, 58); store8(b + 104, 51); store8(b + 105, 49); store8(b + 106, 0); store8(b + 107, 255);
+    store8(b + 108, 192); store8(b + 109, 0); store8(b + 110, 17); store8(b + 111, 8); store8(b + 112, 0); store8(b + 113, 4); store8(b + 114, 0); store8(b + 115, 8); store8(b + 116, 3); store8(b + 117, 1); store8(b + 118, 17); store8(b + 119, 0);
+    store8(b + 120, 2); store8(b + 121, 17); store8(b + 122, 1); store8(b + 123, 3); store8(b + 124, 17); store8(b + 125, 1); store8(b + 126, 255); store8(b + 127, 217);
+    return 128;
 }
 
 # ⛔ THE INVARIANT, AND IT IS THE WHOLE POINT: a parser over untrusted bytes may answer "no" as often
@@ -160,6 +205,84 @@ fn main() {
     if (crab_img_dims(buf, 0 - 1, out) != 0) { fz_fail("FAIL: a negative length was accepted"); }
     if (crab_img_dims(0, 64, out) != 0) { fz_fail("FAIL: a null buffer was accepted"); }
     if (crab_img_dims(buf, 64, 0) != 0) { fz_fail("FAIL: a null output record was accepted"); }
+
+    # ---- round 4: EXIF, the most attacker-controlled parser crab has ------------------------
+    # ⛔⛔ EVERY OFFSET IN AN EXIF FILE IS CHOSEN BY THE FILE. `crab_img_dims` reads fields at fixed
+    # positions; EXIF is a TIFF directory with a **byte order**, an **entry count** and **value
+    # offsets** all supplied by the input. That is three independent ways to make a parser read
+    # where the file points instead of where the data is — and `crab_jpeg_dims` already proved that
+    # a correct bounds check on an index says nothing about the base it is applied to.
+    # ⚠ Seeded from a REAL Exif JPEG so mutation lands past the signature, where the directory walk
+    # actually is. Random bytes are an Exif APP1 essentially never.
+    # ⛔⛔ A POISON TAIL, BECAUSE AN OUT-OF-BOUNDS READ DOES NOT CRASH HERE. cyrius's allocator is a
+    # bump allocator over a large mapped heap, so reading past the end of a fixture lands in
+    # ordinary mapped memory and returns garbage rather than faulting. **Four planted bounds bugs —
+    # the entry bound, the value-offset bound, and inline values dereferenced as offsets — all
+    # survived a first version of this round**, which checked only "returns 0 or 1" and "has a NUL".
+    # ⇒ Fill everything past the fixture with a PRINTABLE byte that appears in no fixture, then
+    # require that no accepted value contains it. `crab_ex_ifd` filters to printable ASCII, so the
+    # poison has to be printable to be copied — a NUL or a control byte would be filtered out and
+    # the overread would go unseen. `~` (126) is printable and appears in no fixture.
+    var exb = alloc(FZ_EXIF_ARENA);
+    var exd = alloc(128);
+    round = 0;
+    while (round < FZ_ROUNDS) {
+        var pi = 0;
+        while (pi < FZ_EXIF_ARENA) { store8(exb + pi, FZ_POISON); pi = pi + 1; }
+        var exlen = fz_seed_exif(exb);
+        var eflips = 1 + fz_upto(12);
+        var ef = 0;
+        # ⚠ MUTATE ACROSS THE WHOLE FILE, not just a header prefix: the interesting bytes are the
+        # IFD entry count, the tag/type/count fields and the value offsets, which sit deep in it.
+        # ⛔⛔ THE MUTATOR MUST NOT BE ABLE TO WRITE THE POISON BYTE. It is a uniform 0..255 draw, so
+        # it will eventually store `~` INTO the fixture — and a correct parser then returns it,
+        # which this round would report as an overread. That false positive fired on unmutated code
+        # at round 3723 and cost a real debugging pass. ⇒ The poison value must exist ONLY past the
+        # declared length, or it proves nothing about where a byte came from.
+        while (ef < eflips) {
+            var mb = fz_byte();
+            if (mb == FZ_POISON) { mb = 33; }
+            store8(exb + fz_upto(exlen), mb);
+            ef = ef + 1;
+        }
+        var elen = fz_upto(exlen + 1);
+        # ⛔ THE INVARIANT: whatever the bytes say, the result is 0 or 1, the destination is always a
+        # NUL-terminated string inside its capacity, and nothing reads past `elen`.
+        var er = crab_exif_str(exb, elen, CRAB_EX_MAKE, exd, 64);
+        if (er != 0) { if (er != 1) { fz_fail("FAIL: crab_exif_str returned neither 0 nor 1"); } }
+        if (er == 1) {
+            fz_exif_ok = fz_exif_ok + 1;
+            if (crab_cstr_len(exd, 64) < 0) { fz_fail("FAIL: an accepted EXIF value has no NUL inside its cap"); }
+            fz_check_poison(exd, "Make");
+        }
+        if (crab_exif_str(exb, elen, CRAB_EX_MODEL, exd, 64) == 1) { fz_check_poison(exd, "Model"); }
+        if (crab_exif_str(exb, elen, CRAB_EX_DTORIG, exd, 64) == 1) { fz_check_poison(exd, "DateTimeOriginal"); }
+        if (crab_exif_str(exb, elen, CRAB_EX_DATETIME, exd, 64) == 1) { fz_check_poison(exd, "DateTime"); }
+        # ⚠ And the reshaper, over whatever the parser just produced — including a value the file
+        # chose the length and contents of.
+        crab_exif_when(exd, exd, 64);
+        round = round + 1;
+    }
+    # ⛔⛔ WHAT THE POISON TAIL CATCHES, AND WHAT IT CANNOT — measured by planting six bugs.
+    #   CAUGHT here: the value-offset bound widened; inline values dereferenced as offsets; the byte
+    #     order inverted. All three put file-chosen bytes into the OUTPUT, which is what poison sees.
+    #   CAUGHT by the suite instead: the TIFF magic left unchecked, and the two above as well.
+    #   ⛔ NOT CAUGHT BY EITHER — and stated rather than left to be assumed:
+    #     • `if (e + 12 > len) { return found; }` in `crab_ex_ifd`. Deleting it reads entry fields
+    #       past the buffer — straight into the poison, which then reads as tag 0x7E7E, matches no
+    #       tag, and returns nothing. **The overread is real and affects only control flow**, and a
+    #       detector that watches the output cannot see a byte that never reaches it. This is the
+    #       single most important bound in the parser and it is held by REVIEW, not by a test.
+    #     • the `CRAB_EX_MAX_ENTRIES` cap. Removing it is bounded by the line above, so it limits
+    #       WORK rather than reach — defence in depth, like `seg < 2` in the segment walker.
+    # ⇒ Both are kept. Neither is load-bearing for this harness's green, and saying so is the point.
+
+    # ⛔ NON-VACUITY, and it matters more here than anywhere: an EXIF corpus that never produces a
+    # readable tag is a corpus that only ever tested the signature check.
+    if (fz_exif_ok == 0) {
+        fz_fails = fz_fails + 1;
+        println("FAIL: the EXIF corpus never read a single tag — the fuzzer tested only the signature");
+    }
 
     # ---- round 4: the name predicates, over arbitrary bytes ---------------------------------
     # ⛔ `crab_name_ok` GUARDS EVERY WRITE crab MAKES — mkdir, rename, the batch sheet and the

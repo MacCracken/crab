@@ -202,6 +202,7 @@ fn main(): i64 {
     }
     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
 
     var sds = crab_render(surf, 0, rs);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
@@ -1080,6 +1081,7 @@ fn main(): i64 {
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                 var s2 = crab_render(surf, 0, rs);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
@@ -1167,6 +1169,7 @@ fn main(): i64 {
                     }
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                     var s3 = crab_render(surf, 0, rs);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
@@ -1235,6 +1238,7 @@ fn main(): i64 {
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                 var s5 = crab_render(surf, 0, rs);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
@@ -1274,6 +1278,7 @@ fn main(): i64 {
                         crab_rs_preview(rs, pv_open);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                        crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                         var s6 = crab_render(surf, 0, rs);
                         if (s6 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                         else { setu_buf_write(buf_id, sd_surface_pixels(s6), nbytes); }
@@ -1317,6 +1322,7 @@ fn main(): i64 {
                 }
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                 var s4 = crab_render(surf, 0, rs);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }

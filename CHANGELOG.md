@@ -2,12 +2,75 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — M5: the preview column, thumbnails, the render-state record, and a fuzz harness that reads its input
+## [Unreleased] — M5: the preview column, thumbnails, EXIF, the render-state record, and a fuzz harness that reads its input
 
 ⚠ **`VERSION` is untouched and nothing is tagged** — the operator drives version and toolchain bumps.
 M5 is *started*, not done: the preview pane and thumbnails are both in — the latter by operator
 ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
 the sidebar — are unchanged and still genuinely gated.
+
+### Added — CAMERA and SHOT: EXIF, and the bounds that make reading it safe
+
+The other half of the roadmap's preview line (*"real metadata — `42.8 MB · 8192 × 5464`, camera,
+shot"*). `p` now shows the camera and the shutter time for a JPEG that carries them.
+
+⛔⛔ **THIS IS THE MOST ATTACKER-CONTROLLED PARSER crab HAS.** `crab_img_dims` reads fields at fixed
+offsets. EXIF is a TIFF directory with a **byte order chosen by the file**, an **entry count chosen
+by the file**, and values reached through **offsets chosen by the file** — three independent ways to
+make a parser read where the file points instead of where the data is. And `crab_jpeg_dims` already
+proved that a correct bounds check on an index says nothing about the base it is applied to.
+⇒ Every read is bounded at its **absolute** address, the entry count is capped, the Exif sub-IFD is
+followed **exactly once and never recursively** (a crafted file can point a directory at itself), and
+values are filtered to printable ASCII before they can reach a widget.
+
+⭐ **Verified against real files in both byte orders**, cross-checked against an independent parser:
+`Canon`/`EOS R5` little-endian, `NIKON CORPORATION`/`NIKON Z 8` big-endian, and a JPEG with no EXIF
+and a PNG both correctly reporting nothing.
+
+⚠ **The timestamp is reshaped into crab's own date format.** EXIF stores `2026:07:04 18:22:31`;
+`crab_mtime_str` renders MODIFIED as `2026-08-31 00:26`. Left alone, the SHOT row drew as
+`2026:07:04 18:22:` — different separators from the row directly above it, and three characters too
+long for a 153 px column, so the seconds sheared off mid-field. ⛔ A value that is **not** EXIF-shaped
+is passed through unchanged rather than reformatted into nonsense: it came out of a file.
+⚠ **`DateTimeOriginal` first, `DateTime` as a fallback** — when the shutter fired versus when the
+file was written are different questions, and an edited photo has a `DateTime` long after its
+`DateTimeOriginal`.
+⚠ **ASCII tags only.** Exposure and aperture are rationals, and would need a formatter and three more
+type cases for two more lines in a 153 px column — the "small language nobody asked for" the
+batch-rename sheet refused.
+
+### Changed — one JPEG segment walker, shared by both parsers
+
+`crab_jpeg_seg` is now the single marker walk behind `crab_img_dims` and `crab_exif_tiff`. ⛔ Written
+once because **this walk is where the bugs have been**: a cursor dereferenced as an absolute address,
+and a fill-byte skip that restarted at the SOI. A second copy would have to get both right again.
+⛔ **A segment running past the buffer is CLAMPED, not rejected** — crab reads at most 64 KiB of a
+file, so the last segment in the buffer is routinely truncated by the *read* rather than by the file.
+A first draft rejected it and two dimension tests failed immediately.
+
+### Fixed — the EXIF fuzzing was vacuous, and only planted bugs said so
+
+⛔⛔ **AN OUT-OF-BOUNDS READ DOES NOT CRASH HERE.** cyrius's allocator is a bump allocator over a
+large mapped heap, so reading past a fixture lands in ordinary mapped memory and returns garbage
+rather than faulting. A first version of the EXIF round checked only *"returns 0 or 1"* and *"has a
+NUL"* — and **four planted bounds bugs all survived it**.
+⇒ Everything past the fixture is now filled with a **printable poison byte** that appears in no
+fixture, and no accepted value may contain it. ⚠ The poison must be *printable*: the parser filters
+to printable ASCII, so a NUL or control byte would be filtered out and the overread would go unseen.
+⚠ **And the mutator must not be able to write it.** A uniform 0..255 draw eventually stores the
+poison byte *into* the file, and a correct parser then returns it — that false positive fired on
+unmutated code at round 3723 and cost a real debugging pass.
+
+⛔ **Two guards are still not caught by anything, and the harness says so** rather than leaving it to
+be assumed: `crab_ex_ifd`'s per-entry bound (deleting it reads past the buffer, but the bytes only
+reach *control flow* — a detector watching the output cannot see them), and the entry-count cap
+(bounded by that same line, so it limits work rather than reach). Both are kept; neither is
+load-bearing for the harness's green.
+
+⚠ **The fixture had no inline value at all until this cut**, so a mutation deleting the inline branch
+entirely survived both gates. A TIFF entry stores a value of four bytes or fewer *inside* the entry;
+every string in the fixture was longer. **A fixture where every value takes the same path tests one
+path** — `Make` is now `HP`.
 
 ### Added — thumbnails, and the two budgets that make them affordable
 

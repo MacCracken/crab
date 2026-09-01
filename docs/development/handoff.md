@@ -1,4 +1,4 @@
-# Handoff — **M5's three ungated items are in, thumbnails included. Burn on iron.**
+# Handoff — **M5's ungated items are all in — preview, thumbnails, EXIF. Burn on iron.**
 
 > ⭐ **Updated 2026-08-31**, after M5's first slice and the chitra adoption. Everything below the
 > *What landed* table is kept from the 0.7.5 handoff because the reasoning is still the reasoning —
@@ -50,11 +50,12 @@ Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md) under `[Unreleased
 |---|---|
 | `crab_render` | **32 positional parameters → one record.** Filled by `crab_rs_pane` (11 params, indexed by pane), `_op`, `_chrome`, `_preview`, `_dims`. ⛔ The point is not brevity: at 32 `i64` arguments across 23 call sites, a miscounted comma shifted everything after it and still compiled. And `crab_rs_reset` now owns the three **`-1` = cannot be said yet** defaults that every one of those sites used to spell by hand — `0` there would make the tray render a real `0 B/s`. |
 | Preview column | `p` toggles it. NAME · KIND · SIZE · MODIFIED · DIMENSIONS. ⛔ Width rule **derived** from crab's own column rule (*it may not cost a pane its SIZE column* → 303 px), not lifted from the canvas. Refuses out loud below that, via `crab_set_notice`. |
+| EXIF | CAMERA and SHOT, both byte orders, verified against an independent parser. ⛔⛔ **The most attacker-controlled parser crab has** — byte order, entry count and value offsets are ALL chosen by the file. Sub-IFD followed exactly once, never recursively. ⚠ Its fuzz round was **vacuous at first**: an out-of-bounds read does not crash on a bump allocator over a large mapped heap, so four planted bounds bugs survived. A printable poison tail fixed it — and the mutator had to be stopped from writing the poison byte itself. |
 | Thumbnails | 64x64, PNG/JPEG/GIF/BMP, **decoded off the idle tick** — at most one per tick, because chitra's entry point is a single call that cannot be resumed the way `crab_copy_step` can. Memoised on the full path **including a remembered refusal**; a closed preview decodes nothing. ⛔ Four differently-named nothings, because "too large" is a property of the FILE, "budget spent" of the SESSION, and "cannot decode" of this BUILD. |
 | Image dimensions | `crab_img_dims` — PNG/JPEG/GIF/BMP from header bytes, **no decoder, no dependency**. Verified against real files against `identify`: 137×42, 1×1, 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real 384×288 JPEG whose SOF sits past an APP0 block. |
 | Fuzz harness | ✅ **Deferral #12 CLOSED.** 60,000 deterministic rounds. It caught a real segfault in `crab_img_dims` the day it was written. |
 | Leak fixed | ⛔ `crab_overlay` used `alloc(32)` not `dh_falloc(32)` on both the menu and sheet branches — **32 B per frame, shipped in 0.7.5**, invisible because the zero-allocation gate never opened an overlay. |
-| Numbers | tests **757 → 966/0** · `render_test` **26 → 40** checks · coverage **86 % → 87 %** (171/196) · source **5,368 → 6,829** lines · host **1,003,168 B** · `--agnos` **1,026,872 B** · fmt clean · both targets build |
+| Numbers | tests **757 → 1,035/0** · `render_test` **26 → 46** checks · coverage **86 %** (181/209) · source **5,368 → 7,272** lines · host **1,011,496 B** · `--agnos` **1,035,200 B** · fmt clean · both targets build |
 
 ### ⛔⛔ THE FOUR LESSONS FROM THIS SLICE, EACH CHEAP AND EACH EXPENSIVE TO RE-LEARN
 
@@ -73,6 +74,14 @@ while it printed `fuzz: ok`. Nothing but a planted bug would have said so. Sampl
 `crab_jpeg_dims` dereferenced its cursor as an **absolute address** (`load8(p)` for `load8(buf + p)`)
 and segfaulted on the first marker — while every comparison of `p` against `len` was correct. That
 class is invisible to a bounds review and instant to a fuzzer.
+
+**4a. AN OUT-OF-BOUNDS READ DOES NOT CRASH IN THIS STACK, so "the fuzzer is green" is a weak
+claim.** cyrius's allocator is a bump allocator over a large mapped heap: reading past a buffer
+returns garbage rather than faulting. Detecting it needs a **poison tail** — and the poison must be
+printable (the parser filters non-printables, so a NUL would be invisible) and must be excluded from
+the mutator's alphabet (or a correct parser returns one and the detector fires on clean code).
+⇒ **Guards whose bytes only reach control flow are undetectable this way, and two EXIF guards are
+in exactly that position.** They are kept and labelled.
 
 **4. `render_test` is where four of seven mutations were caught, and CI runs none of it.**
 *Deferral #14* stopped being a tidiness item: a swapped pair of pane blocks, and a preview column

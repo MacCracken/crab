@@ -1471,66 +1471,103 @@ fn crab_dims_ok(out, w, h): i64 {
     return 1;
 }
 
+# ⭐ ONE JPEG SEGMENT WALKER, SHARED BY THE DIMENSION READER AND THE EXIF READER.
+#
+# ⛔ WRITTEN ONCE BECAUSE TWO COPIES WOULD DRIFT, AND THIS WALK IS WHERE THE BUGS LIVE. Its first
+# draft dereferenced the cursor as an absolute address (`load8(p)` for `load8(buf + p)`) and
+# segfaulted — with every bounds check correct, because the arithmetic was right and only the base
+# was missing. Its second signalled the fill-byte skip's exit by assigning `p = len + len` and
+# subtracting it back, which restored `p` to 0 and restarted at the SOI. A second copy would have to
+# get both right again.
+#
+# -> the cursor past this segment, or -1 at the end of the marker chain / on a malformed one.
+#    out+0  = the marker byte
+#    out+8  = payload offset into `buf` (0 for a standalone marker)
+#    out+16 = payload length (0 for a standalone marker)
+#
+# ⛔ `p` IS AN OFFSET INTO `buf`, NEVER AN ADDRESS — every read below is `buf + p`.
+# ⚠ SOS and EOI return -1: past either, 0xFF bytes are entropy-coded output rather than markers, and
+# a walk that continued would find "markers" in compressed data.
+fn crab_jpeg_seg(buf, len, p, out): i64 {
+    if (out == 0) { return 0 - 1; }
+    store64(out, 0);
+    store64(out + 8, 0);
+    store64(out + 16, 0);
+    if (p < 0) { return 0 - 1; }
+    if (p + 1 >= len) { return 0 - 1; }
+    if (load8(buf + p) != 255) { return 0 - 1; }
+    # ⚠ FILL BYTES: a marker may be preceded by any number of 0xFF padding bytes, so the marker
+    # identifier is the first NON-0xFF byte after them. The flag is explicit; see the ⛔ above.
+    var scanning = 1;
+    while (scanning == 1) {
+        if (p >= len) { return 0 - 1; }
+        if (load8(buf + p) == 255) { p = p + 1; } else { scanning = 0; }
+    }
+    var mk = load8(buf + p);
+    p = p + 1;
+    store64(out, mk);
+    # ⚠ STANDALONE MARKERS CARRY NO LENGTH PAYLOAD — SOI, TEM and the eight restart markers are two
+    # bytes and nothing more, so reading a segment length after one reads the NEXT marker's bytes as
+    # a size.
+    var standalone = 0;
+    if (mk == 0xD8) { standalone = 1; }                       # SOI
+    if (mk == 0x01) { standalone = 1; }                       # TEM
+    if ((mk >= 0xD0) && (mk <= 0xD7)) { standalone = 1; }     # RST0-RST7
+    if (standalone == 1) { return p; }
+    if (mk == 0xDA) { return 0 - 1; }                         # SOS — entropy data follows
+    if (mk == 0xD9) { return 0 - 1; }                         # EOI
+    if (p + 1 >= len) { return 0 - 1; }
+    var seg = crab_be16(buf + p);
+    # ⛔ A LENGTH THAT CANNOT ADVANCE THE WALK is a crafted file. ⚠ Defence in depth: the caller's
+    # iteration cap is what makes the walk total — removing this line does not hang.
+    if (seg < 2) { return 0 - 1; }
+    # ⛔⛔ A SEGMENT RUNNING PAST THE BUFFER IS CLAMPED, NOT REJECTED, AND THAT IS NOT PEDANTRY.
+    # crab reads at most `CRAB_PV_HDR_BUDGET` bytes of a file, so the LAST segment in the buffer is
+    # routinely truncated by the read rather than by the file — rejecting it would make a perfectly
+    # readable SOF unreachable whenever the budget happened to cut the segment after it.
+    # ⚠ A first draft of this refactor rejected instead, and two dimension tests failed immediately:
+    # their fixtures declare a 17-byte SOF and supply only the bytes the dimensions need.
+    # ⇒ Report what is ACTUALLY available and let the caller bound what it reads. The nominal cursor
+    # is still returned, so the next iteration walks off the end and the loop terminates there.
+    var avail = seg - 2;
+    if (p + 2 + avail > len) { avail = len - (p + 2); }
+    if (avail < 0) { avail = 0; }
+    store64(out + 8, p + 2);
+    store64(out + 16, avail);
+    return p + seg;
+}
+
+var crab_jseg = 0;
+# ⚠ Allocated once for the process, like every other scratch here — `alloc` has no `free()`.
+fn crab_jseg_buf(): i64 {
+    if (crab_jseg == 0) { crab_jseg = alloc(24); }
+    return crab_jseg;
+}
+
 # JPEG: walk the marker chain to the first SOF segment, which carries height then width.
 # ⚠ SOF is 0xC0-0xCF **except** 0xC4 (DHT), 0xC8 (JPG) and 0xCC (DAC) — those three sit inside the
-# range and are not frame headers. Treating them as SOF reads a Huffman table as a size.
+# range and are not frame headers. Treating one as SOF reads a Huffman table as a size.
 fn crab_jpeg_dims(buf, len, out): i64 {
-    # ⛔⛔ `p` IS AN OFFSET INTO `buf`, NEVER AN ADDRESS — every read below is `buf + p`. The first
-    # draft wrote `load8(p)`, which dereferences address 2 and segfaults on the very first marker.
-    # ⚠ AND NOT ONE BOUNDS CHECK WOULD HAVE CAUGHT IT: `p` was compared against `len` correctly
-    # throughout, so the arithmetic was right and only the BASE was missing. A bounds check proves
-    # an index is in range; it says nothing about which buffer the index is used against.
+    var sg = crab_jseg_buf();
+    if (sg == 0) { return 0; }
     var p = 2;                                   # past SOI
     var steps = 0;
     while (steps < CRAB_IMG_SCAN_MAX) {
         steps = steps + 1;
-        if (p + 1 >= len) { return 0; }
-        # ⚠ FILL BYTES: a marker may be preceded by any number of 0xFF padding bytes, so the marker
-        # identifier is the first NON-0xFF byte after them. ⛔ The loop carries an explicit flag
-        # rather than encoding "found" in `p` itself — a first draft signalled the exit by assigning
-        # `p = len + len` and then subtracting it back, which restored `p` to 0 and restarted the
-        # walk at the SOI. It compiled, and on a JPEG with no fill bytes it never ran.
-        if (load8(buf + p) != 255) { return 0; }
-        var scanning = 1;
-        while (scanning == 1) {
-            if (p >= len) { return 0; }
-            if (load8(buf + p) == 255) { p = p + 1; } else { scanning = 0; }
-        }
-        var mk = load8(buf + p);
-        p = p + 1;
-        # ⚠ STANDALONE MARKERS CARRY NO LENGTH PAYLOAD — SOI, TEM and the eight restart markers are
-        # two bytes and nothing more, so reading a segment length after one reads the NEXT marker's
-        # bytes as a size. A flag rather than a nested else-chain: three conditions with one
-        # consequence read as three conditions, and the chain needed a `steps = steps;` no-op in
-        # each empty arm to say nothing.
-        var standalone = 0;
-        if (mk == 0xD8) { standalone = 1; }                       # SOI
-        if (mk == 0x01) { standalone = 1; }                       # TEM
-        if ((mk >= 0xD0) && (mk <= 0xD7)) { standalone = 1; }     # RST0-RST7
-        if (standalone == 0) {
-            # ⛔ SOS and EOI mean the frame header is behind us and was never found. Scanning into
-            # entropy-coded data would find 0xFF bytes that are not markers at all.
-            if (mk == 0xDA) { return 0; }
-            if (mk == 0xD9) { return 0; }
-            if (p + 1 >= len) { return 0; }
-            var seg = crab_be16(buf + p);
-            # ⚠ DEFENCE IN DEPTH, NOT THE TERMINATION GUARANTEE — and the fuzzer proved which is
-            # which. A segment length below 2 cannot advance `p`, so a crafted file would re-read
-            # the same marker forever; but removing this check does NOT hang, because
-            # `CRAB_IMG_SCAN_MAX` stops the walk after 256 markers regardless. **The step cap is
-            # what makes this function total**; this line just makes the refusal immediate and
-            # named. Same relationship as `CRAB_WALK_STEPS_MAX` to the walk's own guards.
-            if (seg < 2) { return 0; }
-            var issof = 0;
-            if ((mk >= 0xC0) && (mk <= 0xCF)) { issof = 1; }
-            if (mk == 0xC4) { issof = 0; }
-            if (mk == 0xC8) { issof = 0; }
-            if (mk == 0xCC) { issof = 0; }
-            if (issof == 1) {
-                if (p + 7 >= len) { return 0; }
-                return crab_dims_ok(out, crab_be16(buf + p + 5), crab_be16(buf + p + 3));
-            }
-            p = p + seg;
+        p = crab_jpeg_seg(buf, len, p, sg);
+        if (p < 0) { return 0; }
+        var mk = load64(sg);
+        var po = load64(sg + 8);
+        var pl = load64(sg + 16);
+        var issof = 0;
+        if ((mk >= 0xC0) && (mk <= 0xCF)) { issof = 1; }
+        if (mk == 0xC4) { issof = 0; }
+        if (mk == 0xC8) { issof = 0; }
+        if (mk == 0xCC) { issof = 0; }
+        if (issof == 1) {
+            # Payload: precision(1) height(2) width(2) ...
+            if (pl < 5) { return 0; }
+            return crab_dims_ok(out, crab_be16(buf + po + 3), crab_be16(buf + po + 1));
         }
     }
     return 0;
@@ -1599,6 +1636,237 @@ fn crab_img_dims(buf, len, out): i64 {
         if (load8(buf + 1) == 216) { return crab_jpeg_dims(buf, len, out); }
     }
     return 0;
+}
+
+# ⭐⭐ EXIF (M5) — the preview's CAMERA and SHOT lines, read out of a JPEG's APP1 segment.
+#
+# ⛔⛔ THIS IS A SECOND PARSER OVER UNTRUSTED BYTES AND IT IS THE MORE DANGEROUS ONE. `crab_img_dims`
+# reads fields at fixed offsets; EXIF is a TIFF directory — a **byte order chosen by the file**, an
+# entry count chosen by the file, and values reached through **offsets chosen by the file**. Every
+# one of those is an opportunity to read where the file points rather than where the data is, and a
+# bounds check on the index says nothing about the base (the lesson `crab_jpeg_dims` taught by
+# segfaulting with every bound correct).
+# ⇒ Every read below is bounded against `len` at its ABSOLUTE address, the entry count is capped,
+# the sub-IFD is followed exactly ONCE and never recursively, and the fuzz harness drives it.
+#
+# ⚠ ASCII TAGS ONLY. Make, Model and the two timestamps are TIFF type 2 (ASCII); rationals, shorts
+# and the rest are not read at all. A preview that showed exposure and aperture would need a
+# rational formatter and three more type cases, for two more lines in a 153 px column — the same
+# "small language nobody asked for" the batch-rename sheet refused.
+enum CrabExif {
+    CRAB_EX_MAKE      = 0x010F;
+    CRAB_EX_MODEL     = 0x0110;
+    CRAB_EX_DATETIME  = 0x0132;   # IFD0: when the FILE was written
+    CRAB_EX_SUBIFD    = 0x8769;   # pointer to the Exif sub-IFD
+    CRAB_EX_DTORIG    = 0x9003;   # sub-IFD: when the SHUTTER fired
+    CRAB_EX_ASCII     = 2;        # TIFF type 2
+    # ⚠ An absurdity bound on the directory walk, the same shape as `CRAB_IMG_SCAN_MAX`. A real IFD0
+    # has a couple of dozen entries; 256 is far above any legitimate file, so reaching it is always
+    # a malformed one. ⛔ Without it a crafted count of 65535 walks 786 KB of "entries".
+    CRAB_EX_MAX_ENTRIES = 256;
+    # ⚠ What the 153 px preview column can show. `crab_name_cell` truncates with the same marker.
+    CRAB_EX_STR_MAX   = 48;
+}
+
+# Endian-aware TIFF reads. `le` is 1 for "II" (Intel, little-endian), 0 for "MM" (Motorola, big).
+# ⛔ THE BYTE ORDER IS CHOSEN BY THE FILE, which is why these exist at all — a parser that assumed
+# one reads every field of the other backwards, and a 2026 date becomes year 53764.
+fn crab_ex_u16(buf, at, le): i64 {
+    if (le == 1) { return crab_le16(buf + at); }
+    return crab_be16(buf + at);
+}
+
+fn crab_ex_u32(buf, at, le): i64 {
+    if (le == 1) { return crab_le32(buf + at); }
+    return crab_be32(buf + at);
+}
+
+# @public — offset of the TIFF header inside a JPEG's Exif APP1 segment, or -1.
+#
+# ⚠ APP1 is not necessarily the first segment and is not necessarily Exif — XMP also uses APP1, with
+# a different signature — so the walk checks the six-byte `Exif\0\0` identifier rather than trusting
+# the marker.
+fn crab_exif_tiff(buf, len): i64 {
+    if (buf == 0) { return 0 - 1; }
+    if (len < 12) { return 0 - 1; }
+    if (load8(buf) != 255) { return 0 - 1; }
+    if (load8(buf + 1) != 216) { return 0 - 1; }
+    var sg = crab_jseg_buf();
+    if (sg == 0) { return 0 - 1; }
+    var p = 2;
+    var steps = 0;
+    while (steps < CRAB_IMG_SCAN_MAX) {
+        steps = steps + 1;
+        p = crab_jpeg_seg(buf, len, p, sg);
+        if (p < 0) { return 0 - 1; }
+        if (load64(sg) == 0xE1) {
+            var po = load64(sg + 8);
+            var pl = load64(sg + 16);
+            # 6-byte identifier + an 8-byte TIFF header is the minimum that can carry anything.
+            if (pl >= 14) {
+                if (load8(buf + po) == 69) {                      # 'E'
+                    if (load8(buf + po + 1) == 120) {             # 'x'
+                        if (load8(buf + po + 2) == 105) {         # 'i'
+                            if (load8(buf + po + 3) == 102) {     # 'f'
+                                if (load8(buf + po + 4) == 0) {
+                                    if (load8(buf + po + 5) == 0) { return po + 6; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0 - 1;
+}
+
+# Search ONE IFD for an ASCII tag. -> 1 and fills `dst`, or 0.
+# `sub_out` receives the Exif sub-IFD offset if this directory carries one (0 otherwise), so the
+# caller can follow it without a second walk.
+#
+# ⛔ EVERY OFFSET IN HERE COMES FROM THE FILE. `t` is the TIFF base, all directory offsets are
+# relative to it, and a value longer than four bytes is reached through an offset the file chose.
+# So each is bounded against `len` at its absolute address before a single byte is read.
+fn crab_ex_ifd(buf, len, t, ifd, le, tag, dst, cap, sub_out): i64 {
+    store64(sub_out, 0);
+    if (ifd < 0) { return 0; }
+    if (t + ifd + 2 > len) { return 0; }
+    var n = crab_ex_u16(buf, t + ifd, le);
+    if (n > CRAB_EX_MAX_ENTRIES) { n = CRAB_EX_MAX_ENTRIES; }
+    var i = 0;
+    var found = 0;
+    while (i < n) {
+        var e = t + ifd + 2 + i * 12;
+        if (e + 12 > len) { return found; }
+        var etag = crab_ex_u16(buf, e, le);
+        var etyp = crab_ex_u16(buf, e + 2, le);
+        var ecnt = crab_ex_u32(buf, e + 4, le);
+        if (etag == CRAB_EX_SUBIFD) { store64(sub_out, crab_ex_u32(buf, e + 8, le)); }
+        if (etag == tag) {
+            if (etyp == CRAB_EX_ASCII) {
+                if (ecnt > 0) {
+                    # ⚠ A value of four bytes or fewer is stored INLINE in the entry; anything longer
+                    # lives at an offset from the TIFF base. Reading the inline case as an offset
+                    # dereferences four bytes of text as a pointer.
+                    var vat = e + 8;
+                    if (ecnt > 4) { vat = t + crab_ex_u32(buf, e + 8, le); }
+                    var take = ecnt;
+                    if (take > cap - 1) { take = cap - 1; }
+                    if (take > CRAB_EX_STR_MAX) { take = CRAB_EX_STR_MAX; }
+                    if (vat >= 0) {
+                        if (vat + take <= len) {
+                            # ⛔ STOP AT THE NUL, AND REFUSE ANY BYTE OUTSIDE PRINTABLE ASCII. An
+                            # EXIF string is NUL-terminated by the spec, but the FILE supplies the
+                            # count — so a count longer than the string walks into the next field.
+                            # And a control byte reaching a LABEL is a widget drawing whatever the
+                            # file put there; `crab_name_cell` has the same rule for readdir names.
+                            # ⚠ ONE LOOP. A first draft scanned twice — once to find a stop and once
+                            # to copy — which is two chances to disagree about where the string ends.
+                            # Shrinking `take` to `k` ends the loop AND leaves `k` as the length.
+                            var k = 0;
+                            while (k < take) {
+                                var c = load8(buf + vat + k);
+                                if (c < 32) { take = k; }
+                                else {
+                                    if (c > 126) { take = k; }
+                                    else { store8(dst + k, c); k = k + 1; }
+                                }
+                            }
+                            store8(dst + k, 0);
+                            if (k > 0) { found = 1; }
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return found;
+}
+
+# @public — normalise an EXIF timestamp into the format crab already uses for dates. -> 1 if it was
+# reshaped, 0 if the input did not have EXIF's shape and was copied through unchanged.
+#
+# ⛔ TWO DATE ROWS IN ONE COLUMN MUST NOT DISAGREE ABOUT WHAT A DATE LOOKS LIKE. `crab_mtime_str`
+# renders MODIFIED as `2026-08-31 00:26`; EXIF stores `2026:07:04 18:22:31` — different separators
+# AND three characters too long for a 153 px column, so it drew as `2026:07:04 18:22:` with the
+# seconds sheared off mid-field. The operator reads those two lines together.
+# ⇒ Reshape to crab's own format rather than widening the column for a format crab does not use
+# anywhere else. Seconds are dropped deliberately: MODIFIED does not show them either.
+# ⛔ THE SHAPE IS VALIDATED BEFORE IT IS TRUSTED — this string came out of a file. A value that is
+# not `YYYY:MM:DD HH:MM:SS` is copied through as-is (bounded) rather than reformatted into
+# nonsense: a camera that writes something else should be shown what it wrote.
+fn crab_exif_when(dst, src, cap): i64 {
+    if (dst == 0) { return 0; }
+    if (cap < 2) { return 0; }
+    store8(dst, 0);
+    if (src == 0) { return 0; }
+    var n = crab_cstr_len(src, CRAB_EX_STR_MAX + 1);
+    if (n < 0) { return 0; }
+    var shaped = 0;
+    if (n >= 16) {
+        if (load8(src + 4) == 58) {                      # ':'
+            if (load8(src + 7) == 58) {
+                if (load8(src + 10) == 32) {             # ' '
+                    if (load8(src + 13) == 58) { shaped = 1; }
+                }
+            }
+        }
+    }
+    var take = n;
+    if (shaped == 1) { take = 16; }
+    if (take > cap - 1) { take = cap - 1; }
+    var i = 0;
+    while (i < take) { store8(dst + i, load8(src + i)); i = i + 1; }
+    store8(dst + take, 0);
+    if (shaped == 1) {
+        store8(dst + 4, 45);                             # '-'
+        store8(dst + 7, 45);
+        return 1;
+    }
+    return 0;
+}
+
+# @public — read an ASCII EXIF tag out of a JPEG into `dst` (NUL-terminated, at most `cap` bytes).
+# -> 1 if a non-empty value was found, 0 otherwise.
+#
+# ⛔ THE SUB-IFD IS FOLLOWED EXACTLY ONCE, NEVER RECURSIVELY. A TIFF directory can point at another,
+# and a crafted file can point one at itself — so a recursive walk is an unbounded loop over
+# attacker-chosen offsets. One level reaches every tag crab reads.
+fn crab_exif_str(buf, len, tag, dst, cap): i64 {
+    if (dst == 0) { return 0; }
+    if (cap < 2) { return 0; }
+    store8(dst, 0);
+    if (buf == 0) { return 0; }
+    var t = crab_exif_tiff(buf, len);
+    if (t < 0) { return 0; }
+    if (t + 8 > len) { return 0; }
+    var le = 0;
+    if (load8(buf + t) == 73) { if (load8(buf + t + 1) == 73) { le = 1; } }
+    if (le == 0) {
+        if (load8(buf + t) != 77) { return 0; }
+        if (load8(buf + t + 1) != 77) { return 0; }
+    }
+    # ⚠ The magic is 42 in the file's OWN byte order — checking it is what proves the order was read
+    # correctly, before any offset derived from it is trusted.
+    if (crab_ex_u16(buf, t + 2, le) != 42) { return 0; }
+    var ifd0 = crab_ex_u32(buf, t + 4, le);
+    var sub = crab_exif_sub_buf();
+    if (sub == 0) { return 0; }
+    if (crab_ex_ifd(buf, len, t, ifd0, le, tag, dst, cap, sub) == 1) { return 1; }
+    var so = load64(sub);
+    if (so == 0) { return 0; }
+    var sub2 = sub + 8;
+    return crab_ex_ifd(buf, len, t, so, le, tag, dst, cap, sub2);
+}
+
+var crab_ex_sub = 0;
+# ⚠ Allocated once for the process. Two cells: the sub-IFD pointer found in IFD0, and a sink for the
+# second walk's own (which is never followed — see the ⛔ on `crab_exif_str`).
+fn crab_exif_sub_buf(): i64 {
+    if (crab_ex_sub == 0) { crab_ex_sub = alloc(16); }
+    return crab_ex_sub;
 }
 
 # @public — the KIND line's text. ⚠ THREE KINDS AND DELIBERATELY NOT MORE.
@@ -1738,7 +2006,7 @@ fn crab_pv_field(col, label, value): i64 {
 # keystroke path — the thing M3 *#03* restructured the listing to avoid.
 # ⚠ AN EMPTY PANE GETS THE COLUMN, NOT A HOLE. The header stays and the fields read "—", because a
 # column that vanishes when a directory happens to be empty makes the whole window jump.
-fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, tstate): i64 {
+fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, tstate, cam, shot): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, CRAB_PV_W, h);
@@ -1820,6 +2088,16 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, ts
             crab_pv_field(col, "DIMENSIONS", db);
         }
     }
+    # ⭐ CAMERA and SHOT — the other half of the canvas's "real metadata" line.
+    # ⛔ ABSENT, NOT EMPTY. A "CAMERA: —" under every screenshot is a promise the preview keeps
+    # failing; the label appears exactly when there is something to put beside it. Same rule as
+    # DIMENSIONS above, and the same reason.
+    if (cam != 0) {
+        if (load8(cam) != 0) { crab_pv_field(col, "CAMERA", cam); }
+    }
+    if (shot != 0) {
+        if (load8(shot) != 0) { crab_pv_field(col, "SHOT", shot); }
+    }
     dh_widget_add_child(parent, col);
     return col;
 }
@@ -1885,7 +2163,11 @@ enum CrabRs {
     # the dimensions follow; the record is the carrier.
     CRAB_RS_PVTHUMB  = 264;
     CRAB_RS_PVTSTATE = 272;
-    CRAB_RS_SZ       = 280;
+    # ⭐ CAMERA and SHOT (M5) — pointers to cstrings the app owns and keeps alive. Empty = absent,
+    # and an absent line is not drawn at all rather than drawn as a dash.
+    CRAB_RS_PVCAM    = 280;
+    CRAB_RS_PVSHOT   = 288;
+    CRAB_RS_SZ       = 296;
 }
 
 var crab_rs_rec = 0;
@@ -1989,6 +2271,16 @@ fn crab_rs_thumb(rs, pixels, state): i64 {
     return 1;
 }
 
+# @public — the selected image's EXIF camera and shot time, as cstrings the CALLER keeps alive for
+# the frame. ⛔ The read that produces them lives in `app.cyr` (it needs a syscall); this file only
+# carries them, like the pane state, the tray and the dimensions.
+fn crab_rs_exif(rs, camera, shot): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_PVCAM, camera);
+    store64(rs + CRAB_RS_PVSHOT, shot);
+    return 1;
+}
+
 # @public — which pane is active, plus the overlay: the context menu and the rename/batch field.
 fn crab_rs_chrome(rs, active, menuopen, menux, menuy, menusel, editopen, editlabel): i64 {
     if (rs == 0) { return 0; }
@@ -2051,6 +2343,8 @@ fn crab_render(surf, font, rs): i64 {
     var pvh      = load64(rs + CRAB_RS_PVH);
     var pvthumb  = load64(rs + CRAB_RS_PVTHUMB);
     var pvtstate = load64(rs + CRAB_RS_PVTSTATE);
+    var pvcam    = load64(rs + CRAB_RS_PVCAM);
+    var pvshot   = load64(rs + CRAB_RS_PVSHOT);
     # ⚠ INSTALL BEFORE `dh_frame_begin`, and only if nothing is installed — a caller that has set its
     # own arena (a test measuring the spill path, say) keeps it.
     if (dh_frame_arena_get() == 0) { dh_frame_arena_set(crab_frame_arena()); }
@@ -2132,7 +2426,8 @@ fn crab_render(surf, font, rs): i64 {
     # them. ⚠ It is a sibling of the panes rather than a child of one: it describes the ACTIVE
     # pane's selection and the active pane changes, so parenting it to a pane would make it move.
     if (pvon == 1) {
-        crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb, pvtstate);
+        crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb,
+          pvtstate, pvcam, pvshot);
     }
     dh_widget_add_child(root, panes);
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.

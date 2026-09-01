@@ -125,7 +125,8 @@ tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped of
 Esc cancels them**, so a recursive copy never freezes the window.
 
 **The preview column** (M5): `p` opens a right-hand inspector for the selected entry — NAME · KIND ·
-SIZE · MODIFIED · DIMENSIONS, and a **thumbnail** for PNG, JPEG, GIF and BMP. ⭐ Dimensions are read
+SIZE · MODIFIED · DIMENSIONS · CAMERA · SHOT, and a **thumbnail** for PNG, JPEG, GIF and BMP.
+Camera and shutter time come from a JPEG's EXIF, in either byte order. ⭐ Dimensions are read
 straight out of the file header with no decoder at all; thumbnails go through `chitra` and are
 **decoded off the idle tick**, so neither ever lands on the arrow-key path. ⚠ **The width rule is
 derived, not drawn**: the preview may not cost a pane its SIZE column, so it needs a window of

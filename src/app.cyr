@@ -1628,6 +1628,11 @@ var crab_pv_key = 0;
 var crab_pv_have = 0;
 var crab_pv_w = 0;
 var crab_pv_h = 0;
+# ⭐ CAMERA and SHOT (M5) — read from the SAME 64 KiB header the dimensions come from, in the same
+# pass. ⛔ A second read would double the syscalls on the selection path for data that is in a buffer
+# crab already has, and would need its own memo to stay in step with this one.
+var crab_pv_cam = 0;
+var crab_pv_shot = 0;
 
 # ⚠ Allocated once for the process — the same rule the sort scratch, the copy buffer and the ELF
 # magic buffer follow, and for the same reason: `alloc` has no `free()`.
@@ -1641,6 +1646,29 @@ fn crab_pv_key_buf(): i64 {
     return crab_pv_key;
 }
 
+# @public — the selected entry's camera ("Make Model"), or "" if it has none. Cached alongside the
+# dimensions and invalidated with them.
+fn crab_preview_camera(): i64 {
+    if (crab_pv_cam == 0) { crab_pv_cam = alloc(CRAB_EX_STR_MAX * 2 + 8); store8(crab_pv_cam, 0); }
+    return crab_pv_cam;
+}
+
+# @public — when the shutter fired (`DateTimeOriginal`), falling back to the file's own EXIF
+# `DateTime`. ⚠ The two are different questions — when the picture was TAKEN versus when this FILE
+# was written — and an edited photo has a DateTime long after its DateTimeOriginal. The shutter is
+# the one worth showing, so the fallback is a fallback and not a preference.
+var crab_pv_raw = 0;
+# ⚠ Scratch for the EXIF timestamp before it is reshaped. Allocated once, like everything else here.
+fn crab_exif_raw_buf(): i64 {
+    if (crab_pv_raw == 0) { crab_pv_raw = alloc(CRAB_EX_STR_MAX + 8); store8(crab_pv_raw, 0); }
+    return crab_pv_raw;
+}
+
+fn crab_preview_shot(): i64 {
+    if (crab_pv_shot == 0) { crab_pv_shot = alloc(CRAB_EX_STR_MAX + 8); store8(crab_pv_shot, 0); }
+    return crab_pv_shot;
+}
+
 # @public — forget the cached dimensions. Call after anything that can change what a name refers to:
 # a rename, a delete, a copy into the pane, or a re-listing.
 # ⛔ A CACHE KEYED ON A NAME IS STALE THE MOMENT THE NAME MEANS A DIFFERENT FILE. crab renames and
@@ -1650,6 +1678,10 @@ fn crab_pv_forget(): i64 {
     crab_pv_have = 0;
     crab_pv_w = 0;
     crab_pv_h = 0;
+    var cb = crab_preview_camera();
+    if (cb != 0) { store8(cb, 0); }
+    var sb = crab_preview_shot();
+    if (sb != 0) { store8(sb, 0); }
     var k = crab_pv_key_buf();
     if (k != 0) { store8(k, 0); }
     return 0;
@@ -1684,6 +1716,10 @@ fn crab_preview_dims(dir, name, out, pathscr): i64 {
     crab_pv_have = 0;
     crab_pv_w = 0;
     crab_pv_h = 0;
+    var camb = crab_preview_camera();
+    var shotb = crab_preview_shot();
+    if (camb != 0) { store8(camb, 0); }
+    if (shotb != 0) { store8(shotb, 0); }
     var buf = crab_pv_hdr_buf();
     if (buf == 0) { return 0; }
     var fd = crab_fs_open_r(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
@@ -1691,6 +1727,41 @@ fn crab_preview_dims(dir, name, out, pathscr): i64 {
     var got = sys_read(fd, buf, CRAB_PV_HDR_BUDGET);
     sys_close(fd);
     if (got <= 0) { return 0; }
+    # ⭐ EXIF COMES OUT OF THE SAME BUFFER, BEFORE THE DIMENSION CHECK CAN RETURN. A file whose
+    # header crab cannot make dimensions of may still carry a readable Make/Model — and more to the
+    # point, doing it here means one read, one memo, and no way for the two to disagree about which
+    # file they describe.
+    if (camb != 0) {
+        var mlen = crab_exif_str(buf, got, CRAB_EX_MAKE, camb, CRAB_EX_STR_MAX + 1);
+        if (mlen == 1) {
+            var ml = crab_cstr_len(camb, CRAB_EX_STR_MAX + 1);
+            # ⚠ "Make Model" as one line, and the space is only added when both are present — a
+            # trailing space on a camera with no model is a line that looks truncated.
+            if (ml > 0) {
+                if (ml < CRAB_EX_STR_MAX) {
+                    store8(camb + ml, 32);
+                    if (crab_exif_str(buf, got, CRAB_EX_MODEL, camb + ml + 1, CRAB_EX_STR_MAX) == 0) {
+                        store8(camb + ml, 0);
+                    }
+                }
+            }
+        } else {
+            # No Make: show the Model alone rather than nothing.
+            crab_exif_str(buf, got, CRAB_EX_MODEL, camb, CRAB_EX_STR_MAX + 1);
+        }
+    }
+    if (shotb != 0) {
+        var raw = crab_exif_raw_buf();
+        if (raw != 0) {
+            store8(raw, 0);
+            if (crab_exif_str(buf, got, CRAB_EX_DTORIG, raw, CRAB_EX_STR_MAX + 1) == 0) {
+                crab_exif_str(buf, got, CRAB_EX_DATETIME, raw, CRAB_EX_STR_MAX + 1);
+            }
+            # ⚠ Reshaped into crab's own date format — see `crab_exif_when`. The two date rows in the
+            # preview column are read together and must not disagree about what a date looks like.
+            crab_exif_when(shotb, raw, CRAB_EX_STR_MAX + 1);
+        }
+    }
     if (crab_img_dims(buf, got, out) == 0) { return 0; }
     crab_pv_have = 1;
     crab_pv_w = load64(out + CRAB_IMG_W);
