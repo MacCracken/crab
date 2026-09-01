@@ -36,6 +36,7 @@ var fz_state = 0;
 var fz_fails = 0;
 var fz_recognised = 0;
 var fz_exif_ok = 0;
+var fz_batch_ok = 0;
 
 fn fz_next(): i64 {
     fz_state = (fz_state * 1103515245 + 12345) - ((fz_state * 1103515245 + 12345) / FZ_MOD) * FZ_MOD;
@@ -276,6 +277,61 @@ fn main() {
     #     • the `CRAB_EX_MAX_ENTRIES` cap. Removing it is bounded by the line above, so it limits
     #       WORK rather than reach — defence in depth, like `seg < 2` in the segment walker.
     # ⇒ Both are kept. Neither is load-bearing for this harness's green, and saying so is the point.
+
+    # ---- round 5: the batch-rename expander, over arbitrary patterns and records ------------
+    # ⛔ THE LAST PARSER OVER NON-AUTHORED BYTES WITH NO FUZZ COVERAGE — finding F3 of the 2026-08-31
+    # security audit, which is what put it here. `*` splices in a READDIR NAME and `#` a number, and
+    # the result becomes a filename crab CREATES ON DISK. The audit found the splice reading its
+    # record with no bound; this is what keeps it bounded.
+    # ⚠ HALF THE RECORDS ARE UNTERMINATED, which is the case the bound exists for: the kernel
+    # NUL-terminates at <= 62 bytes, and that invariant is the kernel's, not this function's.
+    var bp = alloc(CRAB_EDIT_CAP + 8);
+    var bo = alloc(CRAB_REC_SZ * 2);
+    var bd = alloc(CRAB_EDIT_CAP + 8);
+    round = 0;
+    while (round < FZ_ROUNDS) {
+        var pl2 = fz_upto(CRAB_EDIT_CAP);
+        var pi2 = 0;
+        while (pi2 < pl2) {
+            # ⚠ Bias toward the two metacharacters: a corpus of random bytes contains `*` and `#`
+            # about once in 128, so it would spend its whole run testing the literal-copy path.
+            var pc = fz_byte();
+            var pick = fz_upto(3);
+            if (pick == 0) { pc = 42; }
+            if (pick == 1) { pc = 35; }
+            store8(bp + pi2, pc);
+            pi2 = pi2 + 1;
+        }
+        store8(bp + pl2, 0);
+        var ol = fz_upto(CRAB_REC_SZ * 2);
+        var oi = 0;
+        while (oi < ol) { store8(bo + oi, fz_byte()); oi = oi + 1; }
+        if (fz_upto(2) == 0) { store8(bo + ol, 0); }
+        else { store8(bo + CRAB_REC_SZ * 2 - 1, 0); }
+        var br = crab_batch_name(bd, bp, fz_upto(100000), bo);
+        # ⛔ THE INVARIANT: whatever the pattern and whatever the record, the result is a
+        # NUL-terminated string inside the cap — because it is about to be passed to `rename`.
+        if (br >= 0) {
+            if (br > CRAB_EDIT_CAP - 1) { fz_fail("FAIL: crab_batch_name reported a length past its cap"); }
+            if (crab_cstr_len(bd, CRAB_EDIT_CAP + 8) < 0) {
+                fz_fail("FAIL: an accepted batch name has no NUL inside its cap");
+            }
+            fz_batch_ok = fz_batch_ok + 1;
+        }
+        # ⚠ Even a REFUSAL must leave a valid cstring — a caller that ignores -1 gets a bounded
+        # string rather than a runaway, the same contract `crab_strcpy_n` keeps.
+        if (crab_cstr_len(bd, CRAB_EDIT_CAP + 8) < 0) {
+            fz_fail("FAIL: a REFUSED batch name left dst unterminated");
+        }
+        # ⛔ And whatever comes out still faces the guard between a keypress and `rename`.
+        var bok = crab_name_ok(bd);
+        if (bok != 0) { if (bok != 1) { fz_fail("FAIL: crab_name_ok returned neither 0 nor 1"); } }
+        round = round + 1;
+    }
+    if (fz_batch_ok == 0) {
+        fz_fails = fz_fails + 1;
+        println("FAIL: the batch corpus never produced a name — the fuzzer tested only refusals");
+    }
 
     # ⛔ NON-VACUITY, and it matters more here than anywhere: an EXIF corpus that never produces a
     # readable tag is a corpus that only ever tested the signature check.

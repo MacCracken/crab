@@ -355,7 +355,7 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,106 passed / 0 failed**
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,119 passed / 0 failed**
   *(unreleased; 757 at 0.7.5, 253 at the 0.7.0 cut)*
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
@@ -438,9 +438,19 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 
 ### Real, and open right now
 
-- ⛔ **No security audit exists, and crab now writes.** `docs/audit/` is empty. Since 0.7.1 crab
-  creates, renames, copies, moves, **deletes recursively**, and **spawns processes**. That is the
-  v1.0 criterion that moved furthest while nobody was looking at it.
+- ✅ **The security audit exists** — [`../audit/2026-08-31-audit.md`](../audit/2026-08-31-audit.md),
+  the first. ⛔ **Its headline (F1) is that GALLERY VIEW CHANGED THE TRUST MODEL**: crab decodes every
+  image in a folder the operator merely opened, so ~22,500 lines of `chitra` + `sankoch` now run
+  in-process on attacker-chosen bytes. Measured at 8 decodes per folder opened against 1 per entry
+  selected. The per-image and session budgets bound **memory**; nothing bounds the code paths a
+  crafted 64x64 PNG reaches.
+  ⚠ F2 (a TOCTOU between the ELF check and spawn — a UX gate, not a boundary) and F4 (a
+  `DT_UNKNOWN` type making a recursive delete fail SAFE) are recorded and unfixed by choice.
+  ⛔⛔ **F3's first draft was a FALSE FINDING and the audit keeps it, corrected.** It claimed an
+  unbounded read in `crab_batch_name` that the code cannot perform — the destination cap bounds the
+  read below `CRAB_NAME_MAX`. Caught by planting the implied mutation and watching the suite stay
+  green. What was real: no fuzz coverage (now closed), and a safety that depends on
+  `CRAB_EDIT_CAP <= CRAB_NAME_MAX`, two constants that can move independently — now asserted.
 - ⛔ **`src/render_test.cyr`'s 26 pixel assertions run under NEITHER CI NOR `cyrius test`.**
   `cyrius.cyml` sets `test = "src/test.cyr"`, which `cyrius test` does not run, and auto-discovery
   covers `tests/*.tcyr` only. It is crab's strongest test and no gate executes it. *Deferral #14.*

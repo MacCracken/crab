@@ -72,9 +72,18 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 - [ ] CHANGELOG complete from v0.1.0; ADRs written for every ⛔ invariant now living in comments.
       ⚠ Two ADRs exist; the *Rules that outlive their milestone* section below is the shortlist of
       what still deserves one.
-- [ ] Security audit pass (`docs/audit/YYYY-MM-DD-audit.md`) — ⛔ **nothing exists yet**, and crab
-      now writes to the filesystem, spawns processes and deletes trees. This is the criterion that
-      moved furthest while nobody was looking at it.
+- [x] Security audit pass — ✅ **[`docs/audit/2026-08-31-audit.md`](../audit/2026-08-31-audit.md)**,
+      the first. Four findings, ranked by what an attacker gets.
+      ⛔ **F1 is a change in the TRUST MODEL, not a bug**: gallery view decodes every image in a
+      folder merely opened, so crab now runs **~22,500 lines of third-party parser** (`chitra` +
+      `sankoch`) in-process on attacker-chosen bytes. Measured: 8 decodes for opening a folder
+      against 1 for selecting an entry. The two budgets bound MEMORY; none bounds code paths reached.
+      ⛔⛔ **One finding in the first draft was WRONG and is kept with its correction** — it claimed
+      an unbounded read `crab_batch_name` cannot perform. Caught by planting the mutation the finding
+      implied and watching the suite stay green, then disproved empirically with a poison tail.
+      *An audit that reports a bug which is not there spends the reader's trust.*
+      ⚠ Re-run it when the trust model moves again — a new parser, a new dependency, or a view that
+      widens what gets read.
 - [ ] `docs/examples/` populated — still empty.
 
 ---
@@ -236,7 +245,9 @@ not quietly lose them.
 | Columns (miller) view | M5 | ⛔ **FALSE GATE — the FOURTH.** Not dhancha: columns is a `BOX_H` of `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight, so it clears neither bar of dhancha's kind rule (as MENU and SHEET did not). **It is gated on crab's two-pane model** — the source/destination pairing the M4 write layer rests on. A design question, not a dependency. | 2026-08-31 ⭐ re-derived |
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra 1.0.0 is declared. Cost paid: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
-| Sidebar | M6 | ⛔ **FALSE GATE — the FIFTH.** Not dhancha: every piece exists. `LIST` gives scroll, selection and a toolkit-painted highlight; `DH_FLAG_INERT` gives section headers the keyboard steps over; `PROGRESS` gives the capacity bars; padding gives the indent. **Expansion state is app state either way** — crab owns its interaction state by the 2026-08-27 ruling. A drawer overlay for the small window is `dh_place_pinned` + the overlay layer, both shipped in 0.9.23. | 2026-08-31 ⭐ re-derived |
+| Sidebar — PLACES | M6 | ⛔ **FALSE GATE (the fifth).** Not dhancha: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers, `PROGRESS` gives bars, padding gives indent. Buildable in crab today. | 2026-08-31 ⭐ re-derived |
+| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **RE-AIMED: gated on DATA, not on a widget.** There is **no `statfs`/`statvfs` anywhere** — not in cyrius's syscall tables, not in agnos's ABI, where `mount`/`umount` are documented no-op **stubs**. crab cannot learn a filesystem's size, its free space, or what is mounted. Filed against agnos. | 2026-08-31 ⭐ re-derived |
+| Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ⚠ crab must wait for 0.9.26 to be pushed. | 2026-08-31 ⭐ built |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
 | Duplicate detection | M7 | **daimon**, or a content hash crab could do alone | 2026-08-31 |

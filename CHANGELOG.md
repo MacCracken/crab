@@ -9,6 +9,63 @@ M5 is *started*, not done: the preview pane and thumbnails are both in — the l
 ruling on a measured +115 % binary cost (below). The two dhancha-gated items — grid/columns and
 the sidebar — are unchanged and still genuinely gated.
 
+### Added — the first security audit (`docs/audit/2026-08-31-audit.md`)
+
+A v1.0 criterion, and the one `state.md` called *"the criterion that moved furthest while nobody was
+looking at it"*. Four findings, ranked by what an attacker gets.
+
+⛔ **F1 is a change in the TRUST MODEL rather than a bug.** Gallery view decodes **every image in a
+folder the operator merely opened**, so crab now runs ~22,500 lines of third-party parser (`chitra`
+6,143 + `sankoch` 16,373) in-process, unsandboxed, on attacker-chosen bytes — on a bump allocator
+with **no guard pages**, where an overread lands in live heap instead of faulting.
+⭐ **Measured**: 8 decodes and 1,033,768 permanent bytes for *opening a folder*, against 1 decode and
+165,256 bytes for *selecting an entry*. ⛔ The two budgets bound **memory**; **none bounds the code
+paths reached** — a crafted 64×64 PNG passes every budget and runs the full inflate and unfilter.
+
+⚠ F2: a TOCTOU between the ELF check and `spawn_path` — low, and the check is a UX gate rather than a
+boundary. F4: a `DT_UNKNOWN` readdir type would make a recursive delete report a failure — fails safe.
+
+⭐ **What was checked and found sound** is listed too, because an audit reporting only findings gives
+no evidence of coverage — notably that **a recursive delete cannot descend a symlink**, safe by
+construction (both backends set the type byte from "is a directory" alone, so a link arrives as a
+leaf and the link is unlinked, never its target) with **no `lstat`**, which does not exist in the
+pinned stdlib.
+
+### Fixed — F3's coverage gap, and F3's own **false finding**
+
+⛔⛔ **THE AUDIT'S FIRST DRAFT REPORTED AN UNBOUNDED READ IN `crab_batch_name`. IT WAS WRONG.** The
+`*` splice has no explicit bound on its read index and `orig` is a 64-byte record the kernel is
+trusted to terminate — the exact shape of the `crab_name_cell` defect from 0.7.1, which is why it
+looked like one. But `w` and `j` increment together and `w` starts at or above `j`, so `w >= lim`
+trips at 63 before `j` can reach 64: the read is already confined to the record, **by the destination
+cap**.
+⭐ **Caught by planting the mutation the finding implied and watching the suite stay green**, then
+disproved empirically — the guard removed, an unterminated record with a poison tail pushed through,
+**no poison in the output**.
+⇒ The guard is **kept as defence in depth** with a comment saying it is unreachable today, and the
+suite now asserts **`CRAB_EDIT_CAP <= CRAB_NAME_MAX`** — because that safety is a coincidence of two
+constants that can move independently, and raising the edit cap alone would make the overread real.
+⚠ **The coverage gap was real and is closed**: `crab_batch_name` was the last parser over
+non-authored bytes with no fuzz coverage, and `tests/crab.fcyr` now drives it.
+⛔ **The lesson is the finding.** An audit reporting a bug which is not there spends the reader's
+trust and sends them to "fix" working code. Every other finding was re-derived afterwards, and F1's
+headline was re-measured rather than left on reading alone.
+
+### Re-derived — both M6 gates were wrong, in different ways
+
+- ⛔ **The sidebar's "Gate: dhancha TREE" is FALSE — the fifth false gate.** Every piece exists:
+  `LIST` (scroll, selection, toolkit-painted highlight), `DH_FLAG_INERT` (section headers the
+  keyboard steps over), `PROGRESS` (capacity bars), padding (indent). Expansion is app state either
+  way; the small-window drawer is `dh_place_pinned` plus the overlay layer, both shipped in 0.9.23.
+- ⛔ **VOLUMES is gated on DATA, not on a widget** — re-aimed. There is **no `statfs`/`statvfs`
+  anywhere**: not in cyrius's syscall tables, not in agnos's ABI, where `mount`/`umount` are
+  documented **no-op stubs**. crab cannot learn a filesystem's size, its free space, or what is
+  mounted. Filed against agnos. ⇒ **crab is not building a half-populated sidebar**: its canvas draws
+  four sections and only PLACES is reachable, and a panel with one working section and three empty
+  headers is the painted-but-inert failure this stack keeps naming.
+- ⛔ **The menu bar's gate was REAL but MIS-NAMED** — what was missing was a horizontal selectable
+  strip, not a `MENU BAR` kind. dhancha 0.9.26 adds `dh_list_new_h`.
+
 ### Added — the GALLERY view, and the thumbnail cache behind it
 
 `g` now cycles **list → grid → gallery**. A gallery cell is the grid cell with a thumbnail above the

@@ -803,10 +803,23 @@ fn crab_batch_name(dst, pattern, idx, orig): i64 {
             }
         } else {
             if (ch == 42) {                              # '*' — the original name
+                # ⚠ THE `j` BOUND IS DEFENCE IN DEPTH AND IS UNREACHABLE TODAY — said plainly,
+                # because the 2026-08-31 audit's first draft claimed it fixed a real overread and
+                # that claim was WRONG.
+                # ⛔ WHY IT CANNOT FIRE: `w` and `j` increment together inside this splice and `w`
+                # starts at or above `j`, so the `w >= lim` check trips first — at `w == 63`, before
+                # `j` can reach 64. The read is therefore already bounded to indices 0..63 of a
+                # 64-byte record, **by the DESTINATION cap**. Verified empirically by removing this
+                # line and running a poison-tailed record through it: no poison reached the output.
+                # ⇒ It is kept because that safety is a **coincidence of two constants that can move
+                # independently**: `CRAB_EDIT_CAP` (64) and `CRAB_NAME_MAX` (64). Raise the edit cap
+                # alone and the overread becomes real, silently. The assertion in `t_batch_bounds`
+                # pins the relationship so that change cannot pass unnoticed.
                 var j = 0;
                 var oc = 0;
                 if (orig != 0) { oc = load8(orig + j); }
                 while (oc != 0) {
+                    if (j >= CRAB_NAME_MAX) { store8(dst + w, 0); return 0 - 1; }
                     if (w >= lim) { store8(dst + w, 0); return 0 - 1; }
                     store8(dst + w, oc); w = w + 1; j = j + 1;
                     oc = load8(orig + j);

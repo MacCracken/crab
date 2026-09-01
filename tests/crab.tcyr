@@ -2345,6 +2345,7 @@ fn main() {
     t_exif();
     t_gridview();
     t_gallery();
+    t_batch_bounds();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3496,6 +3497,62 @@ fn t_gallery(): i64 {
     crab_fs_delete(dir, "galtest.png", 0, scr);
     crab_fs_delete(dir, "galhuge.png", 0, scr);
     crab_tc_clear();
+    return 0;
+}
+
+# Security audit F3 (2026-08-31) — `crab_batch_name`'s `*` splice, and the constant relationship
+# that keeps it in bounds.
+#
+# ⛔⛔ THE AUDIT'S FIRST DRAFT CALLED THIS AN UNBOUNDED READ. IT WAS WRONG, AND THE CORRECTION IS THE
+# point of this group. `orig` is a readdir record — data crab did not author — and the splice loop
+# has no explicit bound on its read index. But `w` and `j` increment together and `w` starts at or
+# above `j`, so `w >= lim` trips at `w == 63` before `j` can reach 64: the read is already confined
+# to indices 0..63 of a 64-byte record, **by the destination cap**.
+# ⚠ Proven by removing the guard and running a poison-tailed unterminated record through it — no
+# poison reached the output. A mutation deleting the guard also passes this suite, which is how the
+# false finding was caught.
+# ⇒ What is REAL is that the safety depends on `CRAB_EDIT_CAP <= CRAB_NAME_MAX` — two constants that
+# can move independently. Raise the edit cap alone and the overread becomes real, silently. That
+# relationship is what this group pins.
+fn t_batch_bounds(): i64 {
+    test_group("crab — audit F3: the batch-rename splice is bounded, not trusting");
+    var dst = alloc(CRAB_EDIT_CAP + 8);
+    # An UNTERMINATED 64-byte record, exactly as a malformed readdir batch would present.
+    var un = alloc(CRAB_REC_SZ * 2);
+    var i = 0;
+    while (i < CRAB_REC_SZ * 2) { store8(un + i, 65); i = i + 1; }   # 'A' throughout, no NUL
+    # ⛔⛔ THE RELATIONSHIP THAT MAKES THE SPLICE SAFE, PINNED. The read index can never reach
+    # `CRAB_NAME_MAX` because the destination fills first — but only while the edit cap is no larger
+    # than a name. Raise `CRAB_EDIT_CAP` alone and a malformed record really is read past.
+    assert(CRAB_EDIT_CAP <= CRAB_NAME_MAX,
+      "the edit cap must not exceed a name: it is what bounds the '*' splice's READ");
+    assert_eq(crab_batch_name(dst, "*", 1, un), 0 - 1,
+      "an unterminated record is refused (the destination fills before the record runs out)");
+    # ⚠ And the refusal still leaves a valid cstring, so a caller that ignores -1 gets a bounded
+    # string rather than a runaway — the same contract `crab_strcpy_n` keeps.
+    assert(crab_cstr_len(dst, CRAB_EDIT_CAP + 8) >= 0, "...and dst is still NUL-terminated");
+    # An ordinary name still expands.
+    assert(crab_batch_name(dst, "*", 1, "photo.jpg") > 0, "an ordinary name still splices");
+    assert(t_streq(dst, "photo.jpg") == 1, "...verbatim");
+    assert(crab_batch_name(dst, "img-#-*", 7, "a.png") > 0, "both substitutions together");
+    assert(t_streq(dst, "img-7-a.png") == 1, "...'#' is the index and '*' the original");
+    # ⛔ AND THE EXPANSION STILL FACES THE NAME GUARD. `*` splices a name crab did not author, so a
+    # pattern really can produce '..' or a separator — the guard refuses it, not the expander.
+    crab_batch_name(dst, "*", 1, "..");
+    assert_eq(crab_name_ok(dst), 0, "a pattern expanding to '..' is refused by the name guard");
+    crab_batch_name(dst, "a/*", 1, "b");
+    assert_eq(crab_name_ok(dst), 0, "...and one carrying a separator");
+    # ⚠ A pattern that overflows the destination refuses rather than truncating: a truncated name is
+    # a DIFFERENT name, and a batch that silently renamed forty files to forty truncated names is
+    # worse than one that stopped.
+    var longp = alloc(256);
+    var j = 0;
+    while (j < 200) { store8(longp + j, 120); j = j + 1; }
+    store8(longp + 200, 0);
+    assert_eq(crab_batch_name(dst, longp, 1, "x"), 0 - 1, "a pattern past the cap is refused");
+    assert_eq(crab_batch_name(0, "*", 1, "x"), 0 - 1, "a null destination is refused");
+    assert_eq(crab_batch_name(dst, 0, 1, "x"), 0 - 1, "a null pattern is refused");
+    assert(crab_batch_name(dst, "plain", 1, 0) > 0, "a null original is survivable");
     return 0;
 }
 
