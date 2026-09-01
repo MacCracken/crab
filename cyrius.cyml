@@ -181,10 +181,16 @@ modules = ["dist/setu.cyr"]
 # chitra/docs/development/issues/2026-08-31-manifest-over-declares-unused-stdlib-leaves.md, and the
 # systemic half (distlib copying [deps].stdlib rather than the fold's real leaves) as
 # cyrius/docs/development/issues/2026-08-31-distlib-deps-sidecar-over-reports-stdlib-leaves.md.
+# ⭐ 1.0.1 (pinned 2026-08-31, `b777d34`): a valid PNG past sankoch's 16 MiB inflate ceiling is now
+# refused FROM THE HEADER in under 64 KiB with its own `CHITRA_ERR_INFLATE_LIMIT`, instead of
+# spending 26,617,512 bytes to return a bare `CHITRA_ERR_INFLATE`. Its sidecar also drops three
+# stdlib leaves (`args`, `flags`, `vec`) that no line of chitra references.
+# ⚠ crab's own per-image budget already kept it clear of that path, so this changes no crab
+# behaviour — it removes a cliff crab was standing well back from.
 # ⛔⛔ AND THE BINARY SIZE IS NOT THE HARD CONSTRAINT — THE ALLOCATOR IS. See `crab_thumb_*` in
 # `src/app.cyr`: chitra makes 31 `alloc()` calls, `chitra_image_free` is a NO-OP (`return 0;`), and
 # cyrius's `alloc` is a bump allocator with no `free()`. Every decode is therefore PERMANENT.
 [deps.chitra]
 git = "https://github.com/MacCracken/chitra.git"
-tag = "1.0.0"
+tag = "1.0.1"
 modules = ["dist/chitra.cyr"]

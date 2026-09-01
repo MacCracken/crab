@@ -291,7 +291,7 @@ errors**, host and `--agnos` both build, **253/0**).
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
 | dhancha | 0.9.24 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
-| chitra  | 1.0.0  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
+| chitra  | 1.0.1  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
@@ -411,8 +411,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,011,496 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,035,200 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,007,320 B** *(unreleased; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
+| `--agnos`    | ✅ builds, **1,031,008 B** *(unreleased; 474,944 at 0.7.5)* — the real target |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -493,9 +493,9 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⚠ **crab's binary more than doubled**: host 466,056 -> **1,003,168 B (+115.2 %)**, agnos 491,856 ->
   **1,026,872 (+108.8 %)**, ~399 KB of which is the `sankoch` inflate leaf PNG requires. Operator
   ruling 2026-08-31, taken with the measurements in hand.
-- ⚠ **chitra 1.0.1 is prepared but NOT pinned here** — the tag must exist on a remote first (the
-  2026-08-28 phantom-tag rule). It makes the >16 MiB PNG failure cheap and correctly named; crab's
-  per-image budget already keeps it clear of that path, so nothing is blocked.
+- ✅ **chitra 1.0.1 pinned 2026-08-31** (`b777d34`, verified on the remote). The >16 MiB PNG failure
+  is now cheap and correctly named, and the sidecar dropped three unused stdlib leaves: host
+  1,011,496 → **1,007,320 B**, agnos 1,035,200 → **1,031,008**.
 - ⛔ **TWO EXIF GUARDS ARE CAUGHT BY NOTHING, AND THE FUZZ HARNESS SAYS SO.** `crab_ex_ifd`'s
   per-entry bound (`e + 12 > len`) is the single most important line in that parser, and deleting it
   leaves both gates green: the overread lands in the poison tail, reads as tag `0x7E7E`, matches
@@ -537,36 +537,48 @@ _None — top-level application._
 
 ## Next
 
-**M4 is complete. M5's three ungated items are IN.**
+**M4 is complete. Every UNGATED M5 item is in.**
 
-⭐ **Done (unreleased)**: the `crab_render` parameter cleanup, the preview pane with real metadata,
-header-only image dimensions, and **thumbnails** — plus *deferral #12* (the fuzz harness) closed, a
-shipped per-frame leak in `crab_overlay` fixed, and dhancha bumped to 0.9.24.
+⭐ **Done**: the `crab_render` parameter cleanup, the preview pane, header-only image dimensions,
+**thumbnails**, and **EXIF** (camera + shot) — plus *deferral #12* (the fuzz harness) closed, a
+shipped per-frame leak in `crab_overlay` fixed, dhancha bumped to 0.9.24 and chitra to 1.0.1.
 
-**Start here, in this order:**
+⛔ **What remains in M5 is gated on dhancha, and the gate is real** — `dh_grid_new`,
+`dh_columns_new`, `dh_tree_new` and a menu BAR are all absent from `dist/dhancha.cyr`
+(re-derived 2026-08-31).
 
-1. ⛔⛔ **BURN ON IRON. This is the oldest and largest untested stretch in the project's history, and
-   it just got larger.** The last iron run was **2026-08-30 against the 0.7.0 tree**. Everything
-   since — the whole write layer, the tray, recursion, the menu, the edit field, the record refactor,
-   the preview and now a decoder that **more than doubled the binary** — has run only on the host
-   and under QEMU. **Both defects crab has ever shipped were iron-only.**
-   ⚠ agnos moved 1.56.53 → 1.56.55 underneath, including a rewrite of `is_user_range`.
-   ⛔ **And the thumbnail path is the most iron-sensitive thing crab has ever shipped**: it is the
-   first code whose failure mode is *memory exhaustion over time* rather than a wrong pixel, and
-   QEMU is explicitly not a control for pressure-dependent behaviour.
-2. ⚠ **Pin chitra 1.0.1 once it is pushed**, then re-run check 4. It is prepared locally: the
-   >16 MiB PNG refusal becomes cheap and correctly named (`CHITRA_ERR_INFLATE_LIMIT`), and its
-   sidecar drops three unused stdlib leaves. Nothing is blocked on it.
-3. ⭐ **Adopt dhancha 0.9.24's stable keys and delete three workarounds.** crab hand-rolls its own
-   press tracking, its own drag state and its own edit buffer because dhancha identified widgets by
-   pointer and crab's arena invalidates pointers every frame. 0.9.24 fixes that at the cause —
-   `dh_widget_set_key` + `dh_surface_set_root` re-binding — so `dh_dispatch`, drag-under-arena and
-   `dh_text_attach` are all now usable. ⚠ **crab uses none of it yet.** That is its own change.
-4. **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
-   agnos has no `AO_EXCL`. Filed; see *Known gaps*.
-5. Then the gated pair — grid/columns and the sidebar, both **dhancha**. Re-derived 2026-08-31:
-   `dh_grid_new`, `dh_columns_new`, `dh_tree_new` and a menu BAR are all genuinely absent.
-   ⭐ **These two gates are REAL**, unlike the three false ones this project has recorded.
+**Available now, in no particular order — sequencing is the operator's:**
+
+- ⭐ **Adopt dhancha 0.9.24's stable keys and delete three workarounds.** crab hand-rolls its own
+  press tracking, its own drag state and its own edit buffer because dhancha identified widgets by
+  pointer and crab's arena invalidates pointers every frame. 0.9.24 fixes that at the cause —
+  `dh_widget_set_key` + `dh_surface_set_root` re-binding — so `dh_dispatch`, drag-under-arena and
+  `dh_text_attach` are all usable now. ⚠ crab uses none of it yet.
+  ⛔ **Adopting `dh_dispatch` would relitigate the 2026-08-27 operator ruling** (*crab owns its
+  interaction state*). That ruling was made because of the pointer problem, which is now fixed — but
+  it is still a ruling, and reversing it is the operator's call, not a consequence of the fix.
+- **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
+  agnos has no `AO_EXCL`. Filed (⚠ at `0x2000`; the first filing proposed `0x400`, which is
+  `AO_APPEND`). See *Known gaps*.
+- ⭐ **The Grid view is UNGATED as of dhancha 0.9.25** — `GRID` is a real kind: wrapping layout,
+  cell selection, arrow keys that move by a whole row, keep-visible, hit-testing from the laid-out
+  cells. crab's half is unbuilt: a view-mode switch, cells from the readdir records, and a decision
+  about thumbnails in cells.
+  ⛔ **That last one is a budget question before it is a layout one.** A gallery of 40 images at
+  256x256 is ~28 MB of permanent decode spend against a 32 MB session ceiling. An icon grid costs
+  nothing; a thumbnail gallery would exhaust the budget on one directory.
+  ⚠ crab must wait for 0.9.25 to be pushed before bumping its tag (the phantom-tag rule).
+- **Still gated on dhancha** — Columns (miller) and the sidebar TREE, plus the menu BAR for M6.
+  Re-derived 2026-08-31: `dh_columns_new`, `dh_tree_new` and a menu BAR are all absent from
+  `dist/dhancha.cyr`. ⭐ **Those gates are REAL**, unlike the three false ones on record.
+
+### What is verified, and what is not
+
+Stated as fact, not as a priority. ⚠ The last on-target run was **2026-08-30, against the 0.7.0
+tree**. Everything since — the write layer, the tray, recursion, the menu, the edit field, the
+render-state record, the preview, thumbnails and EXIF — has run on the host and under QEMU only.
+Every `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction. agnos has
+moved 1.56.53 → 1.56.55 underneath.
 
 ⛔ **Before believing any gate, re-derive it.** Three false gates on record: M4's *"Gate: agnos write
 syscalls"* (real since agnos 1.41.3), drag's *"gated on nothing"* (it was gated, elsewhere), and

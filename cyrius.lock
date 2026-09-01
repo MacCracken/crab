@@ -1,6 +1,6 @@
 commit	dd2905d7101663202a60e9fb7bb623180e3f673e	sadish	https://github.com/MacCracken/sadish.git	0.5.3
 commit	f003d1f2119c0aef8c30673d66836084490f5734	rekha	https://github.com/MacCracken/rekha.git	0.3.5
-commit	dcfcd0ae304b015a16c8edb9d156b8d29d58e539	chitra	https://github.com/MacCracken/chitra.git	1.0.0
+commit	b777d34e8ef229597194b5a0c7146fcd91466de5	chitra	https://github.com/MacCracken/chitra.git	1.0.1
 7240760b1260fa06c53c5a139d1a2086fb439e21ac90e53eacd4bf486ac0e9ca  lib/tagged.cyr
 5978751906616997dc497d5ffaa5171c92611c5cb6f6466ada2c6c1dd0b83c79  lib/net.cyr
 1caa14a837ca3429be0e477b048afca7a538280f91651c6be4f15beece166781  lib/syscalls_macos.cyr
@@ -43,9 +43,9 @@ fc52848a9c536cbda8ea205fb3f92065e89734d6e09d0bffa986382c37e4faf7  lib/setu.cyr
 9fd6444e8cfcf7950837e955473adc5bab6d7bf4fa2c15f8ce2578360c4100eb  lib/hashmap.cyr
 39ee5f438c5b693c8837eda3138a471aac8f0d10f8bdeb1aea2b737bf1f7937b  lib/fnptr.cyr
 5b5dd5a59b766d642d711e8c884780bfe3ba9efd2dcefb3c76230208556e8d54  lib/kashi_font_data.cyr
-e04e65407972e5878c90cf66870a4cecb238a408e24d9f1885776017f4ccf37e  lib/dhancha.cyr
+9ceb7d194c3db63c8d2f527a5120be5516d8827315779a3f11db079b2006dba8  lib/dhancha.cyr
 93aaa29cd8aebcd0a7b4de1b13541d7ebca6dfd5caf104c03fecdf19560d2910  lib/syscalls_windows.cyr
 a098b84c66fa51d4449c21a05ba6be06dd907f7bcc9c375843f4de0e160f5192  lib/syscalls_linux_common.cyr
 99f96283da419ad9f01d076269411c3d5214b6007a92d1bbe2356ab906a5d1a1  lib/args_macos.cyr
-71cb9144f4f76e95d99d0cc77f396fe080b486c17823964bb43ad2d1c1f3be9e  lib/chitra.cyr
+fc7c185d0e66a6759c246db85adea7ea3dd8107b1a37d8368283dcc732ff677a  lib/chitra.cyr
 f731aa0abf603a82ef966e8a1d260e11bd40d842953be5d5265cf86167fa380b  lib/result.cyr

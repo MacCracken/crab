@@ -1,19 +1,10 @@
-# Handoff — **M5's ungated items are all in — preview, thumbnails, EXIF. Burn on iron.**
+# Handoff — **M5's ungated items are all in: preview, thumbnails, EXIF.**
 
 > ⭐ **Updated 2026-08-31**, after M5's first slice and the chitra adoption. Everything below the
 > *What landed* table is kept from the 0.7.5 handoff because the reasoning is still the reasoning —
 > but **every number in it is 0.7.5's or older**. Re-derive before quoting.
 >
-> ⛔⛔ **THE HEADLINE: BURN ON IRON, AND IT MATTERS MORE NOW THAN IT DID THIS MORNING.** The last
-> iron run was **2026-08-30 against the 0.7.0 tree**. Everything since — the whole write layer, the
-> tray, recursion, the menu, the edit field, a render-signature refactor touching five sites in the
-> agnos-only event loop, the preview, and now **a decoder that more than doubled the binary** — has
-> run only on the host and under QEMU. **Both defects crab has ever shipped were iron-only.**
-> ⛔ **And the thumbnail path is the most iron-sensitive code crab has ever carried**: it is the
-> first whose failure mode is *memory exhaustion over time* rather than a wrong pixel, and QEMU is
-> explicitly not a control for pressure-dependent behaviour.
->
-> ⛔⛔ **THE SECOND HEADLINE: EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE +115 % BINARY
+> ⛔⛔ **THE HEADLINE: EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE +115 % BINARY
 > — IS THE LIVE CONSTRAINT.** chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op**
 > (`return 0;`), and cyrius's `alloc` is a bump allocator whose only reclaim rewinds the whole heap.
 > **Measured: ~2.5× the RGBA size per decode, never returned**, and a second decode of the same file
@@ -29,14 +20,19 @@
 > (+115 %). And the real constraint was in neither. ⇒ **A gate is a claim about another repository:
 > it can be wrong about existence AND about price, and neither is visible from the line.**
 
-## Cross-repo work done this session — three repos, and crab is last
+> ### What is verified, and what is not
+> Stated as fact, not as a recommendation. The last on-target run was **2026-08-30 against the 0.7.0
+> tree**; everything since has run on the host and under QEMU only, and every
+> `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction. agnos has moved
+> 1.56.53 → 1.56.55. ⚠ **Sequencing verification is the operator's call and is not this file's to
+> rank.**
 
-⚠ **Nothing is committed, tagged or pushed anywhere.**
+## Cross-repo work, and where each repo stands
 
 | repo | state |
 |---|---|
 | **dhancha 0.9.24** | ⭐ **RELEASED** (`53d2b04`, verified on the remote) and crab's tag moved to it. Stable widget keys: dhancha identified widgets by *pointer*, which a per-frame arena invalidates — so focus, hover, press and drag were all unreachable from an immediate-mode app. Fixed at the cause. **Drag now works under a frame arena** (0.9.21 could only refuse it); `dh_text_attach` lets an app own the edit buffer. 16/16 suites, new `key_test` at 50 checks, six mutations. ⚠ **crab uses none of it yet** — adopting it deletes three hand-rolled workarounds and is its own change. |
-| **chitra 1.0.1** | 🟡 **PREPARED, NOT PUSHED.** A valid PNG past sankoch's 16 MiB inflate ceiling used to spend **26,617,512 bytes** to return a bare `CHITRA_ERR_INFLATE`; it now refuses from the header in **under 64 KiB** with its own `CHITRA_ERR_INFLATE_LIMIT`. Sidecar drops three unused stdlib leaves. 3,020 tests green, two mutations caught. ⛔ **crab still pins 1.0.0** — the phantom-tag rule. Nothing is blocked: crab's per-image budget already keeps it clear of that path. |
+| **chitra 1.0.1** | ⭐ **RELEASED** (`b777d34`, verified on the remote) and crab's tag moved to it. A valid PNG past sankoch's 16 MiB inflate ceiling used to spend **26,617,512 bytes** to return a bare `CHITRA_ERR_INFLATE`; it now refuses from the header in **under 64 KiB** with its own `CHITRA_ERR_INFLATE_LIMIT`. Its sidecar drops three unused stdlib leaves — **-4,176 B** in crab. 3,020 tests green, two mutations caught. ⚠ Changes no crab behaviour: the per-image budget already kept crab clear of that cliff. |
 | **sankoch** | Issue filed: `DECOMPRESS_MAX_OUTPUT` is an absolute 16 MiB with **no caller override**, and the streaming API enforces it identically — so no entry point can inflate a ~5.6 MP RGB PNG. Only sankoch can change that. |
 | **agnos** | Issue filed: `open`#7 has no `AO_EXCL`, so crab's overwrite guard exists on the host only. agnos's own `syscall.cyr:1138` already says so; crab is a second consumer. |
 | **cyrius** | ⚠ **An issue I filed earlier this session was WITHDRAWN** — I claimed `cyrius distlib` copies `[deps].stdlib` into the sidecar. It does not; it derives it from `src/lib.cyr`'s includes, which is sound. The symptom was real, the cause I named was not. Corrected in chitra's own issue. |
