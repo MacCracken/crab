@@ -616,32 +616,21 @@ fn crab_sidebar(parent, places, n): i64 {
 # arithmetic — so a click on "PLACES" is a refusal, not a place that happens to be out of range.
 fn crab_sidebar_hit(x, y): i64 {
     if (crab_sblst == 0) { return 0 - 1; }
-    if (crab_root == 0) { return 0 - 1; }
-    var w = dh_hit_test(crab_root, x, y);
-    if (w == 0) { return 0 - 1; }
-    var node = w;
-    var child = 0;
-    var found = 0;
-    while (node != 0) {
-        if (node == crab_sblst) { found = 1; node = 0; }
-        else {
-            child = node;
-            node = dh_widget_parent(node);
-        }
-    }
-    if (found == 0) { return 0 - 1; }
-    if (child == 0) { return 0 - 1; }
-    var i = 0;
-    var r = dh_widget_first_child(crab_sblst);
-    while (r != 0) {
-        if (r == child) {
-            if (i == 0) { return 0 - 1; }      # the inert PLACES header
-            return i - 1;
-        }
-        i = i + 1;
-        r = dh_widget_next_sibling(r);
-    }
-    return 0 - 1;
+    # ⭐ `dh_list_index_at` DOES THIS, so crab does not. It was a hand-rolled walk — hit-test the
+    # root, climb to the sidebar remembering the child, then scan the child chain for its index —
+    # and every part of that already lives in the toolkit, better: it checks the point is inside the
+    # LIST *and* inside the ROW (a row scrolled half out of the viewport is still at its real
+    # coordinates, so testing the row alone leaves its hidden half clickable), and it refuses an
+    # INERT row outright rather than returning the neighbour.
+    # ⛔ THAT REFUSAL IS crab's PLACES HEADER, FOR FREE. The header is row 0 and inert, so
+    # `dh_list_index_at` answers -1 for it without crab special-casing index 0 — which is the same
+    # off-by-one that made the context menu highlight the wrong verb when it was hand-counted.
+    var row = dh_list_index_at(crab_sblst, x, y);
+    if (row <= 0) { return 0 - 1; }        # -1 = outside or inert; 0 = the PLACES header
+    # ⚠ ROW 0 IS THE SECTION HEADER, so a place at model index `i` is LIST row `i + 1`. This single
+    # subtraction is the whole translation, and it is why this returns a PLACE index and never a
+    # pane index — see the ⛔⛔ at the top of this section.
+    return row - 1;
 }
 
 # =================================================================================================

@@ -63,6 +63,17 @@ shape of the leak that shipped in 0.7.5.
 Also covered: the fit rule at its floor and one pixel under, both panes selecting their own cell,
 **no** strip in two-pane mode, and the text-prefix fallback still working when the window is narrow.
 
+### Changed — `crab_sidebar_hit` is the toolkit's walk, not crab's
+
+It hand-rolled the whole thing: hit-test the root, climb to the sidebar remembering the child, scan
+the child chain for its index, special-case index 0 as the inert header. **`dh_list_index_at` does
+all of it**, and better — it checks the point is inside the LIST *and* inside the ROW (a row
+scrolled half out of the viewport is still at its real coordinates, so testing the row alone leaves
+its hidden half clickable), and it refuses an inert row outright rather than returning the
+neighbour. ⇒ crab's PLACES header is handled for free, without the hand-counted index-0 case that is
+the same off-by-one which made the context menu highlight the wrong verb. **26 lines out, 15 in**,
+behaviour identical — every sidebar assertion still passes unchanged.
+
 ### Fixed — ⛔⛔ THE CONTEXT MENU AND THE RENAME SHEET HAVE NEVER BEEN VISIBLE
 
 Both shipped in **0.7.5**. Neither has ever been drawn on screen. Measured at 760x260 with the menu
