@@ -111,7 +111,7 @@ fn main(): i64 {
     var line = dh_theme_line();
     var midl = (w - 6) / 4;                  # a column inside the left pane
     var midr = w - midl;                     # ...and inside the right one
-    # ⚠ THE SCAN LINES ARE READ FROM THE LAYOUT, NOT HARDCODED (*#32*). They used to be literals —
+    # ⚠ THE SCAN LINES ARE READ FROM THE LAYOUT, NOT HARDCODED. They used to be literals —
     # 67 and 41 — encoding "path header 28 px, then 26 px rows". Adding the NAME/SIZE/MODIFIED
     # column header moved every row down, and those literals would have quietly begun sampling the
     # header instead of the row they name. Reading the laid-out row keeps the assertion honest about

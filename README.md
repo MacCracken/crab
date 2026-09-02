@@ -156,7 +156,7 @@ happened rather than showing a blank square.
   two-pane model, which is a design question rather than a dependency; a PLACES sidebar is
   buildable today out of `LIST` + `DH_FLAG_INERT` + `PROGRESS`. The one genuine block left is
   sidebar **VOLUMES enumeration**: agnos `mount`/`umount` are no-op stubs, so crab cannot learn
-  what is mounted (*deferral #44*). ⚠ **Grid and gallery both SHIP** — see `g` above.
+  what is mounted. ⚠ **Grid and gallery both SHIP** — see `g` above.
   (Roadmap M5–M6.)
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.

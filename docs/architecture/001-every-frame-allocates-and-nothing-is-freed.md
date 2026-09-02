@@ -113,13 +113,13 @@ byte, which is the part the conclusion rested on.
 
 - ⭐ **The "do not add a continuously-repainting element" rule is LIFTED for the frame itself.** It
   stood for three releases and it was right: at 746,440 B a frame, 60 Hz was 45 MB/s into an
-  allocator with no `free()`. A rendered frame now costs zero. The idle mascot line (deferral #29),
+  allocator with no `free()`. A rendered frame now costs zero. The idle mascot line,
   a transfer tray (M4) and index progress (M7) are no longer blocked by *this*.
 - ✅ **And the other half of the loop closed the same week (dhancha 0.9.16).** `dh_setu_poll_event`
   called `setu_msg_new()` **before** it knew whether anything was pending — 80 B per idle poll, never
   reclaimed, ~4.8 KB/s at 60 Hz. The message is pure scratch, so it is now one hoisted buffer per
   process. ⇒ **crab's render/input loop allocates nothing in steady state**, and the repaint rule is
-  lifted outright rather than moved. *Deferral #09.*
+  lifted outright rather than moved.
   ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle.
 - ⚠ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`.** A single
   plain `alloc()` in `crab_render` reintroduces a per-frame leak, and the suite will say so:

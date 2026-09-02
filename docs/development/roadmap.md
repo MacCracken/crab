@@ -3,13 +3,15 @@
 > Milestone plan through v1.0. State lives in [`state.md`](state.md); this file is the
 > **sequencing** — what ships, in what order, against what dependency gates.
 >
-> ⭐ Starting a slot? [`handoff.md`](handoff.md) has the current state and the open items.
+> ⭐ Starting a slot? Read **[Release batches](#release-batches)**. `handoff.md` has the current
+> state; [`../../CHANGELOG.md`](../../CHANGELOG.md) has what already shipped and why.
 >
-> ⛔ **This file was the `cyrius init` scaffold template until 0.5.0** — `### M1 — _Title_ (v0.2.0)`
-> with the body `_Replace this with the first real milestone._` — while crab shipped fifteen
-> releases past it. Every deferral the codebase accumulated had nowhere to be sequenced, so they
-> lived as ⛔/⚠ prose scattered across `src/`, the CHANGELOG and `state.md`, and the only way to
-> find them was to read all of it. That is what this file now exists to prevent.
+> ⛔⛔ **A ROADMAP IS BATCHES OF WORK PINNED TO RELEASES. IT IS NOT A DEFECT LEDGER.** This file
+> carried numbered `#NN` deferral tables — rows for things already fixed, rows for things that were
+> never bugs, and a running "corrections to entries in this file" section. That is changelog
+> material wearing a roadmap's clothes, and it buries the one question the file exists to answer:
+> **what ships next.** Every open item now lives in the batch that will carry it, described by what
+> it IS rather than by a number. Fixed defects live in the CHANGELOG, release by release.
 
 ## The north star
 
@@ -118,23 +120,16 @@ each cut**; do not trust the headings.
 #### Still open from the shipped milestones
 
 These are the only parts of M1–M4 that are not done. They are here so collapsing those sections did
-not quietly lose them.
+not quietly lose them; each is carried in a batch above.
 
-- **Focusing a pane by its HEADER** (*deferral #05* residue). The header is a sibling of the list,
-  not inside it, so `crab_hit` resolves a header click to no pane. Clicking a *row* focuses correctly.
-- **The keycode confusion spans three repos and one number** (*deferral #07*). aethersafha forwards
+- **Focusing a pane by its HEADER.** The header is a sibling of the list, not inside it, so
+  `crab_hit` resolves a header click to no pane. Clicking a *row* focuses correctly.
+- **The keycode confusion spans three repos and one number.** aethersafha forwards
   `bhumi_key_usage(ev)` — an **HID usage** — while dhancha's `DhKey` constants are evdev. puka
   already pays the toll explicitly (`setuwin__hid_to_evdev` exists for exactly this). crab reads raw
   usages and is correct today *because* it never uses `dh_dispatch`; anything that starts to would
   inherit the mismatch. ⇒ **Fix it in one place or document it in three.**
-- ✅ **CLOSED — the idle poll's per-cycle buffer** (*deferral #09*). ⛔ **This was carried as OPEN
-  here and in the gate table, one of them stamped `verified: 2026-08-31`, while the fix had been in
-  the declared graph for nine releases.** `dh_setu_poll_event` was hoisted onto a per-process scratch
-  buffer in **dhancha 0.9.16** and consumed at crab **0.6.1** (`lib/dhancha.cyr:4314–4368`; the idle
-  path returns before any allocation). ⇒ **A stale OPEN is not harmless — #09 is the stated
-  precondition for the mascot line (*#29*) and any self-repainting element, so this entry was
-  blocking work that was already free.** Found by measurement, not by a gate; that absence is *#37*.
-- **The idle mascot line** (*deferral #29*) — unblocked since the allocation gate closed.
+- **The idle mascot line** — unblocked, and in the M6 batch.
 
 ### M5 — Views (v0.9.0) — **STARTED; the two ungated items are in**
 
@@ -208,7 +203,7 @@ not quietly lose them.
   pre-check (a refusal costs **16 bytes** against 26.6 MB unbudgeted) and a 32 MB session ceiling.
   ⚠ The budgets are the feature, not a rail bolted to it — and they are the first thing to delete
   when the allocator gains a `free()`.
-- **Proportional text** (*deferral #26*). crab passes `font = 0` (kashi CP437 bitmap) and calls no
+- **Proportional text.** crab passes `font = 0` (kashi CP437 bitmap) and calls no
   `rekha_*` function (`grep 'rekha_' src/ → 0`), while the README claims rekha TrueType and the
   canvas assumes Barlow + JetBrains Mono. ⛔ **Gate: rekha** + dhancha font plumbing.
   ⚠ It also invalidates crab's caret arithmetic: `dh_draw_widget_ink` positions the TEXTINPUT caret
@@ -230,7 +225,7 @@ not quietly lose them.
 - **Duplicate detection** — byte-identical grouping, `Keep newest`.
 - ⛔ **Declare the daimon dependency or stop promising the AI arc.** The package description, the
   `[deps]` comment and the README all commit to it; `cyrius.cyml` declares no daimon dep. daimon
-  2.1.0 exists locally with vector/RAG stores. *Deferral #18.*
+  2.1.0 exists locally with vector/RAG stores.
 
 ### M8 — Assisted search (v1.0.0)
 
@@ -261,7 +256,7 @@ not quietly lose them.
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra **1.0.1** is declared (⚠ *not* 1.0.0, as this row and ~10 other places said). ⚠ The cost figures below are from the **pre-grid/gallery tree** and no longer describe the binary: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | **rekha** + dhancha font plumbing; crab calls no `rekha_*` | 2026-08-31 |
 | Sidebar — PLACES | M6 | ⛔ **FALSE GATE (the fifth).** Not dhancha: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers, `PROGRESS` gives bars, padding gives indent. Buildable in crab today. | 2026-08-31 ⭐ re-derived |
-| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **TWO GATES, AND THE CAPACITY ONE IS NOW CLOSED.** *Capacity*: agnos shipped **`statfs`#103** in 1.56.56, all three backends answer it since **1.56.57**, and agnos's issue is archived. ⭐ **cyrius 6.5.37 shipped the stdlib peer, and crab VENDORS it as of the 0.7.7 pin bump to 6.5.41** — `lib/syscalls_x86_64_agnos.cyr` carries `SYS_STATFS = 103` and `fn sys_statfs(path, pathlen, buf)`; cyrius's issue is archived too. This row said *"filed 🟡 OPEN against cyrius"* and that is **no longer true**; there is nothing left to wait for and no raw-syscall interim needed. ⚠ Two crab-side facts remain: it is **agnos-only** (no host arm, so no host test can exercise it) and **no `STATFS_*` field offsets are vendored** — the frozen 32-byte record's layout has to come from agnos's docs. *Enumeration*: **still fully open** — `mount`#11 / `umount`#24 are documented no-op **stubs**, so crab cannot learn **what is mounted** (*deferral #44*). | 2026-09-02 ⭐ re-derived |
+| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **TWO GATES, AND THE CAPACITY ONE IS NOW CLOSED.** *Capacity*: agnos shipped **`statfs`#103** in 1.56.56, all three backends answer it since **1.56.57**, and agnos's issue is archived. ⭐ **cyrius 6.5.37 shipped the stdlib peer, and crab VENDORS it as of the 0.7.7 pin bump to 6.5.41** — `lib/syscalls_x86_64_agnos.cyr` carries `SYS_STATFS = 103` and `fn sys_statfs(path, pathlen, buf)`; cyrius's issue is archived too. This row said *"filed 🟡 OPEN against cyrius"* and that is **no longer true**; there is nothing left to wait for and no raw-syscall interim needed. ⚠ Two crab-side facts remain: it is **agnos-only** (no host arm, so no host test can exercise it) and **no `STATFS_*` field offsets are vendored** — the frozen 32-byte record's layout has to come from agnos's docs. *Enumeration*: **still fully open** — `mount`#11 / `umount`#24 are documented no-op **stubs**, so crab cannot learn **what is mounted**. | 2026-09-02 ⭐ re-derived |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ✅ **The wait is over**: 0.9.26 is pushed (`cb855c8`) and crab's manifest declares it as of 2026-09-01, verified by check four. ⚠ crab consumes none of it yet. | 2026-09-01 ⭐ resolvable |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
@@ -277,49 +272,110 @@ one that exists costs **+117 %** of the binary. That is a decision, and a decisi
 kind of thing as a gate. It has its own row in the table above so it stops being read as free.
 
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
-and **daimon 2.1.2 exists locally** with vector/RAG stores. *Deferral #18* has been open since the
-roadmap was written: **declare the dependency or stop promising the AI arc.**
+and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the dependency or stop promising the AI arc** — open since the roadmap was written.
 
-## Filed 2026-09-01 — the 0.7.6 verification sweep (*deferrals #40–#47*)
+## Release batches
 
-> ⛔ **Every row below was MEASURED against tag `0.7.6` (`26f38ed`) with the pinned toolchain**
-> (`cyrius 6.5.36`, self-reporting `manifest-pin: 6.5.36`), not read off a document. They are here
-> because the sweep that found them found them **outside the ledger** — which is the same absence
-> *#37* names: nothing gates a claim, so a defect with no number has nowhere to be sequenced.
+> **This is the sequencing.** Each batch is work pinned to a release; a batch is done when
+> everything in it ships. ⛔ **Version numbers are the operator's to DIRECT** — the milestone→version
+> mapping in this file has already been wrong twice, and M4 rode four patch numbers by ruling. The
+> headings say what a batch is FOR, not when it lands.
 >
-> ⚠ **The `pinned for` column is a PROPOSAL, not a schedule.** Version numbers are the operator's to
-> direct — the milestone→version mapping in this file has already been wrong twice, and M4 rode four
-> patch numbers by ruling. The column exists so no row is open-ended, not to commit a release date.
+> ⛔ **Fixed defects are not roadmap items.** What broke, what it cost and how it was proven live in
+> [`../../CHANGELOG.md`](../../CHANGELOG.md), release by release. What is left to DO lives here.
 
-| # | subject | pinned for |
-|---|---|---|
-| **#40** | ✅ **CLOSED (in `[Unreleased]`, before 0.7.7).** ⛔⛔ **`cyrius test` DOES NOT RUN `[build].test`, AND CI's COMMENT SAYS IT DOES.** *Proven by mutation, not inferred*: `src/test.cyr` rewritten to `return 1` in a scratch tree left `cyrius test` at **1138/0, exit 0**. [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) asserts the opposite — *"bare `cyrius test` picks up the `[build].test` entry AND auto-discovers `tests/*.tcyr`"*. Only `tests/crab.tcyr` is compiled and run. ⇒ This makes *#17* **worse than filed**: the file is not merely redundant, CI tells the next reader it is a live gate. `src/test.cyr`'s own comment is the accurate one. | **0.7.7** — doc + comment fix, no code |
-| **#41** | ✅ **CLOSED (in `[Unreleased]`, before 0.7.7)** — it prints `fuzz: rounds 100000`. ⛔ **The fuzz harness could not contradict a stale claim about itself.** `cyrius fuzz` prints `fuzz: ok` and **no round count**. Docs say **60,000** in six places; the harness drives **100,000** — five `while (round < FZ_ROUNDS)` loops at [`tests/crab.fcyr`](../../tests/crab.fcyr) 176/191/230/292/349 at `FZ_ROUNDS = 20000`, with no break. Two loops were added mid-cut (EXIF, batch-rename) and no output could say so. ⇒ **Exactly the failure `render_test` was fixed for at 0.7.6** — it now prints its 53 checks. Make the fuzzer print its rounds. | **0.7.7** — one print + doc sweep |
-| **#42** | ⚠ **The deferral ledger is short by five.** [`CHANGELOG.md`](../../CHANGELOG.md) records *"**39 deferrals** were harvested"*; exactly **34** numbers are ever cited in any blob of any commit reachable from `--all` (#01–#07, #09–#21, #23–#26, #28, #29, #32–#39). **#08, #22, #27, #30, #31 have no anchor anywhere in history** — they were assigned at the harvest and never transcribed, so no subject can be recovered. ⇒ Correct the count to 34 and say the five were never written down. Nothing is lost by admitting it; a reader hunting five phantom items loses an afternoon. ⛔ **New numbers start at #40, not in the gaps** — reusing a harvested number would make the ledger lie twice. | **0.7.7** — CHANGELOG correction |
-| **#43** | ⛔⛔ **A `path` DEP GETS NO `cyrius.lock` COMMIT PIN, SO A DECLARED-TAG/VENDORED-RECORD DIVERGENCE IS INVISIBLE TO EVERY GATE EXCEPT CHECK FOUR.** **This shipped**: tag `0.7.6` committed a `lib/dhancha.cyr` byte-identical to dhancha **0.9.26**'s `dist/` while `cyrius.cyml` declared **0.9.25**. Not the 0.4.13 phantom-tag failure — 0.9.25 was real and the declared graph built green — but the record and the declaration disagreed *in a released artifact*, and the lock could not catch it because four of seven deps carry `path` and get no `commit` line (lock reads **3 commit-pinned**; disabling the overrides takes it to **7**, which is the tell). ⇒ Closed for dhancha by the 0.9.26 bump; the **class** is what needs the gate, and that gate is *#19*. | **0.8.0** — with *#19*'s automation |
-| **#44** | ⚠ **crab cannot learn what is MOUNTED, and that half of the VOLUMES gate is unfiled.** agnos `mount`**#11** / `umount`#24 are documented **no-op stubs** and the mount table is not reachable from ring 3. ⛔ **THIS ROW SAID `mount`#23 AND THAT IS WRONG — #23 IS `timerfd_settime`.** crab's own vendored header settles it: `lib/syscalls_x86_64_agnos.cyr` has `SYS_MOUNT = 11`, `SYS_TIMERFD_SETTIME = 23`, `SYS_UMOUNT = 24`. Filing the enumeration half against agnos while citing the wrong syscall would have cost the reader of that issue an afternoon. The *capacity* half is now **CLOSED** (see the gate table) — so the sidebar can draw a bar for a path it is *told* about, but still cannot enumerate volumes. ⇒ File the enumeration half against agnos, citing **#11**. | **M6** — gate-bound, not date-bound |
-| **#45** | ⛔ **crab's OWN 9 px monospace assumption is load-bearing, and the roadmap names only dhancha's caret.** [`src/ui.cyr:175`](../../src/ui.cyr) `CRAB_COL_CHARW = 9` feeds `crab_col_chars` (ui.cyr:257–260, `px / CRAB_COL_CHARW`), which decides how many characters a NAME column holds — which drives the **`~` truncation rule** that exists so two different files never render as one identical row (the 0.5.0 fix). Under a proportional face `px / 9` over-reports for wide glyphs and **the truncation marker stops being honest**. That is correctness, not cosmetics, and the column-set ladder (`CRAB_COL_NAME_MIN = 90` = "10 chars", `crab_cols_for_width`) rests on the same constant. ⇒ Add it to the proportional-text gate; it is crab-side work no upstream release delivers. | with **proportional text** (gated) |
-| **#46** | ⚠ **`cyrius lint` exits 0 no matter what it finds — but `cyrius lint --strict` exits 2, so a gate DOES exist.** The headline here was half wrong: the tool can gate, crab just is not using it. Re-measured 2026-09-02 at the 6.5.41 pin: **12 untracked deferrals** and **85 warnings** — of which **83 are `line exceeds 120 characters`** (`src/main.cyr` 14, `tests/crab.tcyr` 58, `tests/crab.fcyr` 11) and **2 are consecutive-blank-line** hits in `crab.tcyr`. ⚠ *The count matched 0.7.6's 85 exactly, but the label did not — correct the noun, not the number; rewriting this to "83" silently drops two real warnings.* ⇒ Still two items: adopt-or-delete the 12 (⚠ all 12 are keyword matches on already-tracked work — "deferred" ×10 describing the *#03* stat sweep, "not yet" ×1, "SCAFFOLD" ×1 — so **deleting them is the honest resolution**, not filing them), and decide whether `--strict` becomes a gate. That means reformatting 83 lines, most in `main.cyr`'s event loop, and is its own change. | **0.7.7** — re-measured; `--strict` deferred |
-| **#47** | ⚠ **The held-key repeat rate was never given a number.** [`CHANGELOG.md`](../../CHANGELOG.md) `[0.6.1]` records an observed **~1 repeat per 1.6 s hold against ~20 expected**, filed as a *hypothesis* (frame cost) rather than a deferral, so it has sat outside the ledger for five releases. ⚠ It is agnos-runtime behaviour: no host test can see it, which ties it to *#16*. | **M6** — with *#16*'s harness |
+### 0.7.8 — the cheap unblocked ones
 
-## Filed 2026-09-02 — the 0.7.7 cut (*deferrals #48–#51*)
+Nothing in this batch is gated on another repo, and none of it is large.
 
-> ⛔ Measured at the **6.5.41** pin against the 0.7.7 working tree, not read off a document.
-> ⚠ Numbers continue from **#48**; the gaps #08/#22/#27/#30/#31 stay empty forever (*#42*).
+- **Drop the redundant `net` stdlib declaration.** setu removed TCP at 0.8.4 and crab has pinned past
+  it since 0.4.5. Removal measured clean: `cyrius deps` re-creates the leaf from setu's sidecar and
+  the build is byte-for-byte the same size. ⚠ The leaf lands at a different concatenation offset, so
+  ~165 KB of the binary *differs* at the same size — record it as "same size, same tests, different
+  layout" or the next reader thinks something broke.
+- **Give the stat trace an arm that works where it is needed.** On agnos the compositor spawns crab,
+  so `CRAB_STAT_TRACE=1` set in a shell never reaches it.
+- **Write `docs/benchmarks.md` from the bench harness.** A v1.0 criterion, and the harness half is
+  already done — it measures the sort at 1024, at 256 and at the real iron 122. Nothing writes the
+  document. ⚠ Record the machine, `cycc --version` and the run-to-run spread; merge/256 was seen
+  swinging 87.4 → 92.4 µs a minute apart, and a single number becomes the next stale claim.
+- **Populate `docs/examples/`.** Declared, empty, and a v1.0 criterion.
+- **Close or formally park the `--win` failure.** `sys_socket` / `sys_connect` are absent from the
+  Windows syscall table and nothing in crab causes it; Windows is not a declared target. Park it in
+  writing or stop listing it as a target.
 
-| # | subject | pinned for |
-|---|---|---|
-| **#48** | ⛔⛔ **`cyrius fmt --check` AND `cyrius lint` SILENTLY PROCESS ONLY THEIR FIRST FILE ARGUMENT.** Measured by planting a deliberately misformatted file: passed **first**, `fmt --check` exits 1 and names it; passed **last**, it exits **0 and prints nothing**. `lint` behaves identically. ⇒ The obvious CI step `cyrius fmt --check src/*.cyr` gates **one file of nine** and reports success — a gate that is worse than none, because it looks like coverage. crab's `ci.yml` works around it with a per-file loop and says why at the step. ⚠ **This is upstream behaviour, and no issue has been filed** — cyrius is not crab's to change. ⇒ Raise it with the operator before filing anything against cyrius. | **operator** — upstream, needs approval to file |
-| **#49** | ⛔ **A crab RELEASE PUBLISHES AN x86_64-LINUX BINARY FOR AN AGNOS APPLICATION.** `release.yml` builds only the host target, folds `build/crab` into `SHA256SUMS`, and attaches it — so the artifact a consumer downloads and checksum-verifies cannot run on the platform crab is written for. ⚠ **Not the *#15* blind spot any more**: the `ci` job is a `needs:` dependency and now builds `--agnos`, so the shipping target must compile before a tag publishes. What is open is the **asset**, not the gate. ⇒ Options: attach both under explicit names, attach only the agnos one, or attach neither and let the source tarball be the release (which is what `cyrius deps` actually consumes). Recorded in `release.yml` at the step. | **operator** — a distribution decision |
-| **#50** | ⚠ **`cyrius lib sync` WALKS ONLY THE DECLARED `[deps].stdlib` SET, SO TRANSITIVE LEAVES GO STALE ACROSS A TOOLCHAIN BUMP.** At the 6.5.36 → 6.5.41 bump the sync copied **29** files and left **three** behind — `lib/thread_agnos.cyr`, `lib/thread_local.cyr`, `lib/thread_macos.cyr` — all transitive, none named by any declaration. They were copied by hand and the whole vendored tree then verified byte-identical to the 6.5.41 snapshot. ⛔ **`lib/atomic.cyr` escaped only by luck**: it is byte-identical between 6.5.36 and 6.5.41, so *#20*'s standing warning did not bite this time. It will. ⇒ This is *#20* with evidence and a wider blast radius: **after every bump, diff the WHOLE vendored tree against the snapshot**, not just the declared subset. | **0.8.0** — with *#19*'s automation |
-| **#51** | ⚠ **A toolchain bump can ADD a vendored leaf, and nothing tells you.** 6.5.41 pulled in **`lib/hashseed.cyr`** (a per-process hash seed + finalizer against hash-flooding, introduced in 6.5.39 and included by `hashmap` / `hashmap_fast`). It arrived **untracked** — `cyrius.lock` grew from 48 entries to 49 and the file appeared as `??` in `git status`. A bump that adds a leaf and is committed without it leaves a tree that resolves locally and fails a clean checkout. ⇒ After a pin bump, reconcile `git status lib/` **and** the lock's entry count, not just the modified files. | **0.8.0** — with *#19*'s automation |
+### 0.8.0 — make the gates automatic
 
-### ⛔ Corrections to entries already in this file, made in the same sweep
+⛔ **The theme is that nothing currently gates a CLAIM.** Every failure in this batch was found by a
+human reading carefully, which is not a process.
 
-- ✅ **APPLIED — the `dh_grid_new` gate line is gone from M5's first bullet.** It read *"Gate: dhancha GRID / COLUMNS widgets — verified absent"* while `dh_grid_new` was vendored and called live from `src/ui.cyr`, and while the same section said GRID had shipped four bullets later — the file contradicted itself in place. The bullet now states that no dhancha gate survives on the line. ⚠ Kept here as the record; there is nothing left to fix.
-- ⛔⛔ **`path` no longer masks a stale pin — the manifest declares dhancha `0.9.26`** (bumped 2026-09-01). Check four re-run with all four `path` lines disabled: **7 deps / 0 errors**, lock **3 → 7 commit-pinned**, both targets build, **1138 / 0**, `render_test` **53 / 0**, and — the clause that had gone dead — the declared-graph binaries are **byte-identical** to the path-resolved ones (host `1,019,784` / `d7bd8125…`, agnos `1,047,624` / `93f5c139…`). ⇒ The menu bar's *"crab must wait for 0.9.26 to be pushed"* clause is **retired**; `dh_list_new_h` is resolvable from the declared graph today. crab still consumes none of it.
-- **chitra is pinned `1.0.1`, not `1.0.0`** — asserted as 1.0.0 in ~11 live places across this file, the CHANGELOG and `src/`. The manifest, the lock (`b777d34e8ef2`) and `sha256(lib/chitra.cyr)` all agree on 1.0.1. ⚠ The thumbnail row's `+537,112 B / +115.2 %` figures are from the **pre-grid/gallery tree** and no longer describe the binary.
-- ✅ **SUPERSEDED at 0.7.7 — the VOLUMES capacity gate is CLOSED.** This bullet said the missing piece was cyrius's `sys_statfs` peer, *"filed 🟡 OPEN against cyrius, affecting the `6.5.36` pin"*. **cyrius 6.5.37 shipped it and its issue is archived**; the 0.7.7 pin bump to 6.5.41 vendors it into crab. No raw-syscall interim is needed. Enumeration (*#44*) is the half that remains. ⇒ **A gate written as OPEN outlived the fix by four cyrius releases** — the same failure as *#09*, which was carried OPEN for nine.
+- **Automate the `path`-wins-over-`tag` re-verification.** 0.4.13 shipped a manifest naming a library
+  the build never compiled, and only a full resolve with the overrides disabled would have caught it.
+  ⛔ A `path` dep gets no `cyrius.lock` commit pin, so a declared-tag/vendored-record divergence is
+  invisible to every other gate — that shipped in 0.7.6, with `lib/dhancha.cyr` byte-identical to
+  0.9.26's `dist/` while the manifest said 0.9.25. The tell is the commit-pinned count: 3 with the
+  overrides on, 7 with them off.
+- **Make the toolchain sync walk the whole vendored tree.** `cyrius lib sync` walks only the declared
+  `[deps].stdlib` set, so transitive leaves go stale across a bump and nothing says so. At the 6.5.41
+  bump it left three `thread_*` leaves behind; `lib/atomic.cyr` escaped only because it happens to be
+  byte-identical between the two versions. A bump can also ADD a leaf — 6.5.41 brought
+  `lib/hashseed.cyr` in untracked and grew the lock from 48 entries to 49. ⇒ Diff the whole tree
+  against the snapshot, and reconcile `git status lib/` **and** the lock count.
+- **Enforce `state.md` currency.** It has rotted three times, once across eleven releases, and the
+  file itself diagnoses why: nothing gates it. The same absence let `handoff.md` carry a table that
+  was six rows wrong and `README.md` § Status be wrong in both directions.
+- **Decide whether `cyrius lint --strict` becomes a gate.** It works (exit 2). The price is
+  reformatting **83** over-long lines — 14 in `src/main.cyr`, 58 in `tests/crab.tcyr`, 11 in
+  `tests/crab.fcyr` — most of them in the event loop, the widest mechanical edit in the most
+  sensitive file. ⛔ Its own change, with the suite run before and after; never a rider on another.
+- **Correct the CHANGELOG's deferral count.** `[0.5.0]` records *"39 deferrals were harvested"*;
+  34 numbers were ever written down. Five were assigned and never transcribed, and no subject can be
+  recovered — say so, rather than leaving a reader hunting them.
+
+### M6 — sidebar, volumes, density (see the milestone above for scope)
+
+- **Sidebar, PLACES section.** Buildable today — no dhancha gate. Four traps are recorded in
+  `docs/development/handoff.md`; the load-bearing one is that `crab_hit` returns a 0/1 pane index
+  that reaches the write layer, so a sidebar must get its own hit function or a drop onto it moves a
+  real file.
+- **The A/B view switcher, then the menu bar**, both on `dh_list_new_h`. The switcher is the smaller
+  of the two and `active_pane` already *is* the selected index.
+- **The 🦀 mascot line.** `docs/development/mascot.md` asks for one quiet home, the status bar:
+  long idle → `Bueller…` · pause · `Bueller…` · pause · `Bueller…?`, plus `crab --about` closing on
+  `…anyone? …anyone?`. ⚠ **There is no unconditional per-tick redraw to ride** — every idle-path
+  `crab_render` fires only on change, deliberately, so this needs its own branch and an `idle_since`
+  reset on every handled event. Gate it on there being no notice: the status line is single-slot,
+  and a mascot must never displace `delete this FOLDER and everything in it? y = yes`.
+  ⛔ Discipline, from the mascot doc: **subtle and infrequent.** "The whole thing dies if it's
+  trying too hard."
+- **Focusing a pane by its HEADER.** The header is a sibling of the list, not inside it, so
+  `crab_hit` resolves a header click to no pane. Clicking a row is correct.
+- **Give the held-key repeat rate a number.** `[0.6.1]` records an observed ~1 repeat per 1.6 s hold
+  against ~20 expected, filed as a hypothesis and never measured. It is agnos-runtime behaviour, so
+  it needs the on-target harness below.
+- **Bring the agnos/iron harness into this repo.** Both real defects crab has ever shipped were
+  agnos-runtime behaviour no host test can see.
+- **Sidebar VOLUMES** — gate-bound, not date-bound. Capacity is unblocked; enumeration is not.
+
+### Gate-bound — no release until the gate moves
+
+- **Proportional text**, and with it crab's own 9 px monospace assumption. `CRAB_COL_CHARW = 9`
+  feeds `crab_col_chars`, which decides how many characters a NAME column holds, which drives the
+  `~` truncation rule that exists so two different files never render as one identical row. Under a
+  proportional face `px / 9` over-reports and **the truncation marker stops being honest** — that is
+  correctness, not cosmetics. Five more constants encode character counts computed at 9 px and feed
+  the column-set ladder; those pick the wrong *layout* rather than failing honestly.
+  ⛔ See the gate table for what is actually missing, which is **not** what this file said for months.
+- **Columns / miller view** — gated on crab's own two-pane model, which is a design question and
+  crab's to answer. The cheapest option that does not relitigate M4's source/destination pairing is
+  columns as a fourth view mode *inside one pane*.
+- **The keycode confusion spans three repos and one number.** aethersafha forwards an **HID usage**
+  while dhancha's `DhKey` constants are **evdev**. crab is correct today *because* it never uses
+  `dh_dispatch`; anything that starts to inherits the mismatch. ⇒ Fix it in one place or document it
+  in three.
+- **The AI arc** — M7 and M8 in full. ⛔ **Declare the daimon dependency or stop promising it.**
+  Three milestones name it and `cyrius.cyml` declares it nowhere. daimon exists locally and has a
+  `dist/`, so this is a crab-side decision about the transitive fold, not an upstream gate.
 
 ## Cross-cutting (not a milestone — do these continuously)
 
@@ -357,121 +413,48 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
 - ⚠ **A milestone closing with gated items is the normal shape here.** M2 shipped 5 of 7, M3 shipped
   4 of 7. Calling that "done" is a lie and calling it "not shipped" is another.
 
-### Testing and CI — the gate is thinner than it looks
+### Testing and CI — what the gate does, and what it still cannot see
 
-> ⭐⭐ **THE GATE STOPPED BEING THIN AT 0.7.7.** `.github/workflows/ci.yml` was rewritten and now
-> runs, in order: `deps` + `deps --verify` · host build · **`--agnos` build** · `cyrius test` ·
-> **`render_test`** · `fuzz` · a per-file `fmt --check` loop · `coverage --min 85` · `vet` + `deny`.
-> `release.yml` gates on that workflow via `uses:`, so a tag inherits every one of them.
-> ⇒ **#14, #15 and #36 are CLOSED.** The three bullets below are kept as the RECORD of what was
-> wrong and what it cost — they are history now, not open items. Everything after them is still live.
+⭐ **CI runs nine steps** — `deps` + `deps --verify`, host build, **`--agnos` build**, `cyrius test`,
+**`render_test`**, `fuzz`, a per-file `fmt --check` loop, `coverage --min 85`, and `vet` + `deny`.
+`release.yml` gates on that workflow, so a tag inherits all of it. What it deliberately omits, and
+why, is recorded in `ci.yml` itself.
 
-- ✅ **CLOSED at 0.7.7 — `src/render_test.cyr` runs in CI**, as its own step, with its exit code
-  (the failed-check count) as the assertion. *Deferral #14.* ⚠ **53** checks now, not the 35 this
-  line claimed nor the 26 before that — re-derive it, do not quote it.
-  ⛔⛔ **WHY IT MATTERED, KEPT:** of seven mutations planted against the render-state record and the
-  preview column, **four were caught ONLY by `render_test`** — the suite CI ran was green for all
-  four. A refactor swapping the two pane blocks, or a preview column painted over panes that never
-  gave up their width, **shipped through CI green** for as long as this was open.
-  ⚠ Still true, and why the step is explicit rather than discovered: `cyrius test` does not find it,
-  and `[build].test` is inert (*#17*).
-- ✅ **CLOSED at 0.7.7 — CI builds `--agnos`**, the target `state.md` calls "the real target".
-  *Deferral #15.* ⛔ The flag is `--agnos`: `CYRIUS_TARGET=agnos` is **silently ignored** and yields a
-  byte-identical host binary at exit 0, so a step written that way would be the host build twice.
-  ⛔⛔ **WHY IT MATTERED, KEPT:** on 2026-08-27, with `path` disabled and a fresh resolve against the
-  DECLARED graph (dhancha 0.9.17, which predates `POINTER_SCROLL`): **host PASS · `--agnos` FAIL —
-  `undefined variable 'POINTER_SCROLL'`.** A commit in that state went green through CI and could not
-  build the thing that ships.
-- ✅ **CLOSED at 0.7.7 — `fuzz`, `fmt --check`, `coverage`, `vet` and `deny` all run in CI.**
-  *Deferral #36.* ⛔ **`fmt --check` and `lint` process only their FIRST file argument** (measured:
-  a misformatted file passed first exits 1, passed last exits 0 silently) — so the step is a LOOP,
-  one invocation per file, and `cyrius fmt --check src/*.cyr` would have gated one file of nine.
-  ⚠ **Three are deliberately still out**, and the reasons are recorded in `ci.yml` itself: `bench`
-  (a timing on a shared runner is noise, and a step that cannot fail is not a gate), plain `lint`
-  (exits 0 whatever it finds, so it *cannot* gate) and `audit` (bundles lint, so it exits 1 on the
-  same warnings). `lint --strict` **would** gate, at the price of reformatting 83 over-long lines —
-  see *#46*.
-- ✅ **CLOSED — the fuzz harness reads its input.** *Deferral #12.* **100,000** deterministic
-  rounds over mutated format headers, random bytes, degenerate and negative lengths, and arbitrary
-  bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len`. It asserts an invariant, not just
-  the absence of a crash, and it caught a real segfault in `crab_img_dims` the day it was written.
-  ⛔⛔ **ITS OWN FIRST DRAFT WAS VACUOUS, AND ONLY A PLANTED BUG SAID SO.** An LCG's low bits have
-  period 2^k, so the format selector returned **only two of four values across 20,000 rounds** — PNG
-  and JPEG were never seeded and the JPEG walk ran **zero** times while it printed `fuzz: ok`.
-  ⇒ **Plant a known bug in a new fuzzer and watch it fail before believing its green.**
-  ⚠ Still uncovered: `crab_readdir_into` (agnos-only), the write layer's joins, `crab_batch_name`.
-- ⚠ **The bench harness no longer times an empty function** — this line was stale from 0.7.0.
-  `tests/crab.bcyr` measures the sort: merge **88.6 µs** vs insertion **5.66 ms** at 256 scrambled,
-  and **38.3 µs** vs **1.28 ms** at the real iron 122. ⛔ **What is still missing is the half the
-  v1.0 criterion names**: nothing writes `docs/benchmarks.md` from it. *Deferral #13, half open.*
-- **Bring the agnos/iron harness into this repo** — both real defects crab shipped were agnos-runtime
-  behaviour no host test can see. *Deferral #16.*
-- ✅ **CLOSED 0.6.0 — nothing in `src/main.cyr` was reachable from a test.** `src/app.cyr` carries the
-  application layer now; `main.cyr` is `main()` and `_entry()` and nothing else. ⚠ The residual gap is
-  irreducible and is down to the event loop alone — and the one setup step that used to live in
-  `main()` (the frame arena) was **moved** into `crab_render` rather than tested around.
-- ⛔ **Three tests could not fail in their first draft, and only mutation testing said so** (0.6.0):
-  a residue check over trees that repainted every pixel; a convergence check whose arena was four
-  times larger than the frame it measured; and dhancha's grow test, which never grew. ⇒ **Assert that
-  the thing you are measuring can be observed to FAIL**, and size fixtures against the mechanism
-  rather than for comfort.
-- **Automate the `path`-wins-over-`tag` re-verification** — 0.4.13 shipped a manifest naming a
-  library the build never compiled. *Deferral #19.*
-- **Enforce `state.md` currency** — it has rotted twice, once across eleven releases, and the file
-  itself diagnoses why: nothing gates it. *Deferral #37.*
+The parts a green CI still does not prove:
+
+- ⛔⛔ **`src/main.cyr` IS COMPILED BY THE GATE AND EXECUTED BY NOTHING.** 1,221 of its 1,494 lines
+  are inside one `#ifdef CYRIUS_TARGET_AGNOS` with **no `#else`**, and nothing includes the file —
+  so the entire key-dispatch table is untested on *every* target, not merely unbuilt on one. Five of
+  the six defects 0.7.7 fixed lived there. ⇒ **A decision that lands in that region must be lifted
+  into a function the suite can reach**, the way `crab_transfer_plan`, `crab_menu_row`,
+  `crab_tray_h`, `crab_drag_targets` and `crab_two_panes_fit` were. The event loop keeps the wiring.
+- ⛔ **A gate that covers one state proves one state.** crab's zero-allocation assertion rendered
+  twenty frames with no overlay open, so a 32 B-per-frame leak in `crab_overlay` shipped for three
+  cuts with a green suite. Arms now exist for the menu, the sheet and the preview. **A new
+  render-path branch without an arm here is a new blind spot, not a covered feature.**
+- ⛔ **Prove a new test can FAIL before believing it.** Three tests could not fail in their first
+  draft and only mutation said so; the fuzz harness's own first draft was vacuous, seeding two of
+  four formats while printing `fuzz: ok`. Every 0.7.7 fix was mutation-proven for this reason — and
+  that run also exposed a defect in one of the new tests, whose cleanup assumed the code under test
+  had worked. **Size a fixture against the mechanism, not for comfort.**
+- ⚠ **An out-of-bounds read does not crash in this stack.** The allocator is a bump allocator over a
+  large mapped heap, so reading past a buffer returns garbage rather than faulting. A poison tail
+  catches overreads that reach the OUTPUT; guards whose bytes only reach control flow are caught by
+  nothing, and two EXIF guards sit in exactly that position. They are kept and labelled.
+- ⚠ **Still uncovered by the fuzzer**: `crab_readdir_into` (agnos-only), the write layer's path
+  joins, and `crab_batch_name`'s pattern expansion.
+- ⚠ **No host test can see the agnos event loop**, and both real defects crab has ever shipped were
+  agnos-runtime behaviour. The on-target harness is in the M6 batch.
 
 ### Documentation debt
 
-- ✅ **CLOSED 2026-08-26 — `CLAUDE.md`'s two `cyrius init` placeholders are gone.** The identity line
-  and the `## Goal` section now carry the operator's wording. *Deferral #23.*
-- ✅ **CLOSED 2026-08-26 — `README.md` § Status.** It had said **"Scaffold."** since before the
-  dual-pane GUI shipped in 0.2.0, and listed that GUI under *Planned scope*. It now states what works,
-  what does not (read-only, fixed 380×220, keyboard-only, no AI arc), and defers every volatile number
-  to `state.md`. *Deferral #24.* The retired `anu` codename (*#25*) and the rekha TrueType claim
-  (*#26*) are corrected in the same pass — crab passes `font = 0` and draws with kashi's CP437 bitmap.
-  ⚠ **A third over-claim was found while writing it and is also fixed**: the draft said the panes had
-  "size and modified columns". They do not — a row is one LABEL holding a 13-char name plus `/` or a
-  size, and the mtime appears only in the status line. Real columns are M3.
-- ✅ **CLOSED (unreleased) — `README.md` § Status, for the second time and in the opposite
-  direction.** *Deferral #24.* It had said **"Shipping, and read-only — no copy, move, rename,
-  delete or mkdir; Enter on a file does nothing"** and quoted a retired **256-entry cap** and a
-  **~280 ms** stat figure the cap bump had made ~1.1 s. Every one of those was true when written and
-  all were false by M4. It now states the write layer, the preview column, and what is genuinely
-  absent — including thumbnails, with the reason (**size, not capability**).
-  ⛔⛔ **THE SECTION HAS NOW BEEN WRONG IN BOTH DIRECTIONS AND THE CAUSE IS IDENTICAL BOTH TIMES**:
-  written once, correctly, and never re-read at a cut. The new text says so in its own body, so the
-  next reader is warned by the file itself rather than by this one. ⇒ **Re-read § Status at every
-  release.** Nothing gates it — the same absence that let `state.md` rot twice.
-
-- `docs/architecture/` and `docs/adr/` are empty indexes. The ⛔ invariants live only in comments,
-  which means they die with the line they annotate. *Deferral #28.*
-- `docs/examples/`, `docs/benchmarks.md`, `docs/audit/` — declared, absent, and two are v1.0
-  criteria. *Deferral #39.*
-
-### Small, cheap, unblocked
-
-- Drop the redundant `net` stdlib declaration — 0.4.15 measured the removal clean. *Deferral #21.*
-- Cover `lib/atomic.cyr` in the toolchain sync, or make the sync walk transitive leaves. *Deferral #20.*
-- Give the stat trace an arm that works where it is needed — on agnos the compositor spawns crab,
-  so `CRAB_STAT_TRACE=1` in a shell environment never reaches it. *Deferral #35.*
-- Resolve `[build].test` pointing at a file that must stay empty. *Deferral #17.*
-- Close or formally park the `--win` failure (`sys_socket`/`sys_connect` absent from the Windows
-  syscall table; nothing in crab causes it). *Deferral #38.*
-
-### 🦀 Bueller
-
-`docs/development/mascot.md` carries an explicit "Easter egg — implementation TODO", and the canvas
-puts it exactly where the mascot doc asks: **one quiet home, the status bar**. *Deferral #29.*
-
-- Long idle / empty pane → `Bueller…` · pause · `Bueller…` · pause · `Bueller…?` — needs M2's
-  self-redraw (an event-driven-only loop cannot animate).
-- `crab --about` closing on `…anyone? …anyone?` — M3's argv handling has landed (*#11*), so this is
-  now unblocked; crab parses positional paths only and has no flag surface yet.
-- ⚠ **The idle hook it needs now exists.** M4's transfer tray put a real per-tick redraw on the idle
-  path (`crab_op_step` → re-render), so the self-redraw this was waiting on is shipped — the mascot
-  line is a `crab_set_notice` on a long-idle counter, not new machinery.
-- ⚠ **Discipline, from the mascot doc: subtle and infrequent.** "The whole thing dies if it's trying
-  too hard." This is a constraint on the implementation, not colour commentary.
+- ⛔ **Re-read `README.md` § Status at every release.** It has been wrong in **both** directions —
+  "Scaffold." long after the GUI shipped, then "read-only" long after the write layer did — and the
+  cause was identical both times: written once, correctly, and never re-read at a cut. Nothing gates
+  it, which is the same absence that let `state.md` rot three times.
+- **Write ADRs for the ⛔ invariants that still live only in source comments.** A comment dies with
+  the line it annotates. The shortlist is *Rules that outlive their milestone*, above; three ADRs
+  exist so far.
 
 ---
 

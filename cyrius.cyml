@@ -1,68 +1,44 @@
 [package]
 name = "crab"
 version = "${file:VERSION}"
-description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack. PLANNED, NOT SHIPPED (roadmap M7-M8, and no daimon dependency is declared here yet - deferral #18): AI semantic find / auto-tag / dedup via daimon's vector store, files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
+description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack. PLANNED, NOT SHIPPED: AI semantic find / auto-tag / dedup via daimon's vector store, files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
 cyrius = "6.5.41"
 
 [build]
 entry = "src/main.cyr"
-test = "src/test.cyr"
+# ⚠ INERT. `cyrius test` auto-discovers `tests/*.tcyr` and never consults this key — proven by
+# pointing it at a file that exits 1 and watching `cyrius test` still return 0. It names where the
+# suite is; it does not run it. The real gates are `cyrius test` and `.github/workflows/ci.yml`.
+test = "tests"
 output = "crab"
 
 [deps]
-# The desktop stack (modeled on puka's setu client, minus mabda — on agnos the
-# present goes over setu's shared buffer, not a GPU ioctl blit). daimon's vector
-# store lands with the AI arc (semantic find / auto-tag / dedup).
-# net = setu's TCP client transport; result = net's return type.
-# ⛔ That TCP transport is RETIRED (2026-08-03) as the WRONG PRIMITIVE for local display IPC — not
-# because it failed: post-`net_src_for` (agnos 1.56.34) crab connected and presented un-rigged
-# (QEMU `-smp 1`, 2026-08-02). Replacement: the agnos **channel band** — syscall `#97 chan_op`,
-# `VFS_CHAN = 11`, kernel prefix `chan_*` (agnos `docs/development/planning/ipc.md` §9/§10).
-# ⛔ This comment said `anu` until 2026-08-26. THE CODENAME IS RETIRED — operator ruling 2026-08-05,
-# "a name is a distribution fact", and a band that only ever appears as a prefix inside one kernel has
-# no repo boundary to cross. Say `chan_*`; `anu` resolves to nothing in the kernel.
-# ⛔ And "`net` stays until setu moves off TCP" was FALSE from 2026-08-07: setu 0.8.4 removed TCP
-# (Linux is AF_UNIX/SOCK_SEQPACKET, agnos is the channel band), and crab has pinned past it since
-# 0.4.5. The declaration is now REDUNDANT rather than load-bearing — MEASURED 2026-08-26: with `net`
-# deleted from this list AND `lib/net.cyr` removed, `cyrius deps` re-creates the leaf (30,092 B) from
-# setu's `dist/setu.deps` sidecar and `cyrius build` is OK at the same 377,288 B. ⇒ Dropping it is a
-# real cleanup, not a risk — but it is a SEPARATE change and is not bundled into the 0.4.15 bump.
-# ⛔ `chrono` added 2026-08-07 — setu's agnos read path needs it, and crab was missing it while
-# building clean: `dist/setu.deps` under-reported 8 of setu's 12 leaves, which switched OFF
-# `cyrius deps`' own validation. setu 0.8.2 corrects its sidecar, so the check fires again and this
-# gap became a hard error. See setu docs/development/issues/2026-08-07-distlib-deps-sidecar-under-reports.md
+# ⚠ `chrono` is load-bearing: setu's agnos read path needs it, and `cyrius deps`' own validation
+# cannot catch its absence when a sidecar under-reports.
+# ⚠ `net` is REDUNDANT — setu dropped TCP at 0.8.4 and crab has pinned past it since 0.4.5.
+# Removal is measured clean; it is queued as its own change, not bundled. See the roadmap.
 stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "net", "chrono"]
 
-# sadish (2D vector) THEN rekha (text; references sd_*) THEN dhancha (widgets;
-# references both). setu is the client transport. dhancha's dist references
-# sd_*/rekha_* rather than bundling them, so crab deps them directly.
+# ⛔ ORDER MATTERS: sadish (2D vector) THEN rekha (text; references sd_*) THEN dhancha (widgets;
+# references both). dhancha's dist references sd_*/rekha_* rather than bundling them, so crab must
+# supply them directly.
+# ⛔ `path` WINS OVER `tag`, so a green local build is NOT evidence the declared graph resolves.
+# Re-verify with the overrides disabled at every cut — see `docs/development/state.md` § Hazards.
+
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
 tag = "0.5.3"
 modules = ["dist/sadish.cyr"]
 
-# rupa (रूप — form / appearance) — the shared desktop theme-token core. crab colours
-# its panes/rows/status with the active MUDRA / SHANTA theme via dhancha's dh_theme_*,
-# which reference rupa's tokens — so crab supplies rupa too.
-# ⚠ This line read "path=../rupa until tagged" until 2026-08-26. rupa HAS been tagged since 0.1.3;
-# the `tag` ten lines below is real and published. The `path` is kept for local iteration, not for
-# want of a tag.
+# rupa (रूप — form) — the shared desktop theme-token core. crab reads its tokens through dhancha's
+# `dh_theme_*` and names no colour of its own (ADR 0001).
+# ⛔ FLOOR >= 0.1.5, HARD: dhancha 0.9.20 binds `dh_theme_on_accent()` to `rupa_theme_on_accent`.
+# Against an older pin the toolkit references a function crab's own dep graph does not supply.
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
-# ⚠ `path` so a local rupa change can be built against before it is pushed — without it a burn
-# tests last week's tokens.
-# ⛔ This said "every other dep in this stack already carries both" — FALSE. **Four of six** carry
-# `path`: rupa, kashi, dhancha, setu. **sadish and rekha are tag-only** and always have been.
 path = "../rupa"
-# ⛔ >= 0.1.3 IS A HARD REQUIREMENT, NOT A FRESHNESS PREFERENCE. dhancha 0.9.6 added per-widget
-# motion, so `dist/dhancha.cyr` now references `RupaMotion` / `RupaEase` / `rupa_motion_duration` —
-# all of which arrived in rupa 0.1.3 (`src/motion.cyr`). Against the old 0.1.2 pin crab does not
-# build at all: `undefined variable 'RupaMotion'`, from a file crab does not own.
-# ⛔ >= 0.1.5 IS THE SAME KIND OF HARD REQUIREMENT. dhancha 0.9.20 binds `dh_theme_on_accent()` to
-# `rupa_theme_on_accent`, which arrived in rupa 0.1.5. crab pulls rupa's dist directly, so against an
-# older pin the toolkit references a function crab's own dep graph does not supply.
 tag = "0.1.6"
 modules = ["dist/rupa.cyr"]
 
@@ -71,151 +47,51 @@ git = "https://github.com/MacCracken/rekha.git"
 tag = "0.3.5"
 modules = ["dist/rekha.cyr"]
 
-# kashi (काशि) — the AGNOS system font. dhancha's dh_draw_text blits its CP437 8x16
-# glyphs for default (font=0) text, so crab provides the glyph data.
+# kashi (काशि) — the AGNOS system font. dhancha's `dh_draw_text` blits its CP437 8x16 glyphs for
+# default (font = 0) text.
+# ⛔ THE FREESTANDING CORE IS A MEASURED CHOICE, NOT A SHORTCUT, and it has a written expiry:
+# switch to `modules = ["dist/kashi.cyr"]` the day crab needs runtime font LOADING.
+# See docs/adr/0003-kashi-freestanding-core-over-the-library-face.md.
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
-# ⚠ `path` — kashi is VENDORED (lib/kashi_font_data.cyr). ⛔ The old tail "every other dep in this
-# stack carries both" was FALSE: sadish and rekha are tag-only. Four of six carry `path`.
 path = "../kashi"
 tag = "1.0.6"
-# ⛔⛔ THE FREESTANDING CORE IS A MEASURED CHOICE, NOT A SHORTCUT (recorded 2026-08-17, kashi 1.0.6).
-# kashi's ADR 0001 says stdlib-linked consumers should take the LIBRARY FACE, and this project links
-# the full stdlib — so `src/font_data.cyr` looks like the wrong surface. Two reasons it is not:
-#   1. Until kashi 1.0.6 the library face was UNCONSUMABLE. `src/lib.cyr` opens with
-#      `include "src/font_data.cyr"`, a kashi-root-relative path that cannot resolve once vendored
-#      into this repo's `lib/` — `error: cannot open include file: src/font_data.cyr`. kashi 1.0.6
-#      adds `dist/kashi.cyr`, which fixes that, so the choice is now real.
-#   2. It is still the core. MEASURED on dhancha: core 364,640 B vs full face 548,000 B —
-#      **+183,360 (+50%)** for PSF/BDF/PCF import and a runtime font registry nothing here calls, and
-#      `CYRIUS_DCE=1` reclaims NONE of it. This project uses `kashi_font_init` + `kashi_glyph_row`.
-# ⇒ Switch to `modules = ["dist/kashi.cyr"]` only when this project needs runtime font LOADING.
 modules = ["src/font_data.cyr"]
 
+# dhancha — the widget toolkit: LIST, GRID, PROGRESS, MENU, SHEET, the theme bindings, and the
+# per-frame arena crab's render path depends on.
+# ⛔ FLOOR >= 0.9.18, HARD: `src/main.cyr` references `POINTER_SCROLL`, which 0.9.17 does not define.
+# The host target builds without it and `--agnos` does not — which is why CI builds both.
+# ⛔ 0.9.15 IS A CONTRACT: `dh_frame_begin` rewinds the arena AND clears dhancha's retained widget
+# pointers. The halves cannot be separated — never call `arena_reset` on a frame arena — and an app
+# on a frame arena must re-establish focus every frame, which `crab_pane` does.
+# ⛔ 0.9.14 IS A CONTRACT: `dh_surface_render` may return the SAME surface twice. A caller wanting
+# two frames at once needs two DhSurfaces; `src/render_test.cyr` is one and guards it.
+# ⚠ The allocation-gate history that used to live here is docs/architecture/001's subject.
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
-# ⚠ `path` added 2026-08-16 (⛔ not "matching every other dep" — sadish and rekha are tag-only, so
-# this is four of six): without it crab could only build
-# against a PUBLISHED tag, so a local dhancha fix could not be exercised until it was pushed — which is
-# how a burn ends up testing last week's library. ⛔ `path` WINS over `tag`, so a green build here is not
-# evidence the declared graph resolves; re-verify the tag against dhancha's VERSION at every cut.
 path = "../dhancha"
-# ⭐ THE PER-FRAME ALLOCATION GATE — CLOSED, in three steps, each measured against `crab_render` at
-# 380x220 with 114 entries per pane, and re-confirmed at the 256 CRAB_MAX_ENTRIES ceiling
-# (docs/architecture/001):
-#   0.9.13 — step 1: `dh_surface_new` no longer allocates a `w*h*4` pixel buffer that nothing in the
-#            stack ever wrote or read.                              746,440 -> 412,040 B per frame
-#   0.9.14 — step 2: the sadish render target is cached on the DhSurface and reused.
-#                                                                   412,040 ->  77,568 B per frame
-# ⚠ Step 2 only pays off because crab ALSO stopped minting a DhSurface per frame (`src/ui.cyr`,
-# `src/main.cyr`). The dhancha half alone saves crab nothing — a cache on an object thrown away each
-# frame is not a cache.
-# ⛔ 0.9.14 IS A CONTRACT CHANGE: `dh_surface_render` may return the SAME surface twice. A caller that
-# wants two frames at once needs two DhSurfaces — `src/render_test.cyr` is one, and guards it.
-#   0.9.15 — step 3: a per-frame ARENA for the widget tree and layout scratch, rewound by
-#            `dh_frame_begin`.                                       77,568 ->       0 B per frame
-# ⭐ 0.9.16 — the OTHER half of the loop: `dh_setu_poll_event` no longer allocates an 80 B message
-#            before it knows whether anything is pending.                 80 ->       0 B per poll
-#            ⇒ crab's render/input loop now allocates NOTHING in steady state, which is what makes a
-#            self-repainting element affordable. (M2 deferral #09.)
-# ⛔ 0.9.15 IS ALSO A CONTRACT ADDITION: `dh_frame_begin` rewinds the arena **and** clears dhancha's
-# retained widget pointers (`_dh_focus` and friends). The two halves cannot be separated — never call
-# `arena_reset` on a frame arena directly — and an app on a frame arena must re-establish focus every
-# frame, which `crab_pane` does.
-# ⭐ 0.9.17 — `dh_surface_resize`: the entry point `WINDOW_CONFIGURE` had waited five releases for.
-#            Also closes a latent overflow 0.9.13 created (a cached `w*h*4` pixel buffer, safe only
-#            while `w`/`h` were immutable) and makes 0.9.14's dormant dimension check live.
-# ⭐ 0.9.18 — `POINTER_SCROLL` (kind 14): the mouse wheel reaches apps. Mapped from setu 0.8.8's
-#            `SETU_INPUT_PTR_SCROLL`. Also adds `path = "../setu"` to dhancha's own manifest.
-# ⛔ THE DECLARED GRAPH MUST CARRY 0.9.18 OR THE REAL TARGET DOES NOT BUILD, AND CI CANNOT SEE IT.
-# `src/main.cyr` references `POINTER_SCROLL`, which 0.9.17 does not define. MEASURED 2026-08-27 with
-# `path` disabled and a fresh resolve against dhancha 0.9.17:
-#     host  build -> **PASS**   ·   agnos build -> **FAIL**: undefined variable 'POINTER_SCROLL'
-# crab's event loop is inside `#ifdef CYRIUS_TARGET_AGNOS`, so the host build compiles none of it.
-# ⭐ CI NOW BUILDS BOTH TARGETS (*#15* CLOSED at 0.7.7): `.github/workflows/ci.yml` runs a
-# `Build (--agnos)` step after the host build, and `release.yml` gates on that workflow via `uses:`.
-# This incident is precisely what that step exists to catch, and it is kept as the reason it exists.
-# ⭐ 0.9.25 — the `GRID` kind: wrapping layout, cell selection, row-wise arrows, keep-visible and
-#            hit-test. crab's `g` view is built on it (`src/ui.cyr` `dh_grid_new`).
-# ⭐ 0.9.26 — `dh_list_new_h` (a horizontal selectable strip) + `DH_W_SCROLL_X`. ⛔ This is what
-#            actually retires M6's "Gate: dhancha MENU BAR": what was missing was never a menu-bar
-#            kind but a row of items with the current one highlighted — which also serves a tab
-#            strip, a toolbar and crab's own A/B switcher. crab consumes NONE of it yet.
-# ⚠ 0.9.26 ALSO FIXES A NINETEEN-RELEASE-OLD LATENT BUG crab was NOT hitting, and the reason it was
-# not is worth keeping: `dh_list_new(row_h)` stored the row height in `DH_W_PREF_H`, the list's own
-# preferred height, so any `dh_widget_set_pref` on a LIST silently rewrote its row height and every
-# scroll figure derived from it. **The list did not break; it scrolled wrong.** crab's single list
-# (`src/ui.cyr` `dh_list_new(26)`) takes `dh_widget_set_flex(lst, 1)` and never a pref, so it was
-# clear by construction rather than by care. Row height now lives in `DH_W_CELL_H`.
-# ⛔ THE BUMP 0.9.25 -> 0.9.26 ALSO CLOSES A DIVERGENCE THAT SHIPPED IN crab 0.7.6: `path` wins, so
-# the released tag committed a `lib/dhancha.cyr` that is byte-for-byte 0.9.26's `dist/` while this
-# line still said 0.9.25. `cyrius.lock` cannot catch that — a `path` dep gets no commit pin — so
-# nothing but check four would ever have said so. (Deferral #43.)
-# ⛔ VERIFIED FOUR WAYS, because `path` wins and a green local build proves nothing about the
-# declared graph. ⚠ THE FIGURES BELOW ARE 0.9.26's, RE-TAKEN 2026-09-02 AT THE 6.5.41 PIN — they
-# used to be 0.9.17's, left in place under a tag that had moved twice, which is the exact shape of
-# evidence-for-the-wrong-thing this block exists to prevent:
-#   1. sibling `VERSION` = 0.9.26
-#   2. `git rev-parse 0.9.26` == HEAD in `../dhancha` (cb855c8), tree clean
-#   3. `git ls-remote --tags` shows `refs/tags/0.9.26` at that same commit
-#   4. — the only check that would have caught 0.4.13's manifest naming a library the build never
-#      compiled — `path` DISABLED so `cyrius deps` really clones the tags, then comparing SHA-256:
-#      **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the overrides on, which is the tell),
-#      **1230 / 0** tests, and both binaries **BYTE-IDENTICAL** to the path-resolved ones —
-#      host `5170a452…` 1,023,968 B, `--agnos` `446b7f6a…` 1,047,832 B. That equality is the
-#      evidence; the rest is merely consistent with it.
-# ⛔ The first three would each have PASSED 0.4.13. Re-do all four at every cut. (Automating it:
-# deferral #19.)
-# ⚠⚠ AND `lib/dhancha.cyr` IS NOT WHAT COMPILES WHILE `path` IS SET — MEASURED 2026-08-27 by
-# appending garbage to it and watching the build succeed, then appending garbage to
-# `../dhancha/dist/dhancha.cyr` and watching it fail. The `path` override compiles the SIBLING'S
-# `dist/` directly; crab's vendored `lib/dhancha.cyr` is a committed RECORD that `cyrius deps`
-# refreshes and `cyrius.lock` hashes, not the artifact. ⇒ A local green says even less than
-# "`path` wins" already implied, which is why check four resolves the tag rather than trusting it.
 tag    = "0.9.26"
 modules = ["dist/dhancha.cyr"]
 
+# setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it
+# reads `AGNOS_CHAN` and does not dial. ⛔ FLOOR: agnos >= 1.56.40.
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
-# ⚠ `path` added 2026-08-12 — setu 0.8.5 centralises the rendezvous ($SETU_SOCKET) and a
-# tag-only dep could not be built against it locally. ⛔ "Every other dep here carries both" was
-# FALSE — sadish and rekha are tag-only.
 path = "../setu"
-tag = "0.8.8"   # ⭐ channel-band client: no dial, reads AGNOS_CHAN. Floor: agnos >= 1.56.40.
-                # 0.8.8 adds `SETU_INPUT_PTR_SCROLL` (kind 12) — the mouse wheel.
+tag = "0.8.8"
 modules = ["dist/setu.cyr"]
 
-# chitra (चित्र — image) — the pure-Cyrius CPU raster decoder: PNG, JPEG, GIF, BMP.
-# crab uses it for THUMBNAILS. ⚠ Not for the preview's DIMENSIONS line — those are read from header
-# bytes by `crab_img_dims` with no decoder at all, because PNG/GIF/BMP put width and height at fixed
-# offsets in the first 26 bytes and JPEG puts them in an SOF segment a bounded marker walk reaches.
-#
-# ⛔⛔ THE COST IS MEASURED AND IT IS LARGE — 2026-08-31, operator-ruled and adopted deliberately.
-# Declaring this dep took crab's host binary from 453,304 to 981,992 B (+116.6 %) and the agnos
-# binary from 474,944 to 1,001,520 (+110.9 %). `CYRIUS_DCE=1` reclaims NONE of it — it NOPs the
-# unreachable functions and the byte count does not move at all. Decomposed:
-#     + stdlib `thread`             ->  461,608  (+8,304)
-#     + stdlib `flags`              ->  461,624  (+8,320)
-#     + stdlib `thread` + `sankoch` ->  860,784  (+407,480)
-#     + all three + chitra's fold   ->  981,992  (+528,688)
-# ⇒ ~399 KB of it is `sankoch`, the RFC 1950/1951 inflate leaf PNG's IDAT requires, pulled in
-# TRANSITIVELY. chitra's own decoder fold is only ~113 KB. crab does not choose that price; PNG does.
-# ⚠ crab does not DECLARE the extra leaves and does not need to: `cyrius deps` re-creates `flags`,
-# `thread`, `sankoch` and their backends from `dist/chitra.deps`. Measured: deleting them from
-# `[deps].stdlib` produced a byte-identical binary. The sidecar is authoritative.
-# ⚠ `flags`, `args` and `vec` in that sidecar are referenced NOWHERE in chitra — filed as
-# chitra/docs/development/issues/2026-08-31-manifest-over-declares-unused-stdlib-leaves.md, and the
-# systemic half (distlib copying [deps].stdlib rather than the fold's real leaves) as
-# cyrius/docs/development/issues/2026-08-31-distlib-deps-sidecar-over-reports-stdlib-leaves.md.
-# ⭐ 1.0.1 (pinned 2026-08-31, `b777d34`): a valid PNG past sankoch's 16 MiB inflate ceiling is now
-# refused FROM THE HEADER in under 64 KiB with its own `CHITRA_ERR_INFLATE_LIMIT`, instead of
-# spending 26,617,512 bytes to return a bare `CHITRA_ERR_INFLATE`. Its sidecar also drops three
-# stdlib leaves (`args`, `flags`, `vec`) that no line of chitra references.
-# ⚠ crab's own per-image budget already kept it clear of that path, so this changes no crab
-# behaviour — it removes a cliff crab was standing well back from.
-# ⛔⛔ AND THE BINARY SIZE IS NOT THE HARD CONSTRAINT — THE ALLOCATOR IS. See `crab_thumb_*` in
-# `src/app.cyr`: chitra makes 31 `alloc()` calls, `chitra_image_free` is a NO-OP (`return 0;`), and
-# cyrius's `alloc` is a bump allocator with no `free()`. Every decode is therefore PERMANENT.
+# chitra (चित्र — image) — CPU raster decode (PNG/JPEG/GIF/BMP) for THUMBNAILS only. The preview's
+# DIMENSIONS line uses no decoder at all: `crab_img_dims` reads header bytes.
+# ⛔⛔ EVERY DECODE IS PERMANENT AND THAT — NOT THE BINARY SIZE — IS THE LIVE CONSTRAINT. chitra makes
+# 31 `alloc()` calls, `chitra_image_free` is a no-op, and cyrius's `alloc` has no `free()`. The two
+# budgets that bound it are `CRAB_THUMB_MAX_RGBA` and `CRAB_THUMB_TOTAL_MAX` in `src/app.cyr`, and
+# they are the first thing to delete the day the allocator gains a `free()`.
+# ⚠ Adopting it cost +115 % of the binary, ~399 KB of which is the transitive `sankoch` inflate leaf
+# PNG requires. Operator ruling 2026-08-31, taken with the measurements in hand.
+# ⚠ crab declares none of chitra's extra stdlib leaves and does not need to — `dist/chitra.deps` is
+# authoritative, and deleting them produced a byte-identical binary.
 [deps.chitra]
 git = "https://github.com/MacCracken/chitra.git"
 tag = "1.0.1"

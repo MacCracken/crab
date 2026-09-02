@@ -3,7 +3,7 @@
 > ⭐ **Updated 2026-09-02.** 0.7.7 is a **repair cut**: no roadmap item advanced. Five defects that
 > had already shipped were found by reading code, each closed with a mutation-proven test; the
 > toolchain pin moved 6.5.36 → **6.5.41**; and `.github/workflows/ci.yml` went from a single
-> `cyrius test` to nine gates, closing *#14*, *#15* and *#36*.
+> `cyrius test` to nine gates, closing the three long-open CI gaps.
 >
 > ⛔⛔ **READ *Where things stand* AND NOTHING ABOVE IT FOR NUMBERS.** Everything below that table is
 > kept because the REASONING is still the reasoning — but **every figure in it is 0.7.5's or
@@ -93,7 +93,7 @@ Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md).
 | EXIF | CAMERA and SHOT, both byte orders, verified against an independent parser. ⛔⛔ **The most attacker-controlled parser crab has** — byte order, entry count and value offsets are ALL chosen by the file. Sub-IFD followed exactly once, never recursively. ⚠ Its fuzz round was **vacuous at first**: an out-of-bounds read does not crash on a bump allocator over a large mapped heap, so four planted bounds bugs survived. A printable poison tail fixed it — and the mutator had to be stopped from writing the poison byte itself. |
 | Thumbnails | 64x64, PNG/JPEG/GIF/BMP, **decoded off the idle tick** — at most one per tick, because chitra's entry point is a single call that cannot be resumed the way `crab_copy_step` can. Memoised on the full path **including a remembered refusal**; a closed preview decodes nothing. ⛔ Four differently-named nothings, because "too large" is a property of the FILE, "budget spent" of the SESSION, and "cannot decode" of this BUILD. |
 | Image dimensions | `crab_img_dims` — PNG/JPEG/GIF/BMP from header bytes, **no decoder, no dependency**. Verified against real files against `identify`: 137×42, 1×1, 4096×2160 PNGs, a 91×33 GIF, a 65×17 BMP and its top-down twin, and a real 384×288 JPEG whose SOF sits past an APP0 block. |
-| Fuzz harness | ✅ **Deferral #12 CLOSED.** **100,000** deterministic rounds — ⛔ *the figure was 60,000 in six documents and wrong in all six; the harness now COUNTS and prints its own rounds (`fuzz: rounds 100000`), because a harness whose output cannot contradict a stale claim about it is one nobody can check (deferral #41).* It caught a real segfault in `crab_img_dims` the day it was written. |
+| Fuzz harness | ✅ * CLOSED.** **100,000** deterministic rounds — ⛔ *the figure was 60,000 in six documents and wrong in all six; the harness now COUNTS and prints its own rounds (`fuzz: rounds 100000`), because a harness whose output cannot contradict a stale claim about it is one nobody can check.* It caught a real segfault in `crab_img_dims` the day it was written. |
 | Leak fixed | ⛔ `crab_overlay` used `alloc(32)` not `dh_falloc(32)` on both the menu and sheet branches — **32 B per frame, shipped in 0.7.5**, invisible because the zero-allocation gate never opened an overlay. |
 | Numbers | tests **757 → 1,138/0** · `render_test` **26 → 53** checks · coverage **87 %** (195/223) · source **5,368 → 7,915** lines · host **1,019,784 B** · `--agnos` **1,047,624 B** · fmt clean · both targets build |
 
@@ -124,7 +124,7 @@ the mutator's alphabet (or a correct parser returns one and the detector fires o
 in exactly that position.** They are kept and labelled.
 
 **4. `render_test` is where four of seven mutations were caught, and CI runs none of it.**
-*Deferral #14* stopped being a tidiness item: a swapped pair of pane blocks, and a preview column
+ stopped being a tidiness item: a swapped pair of pane blocks, and a preview column
 painted over panes that never gave up their width, both ship through CI green today. It at least
 prints its check count now — it used to exit **0** whether it ran 26 checks or none.
 
@@ -157,12 +157,12 @@ prints its check count now — it used to exit **0** whether it ran 26 checks or
 | | |
 |---|---|
 | Version | ⛔ **0.7.6 IS RELEASED AND TAGGED** at `26f38ed`, verified on the remote. ⭐ **0.7.7 is what is being prepared in this tree**: the 6.5.36 → **6.5.41** toolchain pin with `lib/` re-vendored, **five mutation-proven defect fixes** (the single-entry copy accepting a folder; the transfer queue abandoning everything behind a refusal; `m` on a folder silently running a COPY; the marked set discarded when the cursor sat on a folder; the context menu highlighting the wrong verb; the tray bar 0 px tall whenever a rate was known), and the `ci.yml` rewrite closing *#14 / #15 / #36*. Lineage: 0.7.5 (2026-08-31) closed M4; 0.7.1 (`4ac21eb`) carried M4's write layer and the 6.5.36 pin. ⛔ **KEEP THIS LESSON: 0.7.2 exists only because 0.7.1's CHANGELOG section was still being edited after its tag was pushed** — a released section is a record, not a scratchpad. ⛔ **The operator handles all git operations: never commit, tag or push.** |
-| Toolchain | cyrius pin **6.5.41** (moved at 0.7.7 from 6.5.36; tagged on the remote, verified). ⭐ **The bump was not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat`, which closes the VOLUMES *capacity* gate outright and makes the symlink gap a decision rather than a limit; 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest declared 6.5.36 while `cycc` was **already 6.5.41** — the build warned `toolchain drift` on every invocation and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set**: three transitive thread leaves were left at 6.5.36 content and had to be copied by hand (*#50*), and `lib/hashseed.cyr` arrived untracked (*#51*). After any bump, diff the WHOLE vendored tree against the snapshot. |
+| Toolchain | cyrius pin **6.5.41** (moved at 0.7.7 from 6.5.36; tagged on the remote, verified). ⭐ **The bump was not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat`, which closes the VOLUMES *capacity* gate outright and makes the symlink gap a decision rather than a limit; 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest declared 6.5.36 while `cycc` was **already 6.5.41** — the build warned `toolchain drift` on every invocation and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set**: three transitive thread leaves were left at 6.5.36 content and had to be copied by hand, and `lib/hashseed.cyr` arrived untracked. After any bump, diff the WHOLE vendored tree against the snapshot. |
 | Build | x86_64 **1,023,968 B** · `--agnos` **1,047,832 B** at 0.7.7 · `--win` fails (pre-existing, not a regression — two absent syscall stubs, and Windows is not a declared target). ⭐ **Check four re-run in full at the new pin (2026-09-02)**, all four `path` lines disabled so `cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the overrides on — that jump is the tell), **1230 / 0**, and both binaries **BYTE-IDENTICAL** to the path-resolved ones (host `5170a452…`, agnos `446b7f6a…`). *That equality is the evidence; everything else is merely consistent with it.* |
-| Tests | `cyrius test` **1230 / 0** · `render_test` **53** checks, 0 failed · `cyrius fuzz` **100,000 rounds**, and it prints the number so it cannot agree with a stale claim about itself · bench measures the sort, not `bench_noop`. ⭐ **All four now run in CI** (*#14 / #36*), alongside the `--agnos` build (*#15*), a per-file `fmt --check` loop, `coverage --min 85`, `vet` and `deny`. ⛔ Each of 0.7.7's five fixes is **mutation-proven** — the guard was removed and the suite watched to fail — because this project has shipped three tests that could not fail in their first draft. |
+| Tests | `cyrius test` **1230 / 0** · `render_test` **53** checks, 0 failed · `cyrius fuzz` **100,000 rounds**, and it prints the number so it cannot agree with a stale claim about itself · bench measures the sort, not `bench_noop`. ⭐ **All four now run in CI** (*#14 / #36*), alongside the `--agnos` build, a per-file `fmt --check` loop, `coverage --min 85`, `vet` and `deny`. ⛔ Each of 0.7.7's five fixes is **mutation-proven** — the guard was removed and the suite watched to fail — because this project has shipped three tests that could not fail in their first draft. |
 | Coverage | **199/227 fns (87 %)**, 6/6 files — the v1.0 criterion, met. ⭐ **And no longer met by hand**: `ci.yml` runs `cyrius coverage --min 85`, so a cut that drops below the floor fails before anyone remembers to look (verified the gate can fail: `--min 95` exits 1). ⛔ Still REFERENCE coverage — a floor, not a correctness proof, as the tool itself says. |
 | Source | **8,092** lines across **six** files, plus 4,486 in `tests/`. ⚠ Re-derive with `wc -l src/*.cyr`; the per-file numbers that used to sit here went stale at two of the last three cuts, so they are deliberately not repeated. |
-| Deps | ⛔ **SEVEN, AND ONLY SEVEN** (corrected 2026-09-01 — this said *SIX, AND ONLY SIX* at `dhancha 0.9.23`, and was wrong on both the count and the version **in a released tag**): rekha 0.3.5 · kashi 1.0.6 · sadish **0.5.3** · rupa **0.1.6** · dhancha **0.9.26** · setu 0.8.8 · **chitra 1.0.1**. ⛔⛔ *The row that exists specifically to stop a tag check from checking the wrong things was itself checking the wrong things.* Every build prints `7 deps resolved`. This row used to also list **agnos, bhumi, sigil and aethersafha** — none of them is a declared dependency (`grep '^\[deps' cyrius.cyml`); agnos is the *kernel* crab runs on and the others are peers. Misreading that row as the dep graph is how a tag check checks the wrong things. ⭐ **CHECK 4 RE-RUN 2026-09-01, AFTER the dhancha tag moved 0.9.25 → 0.9.26** — the manifest copied with all four `path` lines disabled, so `cyrius deps` actually cloned the declared tags: **7 deps / 0 errors** (lock goes **3 → 7** commit-pinned, which is the tell that the overrides were really off), host **1,019,784 B** and `--agnos` **1,047,624 B** both build, **1138/0** tests, `render_test` **53/0**, and both binaries came out **byte-identical** to the path-resolved ones (`d7bd8125…` / `93f5c139…`). That last equality is the evidence; the rest is consistent with it. ⛔ **It had gone dead**: before the bump the declared graph produced a *different* host binary (1,019,768 B), because `path` compiled 0.9.26 while the tag said 0.9.25. *(Deferral #43.)* |
+| Deps | **SEVEN**: sadish 0.5.3 · rupa 0.1.6 · rekha 0.3.5 · kashi 1.0.6 · dhancha 0.9.26 · setu 0.8.8 · chitra 1.0.1. Every build prints `7 deps resolved`. ⛔ **This row once also listed agnos, bhumi, sigil and aethersafha — none of which is a declared dependency.** agnos is the *kernel* crab runs on and the others are peers; misreading this row as the dep graph is how a tag check checks the wrong things. ⭐ **Check four re-run 2026-09-02 at the 6.5.41 pin**, in a scratch copy with all four `path` lines disabled so `cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **3 → 7 commit-pinned** (the tell the overrides were off), **1230 / 0**, and both binaries **byte-identical** to the path-resolved ones — host `5170a452…` 1,023,968 B, `--agnos` `446b7f6a…` 1,047,832 B. *That equality is the evidence.* |
 | Mid-arc work | **M4 is complete** (0.7.1–0.7.5) and **M5 is substantially in** (0.7.6): the preview pane, header-only image dimensions, thumbnails, EXIF, and the GRID and GALLERY views. ⚠ **0.7.7 is a repair cut, not a feature cut** — no roadmap item advanced; five shipped defects were closed, the toolchain moved, and the CI gate stopped being one step. ⛔ **What M5 has left**: columns/miller (gated on crab's own two-pane model — a design question, not a dependency) and proportional text (gated on rekha `hmtx` advance widths, *not* on the plumbing, which exists — see the roadmap). |
 
 ### ⛔⛔ TWO HAZARDS THIS MILESTONE TAUGHT, BOTH CHEAP AND BOTH EXPENSIVE TO RE-LEARN
@@ -261,7 +261,7 @@ no longer a work queue.
 ⚠ **And the review under-counted the stale comments**: defect 4 says three sites; there are **seven**,
 plus two of a different class (`src/main.cyr` describing listing as `#81` when both live call sites
 are `#101`), plus the arena comment in `src/ui.cyr`, which was stale for a **second, undocumented
-reason** — *#32* took a row from one widget to 1 + `ncols`, so the frame chains **7 chunks** at the
+reason** — took a row from one widget to 1 + `ncols`, so the frame chains **7 chunks** at the
 shipped window, not the one the comment promised. Measure that with `arena_capacity_total`;
 `arena_used` reports the current chunk only and shows 13,104 B for a 2.6 MB frame.
 
@@ -274,7 +274,7 @@ shipped window, not the one the comment promised. Measure that with `arena_capac
    its iterations. ⇒ Break when a call returns `k == 0` with the cursor unmoved, and cap the
    iteration count.
 
-2. **The cap went 256 → 1024 and re-broke the keystroke path that M3 *#03* existed to fix.**
+2. **The cap went 256 → 1024 and re-broke the keystroke path that M3 existed to fix.**
    `crab_sort_entries` (`src/app.cyr:427`) is insertion sort — O(n²) with a 64-byte record swap done
    byte-at-a-time. **Measured on native x86_64** (agnos under QEMU is far slower):
 
@@ -283,7 +283,7 @@ shipped window, not the one the comment promised. Measure that with `arena_capac
    | 256 | 6 ms | 14 ms |
    | 1024 | **100 ms** | **200 ms** |
 
-   It runs once per listing — i.e. on every descend/ascend keypress. *#03* treated ~280 ms there as
+   It runs once per listing — i.e. on every descend/ascend keypress. treated ~280 ms there as
    unacceptable and restructured statting to remove it; this quietly put it back. ⛔ The comment at
    `src/app.cyr:424` still reads *"`CRAB_MAX_ENTRIES` is 256"* — the justification was never
    re-derived at the new size.
@@ -432,7 +432,7 @@ string must die with its widget.
 `cyrius test` **55/0**, `render_test` 0 failed checks, host 381,608 B, `--agnos` 381,672 B, re-staged.
 All three steps mutation-verified on both sides.
 
-## M2 — started. *Deferral #09* is closed: the loop allocates nothing
+## M2 — started. is closed: the loop allocates nothing
 
 **dhancha 0.9.16** (`68c60f8`, tagged and consumed). `dh_setu_poll_event` opened with `setu_msg_new()` — an
 80-byte `alloc` — and only *then* asked whether a frame was pending. With no `free()` under it, an
@@ -445,7 +445,7 @@ build a **separate** `DhEvent` — so it is now one hoisted buffer per process, 
 ⭐ **This was the last unbounded per-cycle allocation.** 0.9.13–0.9.15 took a rendered frame to zero;
 this is the other half. **crab's whole render/input loop now allocates nothing in steady state**, and
 the "no continuously-repainting element" rule is lifted **outright** rather than moved — the idle
-mascot line (*deferral #29*), M4's transfer tray and M7's index progress are unblocked.
+mascot line, M4's transfer tray and M7's index progress are unblocked.
 
 ⚠ An **event** still costs 56 B (`dh_event_new`). That is per input, not per cycle, and bounded by how
 fast a human types.
@@ -533,7 +533,7 @@ against the same image. It now retries the probe four times and the launch six, 
 **INCONCLUSIVE** rather than a verdict when nothing was delivered — a harness that scores a pass for a
 test it never performed is worse than none.
 
-⚠ It lives in `agnos/scripts/harness/` beside its siblings; *deferral #16* (move crab's harnesses into
+⚠ It lives in `agnos/scripts/harness/` beside its siblings; (move crab's harnesses into
 crab's own repo) is still open.
 
 ---
@@ -609,18 +609,18 @@ HEAD (`935a84c`), tree clean; `git ls-remote --tags` at that commit; **and `path
 
 ⛔ **Only the fourth is evidence**, and finding #1 below is why it matters even more than "path wins"
 suggested: `lib/` is not what compiles at all. The first three would each have passed 0.4.13.
-Re-run all four at every cut; automating it is deferral **#19**, still open.
+Re-run all four at every cut; automating it is still open — see the roadmap's 0.8.0 batch.
 
 ### ⭐ The repaint rule is LIFTED — and immediately replaced
 
 "Do not add a continuously-repainting element" stood for three releases and was right at 45 MB/s. The
-frame is free now, so the idle mascot line (*deferral #29*), M4's transfer tray and M7's index
+frame is free now, so the idle mascot line, M4's transfer tray and M7's index
 progress are no longer blocked by it.
 
 ⛔ **But `dh_setu_poll_event` still calls `setu_msg_new()` BEFORE it knows whether anything is
 pending** — ~80 B per poll, on the global heap, never reclaimed. Continuous repaint implies continuous
 polling, so at 60 Hz that is ~4.8 KB/s of permanent growth. Four orders of magnitude better than what
-it replaces, and still unbounded. **Closing *deferral #09* (M2, gate: dhancha) is now the precondition
+it replaces, and still unbounded. **Closing (M2, gate: dhancha) is now the precondition
 for anything that repaints without input.**
 
 ### ⚠ Three findings worth carrying forward
@@ -649,7 +649,7 @@ release. Do not let that be the reason it goes unrecorded.
 
 ⚠ **The probe is still a scratch harness**, so the 0-bytes-per-frame figure is not re-derivable by
 anyone else — though `tests/crab.tcyr` now *gates* it, which is the more important half. A real bench
-harness is deferral **#13**; `tests/crab.bcyr` still times `bench_noop`.
+harness is deferral **; `tests/crab.bcyr` still times `bench_noop`.
 
 ---
 
@@ -752,7 +752,7 @@ the whole 0.6.0 tree (the `app.cyr` extraction, the reused render target, the pe
      ≥30 s after `presented over setu` proves the loop is still turning. ⛔ **Silence is not
      liveness** — "no exit line" cannot tell a running process from one its parent killed, which is
      why the count-and-wait approach is not sufficient on its own.
-   - ⚠ This is roadmap deferral **#16** ("bring crab's agnos/iron harness into crab's own repo")
+   - ⚠ This is roadmap deferral ** ("bring crab's agnos/iron harness into crab's own repo")
      arriving with a concrete first job.
 2. **`crab_descend` / `crab_ascend` were never exercised on agnos.** No harness drives navigation
    keys, so the bounded-join *refusal* path has host assertions only.
@@ -774,10 +774,10 @@ different). ⇒ **Compare with `cmp`, never with the size.**
 
 ## ⭐ M3 (v0.7.0) — SHIPPED. Four items in, and the rest are gated upstream
 
-**Done and QEMU-proven**: sorting (*#33*), selection memory (*#34*), argv start paths (*#11*), and
-deferred statting (*#03*). Details and the mutation evidence are in [`roadmap.md`](roadmap.md).
+**Done and QEMU-proven**: sorting, selection memory, argv start paths, and
+deferred statting. Details and the mutation evidence are in [`roadmap.md`](roadmap.md).
 
-⭐ **The one finding worth carrying**: *#03* was **measured before it was built**, and that mattered.
+⭐ **The one finding worth carrying**: was **measured before it was built**, and that mattered.
 The 2026-08-19 iron slowness had already been misattributed once — it looked like the listing and was
 the per-entry narration. So the sweep was made to report its own cost first: **~1.1 ms per entry**
 (50 ms for 45 in `/bin`), i.e. ~280 ms at the 256 cap on the keystroke that descends. ⚠ QEMU numbers;
@@ -806,7 +806,7 @@ synthesizes eight kinds; crab consumes none), key release, and routing through `
 > accounting in
 > [`../architecture/001-every-frame-allocates-and-nothing-is-freed.md`](../architecture/001-every-frame-allocates-and-nothing-is-freed.md).
 >
-> ⛔ **The repaint constraint has MOVED, not vanished. M2's own *deferral #09* now carries it.**
+> ⛔ **The repaint constraint has MOVED, not vanished. M2's own now carries it.**
 > `dh_setu_poll_event` allocates ~80 B on every poll, pending or not, and continuous repaint means
 > continuous polling — ~4.8 KB/s at 60 Hz, on a heap with no `free()`. Close #09 before adding the
 > idle mascot line, a transfer tray, or index progress.
@@ -842,11 +842,11 @@ crab's roadmap. Filing them is an open, un-started task.
 - ✅ **CLOSED 2026-08-27 — nothing in `src/main.cyr` was reachable from a test.** See the section
   above. *Deferral: none — it was never filed, which is part of why it survived.*
 - ✅ **CLOSED 2026-08-26 — `CLAUDE.md`'s two `cyrius init` placeholders.** The operator supplied the
-  mission statement; the identity line and `## Goal` are real. *Deferral #23.*
+  mission statement; the identity line and `## Goal` are real.
 - ✅ **CLOSED 2026-08-26 — `README.md` § Status**, which had opened **"Scaffold."** and listed the
   dual-pane GUI under *Planned scope* since 0.2.0 (2026-07-10). It now says what works, what does not,
   and defers every volatile number to `state.md`. The retired `anu` codename and the rekha-TrueType
-  claim went in the same pass. *Deferrals #24, #25, #26.*
+  claim went in the same pass.
   ⚠ **The replacement text over-claimed once before it landed, and was caught by reading `crab_row`
   rather than by a gate**: it said the panes had "size and modified columns". They do not — a row is
   one LABEL (13-char name, `~` on truncation, then `/` or a size) and the mtime lives only in the

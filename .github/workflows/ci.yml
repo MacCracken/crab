@@ -48,7 +48,7 @@ jobs:
           cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
       - name: Build (--agnos — the target that actually ships)
-        # ⛔⛔ THIS IS *#15*, AND IT IS NOT A TIDINESS STEP. `src/main.cyr` wraps lines 263–1484 in a
+        # ⛔⛔ THIS STEP IS NOT A TIDINESS ITEM. `src/main.cyr` wraps lines 263–1484 in a
         # single `#ifdef CYRIUS_TARGET_AGNOS` with **no `#else`** — 1,221 of 1,494 lines, including
         # the whole key-dispatch table. The host build above does not compile ONE of them, so a
         # brace error there goes green through the host step and fails only here. That happened at
@@ -60,18 +60,17 @@ jobs:
         run: cyrius build --agnos src/main.cyr build/crab-agnos
 
       - name: Test
-        # ⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY. This comment used to claim it
-        # "picks up the [build].test entry AND auto-discovers tests/*.tcyr"; the first half is false
-        # and it told every reader that `src/test.cyr` was a live gate. Proven by mutation: rewriting
-        # `src/test.cyr` to `return 1` in a scratch tree left this step green, and so does filling it
-        # with syntactically invalid text — the file is never COMPILED, let alone run. Only
-        # `tests/crab.tcyr` is. (*deferrals #17, #40*.)
+        # ⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY — it auto-discovers `tests/*.tcyr`
+        # and nothing else. Proven by pointing `[build].test` at a file that exits 1 and watching
+        # this step return **rc=0** anyway. The key is inert in this toolchain.
+        # ⚠ It now reads `test = "tests"` so it at least NAMES where the suite is; the orphaned
+        # `src/test.cyr` that it used to name is deleted. (*deferrals #17, #40*, both closed.)
         # ⚠ It needs `build/` and `build/crab` to exist — 134 assertions write fixtures into a
         # relative `build` dir and one hard-codes `build/crab` — which the host build above provides.
         run: cyrius test
 
       - name: render_test — the pixel assertions
-        # ⛔⛔ THIS IS *#14*, AND IT IS crab's STRONGEST TEST. It is the only enforcement of the rule
+        # ⛔⛔ THIS IS crab's STRONGEST TEST. It is the only enforcement of the rule
         # that the render path (`src/ui.cyr`) must never call up into `src/app.cyr` — a rule the
         # source records being broken four or five times. Nothing discovered it: `cyrius.cyml` sets
         # `test = "src/test.cyr"` (inert, see above) and auto-discovery covers `tests/*.tcyr` only,
@@ -86,15 +85,13 @@ jobs:
 
       - name: Fuzz
         # ⚠ 100,000 deterministic rounds from a fixed seed, and it prints the number it really drove
-        # (*#41*) so this step cannot agree with a stale claim about itself.
+        # so this step cannot agree with a stale claim about itself.
         run: cyrius fuzz
 
       - name: Format check
-        # ⛔⛔ THE LOOP IS LOAD-BEARING: `cyrius fmt --check` PROCESSES ONLY ITS FIRST FILE ARGUMENT.
-        # Measured 2026-09-02 — with a deliberately misformatted file passed FIRST it exits 1, and
-        # passed LAST it exits 0 and prints nothing. `cyrius lint` behaves identically. So the
-        # obvious `cyrius fmt --check src/*.cyr` would check `src/app.cyr` alone and pass green while
-        # eight other files rotted. Enumerate, one invocation each.
+        # ⚠ THE LOOP IS LOAD-BEARING. `cyrius fmt --check` takes ONE FILE per invocation (as does
+        # `cyrius lint`), so `cyrius fmt --check src/*.cyr` would check `src/app.cyr` alone and pass
+        # green while the other eight rotted. Enumerate, one invocation each.
         run: |
           set -e
           for f in src/*.cyr tests/crab.tcyr tests/crab.fcyr tests/crab.bcyr; do
@@ -115,15 +112,15 @@ jobs:
           cyrius deny src/main.cyr
 
       # ⛔ WHAT THIS WORKFLOW DELIBERATELY DOES **NOT** RUN, so the omissions are decisions rather
-      # than oversights (*#36*, the remainder):
+      # than oversights:
       #   - `cyrius bench` — the harness is real and measures the sort, but a timing on a shared
       #     runner is noise, and a step that cannot fail is not a gate. It is run locally, and
-      #     `docs/benchmarks.md` is where its numbers belong (*#13*).
+      #     `docs/benchmarks.md` is where its numbers belong — see the roadmap's 0.7.8 batch.
       #   - `cyrius lint` — exits 0 no matter what it finds, so it CANNOT gate. `cyrius lint --strict`
       #     does (exit 2), but it fails today on 83 pre-existing over-long lines — 14 in
       #     `src/main.cyr`, 58 in `tests/crab.tcyr`, 11 in `tests/crab.fcyr` (85 lint warnings in
       #     all, counting 2 consecutive-blank-line hits). Turning it on means reformatting the
       #     event loop — the widest mechanical edit in the most sensitive file — and that is its
-      #     own change, not a rider on this one (*#46*).
+      #     own change, not a rider on this one — see the roadmap's 0.8.0 batch.
       #   - `cyrius audit` — bundles lint+test+bench and therefore exits 1 on those same lint
       #     warnings. It becomes usable here the day `--strict` does.

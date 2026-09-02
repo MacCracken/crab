@@ -23,3 +23,4 @@ Decisions about crab — what we chose, the context, and the consequences we acc
 |-----|-------|--------|
 | [0001](0001-compositor-owns-theming.md) | The compositor owns theming; crab ships no palette | Accepted |
 | [0002](0002-semantic-find-is-a-mode.md) | Semantic find is a mode over any view, not a view of its own | Accepted |
+| [0003](0003-kashi-freestanding-core-over-the-library-face.md) | Take kashi's freestanding core, not its library face | Accepted |

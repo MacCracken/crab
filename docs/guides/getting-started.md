@@ -11,10 +11,10 @@ cyrius test                              # auto-discovers tests/*.tcyr — [buil
 ## Layout
 
 - `src/main.cyr` — entry point. Top-level `var r = main(); syscall(SYS_EXIT, r);`.
-- `src/test.cyr` — the INERT `[build].test` hook (`cyrius.cyml`). ⛔ **Never add a case here.**
-  `cyrius test` auto-discovers `tests/*.tcyr` and does not compile this file at all, so a case
-  written here never runs while the suite's pass count still reads green. See the file's own
-  header for what that cost once. Every unit case goes in `tests/crab.tcyr`.
+- `tests/crab.tcyr` — **the suite.** Every unit case goes here; `cyrius test` auto-discovers it.
+  ⚠ `cyrius.cyml`'s `[build].test` now points at `tests/`, but **it is inert either way** — proven
+  by pointing it at a file that exits 1 and watching `cyrius test` still return 0. Do not treat it
+  as a gate. The gate is `cyrius test` itself, plus the steps in `.github/workflows/ci.yml`.
 - `tests/crab.tcyr` — primary test suite (`cyrius test` auto-discovers).
 - `tests/crab.bcyr` — benchmarks (`cyrius bench`).
 - `tests/crab.fcyr` — fuzz harness (`cyrius fuzz`).

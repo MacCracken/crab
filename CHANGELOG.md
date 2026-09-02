@@ -13,7 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > ⭐ **A REPAIR CUT. No roadmap item advanced.** Five defects that had ALREADY SHIPPED were found by
 > reading code, each closed with a mutation-proven test; the toolchain pin moved **6.5.36 → 6.5.41**;
-> and CI went from a single `cyrius test` to nine gates, closing *#14*, *#15* and *#36*.
+> and CI went from a single `cyrius test` to nine gates, closing the three long-open CI gaps.
 
 ### Fixed — five shipped defects, and the shape they share
 
@@ -96,20 +96,20 @@ what CI installs from.
   on. crab vendors it now (`SYS_STATFS = 103`), and cyrius's issue is archived. Both `roadmap.md`
   and its own corrections list still read *"filed 🟡 OPEN against cyrius"*. ⚠ agnos-only (no host
   arm), and **no `STATFS_*` offsets are vendored** — the frozen 32-byte layout must come from
-  agnos's docs. *Enumeration* stays open (*#44*).
+  agnos's docs. *Enumeration* stays open.
 - **6.5.37 also shipped `sys_lstat`**, on both targets. `crab_fs_exists`' comment had said *"there is
   no `sys_lstat` to call"* as the stated reason crab cannot detect a symlink. ⇒ **That is now a
   decision, not a limit.**
-⇒ **Both had been written as OPEN for four cyrius releases** — the same failure as *#09*, carried
+⇒ **Both had been written as OPEN for four cyrius releases** — the same failure as the idle-poll buffer, carried
 OPEN for nine while the fix sat in the declared graph. **Re-derive a gate before believing it.**
 
 ⛔ **`cyrius lib sync` walks only the DECLARED `[deps].stdlib` set, and it left three leaves behind**
 — `thread_agnos`, `thread_local`, `thread_macos`, all transitive, none named by any declaration.
 Copied by hand, then the WHOLE vendored tree verified byte-identical to the 6.5.41 snapshot (0 files
 drifting). ⚠ `lib/atomic.cyr` — the leaf this hazard has always named — **escaped only by luck**: it
-is byte-identical between the two versions. *Deferral #50.* ⚠ 6.5.41 also **added** a leaf,
+is byte-identical between the two versions.* ⚠ 6.5.41 also **added** a leaf,
 `lib/hashseed.cyr` (6.5.39's hash-flooding defence, pulled by `hashmap`), which arrived untracked and
-took the lock from 48 entries to 49. *Deferral #51.*
+took the lock from 48 entries to 49.*
 
 ⭐ **Check four re-run in full at the new pin**, all four `path` lines disabled in a scratch copy so
 `cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the
@@ -121,7 +121,7 @@ path-resolved ones — host `5170a452…` **1,023,968 B**, `--agnos` `446b7f6a�
 poisoned toolchain".** This one was legitimate — the vendored `lib/` genuinely changed. ⇒ The delta
 tells you to look; it does not tell you which. **Diagnose by content, never by the version string.**
 
-### Fixed — CI is a gate now, not a claim (*deferrals #14, #15, #36*)
+### Fixed — CI is a gate now, not a claim, #15, #36*)
 
 ⛔⛔ **THE WHOLE AUTOMATED GATE WAS ONE STEP: `cyrius test`.** `.github/workflows/ci.yml` now runs
 `deps` + `deps --verify` · host build · **`--agnos` build** · `cyrius test` · **`render_test`** ·
@@ -132,24 +132,23 @@ locally, in order, before being written down. `release.yml` already gates on thi
 - ⛔ **`CYRIUS_TARGET=agnos` IS SILENTLY IGNORED.** Measured: it builds a byte-identical HOST binary
   and exits 0, with no warning, even for a garbage value. A `--agnos` step written that way would
   look like the gate and be the host build twice. The flag is `--agnos`.
-- ⛔⛔ **`cyrius fmt --check` AND `cyrius lint` PROCESS ONLY THEIR FIRST FILE ARGUMENT.** Measured by
-  planting a misformatted file: passed **first**, `fmt --check` exits 1 and names it; passed **last**,
-  it exits **0 and prints nothing**. So the obvious `cyrius fmt --check src/*.cyr` gates **one file
-  of nine** and reports success — a gate worse than none, because it looks like coverage. The step is
-  a loop, and says why. *Deferral #48; upstream behaviour, and no issue filed — cyrius is not crab's
-  to change.*
+- ⚠ **`cyrius fmt --check` and `cyrius lint` take ONE FILE PER INVOCATION** — ordinary CLI design,
+  not a defect. It matters only because the *obvious* CI line `cyrius fmt --check src/*.cyr` would
+  then check `src/app.cyr` alone and pass green while eight files rotted. The step is a loop, one
+  invocation per file, and says so. ⛔ *This was briefly filed as and withdrawn the same
+  day: the ledger is for crab's problems, and a tool behaving as designed is not one.*
 - ⚠ **`coverage --min` is a real gate**, verified able to fail (`--min 95` exits 1). The floor is 85
   against a measured **87 %** (199/227), so it gates with headroom.
 - ⚠ **Three tools are deliberately left OUT**, recorded in `ci.yml` so the omissions are decisions:
   `bench` (a timing on a shared runner is noise, and a step that cannot fail is not a gate), plain
   `lint` (exits 0 whatever it finds) and `audit` (bundles lint). ⛔ **`lint --strict` DOES gate**
-  (exit 2) — *#46*'s headline said no gate existed, and that was half wrong. The price is
+  (exit 2) —'s headline said no gate existed, and that was half wrong. The price is
   reformatting **83** over-long lines, most in `main.cyr`'s event loop, which is its own change.
 - ⛔ **`release.yml` publishes an x86_64-linux binary as the release asset for an AGNOS application**,
   folded into `SHA256SUMS`. Recorded at the step, **not changed** — which artifacts a release
-  publishes is a distribution decision. *Deferral #49.*
+  publishes is a distribution decision.*
 
-### Docs — the stale-comment purge (*and four new deferrals, #48–#51*)
+### Docs — the stale-comment purge (*and three new deferrals, #49–#51*)
 
 ⛔⛔ **A COMMENT THAT WAS TRUE WHEN WRITTEN AND IS FALSE NOW IS WORSE THAN NO COMMENT**, because it is
 read as current fact and acted on. Audited every ⛔/⚠/⭐ marker in `src/` and every volatile claim in
@@ -171,17 +170,17 @@ the docs against measurement. Corrected, among others:
   in the project, three lines below the section's own warning never to trust them. **A number nothing
   gates does not survive being corrected; it survives being removed.**
 - **`mount` is agnos syscall #11, not #23** — #23 is `timerfd_settime`, and crab's own vendored
-  header says so. Wrong in three places, including the *#44* row that tells a reader which syscall to
+  header says so. Wrong in three places, including the row that tells a reader which syscall to
   cite when filing the enumeration half upstream.
 - `CLAUDE.md`, `README.md` and `docs/guides/getting-started.md` all told the reader `cyrius test`
   runs `[build].test`. It does not — **the file is never even compiled** — and `getting-started.md`
   went further and invited contributors to add cases there, four lines under the false command.
-  ⚠ *#17* remains **OPEN**: `cyrius.cyml` still reads `test = "src/test.cyr"`.
+  ⚠ remains **OPEN**: `cyrius.cyml` still reads `test = "src/test.cyr"`.
 - `CLAUDE.md` told the reader to build with `cc5`, a compiler renamed to `cycc` in cyrius 6.0.0 and
   absent from the pinned toolchain — and to sync a version into `cyrius.cyml`, which carries
   `version = "${file:VERSION}"` and has no number to sync.
 - `cyrius.cyml`'s package description stated the daimon AI arc in the present tense as what crab IS,
-  while no daimon dependency is declared anywhere (*#18*) and `README.md` says outright that none of
+  while no daimon dependency is declared anywhere () and `README.md` says outright that none of
   it exists. Marked **PLANNED, NOT SHIPPED**.
 - `docs/architecture/README.md`'s index said *"every frame allocates ~750 KB"* — flatly contradicting
   the note it indexes, which records that bound **closed** at 0.6.0.
@@ -208,7 +207,7 @@ tag committed a `lib/dhancha.cyr` **byte-identical to 0.9.26's `dist/`** while t
 **0.9.25**. Not the 0.4.13 phantom-tag failure — 0.9.25 was real and the declared graph built green
 — but the committed record and the declaration disagreed *in a released artifact*, and **no gate
 could see it**: four of seven deps carry `path`, and a `path` dep gets no `cyrius.lock` commit line.
-⇒ Filed as *deferral #43*; the class needs *#19*'s automation, not another manual pass.
+⇒ Filed as; the class needs's automation, not another manual pass.
 
 **Check four re-run in full** (all four `path` lines disabled so `cyrius deps` must clone the tags):
 7 deps / 0 errors · lock **3 → 7 commit-pinned** (the tell the overrides were really off) · host
@@ -225,7 +224,7 @@ from it. **The list did not break; it scrolled wrong.** crab's single list (`src
 `dh_list_new(26)`) takes `dh_widget_set_flex(lst, 1)` and never a pref, so it was clear *by
 construction* rather than by care.
 
-### Fixed — the fuzz harness reports how much work it did (*deferral #41*)
+### Fixed — the fuzz harness reports how much work it did
 
 ⛔⛔ **SIX DOCUMENTS SAID 60,000 ROUNDS. IT DRIVES 100,000, AND NOTHING IT PRINTED COULD SAY SO.**
 `cyrius fuzz` emitted `fuzz: ok` and no magnitude, so when two loops were added mid-cut (the EXIF
@@ -237,14 +236,14 @@ that is not looks unlike its five neighbours at the point it is written.
 ⇒ **This is exactly the failure `render_test` was fixed for in 0.7.6**, when it began printing its 53
 checks after years of exiting 0 whether it ran 26 or none. Same shape, different harness.
 
-### Fixed — CI's Test step no longer claims a gate that does not exist (*deferrals #17, #40*)
+### Fixed — CI's Test step no longer claims a gate that does not exist, #40*)
 
 ⛔⛔ **`cyrius test` DOES NOT RUN `[build].test`, AND THE COMMENT SAID IT DID.** Proven by mutation,
 not inferred: `src/test.cyr` rewritten to `return 1` in a scratch tree left the step at **1138
-passed, 0 failed, exit 0**. Only `tests/crab.tcyr` is compiled and run. That makes *#17* worse than
+passed, 0 failed, exit 0**. Only `tests/crab.tcyr` is compiled and run. That makes worse than
 filed — the file is not merely redundant, **CI told the next reader it was a live gate**. The comment
-now states what the step actually gates, and what it does not: no `--agnos` build (*#15*), no
-`render_test` (*#14*), no fuzz/bench/lint/fmt/coverage (*#36*).
+now states what the step actually gates, and what it does not: no `--agnos` build (), no
+`render_test` (), no fuzz/bench/lint/fmt/coverage ().
 
 ### Fixed — three live claims about `chitra 1.0.0`, one of them load-bearing
 
@@ -264,21 +263,21 @@ Every state claim in the repo was re-measured against `0.7.6` with the pinned to
 gains a **Filed 2026-09-01** section carrying *#40–#47*, each **pinned to a repair release**, plus
 in-place corrections to entries that had gone stale:
 
-- ⛔⛔ ***Deferral #09 was carried as OPEN in two places, one stamped `verified: 2026-08-31`, while
+- ⛔⛔ ** was carried as OPEN in two places, one stamped `verified: 2026-08-31`, while
   the fix had been in the declared graph for nine releases.*** `dh_setu_poll_event` was hoisted onto
   a per-process scratch buffer in **dhancha 0.9.16** and consumed at crab **0.6.1**. ⇒ **A stale OPEN
-  is not harmless**: #09 is the stated precondition for the mascot line (*#29*) and any
+  is not harmless**: #09 is the stated precondition for the mascot line () and any
   self-repainting element, so the entry was blocking work that was already free.
 - The M5 gate line *"Gate: dhancha GRID / COLUMNS — verified absent"* was stale in **both** halves,
   and contradicted its own section four bullets later. **No dhancha gate survives on it.**
 - Sidebar VOLUMES is **two** gates and has re-aimed: agnos ships `statfs`#103 (all three backends
   since 1.56.57, naming crab as the consumer) and its issue is archived, so *capacity* now waits on
   **cyrius**'s missing `sys_statfs` peer — while *enumeration* is untouched, because `mount`#23 /
-  `umount`#24 remain documented no-op stubs (*#44*).
+  `umount`#24 remain documented no-op stubs ().
 - ⚠ **Two corrections that belong to released sections and are therefore recorded HERE, not there:**
   `[0.5.0]`'s *"**39 deferrals** were harvested"* is wrong — exactly **34** numbers are cited in any
   blob of any commit reachable from `--all`; **#08, #22, #27, #30 and #31 have no anchor anywhere in
-  history** and no subject can be recovered (*#42*). And `[0.7.6]`'s *"60,000 rounds"* is the same
+  history** and no subject can be recovered (). And `[0.7.6]`'s *"60,000 rounds"* is the same
   error the fuzz fix above corrects. ⛔ **New deferrals start at #40, never in those five gaps** —
   reusing a harvested number would make the ledger lie twice.
 

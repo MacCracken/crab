@@ -29,7 +29,7 @@
 
 ⭐ **0.7.7 is a REPAIR cut — no roadmap item advanced.** Five defects that had already shipped were
 found by reading code and closed with mutation-proven tests; the toolchain pin moved
-**6.5.36 → 6.5.41**; and CI went from one step to nine, closing *#14*, *#15* and *#36*.
+**6.5.36 → 6.5.41**; and CI went from one step to nine, closing the three long-open CI gaps.
 ⚠ **Every figure below has been re-measured at 0.7.7 unless it says otherwise.**
 
 ⭐ **M5 is substantially in** — the preview column, thumbnails, EXIF, and the GRID and GALLERY
@@ -37,7 +37,7 @@ views — and **every finding of the 2026-08-31 security audit is closed**. ⚠ 
 make new user-facing features a MINOR**; this is the fourth time this project has put feature work in
 a patch by operator ruling. ⛔ **CORRECTED 2026-09-01: 0.7.6 IS committed, tagged (`26f38ed`) and pushed.** This line said
 "Nothing is committed, tagged or pushed" — true when written, false by the time it was read, and
-nothing gated it (*deferral #37*, verbatim). The operator still drives every version decision;
+nothing gated it (nothing gates this file's currency, verbatim). The operator still drives every version decision;
 what changed is that this one was already made.
 
 ⛔ **0.7.2 exists because 0.7.1's CHANGELOG section was being edited after its tag was pushed.**
@@ -51,7 +51,7 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.41` (in `cyrius.cyml [package].cyrius`) — moved 2026-09-02 at the 0.7.7 cut, on operator direction. ⭐ **Not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat` (closing the VOLUMES *capacity* gate outright and turning the symlink gap into a decision), and 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest said 6.5.36 while `cycc` was already 6.5.41, so every build printed `toolchain drift` and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set** — three transitive thread leaves stayed at 6.5.36 content and were copied by hand (*#50*); `lib/hashseed.cyr` arrived untracked (*#51*). **Diff the whole vendored tree against the snapshot after any bump.**
+- **Cyrius pin**: `6.5.41` (in `cyrius.cyml [package].cyrius`) — moved 2026-09-02 at the 0.7.7 cut, on operator direction. ⭐ **Not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat` (closing the VOLUMES *capacity* gate outright and turning the symlink gap into a decision), and 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest said 6.5.36 while `cycc` was already 6.5.41, so every build printed `toolchain drift` and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set** — three transitive thread leaves stayed at 6.5.36 content and were copied by hand; `lib/hashseed.cyr` arrived untracked. **Diff the whole vendored tree against the snapshot after any bump.**
 - *(history)* `6.5.36` — moved 2026-08-30 with the defect
   and M4 work, per the standing rule that a repaired repo does not stay on a stale pin.
   ⭐ **This bump retired `CRAB_SYS_READDIR_AT = 101`**: 6.5.36 vendors `sys_readdir_at`, so crab no
@@ -85,7 +85,7 @@ demands and the one this file broke twice.
   can hold a stdlib that is not that version's, so **diagnose by CONTENT, never by the version
   string in the path**. The check that actually works is to compare the vendored tree against the
   pinned snapshot file by file — which is how 0.7.7's bump was verified (0 files drifting), and how
-  it caught three transitive leaves the sync had left behind (*#50*).
+  it caught three transitive leaves the sync had left behind.
   ⚠ *A byte delta of 16/48 against a documented size is the shape of a vendored-`lib/` change — it
   may be poisoning OR a legitimate stdlib move. 0.7.7's bump produced exactly +16 host / +48 agnos
   and was legitimate. The delta tells you to look; it does not tell you which.*
@@ -98,7 +98,7 @@ demands and the one this file broke twice.
   be byte-identical between 6.5.36 and 6.5.41. It will not always be.
   ⇒ **Diff the WHOLE vendored tree against the snapshot at every bump**, not the declared subset,
   and reconcile `git status lib/` *and* the lock's entry count — 6.5.41 also ADDED a leaf
-  (`lib/hashseed.cyr`), which arrived untracked. *Deferrals #50, #51.*
+  (`lib/hashseed.cyr`), which arrived untracked.
 
 ## Source
 
@@ -131,7 +131,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   ⛔ It exists for the same reason `path.cyr` does — **none of it was reachable from any test** while
   it lived in `main.cyr`, in a program whose two shipped defects were both found on iron. 0.6.0 added
   17 assertions against it, all mutation-proven.
-  ⚠ `CRAB_MAX_ENTRIES = 1024` (256 until M3 *#02*) and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
+  ⚠ `CRAB_MAX_ENTRIES = 1024` (256 until M3) and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
   **unconditionally** — no flag, no arm, no env var — both live here.
 - `src/path.cyr` — the readdir record layout and the **bounded** cstring/path helpers
   (`crab_cstr_len`, `crab_streq_n`, `crab_strcpy_n`, `crab_join_n`).
@@ -347,7 +347,7 @@ the arena.
 
 ⚠ **And check 4 is doing even more work than "path wins" implies** — see Known gaps: `lib/` is not
 what compiles at all while `path` is set. Re-run all four at every cut. Automating it is roadmap
-deferral **#19**, still open.
+still open — see the roadmap's 0.8.0 batch.
 
 ⛔ **`path` WINS over `tag`, so a green local build is not evidence that the declared graph resolves.**
 That is the drift 0.4.13 caught and closed. **Four of six** carry `path` — the table's own column says
@@ -383,8 +383,8 @@ separate change, not bundled into a version bump.
   (exit 139) part-way through, having printed the group header, with every prior assertion passed.
   It looked exactly like a bug in the code under test. `t_img_dims`, `t_preview` and
   `t_preview_dims` are separate functions; anything added from here on should be too. (119 in M3 —
-  44 sorting *#33*, 12 selection memory *#34*, 10 argv *#11*, 28 deferred statting *#03*, 25 real
-  columns *#32*; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
+  44 sorting 12 selection memory 10 argv 28 deferred statting 25 real
+  columns; 55 mid-0.6.0, 37 at 0.5.0, 11 at 0.4.15). ⭐ It now includes **`src/app.cyr`**, not `ui.cyr`, so the application
   layer is reachable for the first time.
   Covers the AE-6 premultiplied `#92` contract on the **production** `crab_render` (`a == 255` and
   `c <= a` across all 83,600 pixels, with negative controls); 0.5.0's repairs (bounded path helpers,
@@ -415,9 +415,9 @@ separate change, not bundled into a version bump.
   Current: merge **88.6 µs** vs insertion **5.66 ms** at 256 scrambled; merge **38.3 µs** vs
   insertion **1.28 ms** at the real iron 122. ⛔ Still nothing writes `docs/benchmarks.md` from it —
   that is the v1.0 criterion, and it is the half that is missing.
-- `tests/crab.fcyr` — ✅ **A REAL FUZZ HARNESS as of 0.7.6 (*deferral #12* CLOSED).**
+- `tests/crab.fcyr` — ✅ **A REAL FUZZ HARNESS as of 0.7.6.**
   It was a scaffold that read none of its input, so `cyrius fuzz` PASSED against anything. It now
-  drives **100,000 rounds** (⛔ measured and printed by the harness itself since *#41*; this line said
+  drives **100,000 rounds** (⛔ measured and printed by the harness itself since; this line said
   60,000, as five others did) over mutated format headers, random bytes, degenerate/negative lengths,
   and arbitrary bytes through `crab_name_ok` / `crab_is_image` / `crab_cstr_len` — deterministic
   from a fixed seed, asserting an invariant rather than only the absence of a crash.
@@ -434,7 +434,7 @@ separate change, not bundled into a version bump.
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
 | x86_64 linux | ✅ builds, **1,023,968 B** *(0.7.7; 1,019,784 at 0.7.6, 453,304 at 0.7.5)* |
-| `--agnos`    | ✅ builds, **1,047,832 B** *(0.7.7; 1,047,624 at 0.7.6)* — the real target, and **CI now builds it** (*#15*) |
+| `--agnos`    | ✅ builds, **1,047,832 B** *(0.7.7; 1,047,624 at 0.7.6)* — the real target, and **CI now builds it** |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -477,10 +477,13 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   green. What was real: no fuzz coverage (now closed), and a safety that depends on
   `CRAB_EDIT_CAP <= CRAB_NAME_MAX`, two constants that can move independently — now asserted.
 - ✅ **CLOSED at 0.7.7 — `render_test`'s 53 pixel assertions RUN IN CI**, as their own step, with
-  the exit code (the failed-check count) as the assertion. *Deferral #14.* ⚠ Still true, and why the
+  the exit code (the failed-check count) as the assertion. ⚠ Still true, and why the
   step is explicit rather than discovered: `cyrius test` does not find it, and `[build].test` is
-  inert (*#17*, still open — `cyrius.cyml` still reads `test = "src/test.cyr"`).
-- ✅ **CLOSED at 0.7.7 — CI builds `--agnos`.** *Deferral #15.* `release.yml` gates on `ci.yml` via
+  inert. ✅ **CLOSED at 0.7.7**: `[build].test` now reads `tests`, and the orphaned
+  `src/test.cyr` is deleted. ⚠ Repointing it did not make it a GATE — measured by pointing it at a
+  file that exits 1 and watching `cyrius test` still return **rc=0**. It names where the tests are;
+  it does not run them.
+- ✅ **CLOSED at 0.7.7 — CI builds `--agnos`.** `release.yml` gates on `ci.yml` via
   `uses:`, so a tag inherits it. ⛔ The flag is `--agnos`: `CYRIUS_TARGET=agnos` is **silently
   ignored** and produces a byte-identical host binary at exit 0.
   ⚠ **The BLIND SPOT ITSELF IS NOT CLOSED, only the build of it**: 1,221 of `src/main.cyr`'s 1,494
@@ -488,14 +491,14 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   key-dispatch table now COMPILES under the gate but is still executed by no test on any target.
   0.7.7's defect fixes answered that by moving the decisions out into `crab_transfer_plan`,
   `crab_menu_row`, `crab_tray_h` and `crab_fs_isdir`, which the suite can reach.
-- ✅ **CLOSED — the fuzz harness now reads its input.** *Deferral #12.* **100,000** rounds
+- ✅ **CLOSED — the fuzz harness now reads its input.** **100,000** rounds
   over mutated headers, random bytes and degenerate lengths, deterministic from a fixed seed. It
   caught a real segfault in `crab_img_dims` the day it was written.
   ⚠ **What it still does NOT cover**: `crab_readdir_into` (agnos-only, needs a syscall), the write
   layer's path joins, and `crab_batch_name`'s pattern expansion. Those are the next targets.
 - ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
   description, the `[deps]` comment and the README all commit to daimon; `cyrius.cyml` declares no
-  daimon dep, and **daimon 2.1.2 exists locally**. *Deferral #18.*
+  daimon dep, and **daimon 2.1.2 exists locally**.
 - ✅ **CLOSED in 0.7.6 — `crab_render` takes one record, not 32 positional parameters.** (The
   count here said 33; it was 32.) `crab_rs_pane` / `_op` / `_chrome` / `_preview` / `_dims` fill it,
   max arity 11, and `crab_rs_reset` owns the three `-1`-means-unknown defaults that 23 call sites
@@ -584,7 +587,7 @@ _None — top-level application._
 cut**: five shipped defects closed, the toolchain pin moved, and CI stopped being one step.
 
 ⭐ **Done in 0.7.6**: the `crab_render` parameter cleanup, the preview pane, header-only image
-dimensions, **thumbnails**, and **EXIF** (camera + shot) — plus *deferral #12* (the fuzz harness)
+dimensions, **thumbnails**, and **EXIF** (camera + shot) — plus (the fuzz harness)
 closed, a shipped per-frame leak in `crab_overlay` fixed, dhancha at 0.9.26 and chitra at 1.0.1.
 
 ⛔⛔ **THE 6.5.41 PIN RETIRED TWO GATES THIS SECTION USED TO LIST AS BLOCKED, and neither needed
@@ -592,10 +595,10 @@ crab work to unblock:**
 - **Sidebar VOLUMES — capacity**: cyrius **6.5.37 shipped `sys_statfs`**, crab vendors it, and
   cyrius's issue is archived. ⚠ agnos-only (no host arm, so no host test can exercise it), and **no
   `STATFS_*` field offsets are vendored** — the frozen 32-byte layout must come from agnos's docs.
-  *Enumeration* is still open (*#44*), because `mount`**#11** / `umount`#24 are no-op stubs.
+  *Enumeration* is still open, because `mount`** / `umount`#24 are no-op stubs.
 - **Symlink detection**: **`sys_lstat`** ships on both targets. What crab should DO with the answer
   is now the open question, not whether it can ask.
-⇒ **Both had been written as OPEN for four cyrius releases.** Same failure as *#09*, carried OPEN for
+⇒ **Both had been written as OPEN for four cyrius releases.** Same failure as the idle-poll buffer, carried OPEN for
 nine. ⛔ **Re-derive a gate before believing it — including the ones in this file.**
 
 ⛔ **What remains in M5**: **columns/miller**, gated on crab's own two-pane model — a design
