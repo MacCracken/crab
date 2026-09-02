@@ -24,8 +24,17 @@
 
 ## Version
 
-**0.7.7 in preparation** (2026-09-02) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
-**0.7.6** (2026-08-31) is the last RELEASED version, tagged `26f38ed` on the remote.
+**0.8.0 in preparation** (2026-09-02) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.7** is the last RELEASED version, tagged `6c9dd18` on the remote.
+
+⭐ **M6 ships everything buildable**: the PLACES sidebar (`b`), the menu bar (`F10`), the A/B view
+switcher, 🦀 Bueller's status-bar line, and pane-header focus — the last M1–M4 residue.
+⛔ **Three M6 items remain and all three are GATED, not deferred**: sidebar VOLUMES (agnos cannot
+enumerate mounts — filed upstream 2026-09-02), the 🦀 chrome button (CP437 has no crab glyph; needs
+an icon path or proportional text), and the held-key repeat number (agnos-runtime, no host test can
+see it). ⚠ *A milestone closing with gated items is the normal shape here.*
+⛔⛔ **AND 0.8.0 FIXED TWO FEATURES THAT HAD NEVER BEEN VISIBLE** — the context menu and the rename
+sheet, shipped in 0.7.5, were laid out entirely below the window. See the CHANGELOG.
 
 ⭐ **0.7.7 is a REPAIR cut — no roadmap item advanced.** Five defects that had already shipped were
 found by reading code and closed with mutation-proven tests; the toolchain pin moved

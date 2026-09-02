@@ -246,10 +246,17 @@ toolkit; see the gate table below for what each turned out to be.
   confirm strings crab already guessed — and it cannot see the aliasing that lists one volume twice
   when ext2 is absent. ⇒ **VOLUMES is absent rather than approximated.** Nothing in crab waits on a
   reply. ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #23.*
-- **The menu bar** (1c: File · Edit · Go · Tags · Index · Window), on the same `dh_list_new_h`.
-  Several times the switcher's work: it needs the drop-down, the model for six menus, and a pointer
-  path the switcher deliberately did without.
-- **The 🦀 menu** (canvas turn 2) — the mascot's chevron menu, light and dark, collapsed and revealed.
+- ✅ **The menu bar — SHIPPED**, on `F10`, collapsed by default so it costs zero rows until
+  revealed. **File · Edit · Go · View**, on `dh_list_new_h(0)`'s per-item widths (dhancha 0.9.28).
+  Drop-downs are a SELECTION over the context menu's `CRAB_MI_*` — one description of each verb, not
+  two — and open as the same overlay under their own bar cell.
+  ⛔ **Tags and Index are deliberately absent**: both are M7, gated on daimon, with no items at all.
+  An absent menu is honest; one that opens on nothing is not.
+- **The 🦀 chrome button** (canvas turn 2) — the crab as the door to the menu row, collapsed and
+  revealed. ⛔ **GATED ON crab's OWN FONT, not on dhancha.** `font = 0` is kashi's CP437 8x16 bitmap
+  and `dh_draw_text` walks one BYTE per glyph: there is no crab glyph in CP437 and no UTF-8 path to
+  one. ⇒ It needs an icon path or proportional text (the M5 gate). `F10` is the door until then, and
+  the menu row itself already ships.
 - ✅ **The 🦀 mascot line — SHIPPED.** After a minute of silence the status bar deadpans
   `Bueller...` · pause · `Bueller...` · pause · `Bueller...?`, then goes quiet until the operator
   touches something. ⛔ Its own idle branch (there is no unconditional per-tick redraw to ride) and

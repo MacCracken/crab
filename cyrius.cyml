@@ -80,7 +80,7 @@ modules = ["src/font_data.cyr"]
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 path = "../dhancha"
-tag    = "0.9.27"
+tag    = "0.9.28"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it

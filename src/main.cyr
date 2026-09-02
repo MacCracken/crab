@@ -144,6 +144,13 @@ fn main(): i64 {
     # 380x220 it would cost the panes their MODIFIED column on the first frame, and a view that
     # reflows the moment the app starts is a view the operator did not ask for.
     var sb_open = 0;
+    # ⭐ THE MENU BAR (M6, canvas turn 2). -1 = collapsed, which is the DEFAULT and what makes it
+    # affordable: at 380x220 an always-present bar would cost a listing row forever to show four
+    # words. `mb_drop` is separate — the bar can be revealed with nothing dropped, which is the
+    # state the operator arrows along.
+    var mb_sel = 0 - 1;
+    var mb_drop = 0 - 1;
+    var mb_item = 0;
     # ⛔ THE PLACES MODEL IS BUILT ONCE, AT STARTUP, NOT PER FRAME. It stats up to six paths, and
     # doing that on the render path would put six syscalls on every keystroke — the exact cost the
     # deferred-statting work exists to keep off it. ⚠ It therefore does NOT notice a `Downloads`
@@ -207,6 +214,7 @@ fn main(): i64 {
     crab_rs_preview(rs, pv_open);
     crab_rs_view(rs, view_mode);
     crab_rs_sidebar(rs, sb_open, places, placen);
+    crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -932,6 +940,70 @@ fn main(): i64 {
                             # the edit field and the delete confirmation. ⛔ Checked BEFORE
                             # every binding below and it consumes the key, so `d` while the
                             # menu is open moves the highlight rather than deleting anything.
+                            # ⭐⭐ THE MENU BAR CONSUMES ITS KEYS FIRST, and it must: Left/Right
+                            # already switch panes and Enter already descends, so a bar that did not
+                            # claim them would be navigable only by keys it does not own.
+                            # ⛔ TWO STATES, NOT ONE. `mb_sel >= 0` is the bar revealed and being
+                            # arrowed along; `mb_drop >= 0` is a drop-down open under it. They are
+                            # separate because the same Left/Right means "next menu" in both, but
+                            # Up/Down and Enter mean entirely different things.
+                            if (mb_sel >= 0) {
+                                if (mb_drop < 0) {
+                                    if (u == 0x29) { mb_sel = 0 - 1; u = 0; }              # Esc
+                                    if ((u == 0x50) || (u == 0x0B)) { mb_sel = crab_mb_move(mb_sel, 0 - 1); u = 0; }
+                                    if ((u == 0x4F) || (u == 0x0F)) { mb_sel = crab_mb_move(mb_sel, 1); u = 0; }
+                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `Go` and `View` are on
+                                    # the bar because the canvas draws them and crab will fill them;
+                                    # opening an empty popup would read as a broken menu rather than
+                                    # an unfinished one.
+                                    if (u == 0x28) {
+                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        else { crab_set_notice("that menu has no items yet"); }
+                                        u = 0;
+                                    }
+                                } else {
+                                    if (u == 0x29) { mb_drop = 0 - 1; u = 0; }             # Esc — close the drop
+                                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                                        if (mb_item > 0) { mb_item = mb_item - 1; }
+                                        u = 0;
+                                    }
+                                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                                        if (mb_item < (crab_mb_item_count(mb_drop) - 1)) { mb_item = mb_item + 1; }
+                                        u = 0;
+                                    }
+                                    # ⚠ Left/Right walk to the adjacent menu WITH the drop still
+                                    # open, which is how every menu bar behaves.
+                                    if ((u == 0x50) || (u == 0x0B)) {
+                                        mb_sel = crab_mb_move(mb_sel, 0 - 1);
+                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        else { mb_drop = 0 - 1; }
+                                        u = 0;
+                                    }
+                                    if ((u == 0x4F) || (u == 0x0F)) {
+                                        mb_sel = crab_mb_move(mb_sel, 1);
+                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        else { mb_drop = 0 - 1; }
+                                        u = 0;
+                                    }
+                                    if (u == 0x28) {                                       # Enter — run it
+                                        # ⛔ THE BAR DOES NOT REIMPLEMENT THE VERBS EITHER. Exactly
+                                        # as the context menu does, it rewrites `u` to the key the
+                                        # entry names and falls through — so there is ONE
+                                        # implementation of each command and the accelerator column
+                                        # cannot drift from what the entry actually does.
+                                        var bi = crab_mb_item(mb_drop, mb_item);
+                                        mb_drop = 0 - 1;
+                                        mb_sel = 0 - 1;
+                                        u = 0;
+                                        if (bi == CRAB_MI_COPY) { u = 0x06; }
+                                        if (bi == CRAB_MI_MOVE) { u = 0x10; }
+                                        if (bi == CRAB_MI_RENAME) { u = 0x15; }
+                                        if (bi == CRAB_MI_DELETE) { u = 0x07; }
+                                        if (bi == CRAB_MI_NEWDIR) { u = 0x11; }
+                                        if (bi == CRAB_MI_OPEN) { u = 0x28; }
+                                    }
+                                }
+                            }
                             if (menu_open != 0) {
                                 if (u == 0x29) { menu_open = 0; u = 0; }           # Esc — dismiss
                                 else {
@@ -1185,6 +1257,21 @@ fn main(): i64 {
                                     } else { crab_clear_notice(); crab_say("crab: preview on\n"); }
                                 } else { crab_clear_notice(); crab_say("crab: preview off\n"); }
                             }
+                            # ⭐⭐ THE MENU BAR (canvas turn 2). ⛔ THE CANVAS ASKS FOR A 🦀 BUTTON
+                            # AND crab CANNOT DRAW ONE: `font = 0` is kashi's CP437 8x16 bitmap and
+                            # `dh_draw_text` walks one BYTE per glyph, so there is no crab glyph and
+                            # no UTF-8 path to one — the same limit that made the truncation marker
+                            # `~` rather than `…`. ⇒ `F10` is the door, and the crab button is
+                            # deferred with its reason recorded rather than faked with ASCII.
+                            # ⚠ F10 is the universal menu-bar key, so the affordance is conventional
+                            # even without the chrome the canvas draws.
+                            if (u == 0x43) {                                       # F10 — the menu bar
+                                if (mb_sel < 0) { mb_sel = 0; crab_say("crab: menu bar\n"); }
+                                else { mb_sel = 0 - 1; }
+                                # ⛔ COLLAPSING TAKES THE DROP-DOWN WITH IT. A menu left open over a
+                                # bar that is gone is a popup with no owner and no way to dismiss it.
+                                mb_drop = 0 - 1;
+                            }
                             if (u == 0x05) {                                       # b — the PLACES sidebar
                                 # ⚠ SAME DISCIPLINE AS `p`: the toggle flips the operator's WANT even
                                 # when the window cannot honour it, and the refusal is reported rather
@@ -1252,6 +1339,7 @@ fn main(): i64 {
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
                 crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1342,6 +1430,7 @@ fn main(): i64 {
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
                     crab_rs_sidebar(rs, sb_open, places, placen);
+                    crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1413,6 +1502,7 @@ fn main(): i64 {
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
                 crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1502,6 +1592,7 @@ fn main(): i64 {
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
                     crab_rs_sidebar(rs, sb_open, places, placen);
+                    crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
@@ -1543,6 +1634,7 @@ fn main(): i64 {
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
                 crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 var sm = crab_render(surf, 0, rs);
                 if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(sm), nbytes); }
@@ -1566,6 +1658,7 @@ fn main(): i64 {
                         crab_rs_preview(rs, pv_open);
                         crab_rs_view(rs, view_mode);
                         crab_rs_sidebar(rs, sb_open, places, placen);
+                        crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                         crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
@@ -1602,6 +1695,7 @@ fn main(): i64 {
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
                 crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only

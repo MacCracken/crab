@@ -634,6 +634,146 @@ fn crab_sidebar_hit(x, y): i64 {
 }
 
 # =================================================================================================
+# M6 — THE MENU BAR (canvas turn 2). Collapsed by default; `F10` is the door.
+# =================================================================================================
+#
+# ⛔⛔ THE CANVAS ASKS FOR A 🦀 BUTTON AND crab CANNOT DRAW ONE. Turn 2 reads *"Clicking 🦀 toggles
+# the File / Edit / Go menu row… the crab earns its place in the chrome by being the door to it."*
+# crab draws with `font = 0` — kashi's **CP437 8x16 bitmap** — and `dh_draw_text` walks the string
+# one BYTE per glyph (`load8(text + i)`). CP437 has 256 glyphs and no emoji; there is no crab, and
+# no UTF-8 path to reach one. This is the same limit already recorded at `crab_name_trunc`: *"'~'
+# (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph."*
+# ⇒ **The door is `F10`, and the crab button is DEFERRED with its reason stated** rather than
+# substituted with an ASCII stand-in that would read as a placeholder nobody removed. It needs an
+# icon path or proportional text, which is the M5 gate. ⚠ The chevron the canvas also names IS
+# drawable — CP437 30/31 — and the bar uses it to say which way the toggle goes.
+#
+# ⭐ COLLAPSED IS THE DEFAULT, AND THAT IS WHAT MAKES IT AFFORDABLE. At the shipped 380x220 every
+# row is contended: the status line owns 22 px, a pane header 28, the tray up to 45. A bar that were
+# always present would cost a listing row forever to show six words. Collapsed it costs **zero**.
+#
+# ⛔ TAGS AND INDEX ARE NOT HERE, AND THAT IS DELIBERATE. The canvas draws six menus; crab ships
+# four. `Tags` and `Index` belong to M7 and have **no implemented items at all** — they are gated on
+# daimon, which `cyrius.cyml` declares nowhere. A menu that opens on nothing, or one greyed out
+# forever, is a promise crab is not keeping; an absent menu is honest and arrives with its contents.
+var CRAB_MB_H = 22;                        # one row, the same height as the status line
+var CRAB_MB_FILE = 0;
+var CRAB_MB_EDIT = 1;
+var CRAB_MB_GO   = 2;
+var CRAB_MB_VIEW = 3;
+var CRAB_MB_COUNT = 4;
+
+# @public — the bar label for menu `i`.
+fn crab_mb_label(i): i64 {
+    if (i == CRAB_MB_FILE) { return "File"; }
+    if (i == CRAB_MB_EDIT) { return "Edit"; }
+    if (i == CRAB_MB_GO)   { return "Go"; }
+    if (i == CRAB_MB_VIEW) { return "View"; }
+    return "";
+}
+
+# @public — how wide menu `i`'s bar cell is, in pixels.
+# ⚠ crab MEASURES ITS OWN TEXT because dhancha cannot: `dh_measure` sizes a childless widget from
+# its PREF, never from its label. At `font = 0` every glyph is exactly `CRAB_COL_CHARW` wide, so the
+# measurement is exact rather than an estimate — and it stops being exact the day proportional text
+# lands, which is the same constant the truncation rule rests on.
+var CRAB_MB_PAD = 8;                       # breathing room either side of the label
+fn crab_mb_cell_w(i): i64 {
+    var n = crab_cstr_len(crab_mb_label(i), CRAB_NAME_MAX);
+    if (n < 0) { return CRAB_MB_PAD + CRAB_MB_PAD; }
+    return n * CRAB_COL_CHARW + CRAB_MB_PAD + CRAB_MB_PAD;
+}
+
+# @public — how many items menu `i` holds, and the item at slot `j` as a context-menu id.
+#
+# ⭐⭐ THE DROP-DOWNS REUSE `CRAB_MI_*` RATHER THAN MINTING A SECOND SET OF VERBS. The context menu
+# already names every verb crab has, with its real accelerator and its own enabled rule — so a menu
+# bar that defined its own would be a second place for `Delete` to be described, and the two would
+# drift. ⇒ A bar menu is a SELECTION over the existing items, and `crab_menu_label`,
+# `crab_menu_key` and `crab_menu_enabled` answer for both surfaces unchanged.
+# ⚠ `Go` and `View` have no `CRAB_MI_*` equivalents because they are navigation and display, not
+# verbs on a file — they carry their own items below, and `-1` marks a slot that is not one.
+fn crab_mb_item_count(i): i64 {
+    if (i == CRAB_MB_FILE) { return 3; }       # Open, New folder..., Rename...
+    if (i == CRAB_MB_EDIT) { return 3; }       # Copy, Move, Delete
+    if (i == CRAB_MB_GO)   { return 0; }       # navigation — no file verbs yet
+    if (i == CRAB_MB_VIEW) { return 0; }       # display — no file verbs yet
+    return 0;
+}
+
+fn crab_mb_item(i, j): i64 {
+    if (i == CRAB_MB_FILE) {
+        if (j == 0) { return CRAB_MI_OPEN; }
+        if (j == 1) { return CRAB_MI_NEWDIR; }
+        if (j == 2) { return CRAB_MI_RENAME; }
+    }
+    if (i == CRAB_MB_EDIT) {
+        if (j == 0) { return CRAB_MI_COPY; }
+        if (j == 1) { return CRAB_MI_MOVE; }
+        if (j == 2) { return CRAB_MI_DELETE; }
+    }
+    return 0 - 1;
+}
+
+# @public — move the bar selection by `d`, CLAMPED to the ends. -> the new index.
+# ⚠ CLAMPED, NOT WRAPPED — the opposite of the context menu's rule, and for the reason that rule
+# gives: a menu is a short list the operator can see all of, so wrapping is faster than stopping. A
+# BAR is a row they are moving ALONG, and wrapping from `View` back to `File` reads as the selection
+# jumping rather than travelling.
+# @public — the x of menu `i`'s bar cell, in window pixels: the widths of every menu before it.
+# ⚠ Needed so a drop-down opens UNDER its own bar item rather than at the pointer. It is derived
+# from the same `crab_mb_cell_w` the bar is built from, so the two cannot disagree.
+fn crab_mb_cell_x(i): i64 {
+    var x = 0;
+    var k = 0;
+    while (k < i) {
+        if (k >= CRAB_MB_COUNT) { return x; }
+        x = x + crab_mb_cell_w(k);
+        k = k + 1;
+    }
+    return x;
+}
+
+fn crab_mb_move(i, d): i64 {
+    var n = i + d;
+    if (n < 0) { return 0; }
+    if (n >= CRAB_MB_COUNT) { return CRAB_MB_COUNT - 1; }
+    return n;
+}
+
+var crab_mblst = 0;
+
+# @public — the menu bar for the frame just rendered, or 0 if it was collapsed.
+fn crab_menubar_widget(): i64 { return crab_mblst; }
+
+# Build the bar into `parent`, with menu `sel` current.
+#
+# ⛔ `dh_list_new_h(0)` — THE PER-ITEM-WIDTH MODE (dhancha 0.9.28). `File` and `Window` are not the
+# same width, and a uniform cell wide enough for the longest label would waste a third of a 380 px
+# window. `dh_list_add` pins the main axis only when the cell size is non-zero, so at 0 each item
+# keeps the width `crab_mb_cell_w` gave it.
+fn crab_menubar(parent, sel): i64 {
+    var bar = dh_list_new_h(0);
+    if (bar == 0) { return 0; }
+    dh_widget_set_pref(bar, 0, CRAB_MB_H);
+    dh_widget_set_flex(bar, 0);
+    dh_widget_set_bg(bar, dh_theme_panel());
+    var i = 0;
+    while (i < CRAB_MB_COUNT) {
+        var it = dh_widget_new(LABEL);
+        dh_widget_set_text(it, crab_mb_label(i));
+        dh_widget_set_pref(it, crab_mb_cell_w(i), CRAB_MB_H);
+        dh_list_add(bar, it);
+        i = i + 1;
+    }
+    # ⛔ dhancha PAINTS THE HIGHLIGHT, not crab — that is the entire reason `dh_list_new_h` is a
+    # toolkit kind and not a `BOX_H` of labels. ADR 0001: crab names no colour.
+    dh_list_select(bar, sel);
+    dh_widget_add_child(parent, bar);
+    return bar;
+}
+
+# =================================================================================================
 # M6 — THE A/B VIEW SWITCHER (dhancha 0.9.26's `dh_list_new_h`).
 # =================================================================================================
 #
@@ -1838,8 +1978,11 @@ fn crab_tray(root, w, opname, opdone, optotal, oprate, opeta): i64 {
 #
 # ⚠ `menu_x`/`menu_y` are where the operator asked for it. `dh_place_at_point` FLIPS rather than
 # slides near an edge, so the pointer is never left sitting on top of the menu it opened.
+# ⚠ `mbmenu` — which BAR menu's items to show, or -1 for the full context menu. ⛔ The bar menus are
+# a SELECTION over `CRAB_MI_*`, not a second set of verbs: `Delete` is described in exactly one
+# place, with one accelerator and one enabled rule, and both surfaces read it.
 fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mmarked, mname,
-  editopen, editlabel): i64 {
+  editopen, editlabel, mbmenu): i64 {
     var layer = dh_overlay_new();
     dh_widget_set_pref(layer, w, h);
     if (menuopen != 0) {
@@ -1848,25 +1991,43 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         dh_cols_set_width(crab_mspec, 0, 0);
         dh_cols_set_width(crab_mspec, 1, CRAB_MENU_KEYW);
         var m = dh_menu_new(22);
+        # ⚠ The context menu shows every verb; a bar menu shows its own slice of them.
+        var mn = CRAB_MI_COUNT;
+        if (mbmenu >= 0) { mn = crab_mb_item_count(mbmenu); }
         var i = 0;
-        while (i < CRAB_MI_COUNT) {
-            var row = dh_menu_item(m, crab_mspec, crab_menu_label(i), crab_menu_key(i));
+        while (i < mn) {
+            var mi = i;
+            if (mbmenu >= 0) { mi = crab_mb_item(mbmenu, i); }
+            var row = dh_menu_item(m, crab_mspec, crab_menu_label(mi), crab_menu_key(mi));
             # ⚠ A DISABLED ENTRY IS GREYED AND INERT, not hidden — entries that move around force
             # the operator to re-read the menu every time. `DH_FLAG_INERT` makes dhancha skip it with
             # the keyboard and miss it with the mouse, so "greyed" is not merely cosmetic.
-            if (crab_menu_enabled(i, mcount, misdir, mmarked) == 0) {
+            if (crab_menu_enabled(mi, mcount, misdir, mmarked) == 0) {
                 dh_widget_set_fg(row, dh_theme_faint());
                 dh_widget_set_inert(row, 1);
             }
             # ⛔ A separator before the destructive verb, so Delete is never the key you land on by
             # overshooting Rename.
-            if (i == CRAB_MI_RENAME) { dh_menu_sep(m); }
+            # ⛔ THE SEPARATOR IS THE CONTEXT MENU'S ONLY. A bar menu is three items the operator
+            # opened deliberately; the separator exists so `Delete` is never the row you land on by
+            # overshooting `Rename`, and in a three-item list there is nothing to overshoot.
+            if (mbmenu < 0) { if (i == CRAB_MI_RENAME) { dh_menu_sep(m); } }
             i = i + 1;
         }
         # ⛔ THE SEPARATOR ABOVE IS WHY THIS IS NOT `dh_list_select(m, menusel)`. `menusel` is a menu
         # ITEM index; the separator makes the list one row longer than the item count from RENAME on.
         # See `crab_menu_row` for what shipped when the two were conflated.
-        dh_list_select(m, crab_menu_row(menusel));
+        # ⚠ `crab_menu_row` maps a MODEL index past the separator; a bar menu has none, so its
+        # index space and the list's already agree and the mapping must NOT be applied.
+        # ⛔ THIS GUARD IS UNEXERCISED DEFENCE TODAY, AND SAYING SO IS THE POINT. `crab_menu_row`
+        # only shifts indices ABOVE `CRAB_MI_RENAME` (3), and the largest bar menu holds three items
+        # (0..2) — so applying the mapping anyway returns the same number and **no test can tell the
+        # difference**. Mutating this line out fails nothing. It becomes load-bearing the moment a
+        # bar menu grows a fourth item, which `Go` and `View` will when M7 fills them. Kept and
+        # labelled rather than deleted, the same way `crab_thumb_draw`'s clip test is.
+        var msrow = menusel;
+        if (mbmenu < 0) { msrow = crab_menu_row(menusel); }
+        dh_list_select(m, msrow);
         # ⛔⛔ `dh_falloc`, NOT `alloc` — THIS WAS A REAL PER-FRAME LEAK, SHIPPED IN 0.7.5. Both this
         # rect and the sheet's below are pure scratch: an out-parameter read on the next three lines
         # and never referenced again. On the global allocator, which has no `free()`, they cost 32 B
@@ -2878,7 +3039,15 @@ enum CrabRs {
     CRAB_RS_SBOPEN   = 304;
     CRAB_RS_PLACES   = 312;
     CRAB_RS_PLACEN   = 320;
-    CRAB_RS_SZ       = 328;
+    # ⭐ THE MENU BAR: -1 = collapsed (the default), 0..CRAB_MB_COUNT-1 = revealed with that menu
+    # current. ⚠ ONE FIELD, NOT TWO. An `open` flag beside a `sel` index is two things to keep in
+    # step and one of them would eventually disagree — the shape that made the tray's bar 0 px tall.
+    CRAB_RS_MBSEL    = 328;
+    # ⭐ WHICH BAR MENU HAS ITS DROP-DOWN OPEN, or -1 for none. ⚠ Separate from `MBSEL` because the
+    # bar can be revealed with nothing dropped — that is the state the operator arrows along.
+    CRAB_RS_MBDROP   = 336;
+    CRAB_RS_MBITEM   = 344;   # the highlighted row WITHIN an open bar drop-down
+    CRAB_RS_SZ       = 352;
 }
 
 var crab_rs_rec = 0;
@@ -2910,6 +3079,11 @@ fn crab_rs_reset(rs): i64 {
     store64(rs + CRAB_RS_OPTOTAL, 0 - 1);
     store64(rs + CRAB_RS_OPRATE, 0 - 1);
     store64(rs + CRAB_RS_OPETA, 0 - 1);
+    # ⛔ -1 = COLLAPSED, and a zeroed record must not mean "File is open". `crab_rs_reset` owns this
+    # default for the same reason it owns the three `-1`s above: 23 call sites spelling it by hand
+    # is 23 chances to spell it 0.
+    store64(rs + CRAB_RS_MBSEL, 0 - 1);
+    store64(rs + CRAB_RS_MBDROP, 0 - 1);
     return 0;
 }
 
@@ -2992,6 +3166,15 @@ fn crab_rs_sidebar(rs, want, places, n): i64 {
     store64(rs + CRAB_RS_SBOPEN, want);
     store64(rs + CRAB_RS_PLACES, places);
     store64(rs + CRAB_RS_PLACEN, n);
+    return 1;
+}
+
+# @public — the menu bar: -1 collapsed, else the current menu index.
+fn crab_rs_menubar(rs, sel, drop, item): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_MBSEL, sel);
+    store64(rs + CRAB_RS_MBDROP, drop);
+    store64(rs + CRAB_RS_MBITEM, item);
     return 1;
 }
 
@@ -3136,7 +3319,13 @@ fn crab_render(surf, font, rs): i64 {
     # its own `pref_h` from this identical call; when the two were separate copies, the band grew
     # here and the widget did not, and the bar lost every pixel it had.
     var trayh = crab_tray_h(opname, oprate);
-    dh_widget_set_pref(panes, 0, h - 24 - trayh);   # reserve 24px for the status line, + the tray
+    # ⭐ THE MENU BAR TAKES A ROW ONLY WHEN IT IS REVEALED. Collapsed (-1) it costs zero, which is
+    # what makes it affordable at the shipped 220 px height — the same "reserve what you draw"
+    # arithmetic the tray uses, and for the same reason.
+    var mbsel = load64(rs + CRAB_RS_MBSEL);
+    var mbh = 0;
+    if (mbsel >= 0) { mbh = CRAB_MB_H; }
+    dh_widget_set_pref(panes, 0, h - 24 - trayh - mbh);   # status line + tray + the menu bar
     # ⛔ CLEARED BEFORE THE PANES ARE BUILT, not after. A stale strip pointer from the previous frame
     # would survive a layout that stopped building one — a window resized from solo to two panes —
     # and report a widget the arena has already rewound.
@@ -3206,6 +3395,11 @@ fn crab_render(surf, font, rs): i64 {
         crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb,
           pvtstate, pvcam, pvshot);
     }
+    # ⛔ THE BAR IS ADDED BEFORE THE PANES, so it is the first child of `content` and sits at the top
+    # of the window — where a menu bar goes. The overlay layer is still the ROOT's last child, so a
+    # drop-down opened from the bar paints over everything including this.
+    crab_mblst = 0;
+    if (mbsel >= 0) { crab_mblst = crab_menubar(content, mbsel); }
     dh_widget_add_child(content, panes);
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
     # ⚠ `content`, not `root` — the flow lives there now; only the overlay layer sits on the root.
@@ -3222,6 +3416,19 @@ fn crab_render(surf, font, rs): i64 {
 
     # ⭐ THE OVERLAY GOES LAST — after the status line and after everything else — because sibling
     # order IS z-order in both the paint and the hit-test. See `crab_overlay`.
+    # ⭐ A BAR DROP-DOWN IS THE SAME OVERLAY, OPENED SOMEWHERE ELSE. Rather than a second popup
+    # mechanism it reuses `menuopen` and places the menu under its own bar cell — so the overlay
+    # layer, the placement clamp, the arena discipline and the zero-allocation arm all still apply.
+    # ⚠ The bar's own row height is the y, so the drop-down hangs directly off the bar.
+    var mbdrop = load64(rs + CRAB_RS_MBDROP);
+    if (mbdrop >= 0) {
+        menuopen = 1;
+        menux = crab_mb_cell_x(mbdrop);
+        menuy = CRAB_MB_H;
+        # ⚠ A bar drop-down indexes its OWN item list, not `CRAB_MI_*` — so the highlight comes from
+        # `MBITEM`, and `crab_overlay` is told not to apply the context menu's separator mapping.
+        menusel = load64(rs + CRAB_RS_MBITEM);
+    }
     var mcnt = ln; var msel2 = sel_l; var mmk = lmarks; var mbuf = lbuf;
     if (active_pane == 1) { mcnt = rn; msel2 = sel_r; mmk = rmarks; mbuf = rbuf; }
     var misdir = 0;
@@ -3236,7 +3443,7 @@ fn crab_render(surf, font, rs): i64 {
     crab_shlst = 0;
     if ((menuopen != 0) || (editopen != 0)) {
         crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcnt, misdir,
-          crab_mark_count(mmk, mcnt), mname, editopen, editlabel);
+          crab_mark_count(mmk, mcnt), mname, editopen, editlabel, mbdrop);
     } else { crab_mlst = 0; }
 
     # ⚠ RECORDED FOR HIT-TESTING, and refreshed here every frame — see the ⛔ on `crab_root`.

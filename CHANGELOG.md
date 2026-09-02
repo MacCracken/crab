@@ -2,11 +2,22 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.8.0] — 2026-09-02 — M6: the sidebar, the menu bar, the switcher, and Bueller
 
 > ⛔ **THIS SECTION EXISTS SO THE `[0.7.7]` SECTION BELOW IS NEVER TOUCHED.** 0.7.7 is tagged at
 > `6c9dd18` and on the remote, so it is a **record** now, not a scratchpad — including where it is
 > wrong. Everything here landed AFTER that tag.
+>
+> ⭐ **M6 SHIPS EVERYTHING THAT IS BUILDABLE.** Three items remain and all three are genuinely
+> gated, not deferred: **sidebar VOLUMES** (agnos cannot enumerate mounts — filed 2026-09-02, and
+> the ask turned out to be a getter over a table the kernel already keeps), **the 🦀 chrome button**
+> (CP437 has no crab glyph; it needs an icon path or proportional text — the M5 gate), and **the
+> held-key repeat number** (agnos-runtime behaviour no host test can see). ⚠ *A milestone closing
+> with gated items is the normal shape here — M2 shipped 5 of 7, M3 shipped 4 of 7.*
+>
+> ⚠ **This is a MINOR, not a patch**, and unusually for this project that matches semver: M6 is new
+> user-facing surface. The last four feature cuts rode patch numbers by operator ruling; this one
+> was directed as 0.8.0.
 > ⛔⛔ **AND IT WAS ALMOST WRITTEN INTO IT.** The dep-bump note below was drafted straight into the
 > released `[0.7.7]` body before anyone checked `git describe`, which answered `0.7.7-1-g8ebe9d8` —
 > one commit past the tag. **That is exactly how 0.7.2 came to exist**: three commits landed past
@@ -62,6 +73,62 @@ and a single `alloc(32)` inside the strip fails the arm at **640 bytes** — 32 
 shape of the leak that shipped in 0.7.5.
 Also covered: the fit rule at its floor and one pixel under, both panes selecting their own cell,
 **no** strip in two-pane mode, and the text-prefix fallback still working when the window is narrow.
+
+### Added — the menu bar (M6, canvas turn 2), on `F10`
+
+Four menus — **File · Edit · Go · View** — in a row at the top of the window, the current one
+highlighted by dhancha. **Collapsed by default**, which is what makes it affordable: at the shipped
+380x220 every row is contended, and a bar that were always present would cost a listing row forever
+to show four words. Collapsed it costs **zero**.
+
+⛔⛆ **THE CANVAS ASKS FOR A 🦀 BUTTON AND crab CANNOT DRAW ONE.** Turn 2 reads *"Clicking 🦀 toggles
+the File / Edit / Go menu row… the crab earns its place in the chrome by being the door to it."*
+crab draws with `font = 0` — kashi's **CP437 8x16 bitmap** — and `dh_draw_text` walks the string one
+BYTE per glyph. CP437 has 256 glyphs and no emoji; there is no crab, and no UTF-8 path to reach one.
+This is the limit already recorded at `crab_name_trunc`: *"'~' (126), not '…' — the kashi system font
+is CP437 8x16 and has no ellipsis glyph."* ⇒ **`F10` is the door and the crab button is DEFERRED
+with its reason stated**, rather than substituted with an ASCII stand-in that would read as a
+placeholder nobody removed. It needs an icon path or proportional text — the M5 gate.
+
+⛔ **TAGS AND INDEX ARE NOT HERE, DELIBERATELY.** The canvas draws six menus; crab ships four. Both
+belong to M7, are gated on daimon (which `cyrius.cyml` declares nowhere), and have **no implemented
+items at all**. A menu that opens on nothing, or one greyed out forever, is a promise crab is not
+keeping; an absent menu is honest and arrives with its contents. ⚠ `Go` and `View` ARE on the bar —
+the canvas draws them and crab will fill them — and pressing Enter on an empty one says so rather
+than opening a blank popup.
+
+⭐⭐ **THE DROP-DOWNS ARE A SELECTION OVER `CRAB_MI_*`, NOT A SECOND SET OF VERBS.** The context menu
+already names every verb crab has, with its real accelerator and its own enabled rule. A bar that
+defined its own would be a second place for `Delete` to be described, and the two would drift. So
+`crab_menu_label`, `crab_menu_key` and `crab_menu_enabled` answer for both surfaces unchanged, and —
+exactly as the context menu does — Enter **rewrites the key the entry names and falls through**, so
+there is one implementation of each command and the accelerator column cannot lie.
+
+⭐ **A drop-down is the same overlay, opened somewhere else** — under its own bar cell, at the bar's
+own height. Not a second popup mechanism: the overlay layer, the placement clamp, the arena
+discipline and the zero-allocation arm all still apply. ⚠ *This only works because the overlay-root
+bug above is fixed; before it, every drop-down would have been off-screen too.*
+
+⚠ **`dh_list_new_h(0)` — dhancha 0.9.28's per-item-width mode**, and the bar is its first consumer.
+`File` and `Go` are not the same width; a uniform cell wide enough for the longest label would waste
+a third of a 380 px window. ⚠ crab **measures its own text** because dhancha cannot (`dh_measure`
+sizes a childless widget from its PREF, never its label) — exact at `font = 0` where every glyph is
+`CRAB_COL_CHARW`, and one more thing that stops being exact the day proportional text lands.
+
+⚠ **Movement is CLAMPED, not wrapped** — the opposite of the context menu's rule and for the reason
+that rule gives: a menu is a short list you see all of, so wrapping is faster than stopping; a bar is
+a row you travel *along*, and wrapping from `View` back to `File` reads as the selection jumping.
+
+### Testing
+
+37 assertions. Mutation-proven: uniform cells fail 3, a bar that does not cost the panes a row fails
+2, and a drop-down opened at the pointer instead of under its cell fails 2.
+⛔ **One guard is unfalsifiable today and is labelled as such rather than deleted.** `crab_menu_row`
+maps a model index past the context menu's separator; a bar menu has none, so the mapping must not
+be applied — but it only shifts indices above `CRAB_MI_RENAME` (3) and the largest bar menu holds
+three items, so applying it anyway returns the same number and **mutating the guard out fails
+nothing**. It becomes load-bearing when a bar menu reaches a fourth item, which `Go` and `View` will
+when M7 fills them. Kept and labelled, the way `crab_thumb_draw`'s clip test is.
 
 ### Changed — `crab_sidebar_hit` is the toolkit's walk, not crab's
 

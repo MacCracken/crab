@@ -2400,6 +2400,7 @@ fn main() {
     t_sidebar();
     t_mascot();
     t_overlay_geometry();
+    t_menubar();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3802,6 +3803,118 @@ fn t_dir_transfer(): i64 {
     return 0;
 }
 
+fn t_menubar(): i64 {
+    test_group("crab — M6: the menu bar, collapsed by default");
+
+    # ---- the model -------------------------------------------------------------------------------
+    assert_eq(CRAB_MB_COUNT, 4, "four menus ship: File, Edit, Go, View");
+    assert_eq(t_streq(crab_mb_label(CRAB_MB_FILE), "File"), 1, "File");
+    assert_eq(t_streq(crab_mb_label(CRAB_MB_VIEW), "View"), 1, "View");
+    assert_eq(t_streq(crab_mb_label(CRAB_MB_COUNT), ""), 1, "out of range is empty, not a stray pointer");
+    # ⛔ TAGS AND INDEX ARE ABSENT ON PURPOSE. The canvas draws six; they are M7 (daimon) and have no
+    # items at all. A menu that opens on nothing is a promise crab is not keeping.
+    assert_eq(crab_mb_item_count(CRAB_MB_GO), 0, "Go has no items yet");
+    assert_eq(crab_mb_item_count(CRAB_MB_VIEW), 0, "...nor View");
+    assert_eq(crab_mb_item_count(CRAB_MB_FILE), 3, "File has three");
+    assert_eq(crab_mb_item_count(CRAB_MB_EDIT), 3, "Edit has three");
+
+    # ---- the drop-downs are a SELECTION over CRAB_MI_*, not a second set of verbs ----------------
+    assert_eq(crab_mb_item(CRAB_MB_FILE, 0), CRAB_MI_OPEN, "File/0 is Open");
+    assert_eq(crab_mb_item(CRAB_MB_FILE, 2), CRAB_MI_RENAME, "File/2 is Rename");
+    assert_eq(crab_mb_item(CRAB_MB_EDIT, 2), CRAB_MI_DELETE, "Edit/2 is Delete");
+    assert_eq(crab_mb_item(CRAB_MB_GO, 0), 0 - 1, "an empty menu yields -1, never item 0");
+    # ⛔ AND THEY READ THE SAME LABELS AND ACCELERATORS. One description of Delete, not two.
+    assert_eq(t_streq(crab_menu_label(crab_mb_item(CRAB_MB_EDIT, 2)), "Delete"), 1,
+      "the bar's Delete IS the context menu's Delete");
+    assert_eq(t_streq(crab_menu_key(crab_mb_item(CRAB_MB_EDIT, 2)), "d"), 1,
+      "...with the same accelerator, so the column cannot lie");
+
+    # ---- widths: measured from the label, because dhancha cannot measure text --------------------
+    var wf = crab_mb_cell_w(CRAB_MB_FILE);
+    var wg = crab_mb_cell_w(CRAB_MB_GO);
+    assert_eq(wf, 4 * CRAB_COL_CHARW + CRAB_MB_PAD + CRAB_MB_PAD, "File is four glyphs plus padding");
+    assert(wf > wg, "File is wider than Go — this is why the bar needs PER-ITEM widths");
+    # ⛔ THE X OF EACH CELL IS DERIVED FROM THE SAME WIDTHS THE BAR IS BUILT FROM, so a drop-down
+    # cannot open under the wrong menu.
+    assert_eq(crab_mb_cell_x(CRAB_MB_FILE), 0, "the first cell starts at 0");
+    assert_eq(crab_mb_cell_x(CRAB_MB_EDIT), wf, "...and the second after the first");
+    assert_eq(crab_mb_cell_x(CRAB_MB_GO), wf + crab_mb_cell_w(CRAB_MB_EDIT), "...and so on");
+
+    # ---- movement is CLAMPED, not wrapped --------------------------------------------------------
+    # ⚠ The opposite of the context menu's rule, deliberately: a bar is a row you travel along, and
+    # wrapping from View back to File reads as the selection jumping.
+    assert_eq(crab_mb_move(0, 0 - 1), 0, "left from the first stays");
+    assert_eq(crab_mb_move(CRAB_MB_COUNT - 1, 1), CRAB_MB_COUNT - 1, "right from the last stays");
+    assert_eq(crab_mb_move(0, 1), 1, "...and otherwise it moves");
+
+    # ---- rendering: collapsed costs ZERO rows -----------------------------------------------------
+    var rs = crab_rs();
+    var bb = alloc(8 * CRAB_REC_SZ);
+    t_entry(bb, 0, "boot", 1);
+    t_entry(bb, 1, "notes.txt", 0);
+    var bz = alloc(8 * 8); var bm = alloc(8 * 8);
+    var bi2 = 0;
+    while (bi2 < 8) { store64(bz + bi2 * 8, 512); store64(bm + bi2 * 8, 1788136000); bi2 = bi2 + 1; }
+    var bsl = alloc(8); store64(bsl, 0);
+    var bsr = alloc(8); store64(bsr, 0);
+    var brb = alloc(8 * CRAB_REC_SZ);
+    t_entry(brb, 0, "etc", 1);
+    var bsurf = dh_surface_new(760, 260);
+
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, bb, 2, "/bin", bz, bm, CRAB_PANE_OK, 0, 0, bsl);
+    crab_rs_pane(rs, 1, brb, 1, "/etc", bz, bm, CRAB_PANE_OK, 0, 0, bsr);
+    crab_render(bsurf, 0, rs);
+    assert_eq(crab_menubar_widget(), 0, "a reset render state is COLLAPSED — the default");
+    var panes_collapsed = dh_widget_h(dh_widget_parent(crab_pane_widget(0)));
+
+    # ---- revealed: the bar is the first child, and the panes give up exactly its height ----------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, bb, 2, "/bin", bz, bm, CRAB_PANE_OK, 0, 0, bsl);
+    crab_rs_pane(rs, 1, brb, 1, "/etc", bz, bm, CRAB_PANE_OK, 0, 0, bsr);
+    crab_rs_menubar(rs, CRAB_MB_EDIT, 0 - 1, 0);
+    crab_render(bsurf, 0, rs);
+    var bar = crab_menubar_widget();
+    assert(bar != 0, "revealed, the bar is built");
+    assert_eq(dh_list_count(bar), CRAB_MB_COUNT, "...with one cell per menu");
+    assert_eq(dh_widget_y(bar), 0, "...at the TOP of the window");
+    assert_eq(dh_list_selected(bar), CRAB_MB_EDIT, "...and dhancha highlights the current menu");
+    # ⛔ PER-ITEM WIDTHS (dhancha 0.9.28's `cell_w = 0`): the cells are NOT uniform.
+    assert_eq(dh_widget_pref_w(dh_list_row_at(bar, CRAB_MB_FILE)), wf, "File's cell is File-wide");
+    assert_eq(dh_widget_pref_w(dh_list_row_at(bar, CRAB_MB_GO)), wg, "...and Go's is narrower");
+    assert_neq(wf, wg, "...which a uniform-cell bar could not do");
+    # ⚠ The panes paid exactly the bar's height, no more.
+    var panes_revealed = dh_widget_h(dh_widget_parent(crab_pane_widget(0)));
+    assert_eq(panes_collapsed - panes_revealed, CRAB_MB_H, "the panes gave up exactly one bar row");
+
+    # ---- a drop-down opens UNDER its own menu, as the same overlay -------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, bb, 2, "/bin", bz, bm, CRAB_PANE_OK, 0, 0, bsl);
+    crab_rs_pane(rs, 1, brb, 1, "/etc", bz, bm, CRAB_PANE_OK, 0, 0, bsr);
+    crab_rs_menubar(rs, CRAB_MB_EDIT, CRAB_MB_EDIT, 1);
+    crab_render(bsurf, 0, rs);
+    var drop = crab_menu_list();
+    assert(drop != 0, "the drop-down is built — it IS the overlay menu");
+    assert_eq(dh_list_count(drop), crab_mb_item_count(CRAB_MB_EDIT),
+      "...holding only Edit's items, with NO separator");
+    assert_eq(dh_widget_x(drop), crab_mb_cell_x(CRAB_MB_EDIT), "...opened under its own bar cell");
+    assert_eq(dh_widget_y(drop), CRAB_MB_H, "...hanging directly off the bar");
+    # ⛔ AND IT IS ON SCREEN — the overlay-root fix is what makes that true.
+    assert(dh_widget_y(drop) + dh_widget_h(drop) <= 260, "...and fully inside the window");
+    # ⚠ The bar menu's index space and the list's already agree, so `crab_menu_row`'s separator
+    # mapping must NOT be applied — item 1 is row 1.
+    assert_eq(dh_list_selected(drop), 1, "the highlighted row is the item index, unmapped");
+    # ⛔ AND THAT ASSERTION CANNOT CURRENTLY FAIL, WHICH IS WORTH SAYING. `crab_menu_row` shifts only
+    # indices above `CRAB_MI_RENAME` (3) and the largest bar menu holds three items, so applying the
+    # context menu's separator mapping here returns the SAME number — mutating the guard out fails
+    # nothing. It starts mattering when a bar menu reaches a fourth item, which `Go` and `View` will
+    # when M7 fills them. Recorded so the next reader knows this row is defence, not proof.
+    assert_eq(crab_menu_row(0), 0, "the mapping is the identity below the separator...");
+    assert_eq(crab_menu_row(2), 2, "...across every index a bar menu can currently hold");
+    assert_eq(crab_menu_row(4), 5, "...and only diverges above it, where no bar menu reaches yet");
+    return 0;
+}
+
 fn t_overlay_geometry(): i64 {
     test_group("crab — 0.8.0: the overlay is ON the window, not below it");
     # ⛔⛆ THIS GROUP EXISTS BECAUSE TWO SHIPPED FEATURES WERE INVISIBLE FOR TWO RELEASES AND EVERY
@@ -3843,10 +3956,10 @@ fn t_overlay_geometry(): i64 {
     assert_eq(dh_widget_y(c1), 0, "...and so does the overlay layer — they OVERLAP");
     assert_eq(dh_widget_h(c1), OH, "the layer is the full window height");
     # ⚠ Sibling order IS z-order in both the paint and the hit-test, so the layer must be last.
-    var lastc = c0;
-    var wk = c0;
-    while (wk != 0) { lastc = wk; wk = dh_widget_next_sibling(wk); }
-    assert_eq(c1, lastc, "the layer is the LAST child — z-order is sibling order in paint AND hit-test");
+    # ⭐ `dh_widget_last_child` — added in dhancha 0.9.28 for exactly this assertion, which crab was
+    # hand-rolling as a sibling walk.
+    assert_eq(c1, dh_widget_last_child(rt),
+      "the layer is the LAST child — z-order is sibling order in paint AND hit-test");
 
     # ---- THE MENU IS WHERE IT WAS ASKED FOR, AND INSIDE THE WINDOW ------------------------------
     var mw = crab_menu_list();
