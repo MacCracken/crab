@@ -61,6 +61,49 @@
 > 1.56.53 → **1.56.57**. ⚠ **Sequencing verification is the operator's call and is not this file's to
 > rank.**
 
+## ⛔⛔ RELEASE ORDER, LIVE RIGHT NOW — THREE REPOS, AND crab IS LAST
+
+**Push in this order, each verified before the next:**
+
+| # | repo | version | state | why it moved |
+|---|---|---|---|---|
+| 1 | **rekha** | 0.3.6 | ✅ **PUSHED** (`cf41b41`, tag verified on the remote 2026-09-02) | `hhea`/`hmtx` readers — `rekha_advance_width` / `rekha_char_advance_px`. Both tags had been declared since the first SFNT commit and never read. |
+| 2 | **dhancha** | 0.9.27 | ⏳ **NOT PUSHED** — remote is still at 0.9.26 | `dh_text_advance` consumes them; the scalable text path stops advancing by a hardcoded 0.6 em |
+| 3 | **crab** | 0.7.7 | ⏳ waits on #2 | declares both floors; consumes neither directly (it still passes `font = 0`) |
+
+⭐ **With rekha pushed, crab is green again** — `deps --verify` 49/0, both targets build,
+**1230 / 0**, `render_test` **53 / 0**, coverage 87 %. ⚠ But that is `path = "../dhancha"` doing the
+work: crab declares **dhancha 0.9.27**, which is not on the remote, so **a clean checkout still
+cannot resolve** until step 2 lands. A green local build is not evidence the declared graph resolves
+— that is the standing hazard, and it is live right now.
+
+⛔ **THE FAILURE MODE, MEASURED, IF THE FLOOR IS EVER LOWERED.** With crab's rekha tag at 0.3.5,
+`path` wins for dhancha, so crab compiles the local **dhancha 0.9.27** against **rekha 0.3.5** and
+fails to link: **`undefined function 'rekha_char_advance_px'`**. Same shape as the 2026-08-27
+`POINTER_SCROLL` failure — the host target is unaffected either way, because crab passes `font = 0`
+and the whole scalable path is dead-code eliminated. **Only `--agnos` and the link step see it.**
+
+⚠ **A POPULATED LOCAL DEP CACHE MASKS AN UNPUSHED TAG.** `~/.cyrius/deps/<dep>/<tag>/` persists, so
+once a temporary `path` override has resolved a version, a later `cyrius deps` finds it there and
+reports success — while a fresh CI runner with an empty cache fails. Checking whether a tag is
+really published means `git ls-remote --tags`, never a local resolve.
+
+⭐ **The chain was verified end to end** with a TEMPORARY `path = "../rekha"` override on crab:
+**7 deps / 0 errors**, both targets build, **1230 / 0**, `render_test` **53 / 0**.
+⛔ **The override was then REMOVED** — and must not come back. sadish and rekha are the only two deps
+crab resolves by tag alone, which makes them the only two whose remote resolution a local build
+genuinely exercises. That property is what stands between this manifest and the 2026-08-28
+phantom-tag failure.
+
+⚠ **Size effect, measured**: host is **byte-identical** at 1,023,968 B — crab passes `font = 0`, so
+the whole scalable path is unreachable and dead-code elimination removes it. `--agnos` grows
+1,047,832 → **1,051,928 B** (+4,096). ⇒ crab pays for a feature it does not yet use on the target
+that ships, which is the normal cost of being downstream of a toolkit fold.
+
+⛔ **crab's own 9 px assumption is NOT closed by this.** `CRAB_COL_CHARW = 9` and the five constants
+that derive from it are crab-side work, and they only matter the day crab stops passing `font = 0`.
+The upstream half of the proportional-text gate is what moved.
+
 ## Cross-repo work, and where each repo stands
 
 | repo | state |

@@ -2,6 +2,57 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+> ⛔ **THIS SECTION EXISTS SO THE `[0.7.7]` SECTION BELOW IS NEVER TOUCHED.** 0.7.7 is tagged at
+> `6c9dd18` and on the remote, so it is a **record** now, not a scratchpad — including where it is
+> wrong. Everything here landed AFTER that tag.
+> ⛔⛔ **AND IT WAS ALMOST WRITTEN INTO IT.** The dep-bump note below was drafted straight into the
+> released `[0.7.7]` body before anyone checked `git describe`, which answered `0.7.7-1-g8ebe9d8` —
+> one commit past the tag. **That is exactly how 0.7.2 came to exist**: three commits landed past
+> 0.7.1's pushed tag while its section was still being edited, and the notes a consumer reads
+> stopped matching the artifact they describe. ⇒ **Check `git describe --tags` before writing into
+> the top section, every time.**
+> ⚠ `VERSION` still reads **0.7.7** and nothing is committed or tagged — the operator drives all of
+> that, including which number this becomes.
+
+### Changed — the declared graph moves to rekha 0.3.6 and dhancha 0.9.27
+
+⛔⛔ **THE UPSTREAM HALF OF THE PROPORTIONAL-TEXT GATE IS CLOSED, AND THE GATE WAS MIS-AIMED.**
+`roadmap.md` named it *"rekha + dhancha font plumbing"*. Both existed. What did not was **advance
+widths**: rekha declared `REKHA_TAG_HHEA` and `REKHA_TAG_HMTX` in its first SFNT commit and never
+referenced either again, so dhancha hard-coded `advf = (h * 6) / 10` — *"fixed advance ~0.6 em"* —
+and rendered every proportional face at monospace pitch. Correct glyph shapes at wrong positions,
+which reads as a rasterizer bug. ⇒ Fixed upstream: **rekha 0.3.6** adds `rekha_advance_width` /
+`rekha_char_advance_px`, **dhancha 0.9.27** consumes them in `dh_text_advance`.
+
+⚠ **crab consumes neither directly** — it still passes `font = 0` and draws kashi's CP437 bitmap.
+It declares both because dhancha's fold calls into rekha.
+⛔ **FLOOR >= rekha 0.3.6, HARD, and measured rather than predicted**: with the tag at 0.3.5, `path`
+wins for dhancha, so crab compiles the local 0.9.27 against 0.3.5 and fails to link with
+**`undefined function 'rekha_char_advance_px'`**. Same shape as 2026-08-27's `POINTER_SCROLL`.
+
+⚠ **Size, measured**: host **byte-identical** at 1,023,968 B — the scalable path is unreachable from
+`font = 0` and dead-code elimination removes it entirely. `--agnos` 1,047,832 → **1,051,928**
+(+4,096). crab pays on the shipping target for a feature it does not yet use, which is what being
+downstream of a toolkit fold costs.
+
+⛔ **crab's OWN 9 px assumption is untouched and still open.** `CRAB_COL_CHARW = 9`, and the five
+constants deriving from it, are crab-side work that only matters the day crab stops passing
+`font = 0`.
+
+⛔ **Release order is rekha → dhancha → crab.** ✅ rekha **0.3.6 is pushed** (`cf41b41`, verified on
+the remote), so crab resolves and is green: `deps --verify` 49/0, both targets, **1230 / 0**,
+`render_test` **53 / 0**. ⏳ **dhancha 0.9.27 is not** — the remote is still at 0.9.26 — so a clean
+checkout cannot resolve crab's declared graph yet; `path = "../dhancha"` is what makes the local
+build work. **A green local build is not evidence the declared graph resolves.**
+⚠ The chain was verified end to end with a temporary `path` override on rekha before it was pushed,
+and the override was then **removed** — rekha is one of only two deps crab resolves by tag alone, and
+that property is what catches a phantom tag.
+⚠ **A populated local dep cache masks an unpushed tag**: `~/.cyrius/deps/<dep>/<tag>/` persists, so
+after a temporary override has resolved a version, a later `cyrius deps` finds it there and reports
+success while a fresh runner fails. Only `git ls-remote --tags` answers whether a tag is published.
+
 ## [0.7.7] — 2026-09-02
 
 > ⛔ **THIS SECTION EXISTS SO THE 0.7.6 SECTION BELOW IS NEVER TOUCHED.** 0.7.2 exists because

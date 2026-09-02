@@ -42,9 +42,18 @@ path = "../rupa"
 tag = "0.1.6"
 modules = ["dist/rupa.cyr"]
 
+# rekha — scalable TrueType outlines. crab does not draw with it yet (it passes `font = 0`), but
+# dhancha's fold calls into it, so crab must supply it.
+# ⛔ FLOOR >= 0.3.6, HARD: dhancha 0.9.27's `dh_text_advance` calls `rekha_char_advance_px`, which
+# 0.3.5 does not define. Against an older pin crab fails to link with
+# `undefined function 'rekha_char_advance_px'` — measured, not predicted.
+# ⛔⛔ TAG-ONLY, AND DELIBERATELY SO. sadish and rekha are the only two deps crab resolves without a
+# `path` override, which makes them the only two whose REMOTE resolution a local build actually
+# exercises. Do not add one — that property is what stands between this manifest and the 2026-08-28
+# phantom-tag failure.
 [deps.rekha]
 git = "https://github.com/MacCracken/rekha.git"
-tag = "0.3.5"
+tag = "0.3.6"
 modules = ["dist/rekha.cyr"]
 
 # kashi (काशि) — the AGNOS system font. dhancha's `dh_draw_text` blits its CP437 8x16 glyphs for
@@ -71,7 +80,7 @@ modules = ["src/font_data.cyr"]
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 path = "../dhancha"
-tag    = "0.9.26"
+tag    = "0.9.27"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it

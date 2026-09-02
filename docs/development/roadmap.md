@@ -135,7 +135,7 @@ not quietly lose them; each is carried in a batch above.
   inherit the mismatch. ⇒ **Fix it in one place or document it in three.**
 - **The idle mascot line** — unblocked, and in the M6 batch.
 
-### M5 — Views (v0.9.0) — **STARTED; the two ungated items are in**
+### M5 — Views (v0.9.0) — **STARTED; only columns and proportional text remain**
 
 > ⭐ **Landed (unreleased, on top of 0.7.5)**: the **preview pane** with real metadata, **image
 > dimensions read from headers with no decoder at all**, and the `crab_render` parameter cleanup
@@ -208,8 +208,10 @@ not quietly lose them; each is carried in a batch above.
   ⚠ The budgets are the feature, not a rail bolted to it — and they are the first thing to delete
   when the allocator gains a `free()`.
 - **Proportional text.** crab passes `font = 0` (kashi CP437 bitmap) and calls no `rekha_*`
-  function, while the canvas assumes Barlow + JetBrains Mono. ⛔ **The gate is NOT the plumbing —
-  see the table.** It is rekha's `hmtx`/`hhea` advance widths, which nothing reads yet.
+  function, while the canvas assumes Barlow + JetBrains Mono.
+  ✅ **THE UPSTREAM HALF IS DONE** — rekha 0.3.6 reads `hhea`/`hmtx`, dhancha 0.9.27 advances by real
+  widths. ⛔ **What remains is crab's**, and it is not a dependency: stop passing `font = 0`, and
+  move the 9 px constants below first.
   ⛔⛔ **AND crab's OWN 9 px assumption is load-bearing correctness, not cosmetics.**
   `CRAB_COL_CHARW = 9` feeds `crab_col_chars`, which decides how many characters a NAME column
   holds, which drives the **`~` truncation rule** that exists so two different files never render as
@@ -296,7 +298,7 @@ toolkit; see the gate table below for what each turned out to be.
 | ~~Grid view~~ | M5 | ✅ **SHIPPED both halves.** dhancha 0.9.25 added the `GRID` kind; crab's `g` view is built on it. | 2026-08-31 ⭐ done |
 | Columns (miller) view | M5 | ⛔ **FALSE GATE — the FOURTH.** Not dhancha: columns is a `BOX_H` of `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight, so it clears neither bar of dhancha's kind rule (as MENU and SHEET did not). **It is gated on crab's two-pane model** — the source/destination pairing the M4 write layer rests on. A design question, not a dependency. | 2026-08-31 ⭐ re-derived |
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra **1.0.1** is declared (⚠ *not* 1.0.0, as this row and ~10 other places said). ⚠ The cost figures below are from the **pre-grid/gallery tree** and no longer describe the binary: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
-| Proportional text | M5 | ⛔ **MIS-AIMED — the SIXTH false gate.** This said *"rekha + dhancha font plumbing"*. **Both exist**: dhancha has `dh_draw_text_ink(sds, font, …)`, `rekha_units_per_em`, `rekha_char_to_sdpath` with real sadish clipping, `font` threaded through `dh_surface_render`, and crab already forwards it. What is missing is **ADVANCE WIDTHS** — dhancha hard-codes `advf = (h * 6) / 10` ("fixed advance ~0.6 em") with no alternative, and rekha declares `REKHA_TAG_HHEA` / `REKHA_TAG_HMTX` and **never references them again**. There is no `rekha_advance_width`. ⇒ A session trusting the old line would wire a font, watch text render, and only then find every glyph is 0.6 em wide. **The chain is rekha `hmtx`/`hhea` → `rekha_advance_width` → dhancha replaces `advf` → only then crab's 9 px constant.** ⚠ The scalable path reads `load8(text + i)`, so it is Latin-1 only. | 2026-09-02 ⭐ re-derived |
+| Proportional text | M5 | ⭐ **UPSTREAM HALF CLOSED 2026-09-02 — the remaining work is crab's own.** This row named *"rekha + dhancha font plumbing"*, and the SIXTH false gate was that both already existed; what was missing was **advance widths**. rekha declared `REKHA_TAG_HHEA` / `REKHA_TAG_HMTX` from its first SFNT commit and never read either, so dhancha hard-coded `advf = (h * 6) / 10` and rendered proportional faces at monospace pitch. ✅ **rekha 0.3.6** adds `rekha_advance_width` / `rekha_char_advance_px`; ✅ **dhancha 0.9.27** consumes them in `dh_text_advance`, with the fixed 0.6 em kept only as the no-metrics fallback. crab declares both floors. ⛔ **WHAT IS LEFT IS crab-SIDE**: it still passes `font = 0`, and `CRAB_COL_CHARW = 9` plus the five constants derived from it must move before it can stop. ⚠ The scalable path reads `load8(text + i)` — Latin-1 only. | 2026-09-02 ⭐ done upstream |
 | Sidebar — PLACES | M6 | ⛔ **FALSE GATE (the fifth).** Not dhancha: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers, `PROGRESS` gives bars, padding gives indent. Buildable in crab today. | 2026-08-31 ⭐ re-derived |
 | Sidebar — VOLUMES + capacity bars | M6 | ⛔ **TWO GATES, AND THE CAPACITY ONE IS NOW CLOSED.** *Capacity*: agnos shipped **`statfs`#103** in 1.56.56, all three backends answer it since **1.56.57**, and agnos's issue is archived. ⭐ **cyrius 6.5.37 shipped the stdlib peer, and crab VENDORS it as of the 0.7.7 pin bump to 6.5.41** — `lib/syscalls_x86_64_agnos.cyr` carries `SYS_STATFS = 103` and `fn sys_statfs(path, pathlen, buf)`; cyrius's issue is archived too. This row said *"filed 🟡 OPEN against cyrius"* and that is **no longer true**; there is nothing left to wait for and no raw-syscall interim needed. ⚠ Two crab-side facts remain: it is **agnos-only** (no host arm, so no host test can exercise it) and **no `STATFS_*` field offsets are vendored** — the frozen 32-byte record's layout has to come from agnos's docs. *Enumeration*: **still fully open** — `mount`#11 / `umount`#24 are documented no-op **stubs**, so crab cannot learn **what is mounted**. | 2026-09-02 ⭐ re-derived |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
