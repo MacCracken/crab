@@ -554,6 +554,29 @@ var CRAB_SB_W  = 90;        # = CRAB_COL_NAME_MIN — ten characters, crab's own
 #   label, and every place name it can produce is shorter than that.
 var CRAB_SB_ROW_H = 22;
 
+# @public — must pointer input be refused right now? 1 = yes, crab is asking a question.
+#
+# ⛔⛆ THIS EXISTS BECAUSE ITS ABSENCE WAS A DATA-LOSS PATH. `d` latches a delete confirmation on the
+# STATUS LINE — not an overlay — so nothing pruned clicks the way the overlay layer prunes them for
+# the menu and the sheet. A sidebar click between `d` and `y` re-listed the pane (`crab_relist`,
+# `crab_mark_clear`, `sel = 0`), and `y` then found no marks, took the single-entry branch against
+# entry 0 of a directory the operator never opened, and — if that entry was a folder — ran a
+# RECURSIVE TREE DELETE on it. The same hole moved the selection for plain pane clicks, so the
+# prompt named one entry and the delete took another.
+# ⇒ **A modal question owns the pointer as well as the keyboard.** The keyboard side was already
+# right: every modal state is checked before the bindings and consumes the key. This is the half
+# that was missing, and it is a predicate so the suite can reach it — the decision lives here rather
+# than inline in `src/main.cyr`, whose key dispatch no test on any target can execute.
+# ⚠ THE MENU BAR COUNTS TOO. It is modal in the same sense: its keys are consumed before the
+# bindings, so a click landing behind it would act on a surface the operator is not looking at.
+fn crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel): i64 {
+    if (confirm_del != 0) { return 1; }
+    if (edit_open != 0) { return 1; }
+    if (menu_open != 0) { return 1; }
+    if (mb_sel >= 0) { return 1; }
+    return 0;
+}
+
 # @public — is there room for the sidebar without costing a pane its columns? 1 = yes.
 #
 # ⛔ THE SAME SHAPE AS `crab_preview_fit`, DELIBERATELY. The sidebar is subtracted from the window
@@ -561,6 +584,20 @@ var CRAB_SB_ROW_H = 22;
 # the width the panes actually get. No rule anywhere needs an "unless the sidebar is open" clause,
 # and opening it can legitimately collapse two panes into one — the ratified small-window rule
 # answering a narrower pane area, not a second behaviour.
+# @public — will the sidebar actually be drawn, given the window AND the preview's want? 1 = yes.
+#
+# ⛔⛆ THE KEY HANDLER AND THE RENDERER WERE ASKING DIFFERENT QUESTIONS. `b` asked
+# `crab_sidebar_fit(w, 1)` — against the whole WINDOW — while `crab_render` asks against what the
+# preview left (`availw`). With the preview open on a window wide enough for one of them but not
+# both, the key reported "sidebar on" and **nothing appeared**. A key that says it worked and does
+# not is indistinguishable from a broken one, which is the exact discipline `p`'s own comment
+# claims. ⇒ One function, asked by both, so the answer cannot differ.
+fn crab_sidebar_shown(w, pvwant, sbwant): i64 {
+    var availw = w;
+    if (crab_preview_fit(w, pvwant) == 1) { availw = w - CRAB_PV_W; }
+    return crab_sidebar_fit(availw, sbwant);
+}
+
 fn crab_sidebar_fit(w, want): i64 {
     if (want == 0) { return 0; }
     var rest = w - CRAB_SB_W;
@@ -656,6 +693,7 @@ fn crab_sidebar_hit(x, y): i64 {
 # four. `Tags` and `Index` belong to M7 and have **no implemented items at all** — they are gated on
 # daimon, which `cyrius.cyml` declares nowhere. A menu that opens on nothing, or one greyed out
 # forever, is a promise crab is not keeping; an absent menu is honest and arrives with its contents.
+var CRAB_MB_ITEMS_MAX = 8;                 # the scan bound for item movement
 var CRAB_MB_H = 22;                        # one row, the same height as the status line
 var CRAB_MB_FILE = 0;
 var CRAB_MB_EDIT = 1;
@@ -732,6 +770,43 @@ fn crab_mb_cell_x(i): i64 {
         k = k + 1;
     }
     return x;
+}
+
+# @public — the next / previous ENABLED item in bar menu `m`, from `j`. -> the new item index.
+#
+# ⛔⛆ WITHOUT THIS THE HIGHLIGHT LANDS ON A GREYED ROW AND ENTER STILL FIRES. A disabled entry is
+# made INERT (`dh_widget_set_inert`), and `dh_list_select` REFUSES an inert row — it stores nothing
+# and returns -1 — so the open drop-down painted **no highlight at all** while `mb_item` happily
+# pointed at the greyed verb, and Enter rewrote its key and ran it. That is the same class as the
+# context menu's separator off-by-one, one surface over, and worse: it acts.
+# ⇒ The context menu has skipped disabled entries since it shipped (`crab_menu_next`/`_prev`); the
+# bar simply never grew the equivalent.
+# ⚠ CLAMPED, not wrapped, and not `crab_menu_next`'s wrap either: a drop-down of three items hanging
+# off a bar is a list the operator is stepping down, and wrapping to the top reads as a jump.
+# ⚠ Returns `j` unchanged when nothing enabled lies that way — a menu with no enabled items at all
+# leaves the highlight where it was rather than spinning.
+fn crab_mb_item_move(m, j, d, count, isdir, marked): i64 {
+    var n = j;
+    var g = 0;
+    while (g < CRAB_MB_ITEMS_MAX) {
+        n = n + d;
+        if (n < 0) { return j; }
+        if (n >= crab_mb_item_count(m)) { return j; }
+        if (crab_menu_enabled(crab_mb_item(m, n), count, isdir, marked) == 1) { return n; }
+        g = g + 1;
+    }
+    return j;
+}
+
+# @public — the first ENABLED item in bar menu `m`, or -1 if it has none.
+# ⚠ Opening a menu onto a greyed row is the same bug as arrowing onto one.
+fn crab_mb_item_first(m, count, isdir, marked): i64 {
+    var i = 0;
+    while (i < crab_mb_item_count(m)) {
+        if (crab_menu_enabled(crab_mb_item(m, i), count, isdir, marked) == 1) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
 }
 
 fn crab_mb_move(i, d): i64 {

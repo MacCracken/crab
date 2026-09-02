@@ -74,6 +74,62 @@ shape of the leak that shipped in 0.7.5.
 Also covered: the fit rule at its floor and one pixel under, both panes selecting their own cell,
 **no** strip in two-pane mode, and the text-prefix fallback still working when the window is narrow.
 
+### Fixed — ⛔⛆ A MODAL QUESTION DID NOT OWN THE POINTER, AND THE WORST CASE WAS A WRONG DELETE
+
+Found by a completeness audit over M1–M6, in code this same release added.
+
+`d` latches a delete confirmation and the status line asks *"delete this FOLDER and everything in
+it? y = yes"*. ⛔ **That latch is on the STATUS LINE, not an overlay** — so nothing pruned pointer
+input the way the overlay layer prunes it for the menu and the sheet. The chain:
+
+1. A sidebar click, unguarded, rewrote `lpath`, ran `crab_relist`, called `crab_mark_clear` and set
+   `sel = 0`.
+2. `y` then found `dmarked == 0` — the marks had just been cleared — and took the **single-entry**
+   branch against `dsel = 0`.
+3. If entry 0 of the newly-listed directory was a folder, that is
+   `crab_walk_begin(CRAB_OP_DTREE, …)` — **a recursive tree delete of a directory the operator never
+   chose, from a "y" they typed about a different file.**
+
+⛔ **THE SAME HOLE EXISTED FOR PANE CLICKS AND PREDATES THE SIDEBAR**: clicking another row between
+`d` and `y` moved the selection, so the prompt named one entry and the delete took another. It was
+invisible while the overlay layer was 2 px tall and pruned nothing — every surface was equally
+unguarded. Fixing the overlay root made `crab_hit` modal and left the sidebar as the one live hit
+path, which is *worse* than uniformly absent, because the comment then described a half-truth.
+
+⇒ `crab_pointer_modal` refuses pointer input while a confirmation, a sheet, the context menu or the
+menu bar is up. The keyboard side was already right — every modal state is checked before the
+bindings and consumes the key — and this is the half that was missing. ⚠ It is a **predicate**, not
+an inline test, because the key dispatch it guards is inside the agnos-only `#ifdef` that no test on
+any target can execute. Mutation-proven: dropping the confirmation arm fails 3, and testing `mb_sel`
+with `!= 0` — which would read menu `File` (index 0) as closed — fails 4.
+
+### Fixed — a bar drop-down could land on a greyed row, and Enter fired it anyway
+
+A disabled entry is made INERT, and `dh_list_select` **refuses** an inert row — storing nothing and
+returning -1 — so an open drop-down painted **no highlight at all** while `mb_item` pointed at the
+greyed verb and Enter rewrote its key and ran it. Opening a menu landed on slot 0 regardless, and
+arrowing stepped over disabled rows without noticing them. The context menu has skipped disabled
+entries since it shipped; the bar simply never grew the equivalent. New `crab_mb_item_first` /
+`crab_mb_item_move`. Mutation-proven: 3 and 4 failures.
+
+### Fixed — `b` reported success and drew nothing whenever the preview was open
+
+The key handler asked `crab_sidebar_fit(w, 1)` — against the whole **window** — while `crab_render`
+asks against what the preview left. On a window wide enough for one of them but not both, the key
+said *"sidebar on"* and nothing appeared. **A key that says it worked and does not is
+indistinguishable from a broken one**, which is the exact discipline `p`'s own comment claims. One
+`crab_sidebar_shown`, asked by both, so the answer cannot differ. Mutation-proven: 2 failures.
+
+### Docs — 38 unfinished items from M1–M6 are now on the roadmap
+
+⛔⛆ **"SHIPPED" AND "FINISHED" HAD DRIFTED APART.** A five-probe audit over M1–M6, the v1.0 criteria
+and every ⚠ marker in `src/` found 38 items done enough to ship and never converted into work —
+most recorded nowhere, several as single sentences inside released CHANGELOG sections, which are
+records rather than backlogs. Three were correctness bugs and are fixed above; the rest are now a
+named section in `docs/development/roadmap.md`, grouped by whether they are wrong today, missing an
+interaction story, an absent affordance, or a fact that was never made an item.
+⇒ **The rule that section enforces: a limitation noticed while shipping is an ITEM, not a comment.**
+
 ### Added — the menu bar (M6, canvas turn 2), on `F10`
 
 Four menus — **File · Edit · Go · View** — in a row at the top of the window, the current one

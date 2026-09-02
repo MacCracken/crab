@@ -2401,6 +2401,8 @@ fn main() {
     t_mascot();
     t_overlay_geometry();
     t_menubar();
+    t_pointer_modal();
+    t_menubar_enabled();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3800,6 +3802,95 @@ fn t_dir_transfer(): i64 {
     crab_fs_delete("build/m4isdir", "adir", 1, sc1);
     crab_fs_delete("build", "m4isdir", 1, sc1);
     crab_fs_delete("build", "m4isdir2", 1, sc1);
+    return 0;
+}
+
+fn t_menubar_enabled(): i64 {
+    test_group("crab — 0.8.0: a bar drop-down never lands on a greyed row");
+    # ⛔⛆ WITHOUT THIS THE HIGHLIGHT LANDS ON AN INERT ROW AND ENTER STILL FIRES. A disabled entry
+    # is made inert, and `dh_list_select` REFUSES an inert row — storing nothing and returning -1 —
+    # so the open drop-down painted no highlight at all while `mb_item` pointed at the greyed verb.
+    # ⚠ `crab_menu_enabled(i, count, isdir, marked)`: with count 0 only New folder is enabled.
+
+    # ---- an EMPTY pane greys everything but New folder --------------------------------------------
+    # File = [Open, New folder, Rename]; with count 0 only New folder (slot 1) survives.
+    assert_eq(crab_menu_enabled(CRAB_MI_OPEN, 0, 0, 0), 0, "an empty pane greys Open");
+    assert_eq(crab_menu_enabled(CRAB_MI_NEWDIR, 0, 0, 0), 1, "...but never New folder");
+    assert_eq(crab_mb_item_first(CRAB_MB_FILE, 0, 0, 0), 1,
+      "File opens onto New folder — the first ENABLED item, not slot 0");
+    # ⛔ Edit is Copy/Move/Delete, ALL of which need a row. On an empty pane it has nothing.
+    assert_eq(crab_mb_item_first(CRAB_MB_EDIT, 0, 0, 0), 0 - 1,
+      "Edit has no enabled item on an empty pane — so it must not open");
+    # ...and a menu with no items at all is the same answer, by a different route.
+    assert_eq(crab_mb_item_first(CRAB_MB_GO, 3, 0, 0), 0 - 1, "Go has no items to enable");
+
+    # ---- a populated pane enables everything ------------------------------------------------------
+    assert_eq(crab_mb_item_first(CRAB_MB_FILE, 3, 0, 0), 0, "with rows, File opens onto Open");
+    assert_eq(crab_mb_item_first(CRAB_MB_EDIT, 3, 0, 0), 0, "...and Edit onto Copy");
+
+    # ---- movement SKIPS the greyed rows -----------------------------------------------------------
+    # On an empty pane File's only enabled item is slot 1; moving either way must stay there.
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 1, 1, 0, 0, 0), 1, "down from the only enabled item stays");
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 1, 0 - 1, 0, 0, 0), 1, "...and so does up");
+    # With rows, movement is ordinary and CLAMPED at the ends.
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 0, 1, 3, 0, 0), 1, "down moves");
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 2, 1, 3, 0, 0), 2, "...and clamps at the last");
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 0, 0 - 1, 3, 0, 0), 0, "...and at the first");
+    # ⛔ RENAME IS GREYED WITH A MARK SET (it is single-target; a set is the batch sheet), so with
+    # two marked, File's items are Open(on) New folder(on) Rename(OFF) and Down from 1 must STAY.
+    assert_eq(crab_menu_enabled(CRAB_MI_RENAME, 3, 0, 2), 0, "a mark set greys Rename");
+    assert_eq(crab_mb_item_move(CRAB_MB_FILE, 1, 1, 3, 0, 2), 1,
+      "...so Down from New folder does not land on it");
+
+    # ---- the sidebar's fit is asked at the width the RENDERER will use ---------------------------
+    # ⛔⛆ `b` asked against the whole WINDOW while `crab_render` asks against what the preview left.
+    # With the preview open on a window wide enough for one but not both, the key reported success
+    # and nothing appeared.
+    assert_eq(crab_sidebar_shown(900, 0, 1), crab_sidebar_fit(900, 1),
+      "with no preview, the two questions agree");
+    # A window that fits the sidebar alone but not alongside the preview is the failing case.
+    var wboth = CRAB_PV_W + CRAB_SB_W + CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_PANE_GAP;
+    if (crab_preview_fit(wboth - 40, 1) == 1) {
+        if (crab_sidebar_fit(wboth - 40, 1) == 1) {
+            assert_eq(crab_sidebar_shown(wboth - 40, 1, 1), 0,
+              "the sidebar alone fits, but not with the preview — and the key now says so");
+        }
+    }
+    assert_eq(crab_sidebar_shown(900, 1, 0), 0, "want=0 is still no sidebar");
+    return 0;
+}
+
+fn t_pointer_modal(): i64 {
+    test_group("crab — 0.8.0: a modal question owns the POINTER too");
+    # ⛔⛆ THIS GROUP PINS A DATA-LOSS PATH. `d` latches a delete confirmation on the STATUS LINE —
+    # not an overlay — so nothing pruned clicks the way the overlay layer prunes them for the menu
+    # and the sheet. A sidebar click between `d` and `y` re-listed the pane (`crab_relist`,
+    # `crab_mark_clear`, `sel = 0`); `y` then found no marks, took the single-entry branch against
+    # entry 0 of a directory the operator never opened, and if that entry was a folder ran a
+    # **recursive tree delete** on it. The prompt named one thing and the delete took another.
+
+    # ---- the ordinary case: nothing modal, the pointer works --------------------------------------
+    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1), 0, "no modal state -> pointer input is live");
+
+    # ---- each modal state alone refuses ----------------------------------------------------------
+    # ⛔ THE DELETE CONFIRMATION IS THE ONE THAT MATTERS, because it is the only modal state with no
+    # overlay to prune clicks for it — and the only one whose next keystroke destroys data.
+    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1), 1, "a delete confirmation refuses the pointer");
+    assert_eq(crab_pointer_modal(0, 1, 0, 0 - 1), 1, "the rename sheet refuses it");
+    assert_eq(crab_pointer_modal(0, 2, 0, 0 - 1), 1, "...whichever edit mode it is in");
+    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1), 1, "the context menu refuses it");
+    # ⚠ The menu bar is modal in the same sense: its keys are consumed before the bindings, so a
+    # click landing behind it would act on a surface the operator is not looking at.
+    assert_eq(crab_pointer_modal(0, 0, 0, 0), 1, "the menu bar refuses it — index 0 is REVEALED");
+    assert_eq(crab_pointer_modal(0, 0, 0, CRAB_MB_COUNT - 1), 1, "...at any menu");
+
+    # ⛔ AND `mb_sel` USES -1 FOR COLLAPSED, SO `0` MUST NOT READ AS "CLOSED". That is exactly the
+    # off-by-one that a `!= 0` test would introduce, and `File` is menu 0.
+    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1), 0, "-1 is collapsed, and collapsed is not modal");
+
+    # ---- combinations still refuse ---------------------------------------------------------------
+    assert_eq(crab_pointer_modal(1, 1, 1, 0), 1, "everything at once still refuses");
+    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1), 1, "...and the confirmation alone is enough");
     return 0;
 }
 

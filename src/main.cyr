@@ -454,8 +454,34 @@ fn main(): i64 {
                     # disjoint regions, so whichever is asked first is authoritative, and asking the
                     # narrower one first means the pane path never sees a coordinate that was not a
                     # pane's.
-                    var sbi = crab_sidebar_hit(ptr_x, ptr_y);
+                    # ⛔⛆ NO POINTER INPUT REACHES A SURFACE WHILE crab IS ASKING A QUESTION.
+                    # This guard is the fix for a DATA-LOSS path, and the path is worth stating in
+                    # full because nothing about it is obvious from any one line:
+                    #   1. `d` latches `confirm_del` and the status line asks
+                    #      "delete this FOLDER and everything in it? y = yes".
+                    #   2. ⛔ `confirm_del` is a STATUS-LINE LATCH, NOT AN OVERLAY — there is no
+                    #      layer over anything, so nothing was pruning clicks the way the overlay
+                    #      prunes them for the menu and the sheet.
+                    #   3. A sidebar click re-listed the pane: `lpath` rewritten, `crab_relist`,
+                    #      `crab_mark_clear`, `sel_l = 0`.
+                    #   4. `y` then found `dmarked == 0` (the marks were just cleared) and took the
+                    #      SINGLE-ENTRY branch against `dsel = 0`.
+                    #   5. If entry 0 of the newly-listed directory was a folder, that is
+                    #      `crab_walk_begin(CRAB_OP_DTREE, …)` — **a recursive tree delete of a
+                    #      directory the operator never chose, from a "y" they typed about a
+                    #      different file.**
+                    # ⛔ THE SAME HOLE EXISTED FOR PANE CLICKS, and predates the sidebar: a click on
+                    # another row between `d` and `y` moved the selection, so the prompt named one
+                    # entry and the delete took another. The overlay prunes clicks for the menu and
+                    # the sheet, but `confirm_del` has no overlay to do it.
+                    # ⇒ A modal question owns the pointer as well as the keyboard. The keyboard side
+                    # was already right — `confirm_del` is checked before every binding and consumes
+                    # the key — and this is the half that was missing.
+                    var modal = crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel);
+                    var sbi = 0 - 1;
+                    if (modal == 0) { sbi = crab_sidebar_hit(ptr_x, ptr_y); }
                     var paneclick = 1;
+                    if (modal == 1) { paneclick = 0; }
                     if (sbi >= 0) {
                         paneclick = 0;
                         var pp = crab_place_path(places, placen, sbi);
@@ -957,31 +983,38 @@ fn main(): i64 {
                                     # opening an empty popup would read as a broken menu rather than
                                     # an unfinished one.
                                     if (u == 0x28) {
-                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
+                                        # row means `dh_list_select` refuses it and the drop-down
+                                        # paints no highlight at all — while Enter still fires it.
+                                        var f0 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (f0 >= 0) { mb_drop = mb_sel; mb_item = f0; }
                                         else { crab_set_notice("that menu has no items yet"); }
                                         u = 0;
                                     }
                                 } else {
                                     if (u == 0x29) { mb_drop = 0 - 1; u = 0; }             # Esc — close the drop
+                                    # ⛔ SKIP DISABLED ENTRIES, as the context menu has always done.
                                     if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                                        if (mb_item > 0) { mb_item = mb_item - 1; }
+                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 0 - 1, mcnt2, misdir2, mmark2);
                                         u = 0;
                                     }
                                     if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                                        if (mb_item < (crab_mb_item_count(mb_drop) - 1)) { mb_item = mb_item + 1; }
+                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 1, mcnt2, misdir2, mmark2);
                                         u = 0;
                                     }
                                     # ⚠ Left/Right walk to the adjacent menu WITH the drop still
                                     # open, which is how every menu bar behaves.
                                     if ((u == 0x50) || (u == 0x0B)) {
                                         mb_sel = crab_mb_move(mb_sel, 0 - 1);
-                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
                                         else { mb_drop = 0 - 1; }
                                         u = 0;
                                     }
                                     if ((u == 0x4F) || (u == 0x0F)) {
                                         mb_sel = crab_mb_move(mb_sel, 1);
-                                        if (crab_mb_item_count(mb_sel) > 0) { mb_drop = mb_sel; mb_item = 0; }
+                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
                                         else { mb_drop = 0 - 1; }
                                         u = 0;
                                     }
@@ -1285,7 +1318,11 @@ fn main(): i64 {
                                 # renderer owns the final say.
                                 if (sb_open == 0) { sb_open = 1; } else { sb_open = 0; }
                                 if (sb_open == 1) {
-                                    if (crab_sidebar_fit(w, 1) == 0) {
+                                    # ⛔ ASKED AT THE WIDTH THE RENDERER WILL USE, not at the window.
+                                    # This was `crab_sidebar_fit(w, 1)` while `crab_render` asked
+                                    # against what the preview left — so with the preview open the
+                                    # key said "sidebar on" and nothing appeared.
+                                    if (crab_sidebar_shown(w, pv_open, 1) == 0) {
                                         crab_set_notice("sidebar needs a wider window");
                                     } else { crab_clear_notice(); crab_say("crab: sidebar on\n"); }
                                 } else { crab_clear_notice(); crab_say("crab: sidebar off\n"); }

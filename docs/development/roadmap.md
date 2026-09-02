@@ -328,6 +328,87 @@ kind of thing as a gate. It has its own row in the table above so it stops being
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
 and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the dependency or stop promising the AI arc** — open since the roadmap was written.
 
+## Unfinished from earlier stages — the 2026-09-02 completeness audit
+
+> ⛔⛆ **THIS SECTION EXISTS BECAUSE "SHIPPED" AND "FINISHED" HAD DRIFTED APART.** A five-probe sweep
+> over M1–M6, the v1.0 criteria and every ⚠ marker in `src/` found **38 items** that were done
+> enough to ship and never converted into work. Most were recorded nowhere at all; several were
+> single sentences inside a released CHANGELOG section, which is a record, not a backlog.
+> ⇒ **The rule this section enforces: a limitation noticed while shipping is an ITEM, not a
+> comment.** Three correctness bugs the sweep found were fixed on the spot (see `CHANGELOG.md`);
+> everything below is open.
+
+### Correctness — buildable now, and each one is wrong today
+
+- **A cancelled recursive copy leaves the partial tree on disk**, under the source folder's own
+  name. Only the file in flight is removed. The operator sees a folder that looks copied.
+- **Drag between panes ignores the marked set** — dragging with ten files marked moves the one
+  under the pointer. Every other verb honours marks; drag predates them and was never revisited.
+- **`m` on a single file across filesystems runs the BLOCKING copy**, not the stepped one:
+  `crab_fs_move` runs to completion inside the keypress branch before the `EXDEV` fallback, so the
+  event loop draws no frames and the tray never appears. The stepped `CRAB_OP_MOVE` path is
+  effectively unreachable for the case it exists for.
+- **A folder cannot be moved at all**, even within one filesystem where it is a single `rename`
+  syscall. `crab_transfer_plan` refuses it because no `CRAB_OP_MTREE` exists — correct for the
+  cross-filesystem case, needlessly strict for the same-filesystem one.
+- **GALLERY view's arrow keys were never wired.** Left/Right still switch panes and Up/Down step by
+  one entry rather than by a row of cells — the grid rule was applied to GRID and not to GALLERY,
+  while the comment claims both.
+- **A spent thumbnail budget EVICTS working cached thumbnails**: the cache slot is claimed before
+  the budget is consulted, so crossing the ceiling destroys a good entry to store a refusal.
+- **With GALLERY and the preview both open**, the preview column draws the gallery's last-decoded
+  thumbnail instead of the selected entry's, and the wrong frame persists.
+- **GALLERY cells never say WHY a thumbnail is missing.** The "four differently-named nothings"
+  rule — too large / budget spent / cannot decode / not an image — is honoured only in the preview.
+
+### M6 surfaces that shipped without a full interaction story
+
+- ⛔ **The PLACES sidebar has NO keyboard route.** A click is the only way to reach a place, in an
+  application whose own source says it is *"keyboard-first by construction: a menu only a mouse can
+  reach is invisible to an operator who never touches one."* On agnos the compositor may spawn crab
+  with no pointer at all. ⇒ Needs a focus model: a selection slot, `dh_list_select`, and a
+  Tab-to-focus rule against the panes. `Tab` (0x2B) is unbound.
+- **The menu bar and the A/B switcher have no pointer route** — only the sidebar got a hit function.
+  Both were shipped display-or-keyboard-only deliberately, but the deferral was recorded in the
+  CHANGELOG and never became an item. Any pointer path must follow `crab_sidebar_hit`'s precedent:
+  its own function, never the pane index the write layer trusts.
+- **There is no pointer route to the CONTEXT menu either** — right-click runs the ordinary
+  left-click path, the open menu cannot be clicked, and there is no click-away dismiss.
+- **`Go` and `View` are drawn on the bar with zero items.** Pressing Enter says so, which is honest,
+  but a menu that can never open is still a menu that should either be filled or removed. `Go` is
+  the natural home for the sidebar's places — the same hole seen from the chrome side.
+- **The menu bar has no fit rule** — the only M5/M6 surface without one. Its intrinsic width is
+  fixed and crab accepts any window width, so a narrow window clips it silently.
+- **The sidebar never shows which place the active pane is in.** It has no selection at all.
+
+### Absent affordances
+
+- **crab has no REFRESH key.** Neither the pane listing nor the PLACES model is re-read for changes
+  made outside crab, and the source names a refresh key as the intended home for that work in two
+  places without one existing.
+- **crab has no flag surface**, so `crab --about` — which `docs/development/mascot.md` asks for by
+  name — cannot be built. It parses positional paths only.
+- **Nothing in crab can overwrite a destination.** There is no replace, keep-both, skip or
+  rename-on-collision path, and a recursive copy aborts the whole walk at the first collision.
+  ⚠ This is a POLICY decision as much as a feature: the overwrite guard is load-bearing and
+  documented, and any answer here changes what a copy can destroy.
+
+### Recorded as facts, never as work
+
+- **No name crab writes can contain a capital letter.** The shift flag on `crab_key_char` is
+  hard-coded to 0 at its only production call site because shift state is not on the wire.
+  ⛔ Gated upstream, on setu/aethersafha forwarding modifiers.
+- **`sys_lstat` is vendored and deliberately never called**, so symlinks stay invisible to the write
+  layer. The gate closed upstream at cyrius 6.5.37; what remains is a decision about what crab
+  should DO with the answer — refuse, report, or recreate.
+- **The preview's dimension + EXIF read is a synchronous 64 KiB open/read/close on the SELECTION
+  path**, against crab's own rule that reads belong on the idle tick. Memoised, but arrowing through
+  a directory of large JPEGs pays per entry.
+- **The `#ifdef CYRIUS_TARGET_AGNOS` blind-spot figure is stale in four places** and the untested
+  region has grown since the number was written.
+- **The batch-rename pattern's two operators, `#` and `*`, cannot be typed** — the sheet advertises
+  a language its own input field cannot produce.
+
 ## Cross-cutting (not a milestone — do these continuously)
 
 > ⛔⛔ **NOTHING IN THIS SECTION IS A RELEASE, AND IT MUST NEVER BE GIVEN A VERSION NUMBER.** Gates,
