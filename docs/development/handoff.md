@@ -1,8 +1,42 @@
-# Handoff — **0.7.6: M5's views are in, and every audit finding is closed.**
+# Handoff — **0.7.7: five shipped defects closed, the pin moved, and CI stopped being one step.**
 
-> ⭐ **Updated 2026-08-31**, after M5's first slice and the chitra adoption. Everything below the
-> *What landed* table is kept from the 0.7.5 handoff because the reasoning is still the reasoning —
-> but **every number in it is 0.7.5's or older**. Re-derive before quoting.
+> ⭐ **Updated 2026-09-02.** 0.7.7 is a **repair cut**: no roadmap item advanced. Five defects that
+> had already shipped were found by reading code, each closed with a mutation-proven test; the
+> toolchain pin moved 6.5.36 → **6.5.41**; and `.github/workflows/ci.yml` went from a single
+> `cyrius test` to nine gates, closing *#14*, *#15* and *#36*.
+>
+> ⛔⛔ **READ *Where things stand* AND NOTHING ABOVE IT FOR NUMBERS.** Everything below that table is
+> kept because the REASONING is still the reasoning — but **every figure in it is 0.7.5's or
+> older**, and several passages describe behaviour 0.7.7 changed. Re-derive before quoting.
+>
+> ⛔⛔ **THE FIVE DEFECTS, BECAUSE THE SHAPE MATTERS MORE THAN THE FIXES.** Every one was a
+> *decision* stated correctly in a comment and implemented wrongly three lines away, or a rule
+> written twice where only one copy was updated:
+> - `crab_copy_begin` had **no directory guard**, so a folder handed to the single-entry copy
+>   created a stray 0-byte file at the destination and then refused forever with `EEXIST`. On agnos
+>   the stray is worse than empty: reading a directory yields raw dirent bytes.
+> - `crab_queue_advance` **returned on the first refusal** and never tried the next entry — while
+>   both `app.cyr` and `main.cyr` carried comments promising *"A REFUSAL DOES NOT STOP THE QUEUE"*.
+>   Marking ten files with the first already present transferred **none** of the other nine.
+> - **`m` on a folder ran `CRAB_OP_CTREE` — a COPY** — and set the notice `copying folder...`.
+>   There is no `CRAB_OP_MTREE`; the operator was told the truth about what happened and the wrong
+>   thing about what they asked for.
+> - The marked set was read **only in the not-a-folder arm**, so a cursor resting on a folder
+>   silently discarded every mark — three lines below a ⭐ comment reading *MARKS OUTRANK THE CURSOR*.
+> - The context menu passed a **model** index to `dh_list_select` while a separator made the list one
+>   row longer: *Delete* selected the inert separator and painted **no highlight at all**, and
+>   *New Folder* highlighted **Delete**.
+> - The tray's PROGRESS bar was **0 px tall whenever a rate was known** — the height rule was
+>   written twice and only `crab_render`'s copy grew.
+> ⇒ **A duplicated rule does not drift symmetrically; it drifts on whichever side someone
+> remembered.** Four of the six now live as pure functions the suite can interrogate
+> (`crab_transfer_plan`, `crab_menu_row`, `crab_tray_h`, `crab_fs_isdir`) rather than as shapes
+> buried in an agnos-only key branch.
+>
+> ⛔⛔ **AND THE REASON NONE OF THEM WAS CAUGHT: 1,221 of `src/main.cyr`'s 1,494 lines sit inside a
+> single `#ifdef CYRIUS_TARGET_AGNOS` with NO `#else`, and nothing includes `main.cyr`.** The whole
+> key-dispatch table is uncompiled on the host and unreachable by every test crab has. `render_test`
+> stayed green through the menu mutation too. That is why the decisions moved out of it.
 >
 > ⛔⛔ **THE HEADLINE: EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE +115 % BINARY
 > — IS THE LIVE CONSTRAINT.** chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op**
@@ -24,7 +58,7 @@
 > Stated as fact, not as a recommendation. The last on-target run was **2026-08-30 against the 0.7.0
 > tree**; everything since has run on the host and under QEMU only, and every
 > `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction. agnos has moved
-> 1.56.53 → 1.56.55. ⚠ **Sequencing verification is the operator's call and is not this file's to
+> 1.56.53 → **1.56.57**. ⚠ **Sequencing verification is the operator's call and is not this file's to
 > rank.**
 
 ## Cross-repo work, and where each repo stands
@@ -122,14 +156,14 @@ prints its check count now — it used to exit **0** whether it ran 26 checks or
 
 | | |
 |---|---|
-| Version | **0.7.5** cut 2026-08-31 — **EVERY M4 ITEM IS IN**: the context menu, inline rename and the batch sheet, on top of 0.7.4's recursion, multi-select, rate and ETA. 0.7.3 carried the stepped copy, Esc cancel and the tray. 0.7.2 carried `open`, the small-window ratification and drag. **0.7.1** (tagged and pushed at `4ac21eb`) carried the five M3 defects, M4's write layer and the 6.5.36 pin. ⛔ **0.7.2 exists because 0.7.1's CHANGELOG section was still being edited after its tag was pushed** — three commits landed past it. A released section is not a scratchpad; it is now byte-identical to the tag. ⛔ **The operator handles all git operations: never commit, tag or push.** `VERSION` and the `## [x.y.z]` heading are the operator's to DIRECT — 0.7.1 was cut on their explicit instruction, not on this file's initiative. **Nothing is committed or tagged.** |
-| Toolchain | cyrius pin **6.5.36** (moved at 0.7.1; the latest *release*). ⭐ This retired the hardcoded `CRAB_SYS_READDIR_AT = 101` at its written expiry — crab now calls `sys_readdir_at`, and is the **first consumer ever to call that wrapper**. ⛔ **THE LOCAL `~/.cyrius` SNAPSHOT IS NOT TRUSTWORTHY** — build through the released tarball; see *Verifying anything in this stack* below. |
-| Build | x86_64 **453,304 B** · `--agnos` **474,944 B** at 0.7.5 · `--win` fails (pre-existing). ⭐ At the 0.7.0 tree a clean-tarball build reproduces **398,504 / 406,992** exactly, and the agnos binary is **byte-identical to the artifact that burned on iron** — so that artifact IS reproducible, contrary to an earlier claim here. |
-| Tests | `cyrius test` **757 / 0** · `render_test` **26** checks, 0 failed (it was 14, never 15) · ⭐ **bench now measures the sort**, not `bench_noop` · fuzz still a scaffold that reads none of its input |
-| Coverage | **137/159 fns (86 %)**, 6/6 files — **the v1.0 criterion, met.** It dipped to 73 % mid-cut and was recovered by writing the assertions genuinely missing (`crab_entry_cmp` directly, the result messages, the notice channel, the listing accessors), not by naming functions to move the number. ⛔ Still reference coverage — a floor, not a correctness proof. The roadmap now gates it per release. |
-| Source | **5,368** lines across **six** files. ⚠ Re-derive with `wc -l src/*.cyr`; the per-file numbers that used to sit here went stale at two of the last three cuts, so they are deliberately not repeated. ⚠ Re-derive with `wc -l src/*.cyr`; this row has been stale at two of the last three cuts. |
+| Version | ⛔ **0.7.6 IS RELEASED AND TAGGED** at `26f38ed`, verified on the remote. ⭐ **0.7.7 is what is being prepared in this tree**: the 6.5.36 → **6.5.41** toolchain pin with `lib/` re-vendored, **five mutation-proven defect fixes** (the single-entry copy accepting a folder; the transfer queue abandoning everything behind a refusal; `m` on a folder silently running a COPY; the marked set discarded when the cursor sat on a folder; the context menu highlighting the wrong verb; the tray bar 0 px tall whenever a rate was known), and the `ci.yml` rewrite closing *#14 / #15 / #36*. Lineage: 0.7.5 (2026-08-31) closed M4; 0.7.1 (`4ac21eb`) carried M4's write layer and the 6.5.36 pin. ⛔ **KEEP THIS LESSON: 0.7.2 exists only because 0.7.1's CHANGELOG section was still being edited after its tag was pushed** — a released section is a record, not a scratchpad. ⛔ **The operator handles all git operations: never commit, tag or push.** |
+| Toolchain | cyrius pin **6.5.41** (moved at 0.7.7 from 6.5.36; tagged on the remote, verified). ⭐ **The bump was not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat`, which closes the VOLUMES *capacity* gate outright and makes the symlink gap a decision rather than a limit; 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest declared 6.5.36 while `cycc` was **already 6.5.41** — the build warned `toolchain drift` on every invocation and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set**: three transitive thread leaves were left at 6.5.36 content and had to be copied by hand (*#50*), and `lib/hashseed.cyr` arrived untracked (*#51*). After any bump, diff the WHOLE vendored tree against the snapshot. |
+| Build | x86_64 **1,023,968 B** · `--agnos` **1,047,832 B** at 0.7.7 · `--win` fails (pre-existing, not a regression — two absent syscall stubs, and Windows is not a declared target). ⭐ **Check four re-run in full at the new pin (2026-09-02)**, all four `path` lines disabled so `cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the overrides on — that jump is the tell), **1230 / 0**, and both binaries **BYTE-IDENTICAL** to the path-resolved ones (host `5170a452…`, agnos `446b7f6a…`). *That equality is the evidence; everything else is merely consistent with it.* |
+| Tests | `cyrius test` **1230 / 0** · `render_test` **53** checks, 0 failed · `cyrius fuzz` **100,000 rounds**, and it prints the number so it cannot agree with a stale claim about itself · bench measures the sort, not `bench_noop`. ⭐ **All four now run in CI** (*#14 / #36*), alongside the `--agnos` build (*#15*), a per-file `fmt --check` loop, `coverage --min 85`, `vet` and `deny`. ⛔ Each of 0.7.7's five fixes is **mutation-proven** — the guard was removed and the suite watched to fail — because this project has shipped three tests that could not fail in their first draft. |
+| Coverage | **199/227 fns (87 %)**, 6/6 files — the v1.0 criterion, met. ⭐ **And no longer met by hand**: `ci.yml` runs `cyrius coverage --min 85`, so a cut that drops below the floor fails before anyone remembers to look (verified the gate can fail: `--min 95` exits 1). ⛔ Still REFERENCE coverage — a floor, not a correctness proof, as the tool itself says. |
+| Source | **8,092** lines across **six** files, plus 4,486 in `tests/`. ⚠ Re-derive with `wc -l src/*.cyr`; the per-file numbers that used to sit here went stale at two of the last three cuts, so they are deliberately not repeated. |
 | Deps | ⛔ **SEVEN, AND ONLY SEVEN** (corrected 2026-09-01 — this said *SIX, AND ONLY SIX* at `dhancha 0.9.23`, and was wrong on both the count and the version **in a released tag**): rekha 0.3.5 · kashi 1.0.6 · sadish **0.5.3** · rupa **0.1.6** · dhancha **0.9.26** · setu 0.8.8 · **chitra 1.0.1**. ⛔⛔ *The row that exists specifically to stop a tag check from checking the wrong things was itself checking the wrong things.* Every build prints `7 deps resolved`. This row used to also list **agnos, bhumi, sigil and aethersafha** — none of them is a declared dependency (`grep '^\[deps' cyrius.cyml`); agnos is the *kernel* crab runs on and the others are peers. Misreading that row as the dep graph is how a tag check checks the wrong things. ⭐ **CHECK 4 RE-RUN 2026-09-01, AFTER the dhancha tag moved 0.9.25 → 0.9.26** — the manifest copied with all four `path` lines disabled, so `cyrius deps` actually cloned the declared tags: **7 deps / 0 errors** (lock goes **3 → 7** commit-pinned, which is the tell that the overrides were really off), host **1,019,784 B** and `--agnos` **1,047,624 B** both build, **1138/0** tests, `render_test` **53/0**, and both binaries came out **byte-identical** to the path-resolved ones (`d7bd8125…` / `93f5c139…`). That last equality is the evidence; the rest is consistent with it. ⛔ **It had gone dead**: before the bump the declared graph produced a *different* host binary (1,019,768 B), because `path` compiled 0.9.26 while the tag said 0.9.25. *(Deferral #43.)* |
-| Mid-arc work | M3 is complete and its five review defects are **closed in 0.7.1**. M4 is **started, not done**: copy/move/delete and the pane states shipped; rename/mkdir are written and tested but not key-bound, and the **transfer tray SHIPPED in 0.7.3** — the copy is stepped off the idle tick, Esc cancels it, and the bar is dhancha 0.9.22's `PROGRESS`. ⛔ **The tray was never really gated on dhancha**: the blocker was crab's own synchronous copy, and the widget alone would have rendered a bar once at 0 % and vanished. ⚠ **Still open in M4**: recursive copy/delete (needs a walk, and the tray is now the surface that makes it stoppable), multi-select, rate/ETA, and the context menu / inline rename / batch-rename sheet. ⚠ agnos HEAD is **1.56.55**; the 2026-08-30 burn ran **1.56.53**. ⛔ **THAT IS NOT A crab GATE AND MUST NOT BE WRITTEN AS ONE.** 1.56.55 rewrote `is_user_range`, which is agnos's own validator on every ring-3 buffer in the system — if it regressed, it regresses for every app, and proving it is **agnos's** job on agnos's schedule, not a reason to hold a crab release. crab passes ordinary BSS/stack buffers and has no special exposure. |
+| Mid-arc work | **M4 is complete** (0.7.1–0.7.5) and **M5 is substantially in** (0.7.6): the preview pane, header-only image dimensions, thumbnails, EXIF, and the GRID and GALLERY views. ⚠ **0.7.7 is a repair cut, not a feature cut** — no roadmap item advanced; five shipped defects were closed, the toolchain moved, and the CI gate stopped being one step. ⛔ **What M5 has left**: columns/miller (gated on crab's own two-pane model — a design question, not a dependency) and proportional text (gated on rekha `hmtx` advance widths, *not* on the plumbing, which exists — see the roadmap). |
 
 ### ⛔⛔ TWO HAZARDS THIS MILESTONE TAUGHT, BOTH CHEAP AND BOTH EXPENSIVE TO RE-LEARN
 
@@ -307,27 +341,6 @@ the ⚠ lines; just do not expect to see a date on first run.
 6. **`git ls-remote` works fine here.** An older note in this file called it "inconclusive due to SSH
    auth in the sandbox" — that was not true on 2026-08-28; it resolved every tag. Use
    `sed 's|.*refs/tags/||' | sort -V` — **`sort -V`, not lexical**, or `1.56.9` outranks `1.56.50`.
-
-### ⛔ One deliberate interim, with an expiry
-
-**crab hard-codes syscall `101`** (`CRAB_SYS_READDIR_AT` in `src/app.cyr`). That is the bug class
-agnos's roadmap tracks, and it is temporary on purpose: cyrius **6.5.36** ADDS `SYS_READDIR_AT` +
-`sys_readdir_at`, but crab pins **6.5.35**, whose vendored `lib/` has no wrapper — and `lib/` must
-not be hand-edited. **Switch to the wrapper and delete the constant when crab's pin moves to
->= 6.5.36.**
-⛔ **6.5.36 IS UNRELEASED — no tag, a local commit only** (verified 2026-08-28; the latest cyrius
-release is **6.5.35**). CI installs *releases*, so the pin CANNOT move there and the wrapper does not
-exist for any consumer. ⚠ Do not be misled by a local `~/.cyrius` that already carries it: on
-2026-08-28 the installed 6.5.35 stdlib snapshot had been overwritten with 6.5.36 content, so
-`lib/syscalls_x86_64_agnos.cyr` briefly showed `sys_readdir_at` here while a clean checkout had
-nothing. Re-check against the released tarball, not the local snapshot.
-Filed on both sides:
-`agnos/docs/development/issues/2026-08-28-syscall-101-readdir-at.md` and
-`cyrius/docs/development/issues/2026-08-28-cyrius-syscall-101-readdir-at-wrapper.md`.
-
-⚠ **The cyrius wrapper is asserted to exist and compile; it has never been CALLED.** agnos's
-`rdat.cyr` proves the kernel contract but uses the raw number. crab is the first consumer that will
-exercise the path through the wrapper, and it cannot until the pin moves.
 
 ### ⛔ Read this before touching the column or listing code
 

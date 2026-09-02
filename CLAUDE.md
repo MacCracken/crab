@@ -37,7 +37,7 @@ Project was scaffolded with `cyrius init` (greenfield) or `cyrius port` (Rust �
 ```sh
 cyrius deps                          # resolve sibling deps
 cyrius build src/main.cyr build/crab
-cyrius test                          # run [build].test + tests/*.tcyr
+cyrius test                          # auto-discovers tests/*.tcyr — [build].test is NEVER run
 ```
 
 ## Key Principles
@@ -46,7 +46,7 @@ cyrius test                          # run [build].test + tests/*.tcyr
 - Test after every change, not after the feature is "done"
 - ONE change at a time — never bundle unrelated changes
 - Research before implementation — check vidya / existing patterns
-- Build with `cyrius build`, not raw `cat file | cc5` — the manifest auto-resolves deps and prepends includes
+- Build with `cyrius build`, not raw `cat file | cycc` — the manifest auto-resolves deps and prepends includes
 - Source files only need project includes — stdlib / external deps auto-resolve from `cyrius.cyml`
 - Every buffer declaration is a contract: `var buf[N]` = N **bytes**, not N entries
 - `&&` / `||` short-circuit; mixed expressions require explicit parens
@@ -79,5 +79,8 @@ cyrius test                          # run [build].test + tests/*.tcyr
 3. **Test + benchmark additions** for new code
 4. **Internal review** — performance, memory, correctness, edge cases
 5. **Documentation** — update CHANGELOG, `docs/development/state.md`, any ADR the change earned
-6. **Version sync** — `VERSION`, `cyrius.cyml`, CHANGELOG header
+6. **Version sync** — `VERSION` and the CHANGELOG header. ⚠ Do **not** hand-edit a version into
+   `cyrius.cyml`: it carries `version = "${file:VERSION}"`, which interpolates the `VERSION` file,
+   and `release.yml` verifies the resolved value against the pushed tag. (The manifest's
+   `cyrius = "X.Y.Z"` toolchain pin is a separate, deliberate bump.)
 

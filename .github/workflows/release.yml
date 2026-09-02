@@ -50,6 +50,19 @@ jobs:
         run: cyrius deps
 
       - name: Build
+        # ⛔⛔ THE BINARY ATTACHED TO A crab RELEASE IS AN x86_64-LINUX HOST BUILD, and crab is an
+        # AGNOS desktop application. This step builds the host target, `Source tarball + checksums`
+        # below folds `build/crab` into `SHA256SUMS`, and `Create release` publishes it — so the
+        # artifact a consumer downloads and checksum-verifies cannot run on the platform crab is
+        # written for. Recorded here rather than quietly changed: WHICH artifacts a release
+        # publishes is a distribution decision, and renaming or adding assets is visible to anyone
+        # consuming them.
+        # ⚠ THIS IS NOT THE *#15* BLIND SPOT ANY MORE. The `ci` job above (`uses: ci.yml`) is a
+        # `needs:` dependency of this job and now builds `--agnos`, so no tag can be published
+        # without the shipping target compiling. What is open is the ASSET, not the gate.
+        # ⇒ Options, for the operator: attach both binaries under explicit names, attach only the
+        # agnos one, or attach neither and let the source tarball be the release (which is what
+        # `cyrius deps` actually consumes downstream — see the note on the tarball step below).
         run: |
           mkdir -p build
           cyrius build src/main.cyr build/${{ github.event.repository.name }}

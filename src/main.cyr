@@ -919,10 +919,19 @@ fn main(): i64 {
                                 edit_open = 2;
                                 edit_label = "New folder name:";
                             }
-                            # ⭐ THE CONTEXT MENU. ⚠ Opened from the KEYBOARD as well as the
-                            # pointer — a menu only a
-                            # mouse can reach is invisible to an operator who never touches one, and crab is
-                            # keyboard-first by construction.
+                            # ⭐ THE CONTEXT MENU. ⚠ KEYBOARD ONLY — the Menu key below is the
+                            # ONLY thing in the program that sets `menu_open`, which is right for a
+                            # crab that is keyboard-first by construction: a menu only a mouse can
+                            # reach is invisible to an operator who never touches one.
+                            # ⛔ THIS SAID "opened from the KEYBOARD as well as the pointer". THERE
+                            # IS NO POINTER ROUTE, and that is an M6 gap rather than a stance:
+                            # dhancha carries the button code in `POINTER_BTN`'s `a`, and crab's arm
+                            # reads only `b` (press vs release) — so a RIGHT-click is
+                            # indistinguishable from a left one and runs the ordinary path. Nor does
+                            # the OPEN menu take a click: `crab_hit` resolves only the two pane
+                            # LISTs, so there is no pointer selection and no click-away dismiss.
+                            # ⚠ `menu_x`/`menu_y` below only PLACE the keyboard-opened menu at the
+                            # last tracked pointer position; they do not open it.
                             if (u == 0x65) {                                       # the Menu key
                                 menu_open = 1;
                                 menu_sel = 0;
@@ -965,25 +974,48 @@ fn main(): i64 {
                                 if (scnt <= 0) { crab_set_notice("nothing selected"); }
                                 else {
                                     var srec = sbuf2 + ssel * CRAB_REC_SZ;
-                                    # ⛔ DIRECTORIES ARE REFUSED HERE, NOT DEEPER. `crab_fs_copy` would open a
-                                    # directory and read it as a byte stream — on ext2 that yields raw dirent
-                                    # bytes, so the "copy" would produce a corrupt FILE where a folder was
-                                    # asked for. Recursive copy needs the transfer tray to show and stop it.
-                                    if (load8(srec + CRAB_REC_TYPE) != 0) {
-                                        # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
-                                        # acceptable: it shows what is happening and Esc stops it.
-                                        crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
-                                        var rct = crab_walk_begin(CRAB_OP_CTREE, srcp, namescr, dstp,
-                                          pathscr, pathscr2, statbuf);
-                                        if (rct == CRAB_FS_OK) { crab_set_notice("copying folder..."); }
-                                        else { crab_set_notice(crab_fs_msg(rct)); }
-                                        crab_say("crab: copy tree "); crab_say(namescr); crab_say("\n");
+                                    crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
+                                    # ⭐ MARKS OUTRANK THE CURSOR, and with nothing marked the cursor IS the
+                                    # selection — so an operator who never presses Space sees no change at all.
+                                    # ⛔⛔ THIS IS READ **BEFORE** THE CURSOR'S TYPE, AND THAT ORDER IS THE FIX.
+                                    # It used to sit inside the not-a-folder arm, so the rule above was true only
+                                    # when the cursor happened to be on a file: marking five files and leaving the
+                                    # cursor on a sixth entry that was a FOLDER silently discarded all five marks
+                                    # and acted on the folder instead. The comment claimed the opposite three
+                                    # lines away from the code that broke it.
+                                    var smk = lmarks; if (active_pane == 1) { smk = rmarks; }
+                                    var smarked = crab_mark_count(smk, scnt);
+                                    # ⛔⛔ THE RULE ITSELF LIVES IN `crab_transfer_plan`, NOT HERE, and that is
+                                    # deliberate: everything in this file between the `#ifdef` at 263 and the
+                                    # `#endif` at 1484 is invisible to every test crab has — no `#else`, and
+                                    # nothing includes `main.cyr`. Both defects this branch shipped were
+                                    # decisions, not wiring, so the decision moved somewhere the suite can reach
+                                    # it and this stays a dispatch.
+                                    var isdirsel = 0;
+                                    if (load8(srec + CRAB_REC_TYPE) != 0) { isdirsel = 1; }
+                                    var ismv = 0;
+                                    if (u == 0x10) { ismv = 1; }
+                                    var plan = crab_transfer_plan(ismv, smarked, isdirsel);
+                                    if ((plan == CRAB_PLAN_TREE) || (plan == CRAB_PLAN_NOMOVEDIR)) {
+                                        if (plan == CRAB_PLAN_NOMOVEDIR) {
+                                            crab_set_notice(
+                                              "folders cannot be moved yet — copy it, then delete the original");
+                                            crab_say("crab: move tree refused "); crab_say(namescr); crab_say("\n");
+                                        } else {
+                                            # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
+                                            # acceptable: it shows what is happening and Esc stops it.
+                                            var rct = crab_walk_begin(CRAB_OP_CTREE, srcp, namescr, dstp,
+                                              pathscr, pathscr2, statbuf);
+                                            if (rct == CRAB_FS_OK) { crab_set_notice("copying folder..."); }
+                                            else { crab_set_notice(crab_fs_msg(rct)); }
+                                            crab_say("crab: copy tree "); crab_say(namescr); crab_say("\n");
+                                        }
                                     } else {
-                                        crab_strcpy_n(namescr, srec, CRAB_NAME_MAX);
-                                        # ⭐ MARKS OUTRANK THE CURSOR, and with nothing marked the cursor IS the
-                                        # selection — so an operator who never presses Space sees no change at all.
-                                        var smk = lmarks; if (active_pane == 1) { smk = rmarks; }
-                                        var smarked = crab_mark_count(smk, scnt);
+                                        # ⚠ A MARKED FOLDER REACHES THE QUEUE AND IS REFUSED THERE, by
+                                        # `crab_copy_begin`'s `EISDIR` guard — it does not silently become a
+                                        # recursive copy. Marking a mixed set transfers the files and says so;
+                                        # recursing per marked folder is a separate operation and a separate
+                                        # ruling. `crab_queue_advance` skips each refusal and keeps going.
                                         if (smarked > 0) {
                                             var qkind = CRAB_OP_COPY;
                                             if (u == 0x10) { qkind = CRAB_OP_MOVE; }

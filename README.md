@@ -51,7 +51,10 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   >   `agnos/scripts/harness/aethersafha-clients-test.py` — which byte-scans the kernel and
   >   hard-exits if it carries any selftest hook — reached **`connected: 2, presented: 2`**:
   >   **crab itself** and setu's `present_probe` (staged as `/bin/puka`) both connected and
-  >   presented. ⚠ Scope: QEMU at `-smp 1` only; never shown on iron, and `-smp 4` fault-kills.
+  >   presented. ⚠ Scope of THAT run: QEMU `-smp 1`, on the now-retired TCP path. ⛔ Both halves
+  >   of the old scope note are superseded and are kept here only as the record of that day: 0.4.5
+  >   (2026-08-07) proved crab at **`-smp 4`** on the channel band, framebuffer-confirmed, and crab
+  >   has since run on iron. The `-smp 4` fault-kill was a property of the 2026-08-02 image alone.
   >
   > The retirement is **architectural, not a failure verdict**: a local display protocol has
   > nothing to route, nothing to checksum, no window to negotiate, and no business owning a port.
@@ -148,8 +151,13 @@ happened rather than showing a blank square.
 - **Thumbnails stop at about 1024×1024**, and larger images say so instead of showing one. That is
   not a rendering limit — it is the decoder's memory, which this stack cannot reclaim. Recorded with
   its measurements in [`docs/development/roadmap.md`](docs/development/roadmap.md).
-- **No grid, columns or gallery view, and no sidebar.** Genuinely gated on `dhancha` widgets that do
-  not exist yet. (Roadmap M5–M6.)
+- **No columns (miller) view, and no sidebar.** ⛔ **Neither is a `dhancha` gate** — both were
+  re-derived FALSE on 2026-08-31. Columns is a `BOX_H` of `LIST`s and is blocked on crab's own
+  two-pane model, which is a design question rather than a dependency; a PLACES sidebar is
+  buildable today out of `LIST` + `DH_FLAG_INERT` + `PROGRESS`. The one genuine block left is
+  sidebar **VOLUMES enumeration**: agnos `mount`/`umount` are no-op stubs, so crab cannot learn
+  what is mounted (*deferral #44*). ⚠ **Grid and gallery both SHIP** — see `g` above.
+  (Roadmap M5–M6.)
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
@@ -171,7 +179,7 @@ here to 1.0 are sequenced in [`docs/development/roadmap.md`](docs/development/ro
 cyrius deps                                          # resolve stdlib + sibling deps
 cyrius build src/main.cyr build/crab                 # compile for the host
 cyrius build --agnos src/main.cyr build/crab_agnos   # for AGNOS — the real target
-cyrius test                                          # run [build].test + tests/*.tcyr
+cyrius test                                          # auto-discovers tests/*.tcyr — [build].test is NEVER run
 ```
 
 ```sh

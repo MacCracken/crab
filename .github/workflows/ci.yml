@@ -34,21 +34,96 @@ jobs:
           echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
       - name: Resolve dependencies
-        run: cyrius deps
+        # ⚠ `--verify` is the NON-MUTATING check and it runs second on purpose: `cyrius deps` may
+        # rewrite `lib/` and `cyrius.lock` from the toolchain snapshot, so verifying first would
+        # verify the checkout rather than what the build will actually compile.
+        run: |
+          set -e
+          cyrius deps
+          cyrius deps --verify
 
-      - name: Build
+      - name: Build (host)
         run: |
           mkdir -p build
           cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
+      - name: Build (--agnos — the target that actually ships)
+        # ⛔⛔ THIS IS *#15*, AND IT IS NOT A TIDINESS STEP. `src/main.cyr` wraps lines 263–1484 in a
+        # single `#ifdef CYRIUS_TARGET_AGNOS` with **no `#else`** — 1,221 of 1,494 lines, including
+        # the whole key-dispatch table. The host build above does not compile ONE of them, so a
+        # brace error there goes green through the host step and fails only here. That happened at
+        # 0.7.5. It also caught a broken dependency graph on 2026-08-27: against the declared
+        # dhancha 0.9.17, host PASSED and `--agnos` failed with `undefined variable 'POINTER_SCROLL'`.
+        # ⛔ THE FLAG IS `--agnos`. `CYRIUS_TARGET=agnos` is SILENTLY IGNORED — measured: it builds a
+        # byte-identical HOST binary and exits 0, with no warning, even for a garbage value. A step
+        # written that way would look like this gate and be the host build twice.
+        run: cyrius build --agnos src/main.cyr build/crab-agnos
+
       - name: Test
-        # ⛔⛔ THIS COMMENT USED TO SAY `cyrius test` "picks up the [build].test entry AND
-        # auto-discovers tests/*.tcyr". THE FIRST HALF IS FALSE, and it mattered: it told every
-        # reader that src/test.cyr was a live gate. MEASURED 2026-09-01 on the pinned 6.5.36 by
-        # mutation — src/test.cyr rewritten to `return 1` in a scratch tree left this step at
-        # **1138 passed, 0 failed, exit 0**. Only tests/crab.tcyr is compiled and run.
-        # ⇒ [build].test is inert, not a gate (*deferrals #17, #40*). src/test.cyr's own header
-        # comment is the accurate one.
-        # ⚠ AND THIS STEP IS THE WHOLE AUTOMATED GATE: no --agnos build (*#15*), no render_test
-        # and its 53 pixel checks (*#14*), no fuzz/bench/lint/fmt/coverage (*#36*).
+        # ⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY. This comment used to claim it
+        # "picks up the [build].test entry AND auto-discovers tests/*.tcyr"; the first half is false
+        # and it told every reader that `src/test.cyr` was a live gate. Proven by mutation: rewriting
+        # `src/test.cyr` to `return 1` in a scratch tree left this step green, and so does filling it
+        # with syntactically invalid text — the file is never COMPILED, let alone run. Only
+        # `tests/crab.tcyr` is. (*deferrals #17, #40*.)
+        # ⚠ It needs `build/` and `build/crab` to exist — 134 assertions write fixtures into a
+        # relative `build` dir and one hard-codes `build/crab` — which the host build above provides.
         run: cyrius test
+
+      - name: render_test — the pixel assertions
+        # ⛔⛔ THIS IS *#14*, AND IT IS crab's STRONGEST TEST. It is the only enforcement of the rule
+        # that the render path (`src/ui.cyr`) must never call up into `src/app.cyr` — a rule the
+        # source records being broken four or five times. Nothing discovered it: `cyrius.cyml` sets
+        # `test = "src/test.cyr"` (inert, see above) and auto-discovery covers `tests/*.tcyr` only,
+        # so these checks ran under NEITHER gate while catching mutations the suite missed.
+        # ⚠ ITS EXIT CODE IS THE ASSERTION — it returns the number of failed checks. Verified by
+        # injecting a bad check: `54 checks, 1 failed`, exit 1. It also prints its own count, so a
+        # run that silently executed zero checks is visible; it used to exit 0 either way.
+        run: |
+          set -e
+          cyrius build src/render_test.cyr build/render_test
+          ./build/render_test
+
+      - name: Fuzz
+        # ⚠ 100,000 deterministic rounds from a fixed seed, and it prints the number it really drove
+        # (*#41*) so this step cannot agree with a stale claim about itself.
+        run: cyrius fuzz
+
+      - name: Format check
+        # ⛔⛔ THE LOOP IS LOAD-BEARING: `cyrius fmt --check` PROCESSES ONLY ITS FIRST FILE ARGUMENT.
+        # Measured 2026-09-02 — with a deliberately misformatted file passed FIRST it exits 1, and
+        # passed LAST it exits 0 and prints nothing. `cyrius lint` behaves identically. So the
+        # obvious `cyrius fmt --check src/*.cyr` would check `src/app.cyr` alone and pass green while
+        # eight other files rotted. Enumerate, one invocation each.
+        run: |
+          set -e
+          for f in src/*.cyr tests/crab.tcyr tests/crab.fcyr tests/crab.bcyr; do
+            cyrius fmt --check "$f"
+          done
+
+      - name: Coverage floor
+        # ⚠ REFERENCE coverage — a floor, not a correctness proof, and the tool says so itself.
+        # The v1.0 criterion is 80%; the floor here is 85 against a measured 87%, so it gates with
+        # headroom rather than being a rubber stamp. Verified it can fail: `--min 95` exits 1 with
+        # `coverage gate FAILED`.
+        run: cyrius coverage --min 85
+
+      - name: Static checks
+        run: |
+          set -e
+          cyrius vet src/main.cyr
+          cyrius deny src/main.cyr
+
+      # ⛔ WHAT THIS WORKFLOW DELIBERATELY DOES **NOT** RUN, so the omissions are decisions rather
+      # than oversights (*#36*, the remainder):
+      #   - `cyrius bench` — the harness is real and measures the sort, but a timing on a shared
+      #     runner is noise, and a step that cannot fail is not a gate. It is run locally, and
+      #     `docs/benchmarks.md` is where its numbers belong (*#13*).
+      #   - `cyrius lint` — exits 0 no matter what it finds, so it CANNOT gate. `cyrius lint --strict`
+      #     does (exit 2), but it fails today on 83 pre-existing over-long lines — 14 in
+      #     `src/main.cyr`, 58 in `tests/crab.tcyr`, 11 in `tests/crab.fcyr` (85 lint warnings in
+      #     all, counting 2 consecutive-blank-line hits). Turning it on means reformatting the
+      #     event loop — the widest mechanical edit in the most sensitive file — and that is its
+      #     own change, not a rider on this one (*#46*).
+      #   - `cyrius audit` — bundles lint+test+bench and therefore exits 1 on those same lint
+      #     warnings. It becomes usable here the day `--strict` does.

@@ -24,7 +24,13 @@
 
 ## Version
 
-**0.7.6** (2026-08-31) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.7 in preparation** (2026-09-02) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
+**0.7.6** (2026-08-31) is the last RELEASED version, tagged `26f38ed` on the remote.
+
+⭐ **0.7.7 is a REPAIR cut — no roadmap item advanced.** Five defects that had already shipped were
+found by reading code and closed with mutation-proven tests; the toolchain pin moved
+**6.5.36 → 6.5.41**; and CI went from one step to nine, closing *#14*, *#15* and *#36*.
+⚠ **Every figure below has been re-measured at 0.7.7 unless it says otherwise.**
 
 ⭐ **M5 is substantially in** — the preview column, thumbnails, EXIF, and the GRID and GALLERY
 views — and **every finding of the 2026-08-31 security audit is closed**. ⚠ **Semver would normally
@@ -45,7 +51,8 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.36` (in `cyrius.cyml [package].cyrius`) — moved 2026-08-30 with the defect
+- **Cyrius pin**: `6.5.41` (in `cyrius.cyml [package].cyrius`) — moved 2026-09-02 at the 0.7.7 cut, on operator direction. ⭐ **Not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat` (closing the VOLUMES *capacity* gate outright and turning the symlink gap into a decision), and 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest said 6.5.36 while `cycc` was already 6.5.41, so every build printed `toolchain drift` and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set** — three transitive thread leaves stayed at 6.5.36 content and were copied by hand (*#50*); `lib/hashseed.cyr` arrived untracked (*#51*). **Diff the whole vendored tree against the snapshot after any bump.**
+- *(history)* `6.5.36` — moved 2026-08-30 with the defect
   and M4 work, per the standing rule that a repaired repo does not stay on a stale pin.
   ⭐ **This bump retired `CRAB_SYS_READDIR_AT = 101`**: 6.5.36 vendors `sys_readdir_at`, so crab no
   longer hardcodes a syscall number, and crab is the first consumer to actually call that wrapper.
@@ -67,34 +74,48 @@ demands and the one this file broke twice.
   **406,992 B — byte-identical to the artifact that burned on iron**. The contaminated local
   snapshot produced 398,520 / 407,040 instead. **A byte delta of 16/48 against the documented sizes
   is the signature of a poisoned toolchain, not of a source change.**
-- ⛔⛔ **THE LOCAL `~/.cyrius` 6.5.35 SNAPSHOT IS POISONED (2026-08-28)** — overwritten with 6.5.36
-  stdlib. The **released** 6.5.35 tarball has **0** hits for `v6.5.36` and **0** for `SYS_READDIR_AT`;
-  the local copy has both. ⇒ **Every `cyrius build` / `cyrius test` re-vendors 6.5.36 stdlib into
-  crab's tracked `lib/` and rewrites `cyrius.lock`.** After any build:
-  `grep -c SYS_READDIR_AT lib/syscalls_x86_64_agnos.cyr` must be **0**, and `git status lib/` should be
-  clean; `git checkout -- lib/ cyrius.lock` undoes it. Root fix (ask the operator first — they may be
-  developing 6.5.36 on purpose):
-  `curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | CYRIUS_VERSION=6.5.35 sh`
-- ⭐ **6.5.36 IS RELEASED (verified 2026-08-30)** — tagged on the remote. This meets the documented
-  expiry condition for `CRAB_SYS_READDIR_AT = 101`. ⚠ **The pin has NOT moved and must not move
-  here** — the operator drives version and toolchain bumps — so the hardcoded constant stays until
-  it does. This line said "UNRELEASED" until 2026-08-30; that was true when written.
+- ⛔⛔ **HISTORY, NOT A LIVE INSTRUCTION — AND ITS REMEDY IS NOW DESTRUCTIVE. DO NOT FOLLOW IT.**
+  On 2026-08-28 the local `~/.cyrius` **6.5.35** snapshot was found overwritten with 6.5.36 stdlib,
+  and this entry told the reader to check `grep -c SYS_READDIR_AT lib/syscalls_x86_64_agnos.cyr`
+  **must be 0** and to run `git checkout -- lib/ cyrius.lock` to undo any change.
+  ⛔ **AT THE 6.5.41 PIN THAT GREP MUST BE NON-ZERO** — 6.5.36 onward vendors `sys_readdir_at`, and
+  crab calls it in three places. Measured 2026-09-02: it returns **2**, correctly. Following the old
+  instruction would revert *correct* vendoring and reintroduce a stdlib that does not match the pin.
+  ⇒ **The durable lesson survives and the recipe does not**: a `~/.cyrius/versions/<v>/lib` directory
+  can hold a stdlib that is not that version's, so **diagnose by CONTENT, never by the version
+  string in the path**. The check that actually works is to compare the vendored tree against the
+  pinned snapshot file by file — which is how 0.7.7's bump was verified (0 files drifting), and how
+  it caught three transitive leaves the sync had left behind (*#50*).
+  ⚠ *A byte delta of 16/48 against a documented size is the shape of a vendored-`lib/` change — it
+  may be poisoning OR a legitimate stdlib move. 0.7.7's bump produced exactly +16 host / +48 agnos
+  and was legitimate. The delta tells you to look; it does not tell you which.*
 - `lib/` is vendored from the pinned snapshot by `cyrius lib sync`, **not** by `cyrius deps` — a
-  toolchain bump without a `lib sync` leaves the stdlib behind. ⚠ The sync walks the **declared**
-  `[deps].stdlib` set: **29 leaves**, while crab actually vendors **30**. The odd one out is
-  `lib/atomic.cyr`, a transitive leaf (`alloc`, `io`, `fmt` and three `syscalls_*` include it) that no
-  declaration names. Check it by hand at every bump.
+  toolchain bump without a `lib sync` leaves the stdlib behind. ⚠⚠ **THE SYNC WALKS THE DECLARED `[deps].stdlib` SET ONLY, AND THAT IS A REAL GAP, MEASURED.**
+  At the 0.7.7 bump it copied **29** files and left **three** behind — `lib/thread_agnos.cyr`,
+  `lib/thread_local.cyr`, `lib/thread_macos.cyr` — all transitive, none named by any declaration.
+  They were copied by hand, and the tree then verified byte-identical to the 6.5.41 snapshot.
+  ⛔ `lib/atomic.cyr` — the leaf this note has always named — **escaped only by luck**: it happens to
+  be byte-identical between 6.5.36 and 6.5.41. It will not always be.
+  ⇒ **Diff the WHOLE vendored tree against the snapshot at every bump**, not the declared subset,
+  and reconcile `git status lib/` *and* the lock's entry count — 6.5.41 also ADDED a leaf
+  (`lib/hashseed.cyr`), which arrived untracked. *Deferrals #50, #51.*
 
 ## Source
 
-**7,915 lines** across **six** files *(0.7.6; 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
+**8,092 lines** across **six** files, plus **4,486** in `tests/` *(0.7.7; 7,915 at 0.7.6, 5,368 at
+0.7.5, 2,227 at the 0.7.0 cut)*.
+⛔ **THE PER-FILE COUNTS THAT USED TO SIT IN THE HEADINGS BELOW ARE DELETED, NOT UPDATED.** They were
+`main.cyr (1,287)` against a real 1,494 and `app.cyr (2,484)` against a real 3,007 — understated by
+523 lines in the largest file in the project — while this very section warned three lines down never
+to trust them. A number nothing gates does not survive being corrected; it survives being removed.
+**Re-derive with `wc -l src/*.cyr`.**
 ⚠ This section read "2019 lines" and per-file counts from **before** the 0.7.0 cut — it was already
 stale by ~200 lines when the cut landed. Re-derive with `wc -l src/*.cyr`, never trust the numbers
 here.
 ⚠ +2,416 over 0.7.5 *(shipped in 0.7.6)*: the render-state record, the preview column, the header-only
 dimension parser and the memoised read behind it — plus the tests, which are the larger half.
 
-- `src/main.cyr` (1,287) — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
+- `src/main.cyr` — ⛔ **`main()` AND `_entry()` AND NOTHING ELSE, as of 0.6.0.** It ends in
   `_entry();`, so a test that included it would RUN THE APP — which is why everything testable was
   moved to `src/app.cyr`. **Do not add a function here.** What remains is the dhancha client
   lifecycle, the shm present path and the frame loop.
@@ -103,7 +124,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   not a rename.
   ⚠ **No arena setup here any more** (0.6.0). It lived in `main()` and that was a gap: deleting it
   broke no test while restoring a 77 KB-per-frame leak. `crab_render` owns it.
-- `src/app.cyr` (2,484) — ⭐ **NEW at 0.6.0**, and M3's centre of gravity; M4's write layer lives
+- `src/app.cyr` — ⭐ **NEW at 0.6.0**, and M3's centre of gravity; M4's write layer lives
   here too (`crab_fs_*`, the per-target syscall shim, `crab_name_ok`). The application layer lifted out of `main.cyr`: the
   readdir parser (`crab_readdir_into` and its cap clamp), the stat layer, `crab_descend` /
   `crab_ascend`, `crab_surface_flags`, the serial logging.
@@ -112,11 +133,11 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   17 assertions against it, all mutation-proven.
   ⚠ `CRAB_MAX_ENTRIES = 1024` (256 until M3 *#02*) and `crab_surface_flags()` returning `SETU_SURF_PREMULTIPLIED`
   **unconditionally** — no flag, no arm, no env var — both live here.
-- `src/path.cyr` (131) — the readdir record layout and the **bounded** cstring/path helpers
+- `src/path.cyr` — the readdir record layout and the **bounded** cstring/path helpers
   (`crab_cstr_len`, `crab_streq_n`, `crab_strcpy_n`, `crab_join_n`).
   ⛔ Extracted at 0.5.0 for the reason `app.cyr` was extracted at 0.6.0: a memory-safety fix that
   cannot be asserted on is a fix held on trust.
-- `src/ui.cyr` (2,067) — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
+- `src/ui.cyr` — dual-pane file browser: a pane is a **`dh_list`** (0.4.10), plus size/mtime
   formatting, row build, status line.
   ⛔ **`crab_render` OWNS THE PER-FRAME ARENA** (0.6.0) — creates it on first use, installs it, and
   calls `dh_frame_begin()`. Placed here rather than in `main.cyr` so every caller is correct without
@@ -142,7 +163,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   ⚠ It creates **two** `DhSurface`s on purpose — it holds two frames live and dumps the first, and
   since dhancha 0.9.14 one surface would hand both renders the same target.
   ⛔ **It is not run by CI or by `cyrius test`** — see Known gaps.
-- `src/test.cyr` (13) — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
+- `src/test.cyr` — ⚠ **deliberately empty, with a warning in it.** Bare `cyrius test`
   auto-discovers `tests/*.tcyr` and does **not** run the `[build].test` hook.
 
 ⭐ `cyrius coverage` reports **137/159 fns referenced (86 %)** at 0.7.5, 6/6 files — **the v1.0
@@ -281,8 +302,8 @@ errors**, host and `--agnos` both build, **253/0**).
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
-| sadish  | 0.5.2  | no      | 2D vector — the surface everything else draws into   |
-| rupa    | 0.1.5  | yes     | shared theme tokens + **`on-accent`** and contrast   |
+| sadish  | 0.5.3  | no      | 2D vector — the surface everything else draws into   |
+| rupa    | 0.1.6  | yes     | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 0.3.5  | no      | text; references `sd_*`                              |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
 | dhancha | 0.9.26 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
@@ -350,8 +371,13 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,138 passed / 0 failed**
-  *(0.7.6; 757 at 0.7.5, 253 at the 0.7.0 cut)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,230 passed / 0 failed**
+  *(0.7.7; 1,138 at 0.7.6, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+  ⭐ **+92 at 0.7.7, all of them pinning defects that had already shipped**, in five new groups:
+  `t_dir_transfer`, `t_queue_refusals`, `t_transfer_plan`, `t_menu_highlight`, `t_tray_height`.
+  ⛔ **Each was mutation-proven** — the guard removed and the suite watched to FAIL (9, 4, 5, 3 and
+  5 failures respectively) — because this project has shipped three tests that could not fail in
+  their first draft.
   ⛔ **NEW GROUPS GO IN THEIR OWN FUNCTIONS.** `main` reached 2,517 lines and **279 locals**, and one
   more group pushed its stack frame past what the process could touch: the suite **segfaulted**
   (exit 139) part-way through, having printed the group header, with every prior assertion passed.
@@ -407,8 +433,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,019,784 B** *(0.7.6; 453,304 at 0.7.5, 398,504 at the 0.7.0 cut)* |
-| `--agnos`    | ✅ builds, **1,047,624 B** *(0.7.6; 474,944 at 0.7.5)* — the real target |
+| x86_64 linux | ✅ builds, **1,023,968 B** *(0.7.7; 1,019,784 at 0.7.6, 453,304 at 0.7.5)* |
+| `--agnos`    | ✅ builds, **1,047,832 B** *(0.7.7; 1,047,624 at 0.7.6)* — the real target, and **CI now builds it** (*#15*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -450,12 +476,18 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   read below `CRAB_NAME_MAX`. Caught by planting the implied mutation and watching the suite stay
   green. What was real: no fuzz coverage (now closed), and a safety that depends on
   `CRAB_EDIT_CAP <= CRAB_NAME_MAX`, two constants that can move independently — now asserted.
-- ⛔ **`src/render_test.cyr`'s 26 pixel assertions run under NEITHER CI NOR `cyrius test`.**
-  `cyrius.cyml` sets `test = "src/test.cyr"`, which `cyrius test` does not run, and auto-discovery
-  covers `tests/*.tcyr` only. It is crab's strongest test and no gate executes it. *Deferral #14.*
-- ⛔ **CI never builds `--agnos`** — the target that ships. Every `#ifdef CYRIUS_TARGET_AGNOS` region
-  is unguarded by the gate, and 0.7.5 proved the cost: a brace error there compiled clean on the host
-  and failed only on `--agnos`. *Deferral #15.*
+- ✅ **CLOSED at 0.7.7 — `render_test`'s 53 pixel assertions RUN IN CI**, as their own step, with
+  the exit code (the failed-check count) as the assertion. *Deferral #14.* ⚠ Still true, and why the
+  step is explicit rather than discovered: `cyrius test` does not find it, and `[build].test` is
+  inert (*#17*, still open — `cyrius.cyml` still reads `test = "src/test.cyr"`).
+- ✅ **CLOSED at 0.7.7 — CI builds `--agnos`.** *Deferral #15.* `release.yml` gates on `ci.yml` via
+  `uses:`, so a tag inherits it. ⛔ The flag is `--agnos`: `CYRIUS_TARGET=agnos` is **silently
+  ignored** and produces a byte-identical host binary at exit 0.
+  ⚠ **The BLIND SPOT ITSELF IS NOT CLOSED, only the build of it**: 1,221 of `src/main.cyr`'s 1,494
+  lines are inside that one `#ifdef` with no `#else`, and nothing includes `main.cyr` — so the whole
+  key-dispatch table now COMPILES under the gate but is still executed by no test on any target.
+  0.7.7's defect fixes answered that by moving the decisions out into `crab_transfer_plan`,
+  `crab_menu_row`, `crab_tray_h` and `crab_fs_isdir`, which the suite can reach.
 - ✅ **CLOSED — the fuzz harness now reads its input.** *Deferral #12.* **100,000** rounds
   over mutated headers, random bytes and degenerate lengths, deterministic from a fixed seed. It
   caught a real segfault in `crab_img_dims` the day it was written.
@@ -473,9 +505,11 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   agnos-only event-loop code. Same irreducible gap `main.cyr` has always had.
 - ⚠ **Shift is not on the wire.** `mods` carries press/release, so typed names are lower-case until
   the compositor forwards modifiers. `crab_key_char` already takes the flag.
-- ⚠ **crab cannot recreate a symlink.** A recursive copy copies whatever `open`+`read` yields through
-  one. `sys_symlink` exists but crab cannot *learn* a source is a link without `readlink`'s ambiguous
-  negative. Moves when agnos `lstat`#102 gets its cyrius peer.
+- ⚠ **crab cannot recreate a symlink** — but the GATE on it is gone. A recursive copy copies whatever
+  `open`+`read` yields through one. ⭐ **`lstat`#102 GOT its cyrius peer**: 6.5.37 shipped `sys_lstat`
+  and crab vendors it as of the 0.7.7 pin — 3-arg on agnos, 2-arg on the host, the same `#ifdef`
+  arity split `crab_fs_exists` already resolves. ⇒ **This is now a decision, not a limit**: what
+  crab should DO with the answer (refuse? report? recreate?) is unanswered, and that is the work.
 - ✅ **CLOSED in 0.7.6 — `README.md` § Status.** It said *"Shipping, and read-only"*, which M4
   falsified, and quoted the retired 256-entry cap. Now states the write layer, the preview column,
   and what is genuinely absent. ⚠ **It has been wrong in both directions now**; the replacement text
@@ -546,15 +580,32 @@ _None — top-level application._
 
 ## Next
 
-**M4 is complete. Every UNGATED M5 item is in.**
+**M4 is complete. Every UNGATED M5 item is in. 0.7.7 advanced no roadmap item — it was a repair
+cut**: five shipped defects closed, the toolchain pin moved, and CI stopped being one step.
 
-⭐ **Done**: the `crab_render` parameter cleanup, the preview pane, header-only image dimensions,
-**thumbnails**, and **EXIF** (camera + shot) — plus *deferral #12* (the fuzz harness) closed, a
-shipped per-frame leak in `crab_overlay` fixed, dhancha bumped to 0.9.24 and chitra to 1.0.1.
+⭐ **Done in 0.7.6**: the `crab_render` parameter cleanup, the preview pane, header-only image
+dimensions, **thumbnails**, and **EXIF** (camera + shot) — plus *deferral #12* (the fuzz harness)
+closed, a shipped per-frame leak in `crab_overlay` fixed, dhancha at 0.9.26 and chitra at 1.0.1.
 
-⛔ **What remains in M5 is gated on dhancha, and the gate is real** — `dh_columns_new` and
-`dh_tree_new` are absent from `dist/dhancha.cyr` (re-derived 2026-08-31). ⭐ `dh_grid_new` is NOT:
-GRID shipped in 0.9.25 and crab's Grid view is built on it.
+⛔⛔ **THE 6.5.41 PIN RETIRED TWO GATES THIS SECTION USED TO LIST AS BLOCKED, and neither needed
+crab work to unblock:**
+- **Sidebar VOLUMES — capacity**: cyrius **6.5.37 shipped `sys_statfs`**, crab vendors it, and
+  cyrius's issue is archived. ⚠ agnos-only (no host arm, so no host test can exercise it), and **no
+  `STATFS_*` field offsets are vendored** — the frozen 32-byte layout must come from agnos's docs.
+  *Enumeration* is still open (*#44*), because `mount`**#11** / `umount`#24 are no-op stubs.
+- **Symlink detection**: **`sys_lstat`** ships on both targets. What crab should DO with the answer
+  is now the open question, not whether it can ask.
+⇒ **Both had been written as OPEN for four cyrius releases.** Same failure as *#09*, carried OPEN for
+nine. ⛔ **Re-derive a gate before believing it — including the ones in this file.**
+
+⛔ **What remains in M5**: **columns/miller**, gated on crab's own two-pane model — a design
+question, not a dependency (`dh_columns_new` is absent from dhancha, but columns was never a dhancha
+gate: it is a `BOX_H` of `LIST`s). And **proportional text**, whose gate is MIS-STATED in the
+roadmap as "rekha + dhancha font plumbing": the plumbing exists and crab already forwards `font`.
+What is missing is **advance widths** — dhancha hard-codes `advf = (h * 6) / 10` and rekha declares
+`REKHA_TAG_HHEA`/`REKHA_TAG_HMTX` without ever reading them. There is no `rekha_advance_width`.
+⭐ `dh_grid_new` and `dh_list_new_h` are both present and resolvable; GRID is consumed, the
+horizontal strip is not.
 
 **Available now, in no particular order — sequencing is the operator's:**
 

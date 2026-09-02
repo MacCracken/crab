@@ -2347,6 +2347,11 @@ fn main() {
     t_gallery();
     t_batch_bounds();
     t_audit_fixes();
+    t_dir_transfer();
+    t_queue_refusals();
+    t_transfer_plan();
+    t_menu_highlight();
+    t_tray_height();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -2375,8 +2380,10 @@ fn main() {
 
     # ⛔ THE TWO PANE BLOCKS MUST NOT ALIAS. Two mutations of this refactor — `crab_rs_pane`
     # ignoring `which`, and `crab_render` reading the right pane's selection out of the left block —
-    # were caught ONLY by `src/render_test.cyr`, which no gate runs (roadmap *deferral #14*). These
-    # assertions put the same property in front of the gate that CI actually executes.
+    # were caught ONLY by `src/render_test.cyr`, which AT THE TIME no gate ran (*deferral #14* —
+    # ⭐ CLOSED at 0.7.7: `.github/workflows/ci.yml` now builds and runs it as its own step, exit
+    # code as the assertion, and `release.yml` gates on that workflow via `uses:`). These assertions
+    # keep the same property under `cyrius test` too, so it is now pinned by BOTH gates.
     crab_rs_pane(rst, 0, 1001, 11, 1002, 1003, 1004, CRAB_PANE_OK, 1005, 7, 1006);
     crab_rs_pane(rst, 1, 2001, 22, 2002, 2003, 2004, CRAB_PANE_GONE, 2005, 9, 2006);
     assert_eq(load64(rst + CRAB_RSP_BUF), 1001, "pane 0 keeps its own buffer");
@@ -3655,6 +3662,318 @@ fn t_audit_fixes(): i64 {
     # `getdents64` types directories correctly — so the trigger cannot be produced here at all. The
     # decision is pinned; the wiring is held by review and by the ⛔ at the call site. Same
     # irreducible shape as the idle-tick wiring and the agnos event loop.
+    return 0;
+}
+
+fn t_dir_transfer(): i64 {
+    test_group("crab — 0.7.7: a folder never reaches the single-entry copy");
+    var sc1 = alloc(CRAB_PATH_MAX);
+    var sc2 = alloc(CRAB_PATH_MAX);
+    var fstat = alloc(STAT_BUFSZ);
+
+    # Clean debris from any earlier run first — `build/` is gitignored, but a failed run leaves it.
+    # ⛔ `adir` IS CLEARED AS A FILE **AND** AS A DIRECTORY, AND THAT IS NOT BELT-AND-BRACES. The
+    # defect this group pins creates a 0-byte FILE named `adir` in the destination. Clearing it only
+    # with `is_dir = 1` calls `rmdir` on a regular file, which fails — so the debris survives, the
+    # destination `mkdir` then returns `EEXIST`, and the NEXT run fails in five places that have
+    # nothing to do with the bug. Measured: that is exactly what happened when the guard was
+    # mutated out to prove this group can fail. ⇒ A cleanup that assumes the code under test worked
+    # cannot clean up after the code under test failing.
+    crab_fs_delete("build/m4isdir", "plain.txt", 0, sc1);
+    crab_fs_delete("build/m4isdir2", "adir", 0, sc1);
+    crab_fs_delete("build/m4isdir2", "adir", 1, sc1);
+    crab_fs_delete("build/m4isdir2", "plain.txt", 0, sc1);
+    crab_fs_delete("build/m4isdir", "adir", 1, sc1);
+    crab_fs_delete("build", "m4isdir", 1, sc1);
+    crab_fs_delete("build", "m4isdir2", 1, sc1);
+
+    assert_eq(crab_fs_mkdir("build", "m4isdir", sc1, fstat), CRAB_FS_OK, "a scratch source dir");
+    assert_eq(crab_fs_mkdir("build", "m4isdir2", sc1, fstat), CRAB_FS_OK, "...and a destination");
+    assert_eq(crab_fs_mkdir("build/m4isdir", "adir", sc1, fstat), CRAB_FS_OK, "...and a FOLDER inside the source");
+    var pf = crab_fs_path(sc1, "build/m4isdir", "plain.txt");
+    var pfd = crab_fs_open_w(sc1, pf);
+    assert(pfd >= 0, "...and a plain file beside it");
+    sys_write(pfd, "hello", 5);
+    sys_close(pfd);
+
+    # ---- crab_fs_isdir answers about a PATH, which is what the queue can ask ----------------------
+    var dp = crab_fs_path(sc1, "build/m4isdir", "adir");
+    assert_eq(crab_fs_isdir(sc1, dp, fstat), 1, "a directory path reports 1");
+    var fp = crab_fs_path(sc2, "build/m4isdir", "plain.txt");
+    assert_eq(crab_fs_isdir(sc2, fp, fstat), 0, "a regular file reports 0");
+    # ⚠ Unstattable folds into 0, deliberately — see the ⚠ on the function. A guard asking "should I
+    # refuse?" gets a two-answer question; the open that follows reports its own failure.
+    var np = crab_fs_path(sc2, "build/m4isdir", "not-here.txt");
+    assert_eq(crab_fs_isdir(sc2, np, fstat), 0, "a path that does not exist reports 0, not -1");
+
+    # ---- the refusal, and the STRAY FILE it exists to prevent -------------------------------------
+    # ⛔⛔ THE RETURN CODE IS THE CHEAP HALF. What shipped broken was the DISK: `open_r` succeeds on a
+    # directory, `open_w` CREATES the destination, and the first step fails — leaving a 0-byte file
+    # that the overwrite guard then finds forever. These four assertions are the ones that would have
+    # caught it; asserting only the enum would not have.
+    assert_eq(crab_op_active(), 0, "nothing is in flight before the refusal");
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, "build/m4isdir", "adir", "build/m4isdir2", sc1, sc2, fstat),
+      CRAB_FS_EISDIR, "a folder handed to the single-entry copy is REFUSED");
+    var strayp = crab_fs_path(sc2, "build/m4isdir2", "adir");
+    assert_eq(crab_fs_exists(sc2, strayp, fstat), 0,
+      "...and NOTHING was created at the destination — this is the assertion that matters");
+    assert_eq(crab_op_active(), 0, "...and no transfer was left in flight");
+    # ⛔ THE RETRY IS THE SECOND HALF OF THE OLD BUG. With a stray on disk the retry returned EEXIST
+    # forever, so the refusal became permanent and named the wrong cause.
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, "build/m4isdir", "adir", "build/m4isdir2", sc1, sc2, fstat),
+      CRAB_FS_EISDIR, "a retry still says EISDIR, never EEXIST");
+    # ⚠ MOVE takes the same path and must refuse identically — it is a copy whose source is unlinked.
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, "build/m4isdir", "adir", "build/m4isdir2", sc1, sc2, fstat),
+      CRAB_FS_EISDIR, "...and a stepped MOVE refuses a folder too");
+    var stillp = crab_fs_path(sc1, "build/m4isdir", "adir");
+    assert_eq(crab_fs_isdir(sc1, stillp, fstat), 1, "...leaving the source folder untouched");
+
+    # ---- and the guard did not break the case it must NOT refuse ---------------------------------
+    # ⚠ A negative control. A refusal that also refuses plain files is not a fix.
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, "build/m4isdir", "plain.txt", "build/m4isdir2", sc1, sc2, fstat),
+      CRAB_FS_OK, "a plain file still starts normally");
+    var pguard = 0;
+    var plast = crab_copy_step();
+    while (plast == 1) {
+        pguard = pguard + 1;
+        if (pguard > 100) { plast = CRAB_FS_EIO; } else { plast = crab_copy_step(); }
+    }
+    assert_eq(plast, CRAB_FS_OK, "...and finishes");
+    var arrived = crab_fs_path(sc2, "build/m4isdir2", "plain.txt");
+    assert_eq(crab_fs_stat_size(sc2, arrived, fstat), 5, "...with its bytes");
+
+    # ---- the message is its own, not the generic tail --------------------------------------------
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EISDIR), "refused: that is a folder"), 1,
+      "EISDIR says which refusal happened, rather than falling through to 'the filesystem refused'");
+
+    crab_fs_delete("build/m4isdir2", "plain.txt", 0, sc1);
+    crab_fs_delete("build/m4isdir", "plain.txt", 0, sc1);
+    crab_fs_delete("build/m4isdir", "adir", 1, sc1);
+    crab_fs_delete("build", "m4isdir", 1, sc1);
+    crab_fs_delete("build", "m4isdir2", 1, sc1);
+    return 0;
+}
+
+fn t_tray_height(): i64 {
+    test_group("crab — 0.7.7: the tray is tall enough for the bar it draws");
+    # ---- no operation, no tray -------------------------------------------------------------------
+    assert_eq(crab_tray_h(0, 0 - 1), 0, "no operation name at all -> no tray");
+    assert_eq(crab_tray_h("", 0 - 1), 0, "an empty name -> no tray");
+
+    # ---- the two live shapes ---------------------------------------------------------------------
+    # ⚠ -1 is "cannot be said yet", which is the first half-second of every transfer.
+    assert_eq(crab_tray_h("big.bin", 0 - 1), CRAB_TRAY_H, "a transfer with no rate yet: title + bar only");
+    assert_eq(crab_tray_h("big.bin", 0), CRAB_TRAY_H + CRAB_TRAY_DETAIL_H,
+      "a rate of 0 B/s is still a KNOWN rate — the detail row is drawn, so the band grows");
+    assert_eq(crab_tray_h("big.bin", 1048576), CRAB_TRAY_H + CRAB_TRAY_DETAIL_H,
+      "...and so is a real one");
+
+    # ---- ⛔⛔ THE INVARIANT THAT WAS VIOLATED ------------------------------------------------------
+    # The tray is a BOX_V holding a fixed-height title, an optional fixed-height detail row, and a
+    # PROGRESS bar with `flex 1` — so the bar gets whatever is LEFT. If the content box cannot fit
+    # all three, the leftover is negative, dhancha clamps it, and the bar is 0 px tall. That is what
+    # shipped: 31 − 8 − 18 − 14 = −9. These two assertions are the ones that fail on the old code.
+    var content_rate = crab_tray_h("big.bin", 4096) - CRAB_TRAY_PAD - CRAB_TRAY_PAD;
+    assert_gte(content_rate, CRAB_TRAY_TITLE_H + CRAB_TRAY_DETAIL_H + CRAB_TRAY_BAR_H,
+      "WITH a rate: title + detail + bar all fit inside the tray's content box");
+    var content_norate = crab_tray_h("big.bin", 0 - 1) - CRAB_TRAY_PAD - CRAB_TRAY_PAD;
+    assert_gte(content_norate, CRAB_TRAY_TITLE_H + CRAB_TRAY_BAR_H,
+      "WITHOUT a rate: title + bar fit, and no detail row is drawn to pay for");
+    # ⚠ And the bar really does get pixels, not merely "not negative" — a 0 px bar satisfies a
+    # `>= 0` test and is exactly the bug.
+    assert_gt(content_rate - CRAB_TRAY_TITLE_H - CRAB_TRAY_DETAIL_H, 0,
+      "...so the leftover the bar actually receives is more than zero");
+
+    # ⚠ The detail row is added by `crab_tray_detail`'s return value, not by the height rule, so the
+    # two conditions must agree or the defect re-opens from the other side.
+    var tb = alloc(48);
+    assert_eq(crab_tray_detail(tb, 0 - 1, 0 - 1), 0, "no rate -> no detail row is written");
+    assert_gt(crab_tray_detail(tb, 4096, 0 - 1), 0, "a rate -> a detail row IS written");
+    assert_eq(crab_tray_h("big.bin", 0 - 1) - CRAB_TRAY_H, 0,
+      "...and the height rule agrees with it in the no-rate case");
+    assert_eq(crab_tray_h("big.bin", 4096) - CRAB_TRAY_H, CRAB_TRAY_DETAIL_H,
+      "...and in the rate case");
+    return 0;
+}
+
+fn t_menu_highlight(): i64 {
+    test_group("crab — 0.7.7: the menu highlights the item it will act on");
+    # ---- the mapping itself, as arithmetic --------------------------------------------------------
+    assert_eq(crab_menu_row(CRAB_MI_OPEN), 0, "items above the separator map to themselves: Open");
+    assert_eq(crab_menu_row(CRAB_MI_COPY), 1, "...Copy");
+    assert_eq(crab_menu_row(CRAB_MI_MOVE), 2, "...Move");
+    assert_eq(crab_menu_row(CRAB_MI_RENAME), 3, "...and Rename, the last one above it");
+    # ⛔ THESE TWO ARE THE BUG. The separator sits at list row 4, so both shift by one.
+    assert_eq(crab_menu_row(CRAB_MI_DELETE), 5, "Delete is list row 5 — row 4 is the SEPARATOR");
+    assert_eq(crab_menu_row(CRAB_MI_NEWDIR), 6, "...and New Folder is 6");
+
+    # ---- and what that means on a real rendered menu ----------------------------------------------
+    var rs = crab_rs();
+    var mb = alloc(8 * CRAB_REC_SZ);
+    t_entry(mb, 0, "boot", 1);
+    t_entry(mb, 1, "notes.txt", 0);
+    t_entry(mb, 2, "shot.png", 0);
+    var mz = alloc(8 * 8); var mm = alloc(8 * 8);
+    var mi = 0;
+    while (mi < 8) { store64(mz + mi * 8, 512); store64(mm + mi * 8, 1788136000); mi = mi + 1; }
+    var msl = alloc(8); store64(msl, 0);
+    var msr = alloc(8); store64(msr, 0);
+    var mrb = alloc(8 * CRAB_REC_SZ);
+    t_entry(mrb, 0, "etc", 1);
+    var msurf = dh_surface_new(760, 300);
+
+    # ⛔ EVERY ITEM, NOT A SPOT CHECK. The old code was correct for four of six, which is exactly the
+    # shape a spot check passes and an operator hits.
+    var sel = 0;
+    while (sel < CRAB_MI_COUNT) {
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, mb, 3, "/bin", mz, mm, CRAB_PANE_OK, 0, 2, msl);
+        crab_rs_pane(rs, 1, mrb, 1, "/", mz, mm, CRAB_PANE_OK, 0, 0, msr);
+        crab_rs_chrome(rs, 0, 1, 40, 60, sel, 0, 0);
+        crab_render(msurf, 0, rs);
+        var lst = crab_menu_list();
+        assert(lst != 0, "the menu really was built");
+        # ⛔⛔ A HIGHLIGHT EXISTS AT ALL. With `menusel = CRAB_MI_DELETE` the old code selected the
+        # inert separator, `dh_list_select` refused it, and the open menu painted NO highlight.
+        assert(dh_list_selected(lst) >= 0, "...and something is highlighted, whichever item is current");
+        # ⛔⛔ AND IT IS THE RIGHT ROW. With `menusel = CRAB_MI_NEWDIR` the old code highlighted
+        # **Delete** — the destructive verb — while Enter would have created a folder.
+        assert_eq(dh_list_selected(lst), crab_menu_row(sel), "...on the row this item actually occupies");
+        # ⚠ The highlighted row is never the separator. That is the same claim from the other side,
+        # and it is the one that fails loudest if the separator ever moves.
+        assert_eq(dh_widget_inert(dh_list_row_at(lst, dh_list_selected(lst))), 0,
+          "...and the highlighted row is a real item, not the separator");
+        sel = sel + 1;
+    }
+
+    # ⚠ NON-VACUITY: the list really is one row longer than the item count. If `dh_menu_sep` ever
+    # stopped adding a row, every assertion above would pass with `crab_menu_row` as dead arithmetic.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, mb, 3, "/bin", mz, mm, CRAB_PANE_OK, 0, 2, msl);
+    crab_rs_pane(rs, 1, mrb, 1, "/", mz, mm, CRAB_PANE_OK, 0, 0, msr);
+    crab_rs_chrome(rs, 0, 1, 40, 60, 0, 0, 0);
+    crab_render(msurf, 0, rs);
+    assert_eq(dh_list_count(crab_menu_list()), CRAB_MI_COUNT + 1,
+      "the list holds SEVEN rows for six items — the separator is a row, which is the whole bug");
+    assert_eq(dh_widget_inert(dh_list_row_at(crab_menu_list(), 4)), 1,
+      "...and row 4 is the inert one");
+    return 0;
+}
+
+fn t_transfer_plan(): i64 {
+    test_group("crab — 0.7.7: what `c` and `m` resolve to, finally reachable by a test");
+    # ⛔⛔ EVERY ASSERTION HERE COVERS A DECISION THAT WAS UNREACHABLE UNTIL NOW. The rule lived
+    # inline in `src/main.cyr` between the `#ifdef CYRIUS_TARGET_AGNOS` at 263 and the `#endif` at
+    # 1484 — no `#else`, and nothing includes `main.cyr` — so the host build never compiled it and
+    # 1,138 passing assertions could not touch it. Two defects shipped there.
+
+    # ---- marks outrank the cursor, WHATEVER the cursor is sitting on -----------------------------
+    # ⛔ THE FOLDER CASE IS THE BUG. The mark check used to live inside the not-a-folder arm, so a
+    # cursor resting on a folder silently discarded every mark and acted on the folder instead.
+    assert_eq(crab_transfer_plan(0, 5, 0), CRAB_PLAN_QUEUE, "copy: five marks, cursor on a file -> the queue");
+    assert_eq(crab_transfer_plan(0, 5, 1), CRAB_PLAN_QUEUE, "copy: five marks, cursor on a FOLDER -> still the queue");
+    assert_eq(crab_transfer_plan(1, 5, 0), CRAB_PLAN_QUEUE, "move: five marks, cursor on a file -> the queue");
+    assert_eq(crab_transfer_plan(1, 5, 1), CRAB_PLAN_QUEUE, "move: five marks, cursor on a FOLDER -> still the queue");
+    assert_eq(crab_transfer_plan(0, 1, 1), CRAB_PLAN_QUEUE, "one mark is enough to outrank the cursor");
+
+    # ---- nothing marked: now, and only now, the cursor's type decides -----------------------------
+    assert_eq(crab_transfer_plan(0, 0, 0), CRAB_PLAN_SINGLE, "copy: no marks, cursor on a file -> one entry");
+    assert_eq(crab_transfer_plan(1, 0, 0), CRAB_PLAN_SINGLE, "move: no marks, cursor on a file -> one entry");
+    assert_eq(crab_transfer_plan(0, 0, 1), CRAB_PLAN_TREE, "copy: no marks, cursor on a folder -> recurse");
+
+    # ⛔⛔ THE SECOND DEFECT, IN ONE ASSERTION. `m` on a folder ran `CRAB_OP_CTREE` — a COPY — and
+    # then set the notice `copying folder...`. There is no `CRAB_OP_MTREE` to dispatch to, so the
+    # honest answer is a refusal, not a different operation wearing the right label.
+    assert_eq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_NOMOVEDIR,
+      "move: no marks, cursor on a folder -> REFUSED, because no move-tree walk exists");
+    assert_neq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_TREE,
+      "...and specifically NOT the recursive copy it used to run");
+
+    # ⚠ The four answers are distinct — a plan enum whose members collide would make the dispatch
+    # above unfalsifiable.
+    assert_neq(CRAB_PLAN_QUEUE, CRAB_PLAN_TREE, "the plan answers are distinct: QUEUE vs TREE");
+    assert_neq(CRAB_PLAN_SINGLE, CRAB_PLAN_NOMOVEDIR, "...and SINGLE vs NOMOVEDIR");
+    return 0;
+}
+
+fn t_queue_refusals(): i64 {
+    test_group("crab — 0.7.7: a refusal really does not stop the queue");
+    var sc1 = alloc(CRAB_PATH_MAX);
+    var sc2 = alloc(CRAB_PATH_MAX);
+    var fstat = alloc(STAT_BUFSZ);
+
+    crab_fs_delete("build/m4q", "adir", 1, sc1);
+    crab_fs_delete("build/m4q", "dup.txt", 0, sc1);
+    crab_fs_delete("build/m4q", "good.txt", 0, sc1);
+    crab_fs_delete("build/m4qd", "adir", 0, sc1);
+    crab_fs_delete("build/m4qd", "dup.txt", 0, sc1);
+    crab_fs_delete("build/m4qd", "good.txt", 0, sc1);
+    crab_fs_delete("build", "m4q", 1, sc1);
+    crab_fs_delete("build", "m4qd", 1, sc1);
+    assert_eq(crab_fs_mkdir("build", "m4q", sc1, fstat), CRAB_FS_OK, "a source dir for the queue");
+    assert_eq(crab_fs_mkdir("build", "m4qd", sc1, fstat), CRAB_FS_OK, "...and a destination");
+    assert_eq(crab_fs_mkdir("build/m4q", "adir", sc1, fstat), CRAB_FS_OK, "...containing a FOLDER");
+
+    # `dup.txt` exists in BOTH, so it refuses with EEXIST — the overwrite guard doing its job.
+    var d1 = crab_fs_path(sc1, "build/m4q", "dup.txt");
+    var f1 = crab_fs_open_w(sc1, d1);
+    assert(f1 >= 0, "...a file that will collide"); sys_write(f1, "aa", 2); sys_close(f1);
+    var d2 = crab_fs_path(sc1, "build/m4qd", "dup.txt");
+    var f2 = crab_fs_open_w(sc1, d2);
+    assert(f2 >= 0, "...already present at the destination"); sys_write(f2, "zz", 2); sys_close(f2);
+    var d3 = crab_fs_path(sc1, "build/m4q", "good.txt");
+    var f3 = crab_fs_open_w(sc1, d3);
+    assert(f3 >= 0, "...and one that can really cross"); sys_write(f3, "hello", 5); sys_close(f3);
+
+    # Three marked entries, in an order that puts BOTH refusals ahead of the one that can succeed.
+    # ⛔ THE ORDER IS THE TEST. With the old single-shot advance, entry one refused and entries two
+    # and three were never attempted at all.
+    var qb = alloc(8 * CRAB_REC_SZ);
+    t_entry(qb, 0, "adir", 1);
+    t_entry(qb, 1, "dup.txt", 0);
+    t_entry(qb, 2, "good.txt", 0);
+    var qm = alloc(8);
+    store8(qm + 0, 1); store8(qm + 1, 1); store8(qm + 2, 1);
+    assert_eq(crab_queue_marked(qb, qm, 3), 3, "three entries are queued");
+    crab_queue_dirs(CRAB_OP_COPY, "build/m4q", "build/m4qd");
+    assert_eq(crab_op_active(), 0, "nothing in flight yet");
+
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), 1,
+      "the queue SKIPS the folder and the collision and starts the third entry");
+    assert_eq(crab_op_active(), 1, "...so a transfer really is in flight");
+    var g = 0;
+    var lastq = crab_copy_step();
+    while (lastq == 1) { g = g + 1; if (g > 100) { lastq = CRAB_FS_EIO; } else { lastq = crab_copy_step(); } }
+    assert_eq(lastq, CRAB_FS_OK, "...and it completes");
+    var gp = crab_fs_path(sc2, "build/m4qd", "good.txt");
+    assert_eq(crab_fs_stat_size(sc2, gp, fstat), 5,
+      "...so the entry BEHIND two refusals arrived — this is the assertion the old comment promised");
+    # ⛔ AND THE REFUSED FOLDER STILL CREATED NOTHING.
+    var qstray = crab_fs_path(sc2, "build/m4qd", "adir");
+    assert_eq(crab_fs_exists(sc2, qstray, fstat), 0, "...while the refused folder left no stray behind");
+    # ⚠ The collision was refused, not overwritten: the destination keeps its own bytes.
+    var dupp = crab_fs_path(sc2, "build/m4qd", "dup.txt");
+    assert_eq(crab_fs_stat_size(sc2, dupp, fstat), 2, "...and the colliding file was not overwritten");
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), 0, "a spent queue reports 0, not a refusal");
+
+    # ---- when NOTHING can start, the last refusal is what comes back ------------------------------
+    var qb2 = alloc(8 * CRAB_REC_SZ);
+    t_entry(qb2, 0, "adir", 1);
+    var qm2 = alloc(8); store8(qm2 + 0, 1);
+    assert_eq(crab_queue_marked(qb2, qm2, 1), 1, "a queue of nothing but a folder");
+    crab_queue_dirs(CRAB_OP_COPY, "build/m4q", "build/m4qd");
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), CRAB_FS_EISDIR,
+      "...reports the refusal rather than a silent 0");
+    assert_eq(crab_op_active(), 0, "...and starts nothing");
+
+    crab_fs_delete("build/m4q", "adir", 1, sc1);
+    crab_fs_delete("build/m4q", "dup.txt", 0, sc1);
+    crab_fs_delete("build/m4q", "good.txt", 0, sc1);
+    crab_fs_delete("build/m4qd", "adir", 0, sc1);
+    crab_fs_delete("build/m4qd", "dup.txt", 0, sc1);
+    crab_fs_delete("build/m4qd", "good.txt", 0, sc1);
+    crab_fs_delete("build", "m4q", 1, sc1);
+    crab_fs_delete("build", "m4qd", 1, sc1);
     return 0;
 }
 

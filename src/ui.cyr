@@ -871,6 +871,27 @@ fn crab_menu_prev(i, count, isdir, marked): i64 {
     return i;
 }
 
+# @public — the LIST row a menu item index lands on, once the separator is counted.
+#
+# ⛔⛔ MODEL INDEX AND LIST INDEX DIVERGE AFTER `CRAB_MI_RENAME`, AND crab USED TO PASS THE MODEL ONE
+# STRAIGHT INTO `dh_list_select`. `crab_overlay` inserts `dh_menu_sep` after RENAME, and a separator
+# is a real row (`dh_list_add` in dhancha's `dh_menu_sep`) — so the list holds seven rows for six
+# items, and everything past RENAME is off by one. What SHIPPED:
+#   - `menusel = CRAB_MI_DELETE` (4) selected list row 4, the SEPARATOR. `dh_list_select` refuses an
+#     inert row and stores nothing, so the open menu painted **no highlight at all**.
+#   - `menusel = CRAB_MI_NEWDIR` (5) selected list row 5, which is **Delete** — the destructive verb
+#     highlighted while Enter would create a folder.
+# ⇒ Two wrong pictures of the same off-by-one, and the more dangerous one is the quiet one.
+# ⚠ ONE-WAY ON PURPOSE. crab navigates the menu in MODEL space (`crab_menu_next` / `crab_menu_prev`)
+# and never calls `dh_list_move_sel`, so nothing ever needs to map a list row back to an item. If
+# that changes, this needs its inverse — and the inverse is not total, because the separator row has
+# no model index.
+# ⚠ Derived from `CRAB_MI_RENAME`, not written as a literal 4, so moving the separator moves this.
+fn crab_menu_row(mi): i64 {
+    if (mi > CRAB_MI_RENAME) { return mi + 1; }
+    return mi;
+}
+
 # @public — the menu's title: what the commands will act on.
 # ⚠ "3 marked" beats the file's name when a set is marked, because the verbs act on the SET — a menu
 # headed with one name while Delete removes nine is the most dangerous label in the app.
@@ -1377,7 +1398,14 @@ fn crab_mspec_init(): i64 {
     return crab_mspec;
 }
 
-# ⚠ The menu's LIST, recorded for hit-testing — refreshed every frame like `crab_llst`/`crab_rlst`.
+# ⚠ The menu's LIST, exposed for the SUITE — refreshed every frame like `crab_llst`/`crab_rlst`:
+# set in `crab_overlay`, cleared to 0 there and in `crab_render` when no menu is up, so it never
+# outlives its frame.
+# ⛔ IT SAID "recorded for hit-testing", AND THE MENU IS NEVER HIT-TESTED. `crab_hit` walks parents
+# against `crab_llst` and `crab_rlst` only — `crab_mlst` is not in that walk — and `crab_menu_list`
+# has no caller anywhere in `src/`; its only callers are in `tests/crab.tcyr`. There is no pointer
+# path to the menu at all: `menu_open = 1` occurs exactly once, under the Menu key, and the
+# `POINTER_BTN` arm reads only press/release and never a button code.
 var crab_mlst = 0;
 fn crab_menu_list(): i64 { return crab_mlst; }
 
@@ -1386,6 +1414,7 @@ enum CrabTray {
     CRAB_TRAY_BAR_H  = 4;
     CRAB_TRAY_TITLE_H = 18;
     CRAB_TRAY_DETAIL_H = 14;
+    CRAB_TRAY_PAD    = 4;      # ⚠ named because the height invariant below has to subtract it
 }
 
 # @public — should the tray be on screen at all? 1 = yes. `opname` is 0 when nothing is running.
@@ -1406,6 +1435,26 @@ fn crab_tray_wanted(opname): i64 {
     return 1;
 }
 
+# @public — how tall the tray is for this operation state, in pixels. 0 = no tray at all.
+#
+# ⛔⛔ THIS EXISTS BECAUSE THE HEIGHT RULE WAS WRITTEN TWICE AND ONLY ONE COPY GREW. `crab_render`
+# reserved `CRAB_TRAY_H + CRAB_TRAY_DETAIL_H` from the pane band whenever a rate was known, while
+# `crab_tray` set its own `pref_h` to a bare `CRAB_TRAY_H`. The tray therefore claimed 31 px of a
+# 45 px band, and inside those 31 the arithmetic ran out: 31 − 2×4 padding = 23 of content, minus an
+# 18 px title and a 14 px detail row = **−9**, clamped to 0 — so the PROGRESS bar, the only widget in
+# there with `flex 1`, was **0 px tall for every transfer fast enough to have measured a rate**.
+# ⇒ The bar was missing exactly when there was something to report, and present only in the first
+# half-second before a rate existed. A duplicated rule does not drift symmetrically; it drifts on
+# whichever side someone remembered.
+# ⚠ THE `oprate >= 0` TEST MUST MATCH `crab_tray_detail`'s, which returns 0 iff `rate < 0`. They are
+# the same condition stated twice and that is the one duplication left here — the detail row is
+# added by its own return value, so a disagreement would re-open this defect in the other direction.
+fn crab_tray_h(opname, oprate): i64 {
+    if (crab_tray_wanted(opname) == 0) { return 0; }
+    if (oprate >= 0) { return CRAB_TRAY_H + CRAB_TRAY_DETAIL_H; }
+    return CRAB_TRAY_H;
+}
+
 # Build the transfer tray: a title line over a PROGRESS bar (dhancha 0.9.22).
 #
 # ⛔⛔ crab NAMES NO COLOUR ON THE BAR, AND THAT IS THE WHOLE REASON `PROGRESS` IS A dhancha WIDGET
@@ -1420,9 +1469,11 @@ fn crab_tray(root, w, opname, opdone, optotal, oprate, opeta): i64 {
     var tray = dh_widget_new(BOX);
     dh_widget_set_layout(tray, BOX_V);
     dh_widget_set_bg(tray, dh_theme_panel());
-    dh_widget_set_pref(tray, 0, CRAB_TRAY_H);
+    # ⛔ THE SAME RULE `crab_render` RESERVES THE BAND WITH — see `crab_tray_h`. This used to be a
+    # bare `CRAB_TRAY_H`, which left the bar 0 px tall whenever a rate was known.
+    dh_widget_set_pref(tray, 0, crab_tray_h(opname, oprate));
     dh_widget_set_flex(tray, 0);
-    dh_widget_set_padding(tray, 4);
+    dh_widget_set_padding(tray, CRAB_TRAY_PAD);
 
     var title = dh_widget_new(BOX);
     dh_widget_set_layout(title, BOX_H);
@@ -1506,7 +1557,10 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
             if (i == CRAB_MI_RENAME) { dh_menu_sep(m); }
             i = i + 1;
         }
-        dh_list_select(m, menusel);
+        # ⛔ THE SEPARATOR ABOVE IS WHY THIS IS NOT `dh_list_select(m, menusel)`. `menusel` is a menu
+        # ITEM index; the separator makes the list one row longer than the item count from RENAME on.
+        # See `crab_menu_row` for what shipped when the two were conflated.
+        dh_list_select(m, crab_menu_row(menusel));
         # ⛔⛔ `dh_falloc`, NOT `alloc` — THIS WAS A REAL PER-FRAME LEAK, SHIPPED IN 0.7.5. Both this
         # rect and the sheet's below are pure scratch: an out-parameter read on the next three lines
         # and never referenced again. On the global allocator, which has no `free()`, they cost 32 B
@@ -2718,19 +2772,20 @@ fn crab_render(surf, font, rs): i64 {
     var panes = dh_widget_new(BOX);
     dh_widget_set_layout(panes, BOX_H);         # two columns side by side
     # ⭐⭐ THE TRANSFER TRAY (M4, v0.7.3) takes its own reserved band, so the panes shrink by exactly
-    # its height rather than the tray floating over rows. `CRAB_TRAY_H` is 0 when nothing is running,
-    # which is how the tray costs a still crab no pixels and no widgets at all.
+    # its height rather than the tray floating over rows. ⚠ `crab_tray_h` — the FUNCTION, not the
+    # `CRAB_TRAY_H` constant, which is always 31 — returns 0 when nothing is running, which is how
+    # the tray costs a still crab no pixels and no widgets at all. Conflating the two is exactly
+    # where the 0-px-bar defect came from: see `crab_tray_h`.
     # ⛔ A STRIP ABOVE THE STATUS LINE, NOT A RIGHT-HAND INSPECTOR COLUMN. The canvas draws the tray
     # in an inspector, but that column is M5 and does not exist yet — lifting its POSITION now would
     # mean building half of M5 to hold one bar. The canvas's own 420px variant already drops the
     # tray's detail line, so a compact form is a drawn variant rather than a compromise.
-    var trayh = 0;
-    if (crab_tray_wanted(opname) == 1) {
-        trayh = CRAB_TRAY_H;
-        # ⚠ The band grows by exactly the detail row when there is one, so the line never overlaps
-        # the bar — the tray reserves what it draws and nothing more.
-        if (oprate >= 0) { trayh = trayh + CRAB_TRAY_DETAIL_H; }
-    }
+    # ⚠ The band grows by exactly the detail row when there is one, so the line never overlaps the
+    # bar — the tray reserves what it draws and nothing more.
+    # ⛔ ONE RULE, ASKED FOR TWICE, RATHER THAN THE SAME ARITHMETIC WRITTEN TWICE. `crab_tray` sets
+    # its own `pref_h` from this identical call; when the two were separate copies, the band grew
+    # here and the widget did not, and the bar lost every pixel it had.
+    var trayh = crab_tray_h(opname, oprate);
     dh_widget_set_pref(panes, 0, h - 24 - trayh);   # reserve 24px for the status line, + the tray
     # ⭐⭐ ONE PANE OR TWO — the M4 ratification. See `crab_two_panes_fit`.
     # ⛔ IN SOLO MODE THE PANE THAT IS NOT SHOWN GETS NO WIDGETS AND ITS LIST POINTER STAYS 0, which

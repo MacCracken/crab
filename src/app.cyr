@@ -312,16 +312,34 @@ fn crab_queue_kind(): i64 { return crab_qkind; }
 fn crab_queue_srcdir(): i64 { return crab_qsrc; }
 fn crab_queue_dstdir(): i64 { return crab_qdst; }
 
-# @public — start the next queued transfer, if any. -> 1 = started, 0 = queue spent, <0 = refused.
+# @public — start the next queued transfer, if any. -> 1 = started, 0 = queue spent, <0 = every
+# remaining entry was refused, and this is the LAST refusal.
 #
-# ⚠ A REFUSAL DOES NOT STOP THE QUEUE. One file already present at the destination should not abandon
-# the other nine — the tray reports each result and moves on. Only a cancel stops everything.
+# ⛔⛔ THIS SAID "A REFUSAL DOES NOT STOP THE QUEUE" FOR FOUR RELEASES WHILE DOING THE OPPOSITE, and
+# the comment is why nobody looked. It started ONE entry and returned the refusal, so the idle tick
+# (`src/main.cyr`, the `crab_op_active() == 1` arm) saw `more != 1`, reported, and stopped — and
+# with nothing in flight that arm is never entered again, so the rest of the queue was abandoned
+# where it stood. **Marking ten files with the first already present at the destination transferred
+# none of the other nine**, which is the exact case the prose promised was handled.
+# ⇒ The loop is the contract. A refusal consumes its entry and the queue moves on.
+# ⚠ THE RETURN IS STILL A SINGLE VALUE, so per-entry refusals are not individually reported — the
+# caller sees the last one only when NOTHING could be started. That is a deliberate narrowing of the
+# old shape rather than a new report channel: the tray is one line, and a per-entry log belongs with
+# a real transfer report. What matters here is that entry two is attempted.
 fn crab_queue_advance(scr1, scr2, statbuf): i64 {
+    var last = 0;
     var nm = crab_queue_next();
-    if (nm == 0) { return 0; }
-    var rc = crab_copy_begin(crab_qkind, crab_qsrc, nm, crab_qdst, scr1, scr2, statbuf);
-    if (rc != CRAB_FS_OK) { return rc; }
-    return 1;
+    while (nm != 0) {
+        var rc = crab_copy_begin(crab_qkind, crab_qsrc, nm, crab_qdst, scr1, scr2, statbuf);
+        if (rc == CRAB_FS_OK) { return 1; }
+        # ⛔ EBUSY IS NOT A PER-ENTRY REFUSAL AND MUST NOT BE SKIPPED PAST. It means a transfer is
+        # already in flight, so consuming the rest of the queue against it would discard every
+        # remaining entry without attempting one. Report it and leave the queue where it is.
+        if (rc == CRAB_FS_EBUSY) { return rc; }
+        last = rc;
+        nm = crab_queue_next();
+    }
+    return last;
 }
 
 # @public — has a press travelled far enough to be a drag? 1 = drag, 0 = still a click.
@@ -356,6 +374,37 @@ fn crab_drag_targets(frompane, topane): i64 {
     if (topane < 0) { return 0; }
     if (frompane == topane) { return 0; }
     return 1;
+}
+
+# @public — what should `c` / `m` actually DO? One of the `CRAB_PLAN_*` answers.
+#
+# ⛔⛔ THIS EXISTS BECAUSE THE DECISION IT REPLACES WAS UNREACHABLE BY EVERY TEST crab HAS. It lived
+# inline in `src/main.cyr`'s key dispatch, which sits inside a single `#ifdef CYRIUS_TARGET_AGNOS`
+# spanning lines 263–1484 with **no `#else`** — so the host build does not compile it, nothing
+# includes `main.cyr`, and the suite cannot call it. Two data-affecting defects shipped in that
+# branch and no assertion in 1,138 could have caught either:
+#   - `m` on a folder ran `CRAB_OP_CTREE`, a COPY, and reported `copying folder...`;
+#   - the marked set was read only in the not-a-folder arm, so a cursor resting on a FOLDER
+#     silently discarded every mark.
+# ⇒ Lifting the decision here is the same move `crab_drag_targets`, `crab_two_panes_fit` and
+# `crab_walk_retry_as_dir` already made: the event loop keeps the wiring, the RULE becomes a pure
+# function the suite can interrogate. What remains untestable is that `main.cyr` still calls it —
+# the irreducible gap, identical in shape to the idle-tick wiring.
+#
+# ⛔ THE ORDER OF THE TWO TESTS IS THE WHOLE POINT. Marks are consulted FIRST, unconditionally,
+# because marks outrank the cursor. The cursor's type only decides anything when nothing is marked.
+# ⚠ A MARKED FOLDER IS NOT A RECURSIVE COPY. It goes to the queue like any other marked entry and is
+# refused there by `crab_copy_begin`'s `EISDIR` guard, which `crab_queue_advance` skips past. Making
+# a mark mean "recurse" would make one keystroke mean two very different amounts of work depending
+# on data the operator cannot see from the row.
+fn crab_transfer_plan(is_move, marked, cursor_is_dir): i64 {
+    if (marked > 0) { return CRAB_PLAN_QUEUE; }
+    if (cursor_is_dir == 0) { return CRAB_PLAN_SINGLE; }
+    # ⛔ NO `CRAB_OP_MTREE` EXISTS — the walk kinds are IDLE/COPY/MOVE/CTREE/DTREE — so there is no
+    # source-removing tree walk to dispatch to. Refusing out loud is the honest answer; running a
+    # copy and calling it a move is not.
+    if (is_move != 0) { return CRAB_PLAN_NOMOVEDIR; }
+    return CRAB_PLAN_TREE;
 }
 
 # Where the selection lands after a wheel delta, clamped to [0, count-1]. -> the new index.
@@ -837,11 +886,19 @@ fn crab_fs_open_w(path, plen): i64 {
 # Does `path` resolve? 1 = yes, 0 = no.
 #
 # ⚠ THE ONLY QUESTION ASKED IS EXISTENCE, and `stat` is the only primitive both targets have for it.
-# ⛔ IT FOLLOWS SYMLINKS, AND ON THIS KERNEL IT MUST. agnos `lstat`#102 was minted off the very burn
-# that motivated this work, but its cyrius peer is still OPEN — there is no `sys_lstat` to call. So
-# a dangling symlink (the burn's `/sl_s`) reports as ABSENT here, and a copy onto it would replace
-# the link. That is the honest limit of what crab can currently ask, and it is why the destination
-# guard is stated as "resolves" rather than "is free".
+# ⛔ IT FOLLOWS SYMLINKS. So a dangling symlink (the burn's `/sl_s`) reports as ABSENT here, and a
+# copy onto it would replace the link — which is why the destination guard is stated as "resolves"
+# rather than "is free".
+# ⛔⛔ THAT IS NOW A CHOICE, NOT A LIMIT, AND THE COMMENT HERE SAID OTHERWISE FOR FOUR RELEASES.
+# It read "its cyrius peer is still OPEN — there is no `sys_lstat` to call". **cyrius 6.5.37 shipped
+# it**, and crab has vendored it since the 6.5.41 pin: `lib/syscalls_x86_64_agnos.cyr` declares
+# `SYS_LSTAT = 102` and `fn sys_lstat(path, pathlen, statbuf)`, with host peers in
+# `syscalls_x86_64_linux.cyr` (2-arg) and the macOS/aarch64 tables. cyrius's own issue is archived.
+# ⚠ IT IS STILL NOT CALLED, deliberately: closing the gap is a `crab_fs_lstat` in exactly the
+# `#ifdef` arity shape three lines below, plus a decision about what crab DOES with the answer
+# (refuse? report? recreate the link?) — and that decision is the operator's, not this function's.
+# ⇒ A gate that has closed upstream and is still written as a limit is how work stays parked after
+# it became free. See also `crab_walk_step`'s type-byte gate, which must NOT start calling it.
 fn crab_fs_exists(path, plen, statbuf): i64 {
     var rc = 0 - 1;
     #ifdef CYRIUS_TARGET_AGNOS
@@ -872,6 +929,31 @@ fn crab_fs_stat_size(path, plen, statbuf): i64 {
     return load64(statbuf + STAT_SIZE);
 }
 
+# @public — is `path` a directory? 1 = yes, 0 = no or unstattable.
+#
+# ⛔ ASKED OF THE PATH, NOT OF A readdir RECORD, AND THAT IS THE POINT. Every other "is it a folder"
+# test in crab reads `CRAB_REC_TYPE` off a listing record — which works only where a record is in
+# hand. The transfer queue holds NAMES (`crab_queue_marked`), deliberately: a queue of indices into a
+# buffer that the relist rebuilds is a queue of stale pointers. So the one caller that most needs the
+# answer is the one that cannot ask a record for it.
+# ⚠ 0 FOR AN UNSTATTABLE PATH, not -1. The caller is a guard deciding whether to refuse; a path that
+# cannot be stat'd is not a directory crab knows about, and the open that follows will fail with its
+# own named result. Folding "cannot tell" into "not a directory" keeps this a two-answer question.
+# ⚠ `load64` over a 4-byte `st_mode` picks up `st_uid` in the high word on Linux (and `st_nlink` on
+# macOS — see `lib/syscalls_macos.cyr:262`). The mask is what makes that harmless: S_IFMT lives in
+# the low 16 bits on every target. Parens are explicit per crab's own mixed-expression rule.
+fn crab_fs_isdir(path, plen, statbuf): i64 {
+    var rc = 0 - 1;
+    #ifdef CYRIUS_TARGET_AGNOS
+    rc = sys_stat(path, plen, statbuf);
+    #else
+    rc = sys_stat(path, statbuf);
+    #endif
+    if (rc < 0) { return 0; }
+    if ((load64(statbuf + STAT_MODE) & 0xF000) == 0x4000) { return 1; }
+    return 0;
+}
+
 # ⚠ Named results, because a bare -1 from six operations cannot be told apart at the call site and
 # the status line has to say WHICH refusal happened.
 enum CrabFs {
@@ -886,6 +968,16 @@ enum CrabFs {
     CRAB_FS_ESPAWNLEN = -17;   # the path exceeds what `spawn_path` accepts
     CRAB_FS_EBUSY    = -18;    # a transfer is already in flight — crab runs one at a time
     CRAB_FS_ELOOP    = -19;    # the destination is inside the source tree
+    CRAB_FS_EISDIR   = -20;    # a folder was handed to the single-entry copy, which cannot carry one
+}
+
+# ⚠ What `c` / `m` resolves to, as an answer the suite can assert on rather than a shape buried in
+# an agnos-only key branch. See `crab_transfer_plan`.
+enum CrabPlan {
+    CRAB_PLAN_QUEUE     = 0;   # marks outrank the cursor — transfer the marked set
+    CRAB_PLAN_TREE      = 1;   # nothing marked, cursor on a folder, COPY — recurse
+    CRAB_PLAN_SINGLE    = 2;   # nothing marked, cursor on a file — the single-entry path
+    CRAB_PLAN_NOMOVEDIR = 3;   # nothing marked, cursor on a folder, MOVE — refused; no MTREE exists
 }
 
 # @public — may crab act on this entry name? 1 = yes, 0 = refuse.
@@ -2149,9 +2241,13 @@ fn crab_fs_launch(dir, name, pathscr): i64 {
 # rewinds every render — so the fds would be handed out as widget memory mid-transfer and the copy
 # would write into a widget tree. Everything that outlives a frame is global; everything that does
 # not is arena'd. This is the boundary.
-# ⚠ Allocated ONCE for the process, like the sort scratch and the copy buffer. One transfer at a
-# time: crab copies a single file per keypress and has no multi-select, so a queue would be
-# scaffolding for a caller that does not exist.
+# ⚠ Allocated ONCE for the process, like the sort scratch and the copy buffer. ONE TRANSFER AT A
+# TIME, enforced by the `CRAB_OP_KIND != CRAB_OP_IDLE` -> `EBUSY` guard in `crab_copy_begin`.
+# ⛔ THIS USED TO READ "crab copies a single file per keypress and has no multi-select, so a queue
+# would be scaffolding for a caller that does not exist." BOTH HALVES DIED IN M4, and the queue it
+# called hypothetical is `crab_queue_marked` / `crab_queue_next` / `crab_queue_advance` — 250 lines
+# ABOVE this comment, in this same file. A marked set does not run concurrently; it is fed through
+# this one record serially, the idle tick starting the next entry only when the current one ends.
 enum CrabOp {
     CRAB_OP_IDLE   = 0;
     CRAB_OP_COPY   = 1;    # a plain copy
@@ -2354,6 +2450,23 @@ fn crab_copy_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
     if (ld < 0) { return ld; }
     if (crab_streq_n(scr1, scr2, CRAB_PATH_MAX) != 0) { return CRAB_FS_ESAME; }
     if (crab_fs_exists(scr2, ld, statbuf) != 0) { return CRAB_FS_EEXIST; }
+    # ⛔⛔ A FOLDER IS REFUSED HERE, AND THIS GUARD SHIPPED MISSING. Without it `crab_fs_open_r`
+    # succeeds on a directory, `crab_fs_open_w` CREATES the destination, and the first
+    # `crab_copy_step` fails — leaving a stray 0-byte file behind and a retry that returns
+    # `EEXIST` forever, because the stray is now what the overwrite guard finds. On agnos the
+    # damage is worse than empty: reading a directory yields raw dirent bytes, so the stray is
+    # non-empty and corrupt.
+    # ⛔ IT MUST LIVE IN THIS FUNCTION, NOT AT THE FOUR CALL SITES. Two of them arrive from
+    # `crab_queue_advance`, which holds a NAME and no record — there is no `CRAB_REC_TYPE` to
+    # consult, which is exactly how the marked path reached `open` with a folder in hand. The
+    # marked-DELETE path re-derives the type per entry (`src/main.cyr`, `crab_index_of`); copy and
+    # move were the outlier.
+    # ⚠ AFTER the `EEXIST` test on purpose, so every refusal that was already reachable keeps the
+    # message it had — only the case that used to create a file changes. `crab_fs_exists` creates
+    # nothing, so nothing is on disk yet when this returns.
+    # ⚠ NOT the recursive path's answer: a folder that should be copied whole goes to
+    # `crab_walk_begin(CRAB_OP_CTREE, …)`, which never calls this function.
+    if (crab_fs_isdir(scr1, ls, statbuf) == 1) { return CRAB_FS_EISDIR; }
     if (crab_copy_buf() == 0) { return CRAB_FS_EIO; }
     var fin = crab_fs_open_r(scr1, ls);
     if (fin < 0) { return CRAB_FS_ESYS; }
@@ -2766,8 +2879,11 @@ fn crab_walk_step(): i64 {
             # symlink, including one pointing at a directory, arrives with type 0 because both kernel
             # backends set the byte from `ftype == 2` alone. So the walk treats it as a leaf and
             # unlinks the LINK, never the target — correct `rm -r` behaviour, achieved with no
-            # `lstat` (which does not exist in the pinned stdlib) and safe by construction rather
-            # than by a check that could be forgotten.
+            # `lstat` and safe by construction rather than by a check that could be forgotten.
+            # ⚠ THE PIN HAS HAD `sys_lstat` SINCE 6.5.37 — this line used to say it "does not exist
+            # in the pinned stdlib", which was the reason given for not calling it. The reason is
+            # now the argument above, not the absence: the type byte IS the gate, and reaching for
+            # a stat here would re-open the very thing this paragraph rules out.
             if (load8(rec + CRAB_REC_TYPE) == 1) {
                 if ((d + 1) >= CRAB_WALK_DEPTH_MAX) {
                     crab_walk_restore(r, slot);
@@ -2888,6 +3004,7 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_ESPAWNLEN) { return "refused: the path is too long to launch"; }
     if (rc == CRAB_FS_EBUSY)    { return "a transfer is already running"; }
     if (rc == CRAB_FS_ELOOP)    { return "refused: a folder cannot be copied into itself"; }
+    if (rc == CRAB_FS_EISDIR)   { return "refused: that is a folder"; }
     return "failed: the filesystem refused";
 }
 

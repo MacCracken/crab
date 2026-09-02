@@ -1,10 +1,10 @@
 [package]
 name = "crab"
 version = "${file:VERSION}"
-description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack; AI (semantic find / auto-tag / dedup) via daimon's vector store — files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
+description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack. PLANNED, NOT SHIPPED (roadmap M7-M8, and no daimon dependency is declared here yet - deferral #18): AI semantic find / auto-tag / dedup via daimon's vector store, files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.36"
+cyrius = "6.5.41"
 
 [build]
 entry = "src/main.cyr"
@@ -131,9 +131,10 @@ path = "../dhancha"
 # `src/main.cyr` references `POINTER_SCROLL`, which 0.9.17 does not define. MEASURED 2026-08-27 with
 # `path` disabled and a fresh resolve against dhancha 0.9.17:
 #     host  build -> **PASS**   ·   agnos build -> **FAIL**: undefined variable 'POINTER_SCROLL'
-# crab's event loop is inside `#ifdef CYRIUS_TARGET_AGNOS` and CI builds only the host target
-# (roadmap *deferral #15*), so that state goes GREEN through CI while being unable to build what
-# ships. #15 is the gate that would have caught it.
+# crab's event loop is inside `#ifdef CYRIUS_TARGET_AGNOS`, so the host build compiles none of it.
+# ⭐ CI NOW BUILDS BOTH TARGETS (*#15* CLOSED at 0.7.7): `.github/workflows/ci.yml` runs a
+# `Build (--agnos)` step after the host build, and `release.yml` gates on that workflow via `uses:`.
+# This incident is precisely what that step exists to catch, and it is kept as the reason it exists.
 # ⭐ 0.9.25 — the `GRID` kind: wrapping layout, cell selection, row-wise arrows, keep-visible and
 #            hit-test. crab's `g` view is built on it (`src/ui.cyr` `dh_grid_new`).
 # ⭐ 0.9.26 — `dh_list_new_h` (a horizontal selectable strip) + `DH_W_SCROLL_X`. ⛔ This is what
@@ -150,12 +151,21 @@ path = "../dhancha"
 # the released tag committed a `lib/dhancha.cyr` that is byte-for-byte 0.9.26's `dist/` while this
 # line still said 0.9.25. `cyrius.lock` cannot catch that — a `path` dep gets no commit pin — so
 # nothing but check four would ever have said so. (Deferral #43.)
-# ⛔ VERIFIED FOUR WAYS before this line moved, because `path` wins and a green local build proves
-# nothing about the declared graph: sibling `VERSION` = 0.9.17; `git rev-parse 0.9.17` == HEAD in
-# `../dhancha` (b297604); `git ls-remote --tags` shows `refs/tags/0.9.17` at that same commit; and —
-# the only check that would have caught 0.4.13's manifest naming a library the build never compiled —
-# `path` DISABLED so `cyrius deps` actually clones the tag, then comparing SHA-256. The first three
-# would each have passed 0.4.13. Re-do all four at every cut. (Automating it: deferral #19.)
+# ⛔ VERIFIED FOUR WAYS, because `path` wins and a green local build proves nothing about the
+# declared graph. ⚠ THE FIGURES BELOW ARE 0.9.26's, RE-TAKEN 2026-09-02 AT THE 6.5.41 PIN — they
+# used to be 0.9.17's, left in place under a tag that had moved twice, which is the exact shape of
+# evidence-for-the-wrong-thing this block exists to prevent:
+#   1. sibling `VERSION` = 0.9.26
+#   2. `git rev-parse 0.9.26` == HEAD in `../dhancha` (cb855c8), tree clean
+#   3. `git ls-remote --tags` shows `refs/tags/0.9.26` at that same commit
+#   4. — the only check that would have caught 0.4.13's manifest naming a library the build never
+#      compiled — `path` DISABLED so `cyrius deps` really clones the tags, then comparing SHA-256:
+#      **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the overrides on, which is the tell),
+#      **1230 / 0** tests, and both binaries **BYTE-IDENTICAL** to the path-resolved ones —
+#      host `5170a452…` 1,023,968 B, `--agnos` `446b7f6a…` 1,047,832 B. That equality is the
+#      evidence; the rest is merely consistent with it.
+# ⛔ The first three would each have PASSED 0.4.13. Re-do all four at every cut. (Automating it:
+# deferral #19.)
 # ⚠⚠ AND `lib/dhancha.cyr` IS NOT WHAT COMPILES WHILE `path` IS SET — MEASURED 2026-08-27 by
 # appending garbage to it and watching the build succeed, then appending garbage to
 # `../dhancha/dist/dhancha.cyr` and watching it fail. The `path` override compiles the SIBLING'S

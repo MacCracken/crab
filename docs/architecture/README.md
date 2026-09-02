@@ -8,4 +8,4 @@ Not decisions (those live in [`../adr/`](../adr/)) and not guides (those live in
 
 | Note | Constraint |
 |------|-----------|
-| [001](001-every-frame-allocates-and-nothing-is-freed.md) | Every frame allocates ~750 KB and the allocator has no `free()` — this bounds what crab may repaint |
+| [001](001-every-frame-allocates-and-nothing-is-freed.md) | The allocator still has no `free()`, but the per-frame bound is **CLOSED** (2026-08-27, dhancha 0.9.15 + crab's frame arena): a frame once cost ~750 KB and now costs the global heap **zero**. ⛔ Anything added to the render path must allocate through `dh_falloc`, not `alloc` |

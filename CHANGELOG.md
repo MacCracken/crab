@@ -2,14 +2,200 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.7.7] — 2026-09-02
 
 > ⛔ **THIS SECTION EXISTS SO THE 0.7.6 SECTION BELOW IS NEVER TOUCHED.** 0.7.2 exists because
 > 0.7.1's section was still being edited after its tag was pushed; `0.7.6` is tagged at `26f38ed`
 > and on the remote, so it is now a record, not a scratchpad — **including where it is wrong.** Two
 > corrections below apply to text inside released sections and are therefore made *here*.
-> ⚠ **`VERSION` is untouched and nothing is committed or tagged** — the operator drives all of that,
-> including which number this becomes.
+> ⚠ **Nothing is committed, tagged or pushed** — the operator drives all git operations. `VERSION`
+> and this heading were set on the operator's explicit direction to cut 0.7.7.
+
+> ⭐ **A REPAIR CUT. No roadmap item advanced.** Five defects that had ALREADY SHIPPED were found by
+> reading code, each closed with a mutation-proven test; the toolchain pin moved **6.5.36 → 6.5.41**;
+> and CI went from a single `cyrius test` to nine gates, closing *#14*, *#15* and *#36*.
+
+### Fixed — five shipped defects, and the shape they share
+
+⛔⛔ **EVERY ONE WAS A DECISION STATED CORRECTLY IN A COMMENT AND IMPLEMENTED WRONGLY NEARBY, OR A
+RULE WRITTEN TWICE WHERE ONLY ONE COPY WAS UPDATED.** None was a typo and none was subtle at the
+point of failure — they survived because nothing could reach them. ⇒ **A duplicated rule does not
+drift symmetrically; it drifts on whichever side someone remembered.**
+
+**1. `crab_copy_begin` had no directory guard, and the damage was on disk.** Handed a folder, it ran
+`open`+`open` and **created a 0-byte file at the destination**, then failed the first step and
+refused every retry with `EEXIST` — because the stray it left was now what the overwrite guard
+found. ⚠ On agnos it is worse than empty: reading a directory yields raw dirent bytes, so the stray
+is **non-empty and corrupt**. Reproduced on disk before the fix. New `crab_fs_isdir` (a stat-based
+question, because the transfer queue holds NAMES and has no record to consult) and a new
+`CRAB_FS_EISDIR`. ⛔ The guard is in `crab_copy_begin`, not at its four call sites — two of them
+arrive from the queue with no `CRAB_REC_TYPE` in hand, which is exactly how a folder reached `open`.
+⚠ The marked-DELETE path already re-derived the type per entry; copy and move were the outlier.
+
+**2. `crab_queue_advance` abandoned the queue on the first refusal, while two comments promised it
+would not.** It started ONE entry and returned the refusal, so the idle tick saw `more != 1`,
+reported, and stopped — and with nothing in flight that arm is never entered again. **Marking ten
+files with the first already present at the destination transferred none of the other nine.** Both
+`src/app.cyr` and `src/main.cyr` carried the words *"A REFUSAL DOES NOT STOP THE QUEUE"* above the
+code that did. It now loops, skipping refusals and returning the last one only when nothing could
+start. ⛔ `EBUSY` is not skipped past — it means a transfer is already running, so consuming the rest
+of the queue against it would discard every remaining entry.
+
+**3. `m` on a folder performed a COPY, and said so in the wrong direction.** The directory arm
+dispatched `crab_walk_begin(CRAB_OP_CTREE, …)` **without consulting the key**, then set the notice
+`copying folder...` — so the operator was told the truth about what happened and the wrong thing
+about what they asked for. There is no `CRAB_OP_MTREE`: the walk kinds are IDLE/COPY/MOVE/CTREE/DTREE
+and no source-removing tree walk exists. Now refused out loud, in the shape the folder-drag refusal
+already used.
+
+**4. A cursor resting on a folder silently discarded every mark.** The marked set was read **only in
+the not-a-folder arm** — three lines below a ⭐ comment reading *MARKS OUTRANK THE CURSOR*. Marking
+five files and leaving the cursor on a sixth entry that was a folder acted on the folder and dropped
+the five. The marks are now read **before** the cursor's type, which is what makes that comment true.
+
+**5. The context menu highlighted the wrong verb, or none.** `crab_overlay` inserts `dh_menu_sep`
+after RENAME and then passed the **model** index to `dh_list_select`, while the separator makes the
+LIST one row longer from that point on. Measured: `CRAB_MI_DELETE` (4) selected list row 4 — the
+inert separator — which `dh_list_select` refuses, so **the open menu painted no highlight at all**;
+`CRAB_MI_NEWDIR` (5) selected row 5, which is **Delete** — the destructive verb highlighted while
+Enter would create a folder. New `crab_menu_row` maps model index to list row. ⚠ One-way on purpose:
+crab navigates the menu in model space and never calls `dh_list_move_sel`.
+
+**6. The transfer tray's progress bar was 0 px tall whenever a rate was known.** `crab_render` grew
+the reserved band by `CRAB_TRAY_DETAIL_H` when a rate existed; `crab_tray` set its own `pref_h` to a
+bare `CRAB_TRAY_H`. So the tray claimed 31 px of a 45 px band, and inside those 31: 31 − 8 padding
+− 18 title − 14 detail = **−9**, clamped to 0 — and the bar is the only child with `flex 1`.
+⇒ **The bar was missing exactly when there was something to report**, and present only in the first
+half-second before a rate existed. One `crab_tray_h`, asked twice.
+
+⛔⛔ **AND THE REASON NONE OF THEM WAS CAUGHT.** **1,221 of `src/main.cyr`'s 1,494 lines sit inside a
+single `#ifdef CYRIUS_TARGET_AGNOS` with no `#else`**, and nothing includes `main.cyr` — so the whole
+key-dispatch table is uncompiled on the host and unreachable by every test crab has. `render_test`
+stayed **53 / 0 green** through the menu mutation as well. ⇒ Four of the six decisions were lifted
+out into pure functions the suite can interrogate — `crab_transfer_plan`, `crab_menu_row`,
+`crab_tray_h`, `crab_fs_isdir` — the same move `crab_drag_targets` and `crab_two_panes_fit` already
+made. **The event loop keeps the wiring; the RULE goes where it can be asked a question.**
+
+⚠ **Every fix is mutation-proven** — the guard removed and the suite watched to FAIL (9, 4, 5, 3 and
+5 failures) — because this project has shipped three tests that could not fail in their first draft.
+⛔ **The mutation run also exposed a defect in one of the new tests**: its pre-clean deleted the
+stray `adir` only as a directory, so the 0-byte FILE the bug creates survived, and the next run
+failed in five places unrelated to the bug. **A cleanup that assumes the code under test worked
+cannot clean up after it failing.** Fixed, and the mutation now yields a stable 9 across consecutive
+runs.
+
+### Changed — the toolchain pin moves 6.5.36 → 6.5.41, and it retires two gates
+
+⭐ **The pin was a false declaration before this.** `cyrius.cyml` said 6.5.36 while the installed
+`cycc` was already 6.5.41, so every build printed `warning: cyrius.cyml pins 6.5.36 but cycc is
+6.5.41 — toolchain drift`. It no longer warns. 6.5.41 is tagged on the remote (verified), which is
+what CI installs from.
+
+⭐⭐ **AND THE BUMP CLOSED TWO ROADMAP GATES WITHOUT A LINE OF crab WORK:**
+- **cyrius 6.5.37 shipped `sys_statfs`** — the peer the Sidebar VOLUMES *capacity* gate was waiting
+  on. crab vendors it now (`SYS_STATFS = 103`), and cyrius's issue is archived. Both `roadmap.md`
+  and its own corrections list still read *"filed 🟡 OPEN against cyrius"*. ⚠ agnos-only (no host
+  arm), and **no `STATFS_*` offsets are vendored** — the frozen 32-byte layout must come from
+  agnos's docs. *Enumeration* stays open (*#44*).
+- **6.5.37 also shipped `sys_lstat`**, on both targets. `crab_fs_exists`' comment had said *"there is
+  no `sys_lstat` to call"* as the stated reason crab cannot detect a symlink. ⇒ **That is now a
+  decision, not a limit.**
+⇒ **Both had been written as OPEN for four cyrius releases** — the same failure as *#09*, carried
+OPEN for nine while the fix sat in the declared graph. **Re-derive a gate before believing it.**
+
+⛔ **`cyrius lib sync` walks only the DECLARED `[deps].stdlib` set, and it left three leaves behind**
+— `thread_agnos`, `thread_local`, `thread_macos`, all transitive, none named by any declaration.
+Copied by hand, then the WHOLE vendored tree verified byte-identical to the 6.5.41 snapshot (0 files
+drifting). ⚠ `lib/atomic.cyr` — the leaf this hazard has always named — **escaped only by luck**: it
+is byte-identical between the two versions. *Deferral #50.* ⚠ 6.5.41 also **added** a leaf,
+`lib/hashseed.cyr` (6.5.39's hash-flooding defence, pulled by `hashmap`), which arrived untracked and
+took the lock from 48 entries to 49. *Deferral #51.*
+
+⭐ **Check four re-run in full at the new pin**, all four `path` lines disabled in a scratch copy so
+`cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the
+overrides on — that jump is the tell), **1230 / 0**, and both binaries **BYTE-IDENTICAL** to the
+path-resolved ones — host `5170a452…` **1,023,968 B**, `--agnos` `446b7f6a…` **1,047,832 B**.
+*That equality is the evidence; the rest is merely consistent with it.*
+
+⚠ **A byte delta of +16 host / +48 agnos is the shape `state.md` documents as "the signature of a
+poisoned toolchain".** This one was legitimate — the vendored `lib/` genuinely changed. ⇒ The delta
+tells you to look; it does not tell you which. **Diagnose by content, never by the version string.**
+
+### Fixed — CI is a gate now, not a claim (*deferrals #14, #15, #36*)
+
+⛔⛔ **THE WHOLE AUTOMATED GATE WAS ONE STEP: `cyrius test`.** `.github/workflows/ci.yml` now runs
+`deps` + `deps --verify` · host build · **`--agnos` build** · `cyrius test` · **`render_test`** ·
+`fuzz` · a per-file `fmt --check` loop · `coverage --min 85` · `vet` + `deny`. Every one was executed
+locally, in order, before being written down. `release.yml` already gates on this workflow via
+`uses:`, so a tag inherits all of it — **#15 is closed for releases too**.
+
+- ⛔ **`CYRIUS_TARGET=agnos` IS SILENTLY IGNORED.** Measured: it builds a byte-identical HOST binary
+  and exits 0, with no warning, even for a garbage value. A `--agnos` step written that way would
+  look like the gate and be the host build twice. The flag is `--agnos`.
+- ⛔⛔ **`cyrius fmt --check` AND `cyrius lint` PROCESS ONLY THEIR FIRST FILE ARGUMENT.** Measured by
+  planting a misformatted file: passed **first**, `fmt --check` exits 1 and names it; passed **last**,
+  it exits **0 and prints nothing**. So the obvious `cyrius fmt --check src/*.cyr` gates **one file
+  of nine** and reports success — a gate worse than none, because it looks like coverage. The step is
+  a loop, and says why. *Deferral #48; upstream behaviour, and no issue filed — cyrius is not crab's
+  to change.*
+- ⚠ **`coverage --min` is a real gate**, verified able to fail (`--min 95` exits 1). The floor is 85
+  against a measured **87 %** (199/227), so it gates with headroom.
+- ⚠ **Three tools are deliberately left OUT**, recorded in `ci.yml` so the omissions are decisions:
+  `bench` (a timing on a shared runner is noise, and a step that cannot fail is not a gate), plain
+  `lint` (exits 0 whatever it finds) and `audit` (bundles lint). ⛔ **`lint --strict` DOES gate**
+  (exit 2) — *#46*'s headline said no gate existed, and that was half wrong. The price is
+  reformatting **83** over-long lines, most in `main.cyr`'s event loop, which is its own change.
+- ⛔ **`release.yml` publishes an x86_64-linux binary as the release asset for an AGNOS application**,
+  folded into `SHA256SUMS`. Recorded at the step, **not changed** — which artifacts a release
+  publishes is a distribution decision. *Deferral #49.*
+
+### Docs — the stale-comment purge (*and four new deferrals, #48–#51*)
+
+⛔⛔ **A COMMENT THAT WAS TRUE WHEN WRITTEN AND IS FALSE NOW IS WORSE THAN NO COMMENT**, because it is
+read as current fact and acted on. Audited every ⛔/⚠/⭐ marker in `src/` and every volatile claim in
+the docs against measurement. Corrected, among others:
+
+- ⛔ **`state.md`'s poisoned-snapshot remedy had INVERTED and become destructive.** It instructed
+  `grep -c SYS_READDIR_AT lib/syscalls_x86_64_agnos.cyr` **must be 0** and `git checkout -- lib/` to
+  undo. At the 6.5.41 pin that grep must be **non-zero** — 6.5.36 onward vendors `sys_readdir_at` and
+  crab calls it in three places. **Following it would revert correct vendoring.** The durable lesson
+  (a version directory can hold a stdlib that is not its version's — diagnose by content) is kept;
+  the recipe is replaced by the check that actually works.
+- ⛔ **`handoff.md`'s *"One deliberate interim, with an expiry"* section was entirely dead** and has
+  been DELETED, not annotated. It described a hardcoded `CRAB_SYS_READDIR_AT = 101` removed on
+  2026-08-30, asserted *"6.5.36 IS UNRELEASED — no tag"* (tagged, and five releases superseded), and
+  claimed the wrapper *"has never been CALLED"* while `src/app.cyr` calls it three times. **The
+  interim closed at its written expiry, which is the outcome it existed to force.**
+- ⛔ **`state.md`'s per-file line counts are DELETED, not corrected** — `main.cyr (1,287)` against a
+  real 1,494 and `app.cyr (2,484)` against a real 3,007, understated by 523 lines in the largest file
+  in the project, three lines below the section's own warning never to trust them. **A number nothing
+  gates does not survive being corrected; it survives being removed.**
+- **`mount` is agnos syscall #11, not #23** — #23 is `timerfd_settime`, and crab's own vendored
+  header says so. Wrong in three places, including the *#44* row that tells a reader which syscall to
+  cite when filing the enumeration half upstream.
+- `CLAUDE.md`, `README.md` and `docs/guides/getting-started.md` all told the reader `cyrius test`
+  runs `[build].test`. It does not — **the file is never even compiled** — and `getting-started.md`
+  went further and invited contributors to add cases there, four lines under the false command.
+  ⚠ *#17* remains **OPEN**: `cyrius.cyml` still reads `test = "src/test.cyr"`.
+- `CLAUDE.md` told the reader to build with `cc5`, a compiler renamed to `cycc` in cyrius 6.0.0 and
+  absent from the pinned toolchain — and to sync a version into `cyrius.cyml`, which carries
+  `version = "${file:VERSION}"` and has no number to sync.
+- `cyrius.cyml`'s package description stated the daimon AI arc in the present tense as what crab IS,
+  while no daimon dependency is declared anywhere (*#18*) and `README.md` says outright that none of
+  it exists. Marked **PLANNED, NOT SHIPPED**.
+- `docs/architecture/README.md`'s index said *"every frame allocates ~750 KB"* — flatly contradicting
+  the note it indexes, which records that bound **closed** at 0.6.0.
+- `cyrius.cyml`'s four-way dhancha check was quoting **0.9.17's** figures under a `tag = "0.9.26"`
+  line — evidence for the wrong thing, which is the exact failure that block exists to prevent.
+  Re-taken for 0.9.26.
+- `src/app.cyr`'s *"crab copies a single file per keypress and has no multi-select, so a queue would
+  be scaffolding for a caller that does not exist"* — the queue it calls hypothetical sits **250
+  lines above it in the same file**.
+- `src/ui.cyr`'s *"The menu's LIST, recorded for hit-testing"* — the menu is never hit-tested;
+  `crab_hit` walks only the two pane lists, and `crab_menu_list` has no caller in `src/` at all.
+- `src/main.cyr`'s *"Opened from the KEYBOARD as well as the pointer"* — **there is no pointer
+  route.** `menu_open` is set in exactly one place, under the Menu key, and the `POINTER_BTN` arm
+  reads only press/release, never a button code, so a right-click runs the ordinary left-click path.
 
 ### Changed — the declared graph moves to dhancha 0.9.26, and check four gets its evidence back
 
