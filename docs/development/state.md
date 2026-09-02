@@ -654,7 +654,8 @@ horizontal strip is not.
     adds `dh_list_new_h` — the same container laid the other way — which serves a menu bar, a tab
     strip, a toolbar and crab's own A/B switcher. ✅ **crab pins 0.9.26 as of 2026-09-01** — it is
     pushed (`cb855c8`) and check four passes against the declared graph. ⚠ crab consumes none of it yet.
-  ⇒ **Five false gates now.** A gate is a claim about another repository, and this one was wrong
+  ⇒ **SIX false gates now** — proportional text is the sixth, and it was wrong in a new way again: not about existence or price, but about **which half was missing**. dhancha's font plumbing and rekha's glyph path both exist; what does not is `rekha_advance_width`, so a session would wire a font, watch text render, and only then find every glyph 0.6 em wide.
+  ⇒ **Five before it.** A gate is a claim about another repository, and this one was wrong
   about *existence* (TREE), about *price* (thumbnails), and about *what was actually missing*
   (MENU BAR). Re-derive all three before believing a line.
 
