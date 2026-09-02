@@ -140,6 +140,17 @@ fn main(): i64 {
     # the panes their MODIFIED column. A view that reflows the moment the app starts is a view the
     # operator did not ask for.
     var pv_open = 0;
+    # ⭐ THE SIDEBAR (M6). ⚠ OFF BY DEFAULT and for the same reason the preview is: at the shipped
+    # 380x220 it would cost the panes their MODIFIED column on the first frame, and a view that
+    # reflows the moment the app starts is a view the operator did not ask for.
+    var sb_open = 0;
+    # ⛔ THE PLACES MODEL IS BUILT ONCE, AT STARTUP, NOT PER FRAME. It stats up to six paths, and
+    # doing that on the render path would put six syscalls on every keystroke — the exact cost the
+    # deferred-statting work exists to keep off it. ⚠ It therefore does NOT notice a `Downloads`
+    # created while crab is running; that is a deliberate trade, and re-reading it belongs on a
+    # refresh key rather than on the frame.
+    var places = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
+    var placen = crab_places_build(places, pathscr, statbuf);
     # ⭐ THE VIEW MODE (M5). ⚠ ONE MODE FOR BOTH PANES, like the sort order — a view is a property of
     # how the operator is reading, and two panes in different modes is a display they would have to
     # remember having toggled.
@@ -195,6 +206,7 @@ fn main(): i64 {
     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     crab_rs_preview(rs, pv_open);
     crab_rs_view(rs, view_mode);
+    crab_rs_sidebar(rs, sb_open, places, placen);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -252,6 +264,10 @@ fn main(): i64 {
     # ⚠ ONE held key, not a set. Two movement keys held at once is not a gesture a file manager owes
     # anyone, and tracking a set would need a release to clear the right slot rather than just clear.
     var held_key = 0;
+    # 🦀 BUELLER. `idle_since` is reset by every handled event; `mascot_stage` is the last stage
+    # ACTED ON, so the line is written once per transition rather than once per tick.
+    var idle_since = clock_now_ms();
+    var mascot_stage = 0;
     var held_since = 0;
     var held_last = 0;
 
@@ -296,6 +312,18 @@ fn main(): i64 {
     var running = 1;
     while (running == 1) {
         var ev = dh_client_poll_event(c);
+        # ⛔ ANY event resets the clock, not just a keypress. Pointer motion, a resize and a scroll
+        # are all the operator being present, and a mascot that spoke over someone moving the mouse
+        # would be exactly the "trying too hard" the mascot doc forbids.
+        if (ev != 0) {
+            idle_since = clock_now_ms();
+            if (mascot_stage != 0) {
+                # ⚠ Clear only what the mascot itself wrote. A real notice raised in the meantime
+                # is not ours to erase — the status line is a single slot with many writers.
+                if (crab_get_notice() == crab_mascot_text(mascot_stage)) { crab_clear_notice(); }
+                mascot_stage = 0;
+            }
+        }
         # ⛔ EOF IS NOT "no input". -6 means the connection is gone; carrying on would render into a
         # surface nobody reads, holding the `#86` slot the whole time.
         if (ev == (0 - 6)) {
@@ -409,58 +437,97 @@ fn main(): i64 {
             # the selection.
             if (k == POINTER_BTN) {
                 if (dh_event_b(ev) == 1) {
-                    if (crab_hit(ptr_x, ptr_y, hit) == 1) {
-                        var hp = load64(hit);
-                        var hr = load64(hit + 8);
-                        active_pane = hp;             # clicking a pane focuses it, even off-row
-                        var now = clock_now_ms();
-                        if (hr >= 0) {
-                            # ⚠ CLAMP AGAINST THE LIVE COUNT. The tree was built from the count at the
-                            # last render; nothing has changed it since, but a row index is an index
-                            # into arrays sized by `CRAB_MAX_ENTRIES` and is not worth trusting.
-                            if (hp == 0) { if (hr < ln) { sel_l = hr; } }
-                            if (hp == 1) { if (hr < rn) { sel_r = hr; } }
-                            if (crab_is_double(last_pane, last_row, last_ms, hp, hr, now) == 1) {
-                                if (hp == 0) {
-                                    var dl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf);
-                                    if (dl >= 0) {
-                                        ln = dl;
-                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                        lstate = crab_pane_state(ln, crab_listing_err());
-                                        sel_l = 0;
-                                        crab_log_cd(lpath);
-                                    }
-                                }
-                                if (hp == 1) {
-                                    var dr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf);
-                                    if (dr >= 0) {
-                                        rn = dr;
-                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                        rstate = crab_pane_state(rn, crab_listing_err());
-                                        sel_r = 0;
-                                        crab_log_cd(rpath);
-                                    }
-                                }
-                                # ⛔ CONSUME THE PAIR. Leaving `last_row` set would make a third click
-                                # a second double-click, descending twice on a triple-click.
-                                last_pane = 0 - 1;
-                                last_row = 0 - 1;
+                    # ⛔⛔ THE SIDEBAR IS ASKED FIRST, AND IT IS ASKED BY ITS OWN FUNCTION. A place
+                    # click must never reach `crab_hit`, whose answer is a 0/1 PANE index that the
+                    # write layer trusts — `crab_drag_targets` rejects only negatives and same-pane,
+                    # so a third surface behind that number is one drop away from moving a real file.
+                    # `crab_sidebar_hit` returns a PLACE index and shares no vocabulary with it.
+                    # ⚠ Ordered first rather than guarded afterwards: the sidebar and the panes are
+                    # disjoint regions, so whichever is asked first is authoritative, and asking the
+                    # narrower one first means the pane path never sees a coordinate that was not a
+                    # pane's.
+                    var sbi = crab_sidebar_hit(ptr_x, ptr_y);
+                    var paneclick = 1;
+                    if (sbi >= 0) {
+                        paneclick = 0;
+                        var pp = crab_place_path(places, placen, sbi);
+                        if (pp != 0) {
+                            # ⭐ NAVIGATE THE ACTIVE PANE, not a fixed one. The sidebar is a
+                            # destination list; which pane goes there is the operator's existing
+                            # focus, the same rule every other navigation key follows.
+                            # ⚠ `crab_relist` reports the count and leaves the error on the notice
+                            # channel, so an unreadable place says so instead of blanking the pane.
+                            if (active_pane == 0) {
+                                crab_strcpy_n(lpath, pp, CRAB_PATH_MAX);
+                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                lstate = crab_pane_state(ln, crab_listing_err());
+                                sel_l = 0;
+                            } else {
+                                crab_strcpy_n(rpath, pp, CRAB_PATH_MAX);
+                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                rstate = crab_pane_state(rn, crab_listing_err());
+                                sel_r = 0;
                             }
-                            else {
-                                last_pane = hp;
-                                last_row = hr;
-                                last_ms = now;
-                            }
+                            crab_say("crab: place "); crab_say(pp); crab_say("\n");
                         }
-                        crab_say("crab: click\n");
-                        # ⭐ ARM THE DRAG. Recorded on every press on a row; it only becomes a drag
-                        # once the pointer travels past the threshold, so this costs a click nothing.
-                        if (hr >= 0) {
-                            drag_pane = hp;
-                            drag_row = hr;
-                            drag_x = ptr_x;
-                            drag_y = ptr_y;
-                            dragging = 0;
+                    }
+                    # ⚠ Nested rather than `else if`, which cyrius does not have.
+                    if (paneclick == 1) {
+                        if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                            var hp = load64(hit);
+                            var hr = load64(hit + 8);
+                            active_pane = hp;             # clicking a pane focuses it, even off-row
+                            var now = clock_now_ms();
+                            if (hr >= 0) {
+                                # ⚠ CLAMP AGAINST THE LIVE COUNT. The tree was built from the count at the
+                                # last render; nothing has changed it since, but a row index is an index
+                                # into arrays sized by `CRAB_MAX_ENTRIES` and is not worth trusting.
+                                if (hp == 0) { if (hr < ln) { sel_l = hr; } }
+                                if (hp == 1) { if (hr < rn) { sel_r = hr; } }
+                                if (crab_is_double(last_pane, last_row, last_ms, hp, hr, now) == 1) {
+                                    if (hp == 0) {
+                                        var dl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr, lsizes, lmtimes, statbuf);
+                                        if (dl >= 0) {
+                                            ln = dl;
+                                            crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                            lstate = crab_pane_state(ln, crab_listing_err());
+                                            sel_l = 0;
+                                            crab_log_cd(lpath);
+                                        }
+                                    }
+                                    if (hp == 1) {
+                                        var dr = crab_descend(rpath, rbuf, sel_r, rn, namescr, pathscr, rsizes, rmtimes, statbuf);
+                                        if (dr >= 0) {
+                                            rn = dr;
+                                            crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                            rstate = crab_pane_state(rn, crab_listing_err());
+                                            sel_r = 0;
+                                            crab_log_cd(rpath);
+                                        }
+                                    }
+                                    # ⛔ CONSUME THE PAIR. Leaving `last_row` set would make a third click
+                                    # a second double-click, descending twice on a triple-click.
+                                    last_pane = 0 - 1;
+                                    last_row = 0 - 1;
+                                }
+                                else {
+                                    last_pane = hp;
+                                    last_row = hr;
+                                    last_ms = now;
+                                }
+                            }
+                            crab_say("crab: click\n");
+                            # ⭐ ARM THE DRAG. Recorded on every press on a row; it only becomes a drag
+                            # once the pointer travels past the threshold, so this costs a click nothing.
+                            if (hr >= 0) {
+                                drag_pane = hp;
+                                drag_row = hr;
+                                drag_x = ptr_x;
+                                drag_y = ptr_y;
+                                dragging = 0;
+                            }
                         }
                     }
                 }
@@ -1118,6 +1185,24 @@ fn main(): i64 {
                                     } else { crab_clear_notice(); crab_say("crab: preview on\n"); }
                                 } else { crab_clear_notice(); crab_say("crab: preview off\n"); }
                             }
+                            if (u == 0x05) {                                       # b — the PLACES sidebar
+                                # ⚠ SAME DISCIPLINE AS `p`: the toggle flips the operator's WANT even
+                                # when the window cannot honour it, and the refusal is reported rather
+                                # than swallowed — so a window later resized wide enough shows the
+                                # sidebar without a second keypress, and a key that silently does
+                                # nothing is never indistinguishable from a broken one.
+                                # ⚠ It is asked against the WINDOW here, while `crab_render` asks
+                                # against what the preview left. Opening both on a window that fits
+                                # only one therefore reports success and shows nothing — the same
+                                # honest-but-partial answer `p` already gives, and the reason the
+                                # renderer owns the final say.
+                                if (sb_open == 0) { sb_open = 1; } else { sb_open = 0; }
+                                if (sb_open == 1) {
+                                    if (crab_sidebar_fit(w, 1) == 0) {
+                                        crab_set_notice("sidebar needs a wider window");
+                                    } else { crab_clear_notice(); crab_say("crab: sidebar on\n"); }
+                                } else { crab_clear_notice(); crab_say("crab: sidebar off\n"); }
+                            }
                             if (u == 0x2A) {                                       # Backspace — ascend to the parent
                                 # ⭐ SELECTION MEMORY (*#34*). Capture the leaf BEFORE the ascend — the ascend rewrites
                                 # `path` in place, so afterwards there is nothing left to look for.
@@ -1166,6 +1251,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_rs_sidebar(rs, sb_open, places, placen);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1255,6 +1341,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
+                    crab_rs_sidebar(rs, sb_open, places, placen);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                     # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1325,6 +1412,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_rs_sidebar(rs, sb_open, places, placen);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
@@ -1413,6 +1501,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
+                    crab_rs_sidebar(rs, sb_open, places, placen);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
@@ -1420,6 +1509,43 @@ fn main(): i64 {
                     if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s7), nbytes); }
                 }
+            }
+        }
+        # 🦀 BUELLER. ⛔ ITS OWN IDLE BRANCH, because there is NO unconditional per-tick redraw to
+        # ride: every other idle-path `crab_render` fires only when it did work — the tray when a
+        # step moved bytes, the gallery when a picture landed — deliberately, so the idle loop does
+        # not become a busy loop drawing the same frame.
+        # ⛔ FIRES ON A STAGE *TRANSITION*, NEVER PER TICK. `crab_mascot_stage` is a pure function of
+        # elapsed time and is asked every idle pass; the render happens only when its answer changes,
+        # which is at most four times in the eight seconds after a minute of silence, and then never
+        # again until the operator touches something.
+        # ⛔ AND IT REFUSES TO SPEAK OVER A REAL MESSAGE. The status line is a single slot, and the
+        # notice channel carries `delete this FOLDER and everything in it? y = yes`.
+        if ((running == 1) && (ev == 0)) {
+            var mnow = clock_now_ms();
+            var mhave = 0;
+            if (crab_get_notice() != 0) { mhave = 1; }
+            # ⚠ A line the mascot itself wrote is not "a real message" — otherwise stage 1 would
+            # block stage 2 and the sequence would stop after its first beat.
+            if (mascot_stage != 0) {
+                if (crab_get_notice() == crab_mascot_text(mascot_stage)) { mhave = 0; }
+            }
+            var mwant = crab_mascot_stage(mnow - idle_since, mhave);
+            if (mwant != mascot_stage) {
+                if (mwant == 0) {
+                    if (crab_get_notice() == crab_mascot_text(mascot_stage)) { crab_clear_notice(); }
+                } else { crab_set_notice(crab_mascot_text(mwant)); }
+                mascot_stage = mwant;
+                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
+                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
+                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
+                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
+                crab_rs_preview(rs, pv_open);
+                crab_rs_view(rs, view_mode);
+                crab_rs_sidebar(rs, sb_open, places, placen);
+                var sm = crab_render(surf, 0, rs);
+                if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                else { setu_buf_write(buf_id, sd_surface_pixels(sm), nbytes); }
             }
         }
         if ((running == 1) && (ev == 0)) {
@@ -1439,6 +1565,7 @@ fn main(): i64 {
                         crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                         crab_rs_preview(rs, pv_open);
                         crab_rs_view(rs, view_mode);
+                        crab_rs_sidebar(rs, sb_open, places, placen);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                         crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
@@ -1474,6 +1601,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_rs_sidebar(rs, sb_open, places, placen);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
                 # (directory, name) and returns early on a non-image, so this costs nothing per frame — only

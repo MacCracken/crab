@@ -506,6 +506,202 @@ fn crab_pane_state_label(state): i64 {
 # switching between two views that claim to be the same one.
 # ⚠ Bounded like every other string helper here — `path` is crab's own joined path, but it is the
 # same buffer descent grows, and the 0.5.0 P-1 was in exactly that family.
+# =================================================================================================
+# M6 — THE SIDEBAR (PLACES).
+# =================================================================================================
+#
+# ⛔⛔ NO dhancha GATE. The roadmap carried *"Gate: dhancha TREE widget"* for this and it was the
+# FIFTH false gate: `LIST` gives scroll, selection and a toolkit-painted highlight, `DH_FLAG_INERT`
+# gives a section header the keyboard steps over, and padding gives indent. Nothing was missing.
+#
+# ⛔⛔ THE SIDEBAR HAS ITS OWN HIT FUNCTION, AND THAT IS THE MOST IMPORTANT LINE HERE.
+# `crab_hit` returns a 0/1 PANE index which reaches the WRITE layer — `crab_drag_targets` rejects
+# only negatives and same-pane, so a drop resolved against a widened pane index would execute a real
+# `crab_fs_move`. Teaching `crab_hit` about the sidebar would put a third surface behind a number
+# two write paths trust. ⇒ `crab_sidebar_hit` is separate, returns a PLACE index, and shares no
+# vocabulary with the pane index at all.
+#
+# ⚠ THE MODEL IS BUILT IN `app.cyr` AND PASSED DOWN. This file may not call `getenv` or stat —
+# `render_test` includes `ui.cyr` alone, and reaching up is the mistake this codebase has made five
+# times. Everything below renders what it is handed.
+# ⛔⛔ THE PLACE RECORD LIVES HERE, NOT IN `app.cyr`, AND THE INCLUDE ORDER IS WHY. The chain is
+# `path.cyr` -> `ui.cyr` -> `app.cyr` -> `main.cyr`, and `render_test` includes `ui.cyr` ALONE — so
+# an accessor defined above this file is invisible to the render path and to crab's strongest test.
+# ⚠ THE SPLIT IS DELIBERATE AND IS THE WHOLE LAYERING RULE IN MINIATURE: the record layout and its
+# accessors are shared VOCABULARY and belong at the bottom; `crab_places_build` needs `getenv` and
+# `stat`, so it belongs in `app.cyr`. Putting all of it upstairs compiles fine through `main.cyr`
+# and leaves `render_test` with undefined symbols — which is how this rule has been broken five
+# times, and was very nearly a sixth here.
+var CRAB_PLACE_LABEL = 0;                        # CRAB_NAME_MAX bytes
+var CRAB_PLACE_PATH  = 64;                       # = CRAB_NAME_MAX; CRAB_PATH_MAX bytes
+var CRAB_PLACE_SZ    = 320;                      # = CRAB_NAME_MAX + CRAB_PATH_MAX
+var CRAB_PLACES_MAX  = 8;
+
+# @public — the label / path of place `i`, or 0 if `i` is out of range.
+fn crab_place_label(places, n, i): i64 {
+    if (i < 0) { return 0; }
+    if (i >= n) { return 0; }
+    return places + i * CRAB_PLACE_SZ + CRAB_PLACE_LABEL;
+}
+
+fn crab_place_path(places, n, i): i64 {
+    if (i < 0) { return 0; }
+    if (i >= n) { return 0; }
+    return places + i * CRAB_PLACE_SZ + CRAB_PLACE_PATH;
+}
+
+var CRAB_SB_W  = 90;        # = CRAB_COL_NAME_MIN — ten characters, crab's own floor for a legible
+#   label, and every place name it can produce is shorter than that.
+var CRAB_SB_ROW_H = 22;
+
+# @public — is there room for the sidebar without costing a pane its columns? 1 = yes.
+#
+# ⛔ THE SAME SHAPE AS `crab_preview_fit`, DELIBERATELY. The sidebar is subtracted from the window
+# BEFORE the two-pane decision, so `crab_two_panes_fit` and `crab_cols_for_width` are asked about
+# the width the panes actually get. No rule anywhere needs an "unless the sidebar is open" clause,
+# and opening it can legitimately collapse two panes into one — the ratified small-window rule
+# answering a narrower pane area, not a second behaviour.
+fn crab_sidebar_fit(w, want): i64 {
+    if (want == 0) { return 0; }
+    var rest = w - CRAB_SB_W;
+    if (rest <= CRAB_PANE_GAP) { return 0; }
+    var panew = rest - CRAB_PANE_GAP;
+    if (crab_two_panes_fit(rest) == 1) { panew = (rest - CRAB_PANE_GAP) / 2; }
+    if (crab_cols_for_width(panew) < 2) { return 0; }
+    return 1;
+}
+
+var crab_sblst = 0;
+
+# @public — the sidebar LIST for the frame just rendered, or 0 if none was built.
+# ⚠ Cleared in `crab_render` before the panes, like every other recorded widget: a pointer that
+# outlived its frame names arena memory `dh_frame_begin` has rewound.
+fn crab_sidebar_widget(): i64 { return crab_sblst; }
+
+# Build the PLACES sidebar into `parent`. `places` / `n` come from `crab_places_build`.
+#
+# ⚠ ROW 0 IS THE INERT SECTION HEADER, so a place at model index `i` is LIST row `i + 1`. That
+# offset is the whole reason `crab_sidebar_hit` exists rather than returning the row index raw —
+# the same off-by-one that made the context menu highlight the wrong verb when a separator was
+# counted as an item.
+fn crab_sidebar(parent, places, n): i64 {
+    var sb = dh_list_new(CRAB_SB_ROW_H);
+    if (sb == 0) { return 0; }
+    dh_widget_set_pref(sb, CRAB_SB_W, 0);
+    dh_widget_set_flex(sb, 0);
+    dh_widget_set_bg(sb, dh_theme_panel());
+    # ⛔ INERT, so dhancha's own keyboard movement steps OVER it and `dh_list_select` refuses it.
+    # A section header that can be selected is a heading the operator can "open".
+    var hdr = dh_widget_new(LABEL);
+    dh_widget_set_text(hdr, "PLACES");
+    dh_widget_set_fg(hdr, dh_theme_mute());
+    dh_widget_set_inert(hdr, 1);
+    dh_list_add(sb, hdr);
+    var i = 0;
+    while (i < n) {
+        var row = dh_widget_new(LABEL);
+        dh_widget_set_text(row, crab_place_label(places, n, i));
+        dh_list_add(sb, row);
+        i = i + 1;
+    }
+    dh_widget_add_child(parent, sb);
+    return sb;
+}
+
+# @public — which PLACE is at (x, y)? -> the model index, or -1 for none.
+#
+# ⛔ RETURNS A PLACE INDEX, NEVER A PANE INDEX. See the ⛔⛔ at the top of this section: the pane
+# index is trusted by the write layer and this number must never be mistaken for one.
+# ⚠ Subtracts the inert header row, and refuses row 0 outright rather than returning -1 by
+# arithmetic — so a click on "PLACES" is a refusal, not a place that happens to be out of range.
+fn crab_sidebar_hit(x, y): i64 {
+    if (crab_sblst == 0) { return 0 - 1; }
+    if (crab_root == 0) { return 0 - 1; }
+    var w = dh_hit_test(crab_root, x, y);
+    if (w == 0) { return 0 - 1; }
+    var node = w;
+    var child = 0;
+    var found = 0;
+    while (node != 0) {
+        if (node == crab_sblst) { found = 1; node = 0; }
+        else {
+            child = node;
+            node = dh_widget_parent(node);
+        }
+    }
+    if (found == 0) { return 0 - 1; }
+    if (child == 0) { return 0 - 1; }
+    var i = 0;
+    var r = dh_widget_first_child(crab_sblst);
+    while (r != 0) {
+        if (r == child) {
+            if (i == 0) { return 0 - 1; }      # the inert PLACES header
+            return i - 1;
+        }
+        i = i + 1;
+        r = dh_widget_next_sibling(r);
+    }
+    return 0 - 1;
+}
+
+# =================================================================================================
+# M6 — THE A/B VIEW SWITCHER (dhancha 0.9.26's `dh_list_new_h`).
+# =================================================================================================
+#
+# ⛔⛔ THE STRIP IS A dhancha KIND BECAUSE OF ADR 0001, NOT FOR CONVENIENCE. A row of items with the
+# current one highlighted, composed from a `BOX_H` of labels, makes the APP paint that highlight —
+# which means crab naming `accent`, which ADR 0001 forbids. `dh_list_new_h` + `dh_list_select` puts
+# the highlight back in the toolkit, where the theme lives. That is the entire reason the kind was
+# added, and this is its first consumer anywhere.
+#
+# ⛔ SOLO MODE ONLY. Two panes side by side distinguish themselves by POSITION; a strip in each of
+# two headers would be redundant and would beg the question of which one is authoritative. The
+# switcher exists for the case that has no other signal — and at the shipped 380x220 default that is
+# every case, because `crab_two_panes_fit` needs 600 px.
+#
+# ⚠ IT IS A DISPLAY, NOT A CONTROL, AND THAT IS DELIBERATE. `crab_hit` walks parents against exactly
+# `crab_llst` / `crab_rlst` and returns a 0/1 pane index that reaches the WRITE layer —
+# `crab_drag_targets` rejects only negatives and same-pane, so a drop resolved against a widened
+# index would execute a real `crab_fs_move`. Making the strip clickable means giving it its own hit
+# function, which is a separate change. The keyboard already switches panes.
+var CRAB_SW_CELL_W = 20;                                  # one 'A' / 'B' cell
+var CRAB_SW_W      = 40;                                  # the whole strip: two cells
+
+# @public — is there room for the switcher without costing the header its path? 1 = yes.
+#
+# ⛔ DERIVED FROM crab's OWN COLUMN RULE, NOT LIFTED FROM THE CANVAS — the same discipline that
+# produced `crab_two_panes_fit`'s 600 and the preview's 303. The header must still show a path worth
+# reading, and crab already has a number for "enough characters to tell things apart":
+# `CRAB_COL_NAME_MIN`, 10 characters. Below that the strip is refused and the header falls back to
+# `crab_pane_label`'s `A `/`B ` text prefix, which costs 3 characters instead of 40 px.
+fn crab_switcher_fit(panew): i64 {
+    if (panew >= (CRAB_SW_W + CRAB_COL_NAME_MIN)) { return 1; }
+    return 0;
+}
+
+# @public — build the A/B strip into `parent`, with pane `which` selected. -> the strip, or 0.
+#
+# ⚠ `dh_list_add` pins each cell's width from the list's cell size and forces flex 0, so the two
+# cells cannot stretch to share the header and the strip stays exactly `CRAB_SW_W` wide.
+fn crab_switcher(parent, which): i64 {
+    var sw = dh_list_new_h(CRAB_SW_CELL_W);
+    if (sw == 0) { return 0; }
+    dh_widget_set_pref(sw, CRAB_SW_W, 0);
+    dh_widget_set_flex(sw, 0);
+    var a = dh_widget_new(LABEL);
+    dh_widget_set_text(a, "A");
+    dh_list_add(sw, a);
+    var b = dh_widget_new(LABEL);
+    dh_widget_set_text(b, "B");
+    dh_list_add(sw, b);
+    # ⛔ `active_pane` ALREADY IS THE SELECTED INDEX — 0 = left = 'A', 1 = right = 'B'. That is why
+    # this widget needs no model state of its own, and why it cannot drift out of step with the
+    # pane it labels: there is only one number.
+    dh_list_select(sw, which);
+    dh_widget_add_child(parent, sw);
+    return sw;
+}
+
 fn crab_pane_label(dst, cap, which, path): i64 {
     if (cap < 4) { return -1; }
     store8(dst, 65 + which);                           # 'A' + pane index
@@ -909,25 +1105,48 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, panew, 0);
     dh_widget_set_bg(col, dh_theme_panel());   # pane column surface
-    var hdr = dh_widget_new(LABEL);
     var hc = dh_theme_panel();                 # pane header bar
     if (active != 0) { hc = dh_theme_accent(); }   # accent when this pane is focused
-    dh_widget_set_bg(hdr, hc);
-    dh_widget_set_pref(hdr, 0, 28);
     # ⚠ WHEN ONLY ONE PANE IS ON SCREEN THE HEADER MUST SAY WHICH ONE IT IS. Two panes distinguish
     # themselves by being side by side; one pane cannot, and the operator switching with Left/Right
     # would otherwise see the path change with no way to tell A from B — worse than two panes,
     # because it looks like navigation rather than a switch.
-    # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so this
-    # string must live exactly as long as the widget does — one frame.
-    var htext = path;
-    if (solo != 0) {
-        var hb = dh_falloc(CRAB_PATH_MAX + 4);
-        crab_pane_label(hb, CRAB_PATH_MAX + 4, which, path);
-        htext = hb;
+    # ⭐ SOLO + ROOM -> the real A/B strip (`crab_switcher`); SOLO + CRAMPED -> the `A `/`B ` text
+    # prefix it replaces, which costs 3 characters instead of 40 px. Two panes need neither.
+    var wide = 0;
+    if (solo != 0) { wide = crab_switcher_fit(panew); }
+    if (wide == 1) {
+        # ⛔ THE HEADER BECOMES A `BOX_H` AND KEEPS ITS OWN 28 px BAND. It is NOT a new root child:
+        # at the shipped 220 px height every row is contended, and a strip added above the panes
+        # would take one from the listing to say something the header can already say.
+        var hbox = dh_widget_new(BOX);
+        dh_widget_set_layout(hbox, BOX_H);
+        dh_widget_set_bg(hbox, hc);
+        dh_widget_set_pref(hbox, 0, 28);
+        dh_widget_set_flex(hbox, 0);
+        crab_swlst = crab_switcher(hbox, which);
+        if (which == 1) { crab_rhdr = hbox; } else { crab_lhdr = hbox; }
+        var plab = dh_widget_new(LABEL);
+        dh_widget_set_flex(plab, 1);           # the path takes whatever the strip leaves
+        dh_widget_set_text(plab, path);
+        dh_widget_add_child(hbox, plab);
+        dh_widget_add_child(col, hbox);
+    } else {
+        var hdr = dh_widget_new(LABEL);
+        dh_widget_set_bg(hdr, hc);
+        dh_widget_set_pref(hdr, 0, 28);
+        # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so
+        # this string must live exactly as long as the widget does — one frame.
+        var htext = path;
+        if (solo != 0) {
+            var hb = dh_falloc(CRAB_PATH_MAX + 4);
+            crab_pane_label(hb, CRAB_PATH_MAX + 4, which, path);
+            htext = hb;
+        }
+        dh_widget_set_text(hdr, htext);
+        dh_widget_add_child(col, hdr);
+        if (which == 1) { crab_rhdr = hdr; } else { crab_lhdr = hdr; }
     }
-    dh_widget_set_text(hdr, htext);
-    dh_widget_add_child(col, hdr);
 
     # ⭐⭐ REAL COLUMNS (*#32*, dhancha 0.9.20). The 13-character name column is gone — NAME is the
     # REMAINDER column, so it grows with the pane. ⛔ Columns that do not fit are DROPPED, not
@@ -1059,6 +1278,50 @@ fn crab_set_notice(s): i64 { crab_notice = s; return 0; }
 fn crab_clear_notice(): i64 { crab_notice = 0; return 0; }
 fn crab_get_notice(): i64 { return crab_notice; }
 
+# =================================================================================================
+# 🦀 BUELLER — the mascot's one line, in the status bar.
+# =================================================================================================
+#
+# ⛔⛔ DISCIPLINE FIRST, BECAUSE IT IS THE FEATURE. `docs/development/mascot.md`: *"subtle and
+# infrequent… the whole thing dies if it's trying too hard."* This is a constraint on the
+# implementation, not colour commentary. It speaks after a full minute of nothing, says three short
+# things over eight seconds, and then **goes quiet for good** until the operator touches something.
+# It never repeats on its own.
+#
+# ⛔ IT NEVER DISPLACES A REAL MESSAGE. The status line is a SINGLE SLOT with many writers, and the
+# notice channel carries things like `delete this FOLDER and everything in it? y = yes`. A mascot
+# that overwrote a destructive confirmation would be the worst bug in the app. `notice_present` is
+# checked first and is the whole guard.
+#
+# ⚠ A PURE FUNCTION OF ELAPSED TIME, deliberately — so the suite can interrogate the whole sequence
+# without a clock, and so the event loop's only job is to notice when the answer CHANGES.
+var CRAB_MASCOT_IDLE_MS = 60000;   # a minute of nothing before Bueller says anything at all
+var CRAB_MASCOT_BEAT_MS = 2000;    # one beat: a line, or the pause between them
+
+# @public — what should the mascot say? 0 = nothing, 1 = "Bueller…", 2 = "Bueller…?"
+#
+# ⚠ The beats are `Bueller…` · pause · `Bueller…` · pause · `Bueller…?` — the deadpan absentee
+# roll-call. The PAUSES are part of it; a line that simply sat there would be a status, not a joke.
+fn crab_mascot_stage(idle_ms, notice_present): i64 {
+    if (notice_present != 0) { return 0; }
+    if (idle_ms < CRAB_MASCOT_IDLE_MS) { return 0; }
+    var beat = (idle_ms - CRAB_MASCOT_IDLE_MS) / CRAB_MASCOT_BEAT_MS;
+    if (beat == 0) { return 1; }
+    if (beat == 2) { return 1; }
+    if (beat == 4) { return 2; }
+    # ⛔ Beats 1 and 3 are the pauses, and everything past 4 is silence — Bueller does not nag.
+    return 0;
+}
+
+# @public — the line for a stage, or 0 for silence.
+# ⚠ STRING LITERALS ONLY. `crab_set_notice` stores the pointer WITHOUT copying, so anything
+# arena-allocated would be freed under the status line by the next `dh_frame_begin`.
+fn crab_mascot_text(stage): i64 {
+    if (stage == 1) { return "Bueller..."; }
+    if (stage == 2) { return "Bueller...?"; }
+    return 0;
+}
+
 fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
     var out = dh_falloc(96);    # ⛔ the status LABEL points at this — same lifetime
     if (count <= 0) { store8(out, 32); store8(out + 1, 0); return out; }
@@ -1166,8 +1429,38 @@ fn crab_frame_arena(): i64 {
 # must be re-established every frame. crab can hold these because it re-establishes them every frame;
 # it cannot hold a PRESS across frames, which is why `dh_dispatch` is not used — see `src/app.cyr`.
 var crab_root = 0;
+# @public — the root widget of the frame just rendered, or 0. Exposed so the suite can assert the
+# TREE'S SHAPE, not just its contents.
+# ⛔ THAT DISTINCTION IS WHY THIS EXISTS. crab's overlay layer spent two releases stacked BELOW the
+# status line — the context menu and the rename sheet were laid out entirely off-screen — and every
+# assertion crab had about them was a STATE check (`crab_menu_list() != 0`,
+# `dh_list_selected(...) == n`), all of which pass for a widget positioned outside the window.
+var crab_shlst = 0;
+
+fn crab_hit_root(): i64 { return crab_root; }
+
+# @public — the rename/batch SHEET for the frame just rendered, or 0 if none was built.
+fn crab_sheet_widget(): i64 { return crab_shlst; }
 var crab_llst = 0;
 var crab_rlst = 0;
+# ⚠ The A/B strip, exposed for the SUITE — it has no caller in `src/` and is NOT hit-tested.
+# `crab_hit` walks only `crab_llst` / `crab_rlst`, deliberately: the strip is a display, and giving
+# it a pointer path means giving it its own hit function rather than widening the pane index.
+# ⛔ Set in `crab_pane` and cleared to 0 in `crab_render` before the panes are built, so it can
+# never outlive its frame or report a strip from a layout that is no longer on screen. That is the
+# same discipline `crab_mlst` follows — and the reason its own comment once claimed hit-testing it
+# never did.
+var crab_swlst = 0;
+# ⛔ THE PANE HEADERS, RECORDED FOR HIT-TESTING — and this one really is hit-tested, unlike the
+# strip above. Without them `crab_hit` walks a header click up to the root without ever meeting
+# `crab_llst` / `crab_rlst`, resolves to no pane, and returns 0: **clicking pane B's header did
+# nothing at all**, which is the last M1-M4 residue. The click path already intended this — its own
+# comment reads "clicking a pane focuses it, even off-row" — the header simply was not reachable.
+# ⚠ Set in `crab_pane` and cleared in `crab_render` before the panes are rebuilt, exactly as
+# `crab_llst` / `crab_swlst` are; a header pointer that outlived its frame would name arena memory
+# the next `dh_frame_begin` has already rewound.
+var crab_lhdr = 0;
+var crab_rhdr = 0;
 
 # Map a content-relative pointer position to crab's own model. -> 1 when it landed inside a pane.
 #   out16 + 0 : pane  (0 = left, 1 = right, -1 = none)
@@ -1249,6 +1542,20 @@ fn crab_pane_widget(which): i64 {
     return crab_llst;
 }
 
+# @public — the A/B strip for the frame just rendered, or 0 if none was built.
+fn crab_switcher_widget(): i64 { return crab_swlst; }
+
+# @public — pane `which`'s HEADER widget for the frame just rendered, or 0 if that pane was not
+# drawn. ⛔ THE ZERO MATTERS AS MUCH AS THE POINTER, exactly as it does for `crab_pane_widget`:
+# in solo mode only one pane is built, and a header pointer left over from a previous two-pane
+# frame names arena memory `dh_frame_begin` has already rewound. `crab_hit` compares by identity
+# during its parent walk, so a reused arena address would make it report a pane that is not on
+# screen — and that index reaches the write layer.
+fn crab_pane_header(which): i64 {
+    if (which == 1) { return crab_rhdr; }
+    return crab_lhdr;
+}
+
 fn crab_hit(x, y, out16): i64 {
     store64(out16, 0 - 1);
     store64(out16 + 8, 0 - 1);
@@ -1263,6 +1570,16 @@ fn crab_hit(x, y, out16): i64 {
     while (node != 0) {
         if (node == crab_llst) { pane = 0; }
         if (node == crab_rlst) { pane = 1; }
+        # ⛔ A HEADER RESOLVES TO ITS PANE WITH NO ROW, and the row staying -1 is what makes this
+        # safe rather than merely possible. The click path does `active_pane = hp` unconditionally
+        # and only touches the selection `if (hr >= 0)` — so a header click focuses the pane and
+        # moves nothing. A drop resolves to the pane, which is already the documented drop target
+        # ("the pane is the unambiguous target"), and a header is part of that pane.
+        # ⚠ In solo mode the drawn pane is ALREADY the active one, so this changes nothing there —
+        # including clicks on the A/B strip, which walk up through the header. It is the two-pane
+        # case, where pane B's header did nothing at all, that this fixes.
+        if (node == crab_lhdr) { pane = 0; }
+        if (node == crab_rhdr) { pane = 1; }
         if (pane >= 0) { store64(out16, pane); }
         if (pane >= 0) { node = 0; }
         else {
@@ -1578,6 +1895,7 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         dh_widget_add_child(layer, m);
         crab_mlst = m;
     } else { crab_mlst = 0; }
+    crab_shlst = 0;
     if (editopen != 0) {
         # ⚠ A SHEET, NOT A ROW-ALIGNED FIELD. Inline-over-the-row is what the canvas draws, but it
         # needs the row's laid-out rect, and the row is rebuilt after this runs. A pinned sheet is
@@ -1585,6 +1903,7 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         # at its small size.
         dh_widget_set_scrim(layer, 1);
         var sh = dh_sheet_new();
+        crab_shlst = sh;
         dh_widget_set_layout(sh, BOX_V);
         var lab = dh_widget_new(LABEL);
         dh_widget_set_pref(lab, 0, 20);
@@ -2563,7 +2882,14 @@ enum CrabRs {
     # view is a property of how the operator is reading, and two panes in different modes is a
     # display that cannot be reasoned about — they would have to remember which pane they toggled.
     CRAB_RS_VIEW     = 296;
-    CRAB_RS_SZ       = 304;
+    # ⭐ THE SIDEBAR. `SBOPEN` is the operator's WANT, not what fits — same discipline as the
+    # preview, so a window later resized wide enough shows it without a second keypress.
+    # ⚠ `PLACES` is a pointer to a model built in `app.cyr` and handed down; this file never asks
+    # the filesystem anything.
+    CRAB_RS_SBOPEN   = 304;
+    CRAB_RS_PLACES   = 312;
+    CRAB_RS_PLACEN   = 320;
+    CRAB_RS_SZ       = 328;
 }
 
 var crab_rs_rec = 0;
@@ -2671,6 +2997,15 @@ fn crab_rs_thumb(rs, pixels, state): i64 {
 # the frame. ⛔ The read that produces them lives in `app.cyr` (it needs a syscall); this file only
 # carries them, like the pane state, the tray and the dimensions.
 # @public — the view mode: `CRAB_VIEW_LIST` or `CRAB_VIEW_GRID`. Applies to both panes.
+# @public — the sidebar: the operator's want, plus the places model built in `app.cyr`.
+fn crab_rs_sidebar(rs, want, places, n): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_SBOPEN, want);
+    store64(rs + CRAB_RS_PLACES, places);
+    store64(rs + CRAB_RS_PLACEN, n);
+    return 1;
+}
+
 fn crab_rs_view(rs, view): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_VIEW, view);
@@ -2765,9 +3100,35 @@ fn crab_render(surf, font, rs): i64 {
     dh_frame_begin();
     var w = dh_surface_width(surf);
     var h = dh_surface_height(surf);
+    # ⛔⛔ A `NONE` ROOT WITH TWO FULL-WINDOW CHILDREN, AND THE OLD SHAPE WAS A SHIPPED BUG.
+    # This was a `BOX_V` root with the panes, the tray, the status line AND the overlay layer as
+    # flow siblings — so the layer was stacked AFTER the status line instead of over everything.
+    # Measured at 760x260: panes y=0 h=236, status y=236 h=22, **layer y=258** — two pixels of a
+    # 260 px window. The context menu placed inside it at a requested y=60 landed at **y=318**, and
+    # the rename/batch sheet with it. ⇒ **Neither has ever been visible.** Both shipped in 0.7.5.
+    # ⛔ dhancha's `overlay.cyr` states the precondition crab was violating, in as many words: an
+    # offset is measured from the layer's padded content origin, so "in a NONE root at (0,0) with
+    # pad 0 the layer's content origin IS (0,0) and an offset is a window coordinate. **Any other
+    # root, and the caller subtracts.**" crab passed window coordinates and did not subtract.
+    # ⇒ Rather than subtract — which would mean re-deriving the layer's flow position from its
+    # siblings' heights, the same duplicated-rule shape that made the tray's bar 0 px tall — crab
+    # now gives dhancha the root its contract describes. `content` carries the flow; the layer sits
+    # over it at (0,0); sibling order is z-order, and the layer is still last.
+    # ⛔ WHY NO GATE CAUGHT IT: every menu assertion crab had was a STATE check —
+    # `crab_menu_list() != 0`, `dh_list_selected(...) == n`. All of them pass on a widget positioned
+    # off-screen. `render_test`'s 53 PIXEL checks never open an overlay. *A state check cannot see a
+    # geometry bug*, which is the same lesson `render_test` exists for.
     var root = dh_widget_new(WINDOW);
-    dh_widget_set_layout(root, BOX_V);          # panes row on top, status line below
+    dh_widget_set_layout(root, NONE);
+    dh_widget_set_padding(root, 0);
     dh_widget_set_bg(root, dh_theme_bg());     # the desktop void
+
+    var content = dh_widget_new(BOX);
+    dh_widget_set_layout(content, BOX_V);       # panes row on top, status line below
+    dh_widget_set_pref(content, w, h);
+    dh_widget_set_offset(content, 0, 0);
+    dh_widget_set_bg(content, 0 - 1);
+    dh_widget_add_child(root, content);
 
     var panes = dh_widget_new(BOX);
     dh_widget_set_layout(panes, BOX_H);         # two columns side by side
@@ -2787,6 +3148,13 @@ fn crab_render(surf, font, rs): i64 {
     # here and the widget did not, and the bar lost every pixel it had.
     var trayh = crab_tray_h(opname, oprate);
     dh_widget_set_pref(panes, 0, h - 24 - trayh);   # reserve 24px for the status line, + the tray
+    # ⛔ CLEARED BEFORE THE PANES ARE BUILT, not after. A stale strip pointer from the previous frame
+    # would survive a layout that stopped building one — a window resized from solo to two panes —
+    # and report a widget the arena has already rewound.
+    crab_swlst = 0;
+    crab_lhdr = 0;
+    crab_rhdr = 0;
+    crab_sblst = 0;
     # ⭐⭐ ONE PANE OR TWO — the M4 ratification. See `crab_two_panes_fit`.
     # ⛔ IN SOLO MODE THE PANE THAT IS NOT SHOWN GETS NO WIDGETS AND ITS LIST POINTER STAYS 0, which
     # `crab_hit` relies on: it walks parents comparing against `crab_llst` / `crab_rlst`, and its
@@ -2801,6 +3169,21 @@ fn crab_render(surf, font, rs): i64 {
     var pvon = crab_preview_fit(w, pvwant);
     var availw = w;
     if (pvon == 1) { availw = w - CRAB_PV_W; }
+    # ⛔ THE SIDEBAR IS SUBTRACTED HERE, BEFORE THE TWO-PANE DECISION, for exactly the reason the
+    # preview is: every rule below is then asked about the width the PANES actually get, so none of
+    # them needs an "unless the sidebar is open" clause. ⚠ It is asked against `availw`, not `w`,
+    # so the sidebar and the preview compose — with both open the panes get what is left of both.
+    var sbwant = load64(rs + CRAB_RS_SBOPEN);
+    var sbon = crab_sidebar_fit(availw, sbwant);
+    if (sbon == 1) { availw = availw - CRAB_SB_W; }
+    # ⭐ THE SIDEBAR IS BUILT FIRST, so it is the FIRST child of `panes` and sits to the LEFT of
+    # everything — the panes and, beyond them, the preview. That mirrors the preview being the LAST
+    # child, and it means neither has to know the other exists.
+    # ⛔ AFTER `availw` IS SETTLED AND BEFORE THE PANES ARE BUILT. Built earlier it would be sized
+    # against a width no rule had agreed on yet; built later it would be the wrong child.
+    if (sbon == 1) {
+        crab_sblst = crab_sidebar(panes, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN));
+    }
     var twopanes = crab_two_panes_fit(availw);
     var panew = availw - CRAB_PANE_GAP;
     if (twopanes == 1) { panew = (availw - CRAB_PANE_GAP) / 2; }
@@ -2834,9 +3217,10 @@ fn crab_render(surf, font, rs): i64 {
         crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb,
           pvtstate, pvcam, pvshot);
     }
-    dh_widget_add_child(root, panes);
+    dh_widget_add_child(content, panes);
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
-    if (trayh > 0) { crab_tray(root, w, opname, opdone, optotal, oprate, opeta); }
+    # ⚠ `content`, not `root` — the flow lives there now; only the overlay layer sits on the root.
+    if (trayh > 0) { crab_tray(content, w, opname, opdone, optotal, oprate, opeta); }
     var status = dh_widget_new(LABEL);
     dh_widget_set_bg(status, dh_theme_panel());   # status line
     dh_widget_set_pref(status, 0, 22);
@@ -2845,7 +3229,7 @@ fn crab_render(surf, font, rs): i64 {
     # underneath a pending confirmation is how the wrong key gets pressed.
     if (crab_notice != 0) { dh_widget_set_text(status, crab_notice); }
     else { dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt)); }
-    dh_widget_add_child(root, status);
+    dh_widget_add_child(content, status);
 
     # ⭐ THE OVERLAY GOES LAST — after the status line and after everything else — because sibling
     # order IS z-order in both the paint and the hit-test. See `crab_overlay`.
@@ -2857,6 +3241,10 @@ fn crab_render(surf, font, rs): i64 {
         misdir = load8(mbuf + msel2 * CRAB_REC_SZ + CRAB_REC_TYPE);
         mname = mbuf + msel2 * CRAB_REC_SZ;
     }
+    # ⚠ Cleared here too: `crab_overlay` is not called at all when neither is open, so a pointer
+    # from a previous frame would otherwise survive into a layout that built no overlay.
+    crab_mlst = 0;
+    crab_shlst = 0;
     if ((menuopen != 0) || (editopen != 0)) {
         crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcnt, misdir,
           crab_mark_count(mmk, mcnt), mname, editopen, editlabel);

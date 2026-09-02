@@ -929,6 +929,67 @@ fn crab_fs_stat_size(path, plen, statbuf): i64 {
     return load64(statbuf + STAT_SIZE);
 }
 
+# =================================================================================================
+# M6 — PLACES. The sidebar's model, built HERE and not in the render path.
+# =================================================================================================
+#
+# ⛔⛔ ONLY THE BUILDER LIVES HERE. The record LAYOUT and its accessors are in `ui.cyr`, because the
+# render path must never call up into this file. `src/ui.cyr` is
+# included BY this file, and both `render_test.cyr` and the suite include `ui.cyr` ALONE — so a
+# sidebar that called `getenv` or `sys_stat` from `crab_sidebar` would compile through `main.cyr`
+# and leave `render_test` with undefined symbols. That has happened five times in this codebase.
+# ⇒ The model is built above and PASSED DOWN, exactly as the pane buffers are. `ui.cyr` renders
+# what it is handed and asks the filesystem nothing.
+#
+# ⭐ A PLACE IS ONLY LISTED IF IT ACTUALLY EXISTS. Every candidate below is stat'd, and one that is
+# not a directory is dropped. A sidebar that lists `Downloads` on a machine that has never had one
+# is a row that does nothing, and the operator cannot tell it apart from a row that is broken.
+# ⚠ `HOME` is read once from the environment. On agnos the compositor spawns crab, so the
+# environment is whatever it staged — an absent `HOME` simply yields fewer places, never a crash.
+# Append one place if `path` stats as a directory. -> the new count.
+fn crab_place_add(dst, n, label, path, statbuf): i64 {
+    if (n >= CRAB_PLACES_MAX) { return n; }
+    if (path == 0) { return n; }
+    if (load8(path) == 0) { return n; }
+    var pl = crab_cstr_len(path, CRAB_PATH_MAX);
+    if (pl < 0) { return n; }
+    if (crab_fs_isdir(path, pl, statbuf) == 0) { return n; }
+    var rec = dst + n * CRAB_PLACE_SZ;
+    crab_strcpy_n(rec + CRAB_PLACE_LABEL, label, CRAB_NAME_MAX);
+    crab_strcpy_n(rec + CRAB_PLACE_PATH, path, CRAB_PATH_MAX);
+    return n + 1;
+}
+
+# @public — fill `dst` (CRAB_PLACES_MAX * CRAB_PLACE_SZ bytes) with the places that exist.
+# -> how many were written.
+#
+# ⚠ ORDER IS FIXED AND MEANINGFUL: Home first because it is where an operator starts, then the
+# well-known subdirectories in the order a desktop lists them, then Root last because it is the
+# escape hatch rather than a destination. A sidebar whose rows move between runs is one nobody can
+# build muscle memory against.
+fn crab_places_build(dst, scr, statbuf): i64 {
+    var n = 0;
+    var home = getenv("HOME");
+    n = crab_place_add(dst, n, "Home", home, statbuf);
+    if (home != 0) {
+        if (load8(home) != 0) {
+            n = crab_places_sub(dst, n, home, "Desktop", scr, statbuf);
+            n = crab_places_sub(dst, n, home, "Documents", scr, statbuf);
+            n = crab_places_sub(dst, n, home, "Downloads", scr, statbuf);
+            n = crab_places_sub(dst, n, home, "Pictures", scr, statbuf);
+            n = crab_places_sub(dst, n, home, "Music", scr, statbuf);
+        }
+    }
+    n = crab_place_add(dst, n, "Root", "/", statbuf);
+    return n;
+}
+
+# Join `home`/`name` into `scr` and add it if it exists. -> the new count.
+fn crab_places_sub(dst, n, home, name, scr, statbuf): i64 {
+    if (crab_fs_path(scr, home, name) < 0) { return n; }
+    return crab_place_add(dst, n, name, scr, statbuf);
+}
+
 # @public — is `path` a directory? 1 = yes, 0 = no or unstattable.
 #
 # ⛔ ASKED OF THE PATH, NOT OF A readdir RECORD, AND THAT IS THE POINT. Every other "is it a folder"

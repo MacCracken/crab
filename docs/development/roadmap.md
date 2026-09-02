@@ -126,8 +126,7 @@ each cut**; do not trust the headings.
 These are the only parts of M1–M4 that are not done. They are here so collapsing those sections did
 not quietly lose them; each is carried in a batch above.
 
-- **Focusing a pane by its HEADER.** The header is a sibling of the list, not inside it, so
-  `crab_hit` resolves a header click to no pane. Clicking a *row* focuses correctly.
+- ✅ **Focusing a pane by its HEADER — CLOSED (M6).** `crab_hit` now matches the recorded headers.
 - **The keycode confusion spans three repos and one number.** aethersafha forwards
   `bhumi_key_usage(ev)` — an **HID usage** — while dhancha's `DhKey` constants are evdev. puka
   already pays the toll explicitly (`setuwin__hid_to_evdev` exists for exactly this). crab reads raw
@@ -228,34 +227,38 @@ not quietly lose them; each is carried in a batch above.
 ⛔ **BOTH of this milestone's dhancha gates were re-derived FALSE.** Nothing here waits on the
 toolkit; see the gate table below for what each turned out to be.
 
-- **Sidebar** — PLACES / SMART FOLDERS / TAGS / VOLUMES with capacity bars. **PLACES is buildable
-  today**: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers the
-  keyboard steps over, `PROGRESS` gives capacity bars, padding gives indent.
-  ⛔ **Give the sidebar its OWN hit function.** `crab_hit` returns a 0/1 pane index that reaches the
-  write layer — `crab_drag_targets` rejects only negatives and same-pane, so a drop onto a widened
-  pane index would execute a real `crab_fs_move`. Never widen the pane index.
-  ⚠ **It must be a toggle.** At the 380 px default, any sidebar wider than ~77 px drops the panes
-  from three columns to two and the MODIFIED column disappears. Two panes plus a 150 px sidebar
-  needs ~750 px; add the preview and it needs ~900. Subtract the sidebar before consulting
-  `crab_preview_fit`.
-  ⚠ **There is no left/right drawer to build.** `DhPin` has BOTTOM / TOP / CENTER only, and
-  BOTTOM/TOP are full-bleed. The small-window story needs a different answer.
-  ⚠ SMART FOLDERS and TAGS need M7's index. VOLUMES is gate-bound — see the table.
-- **The A/B view switcher, then the menu bar** (1c: File · Edit · Go · Tags · Index · Window), both
-  on dhancha 0.9.26's `dh_list_new_h`. ⭐ **Ship the switcher first** — `active_pane` already *is*
-  the selected index, so it needs no new model state, and the menu bar is several times the work.
-  ⚠ Keep it inside the pane header's existing 28 px band; a new root child steals rows at 220 px.
+- ✅ **Sidebar, PLACES — SHIPPED**, on `b`. Home + the well-known subdirectories that actually
+  exist + Root, each stat-checked so no row goes nowhere. Built once at startup, not per frame.
+  ⛔ **Its own hit function** (`crab_sidebar_hit`), returning a PLACE index — never the pane index
+  the write layer trusts. The click path asks it first, so a sidebar coordinate never reaches
+  `crab_hit`. ⚠ The width rule is `crab_preview_fit`'s shape with `CRAB_SB_W`, subtracted before the
+  two-pane decision so nothing needs an "unless the sidebar is open" clause.
+  ⚠ **SMART FOLDERS and TAGS need M7's index.** VOLUMES is below.
+- **Sidebar VOLUMES + capacity bars** — ⭐ *capacity* is unblocked: cyrius 6.5.37 shipped
+  `sys_statfs` and crab vendors it. ⛔ **Enumeration is filed upstream (2026-09-02)** —
+  `agnos/docs/development/issues/2026-09-02-no-way-to-enumerate-mounts.md`.
+  ⭐⭐ **AND THE ASK TURNED OUT TO BE TINY**: agnos already keeps a `{prefix → backend}` mount table
+  (`kernel/core/vfs.cyr:373-376`, filled on every boot from `main.cyr:922`). Ring 3 simply has no
+  getter for it, so this is *expose what exists*, not *build a mount table*.
+  ⚠ **crab could ship a probe today and deliberately does not**: the mount namespace is three fixed
+  prefixes (`/`, `/mnt/fat`, `/mnt/exfat`) and `statfs` validates its path, so probing those three
+  constants works. It hardcodes agnos's namespace into crab's binary, it cannot enumerate — only
+  confirm strings crab already guessed — and it cannot see the aliasing that lists one volume twice
+  when ext2 is absent. ⇒ **VOLUMES is absent rather than approximated.** Nothing in crab waits on a
+  reply. ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #23.*
+- **The menu bar** (1c: File · Edit · Go · Tags · Index · Window), on the same `dh_list_new_h`.
+  Several times the switcher's work: it needs the drop-down, the model for six menus, and a pointer
+  path the switcher deliberately did without.
 - **The 🦀 menu** (canvas turn 2) — the mascot's chevron menu, light and dark, collapsed and revealed.
-- **The 🦀 mascot line.** `docs/development/mascot.md` asks for one quiet home, the status bar:
-  long idle → `Bueller…` · pause · `Bueller…` · pause · `Bueller…?`, plus `crab --about` closing on
-  `…anyone? …anyone?`. ⚠ **There is no unconditional per-tick redraw to ride** — every idle-path
-  `crab_render` fires only on change, deliberately, so this needs its own branch and an `idle_since`
-  reset on every handled event. Gate it on there being no notice: the status line is single-slot and
-  a mascot must never displace `delete this FOLDER and everything in it? y = yes`.
-  ⛔ Discipline, from the mascot doc: **subtle and infrequent.** "The whole thing dies if it's trying
-  too hard."
-- **Focusing a pane by its HEADER** — the last M1–M4 residue. The header is a sibling of the list, so
-  `crab_hit` resolves a header click to no pane; clicking a row is correct.
+- ✅ **The 🦀 mascot line — SHIPPED.** After a minute of silence the status bar deadpans
+  `Bueller...` · pause · `Bueller...` · pause · `Bueller...?`, then goes quiet until the operator
+  touches something. ⛔ Its own idle branch (there is no unconditional per-tick redraw to ride) and
+  it renders on a stage TRANSITION only — at most four frames. ⛔ It never displaces a real notice.
+  ⚠ `crab --about` closing on `...anyone? ...anyone?` still wants a flag surface; crab parses
+  positional paths only.
+- ✅ **Focusing a pane by its HEADER — SHIPPED.** The last M1–M4 residue. Headers are recorded per
+  frame and matched in `crab_hit`'s parent walk, reporting the pane with **no row** — which is what
+  keeps the selection and the write layer untouched.
 - **Give the held-key repeat rate a number.** `[0.6.1]` recorded ~1 repeat per 1.6 s hold against
   ~20 expected as a hypothesis and never measured it. It is agnos-runtime behaviour, so it needs the
   on-target harness.

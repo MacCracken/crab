@@ -16,6 +16,201 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > ⚠ `VERSION` still reads **0.7.7** and nothing is committed or tagged — the operator drives all of
 > that, including which number this becomes.
 
+### Added — the A/B view switcher (M6), and dhancha 0.9.26's horizontal LIST gets its first consumer
+
+⭐ At the shipped **380x220** default crab is **always solo** — `crab_two_panes_fit` needs 600 px —
+so the only signal that a second pane exists at all was the `A `/`B ` text prefix on the header. It
+is now a real strip: two cells, the current one highlighted **by dhancha**, with the pane's path
+beside it in the same 28 px band.
+
+⛔⛔ **THE STRIP IS A TOOLKIT KIND BECAUSE OF ADR 0001, NOT FOR CONVENIENCE.** A row of items with
+the current one highlighted, composed from a `BOX_H` of labels, makes the APP paint that highlight —
+which means crab naming `accent`, which ADR 0001 forbids. `dh_list_new_h` + `dh_list_select` put it
+back in the toolkit where the theme lives. That is the entire reason dhancha 0.9.26 added the kind,
+and **this is its first consumer anywhere** — it shipped consumed by nobody.
+
+⭐ **`active_pane` ALREADY IS THE SELECTED INDEX** (0 = left = A, 1 = right = B), so the widget
+carries no model state of its own and cannot drift out of step with the pane it labels: there is
+only one number. No new key binding either — Left/Right and `h`/`l` already move it.
+
+⛔ **SOLO ONLY.** Two panes side by side distinguish themselves by POSITION; a strip in each of two
+headers would be redundant and would beg which one is authoritative. The switcher exists for the
+case with no other signal.
+
+⚠ **IT IS A DISPLAY, NOT A CONTROL, AND THAT IS DELIBERATE.** `crab_hit` walks parents against
+exactly `crab_llst` / `crab_rlst` and returns a 0/1 pane index **that reaches the write layer** —
+`crab_drag_targets` rejects only negatives and same-pane, so a drop resolved against a widened index
+would execute a real `crab_fs_move`. Making the strip clickable means giving it its own hit
+function; that is a separate change.
+
+⚠ **The fit rule is DERIVED, not picked** — the same discipline behind `crab_two_panes_fit`'s 600 and
+the preview's 303. `crab_switcher_fit` needs the strip's 40 px plus `CRAB_COL_NAME_MIN` (90 px, ten
+characters — crab's existing number for "enough to tell things apart"), so below **130 px** the strip
+is refused and the header falls back to the text prefix, which costs 3 characters instead of 40 px.
+⚠ It stays **inside the header's existing 28 px band** rather than becoming a new root child: at
+220 px every row is contended, and a strip above the panes would take one from the listing to say
+what the header can already say.
+
+### Testing
+
+⛔ **A NEW RENDER-PATH BRANCH WITHOUT A ZERO-ALLOCATION ARM IS A NEW BLIND SPOT, NOT A COVERED
+FEATURE** — the rule 0.7.6 learned when `crab_overlay` leaked 32 B per frame for three cuts because
+the gate's fixture never opened an overlay. The strip gets its own arm: twenty frames with it on
+screen, plus a non-vacuity assertion that the branch was really entered.
+⚠ **Mutation-proven, both ways**: selecting a hardcoded cell instead of `which` fails 1 assertion,
+and a single `alloc(32)` inside the strip fails the arm at **640 bytes** — 32 × 20 frames, the exact
+shape of the leak that shipped in 0.7.5.
+Also covered: the fit rule at its floor and one pixel under, both panes selecting their own cell,
+**no** strip in two-pane mode, and the text-prefix fallback still working when the window is narrow.
+
+### Fixed — ⛔⛔ THE CONTEXT MENU AND THE RENAME SHEET HAVE NEVER BEEN VISIBLE
+
+Both shipped in **0.7.5**. Neither has ever been drawn on screen. Measured at 760x260 with the menu
+open at a requested `(40, 60)`:
+
+| root child | y | h |
+|---|---|---|
+| panes | 0 | 236 |
+| status line | 236 | 22 |
+| **overlay layer** | **258** | 260 |
+
+Two pixels of a 260 px window. The menu placed inside it landed at **y=318, bottom 475** — entirely
+below the window. The sheet with it.
+
+⛔ **THE CAUSE IS ONE WORD IN dhancha's CONTRACT THAT crab DID NOT HONOUR.** `overlay.cyr`'s header
+says it outright: an offset is measured from the layer's padded content origin, so *"in a NONE root
+at (0,0) with pad 0 the layer's content origin IS (0,0) and an offset is a window coordinate. **Any
+other root, and the caller subtracts.**"* crab's root was a `BOX_V` and crab passed window
+coordinates without subtracting — so the layer was **stacked after the status line** instead of
+layered over everything.
+⇒ Fixed by giving dhancha the root its contract describes: a `NONE` root holding a full-window
+`content` box (which carries the panes, tray and status flow) and the overlay layer, both at (0,0),
+layer last so sibling order is still z-order. ⚠ *Not* by subtracting — that would mean re-deriving
+the layer's flow position from its siblings' heights, which is the same duplicated-rule shape that
+left the tray's progress bar 0 px tall.
+
+⛔⛔ **WHY NOTHING CAUGHT IT, AND THIS IS THE PART WORTH KEEPING.** Every assertion crab had about
+the menu was a **state** check — `crab_menu_list() != 0`, `dh_list_selected(...) == n`,
+`dh_list_count(...) == 7`. **All of them pass for a widget positioned entirely off-screen**, and all
+of them did. `render_test`'s 53 pixel checks never open an overlay. The 0.7.7 menu-highlight fix was
+written against this same blind spot: it corrected *which row* was selected in a menu nobody could
+see. ⇒ **A state check cannot see a geometry bug.** `t_overlay_geometry` now asserts the root's
+shape and that both overlays are fully inside the window; the mutation restoring the `BOX_V` root
+fails **8** assertions, including `got 318, expected 60`.
+
+### Added — 🦀 Bueller has a voice (M6)
+
+`docs/development/mascot.md` carried an explicit *"Easter egg — implementation TODO"* since before
+0.5.0. After a full minute of nothing, the status bar deadpans the absentee roll-call:
+`Bueller...` · pause · `Bueller...` · pause · `Bueller...?` — and then **goes quiet for good** until
+the operator touches something.
+
+⛔⛔ **THE DISCIPLINE IS THE FEATURE, NOT A CONSTRAINT ON IT.** The mascot doc says *"subtle and
+infrequent… the whole thing dies if it's trying too hard"*, and that is a rule about the code. He
+speaks four times in the eight seconds after a minute of silence and never repeats on his own. The
+pauses are part of it: a line that simply sat there would be a status, not a joke.
+
+⛔⛔ **HE NEVER DISPLACES A REAL MESSAGE.** The status line is a **single slot with many writers**,
+and the notice channel carries `delete this FOLDER and everything in it? y = yes`. A mascot that
+overwrote a destructive confirmation would be the worst bug in the app, so `notice_present` is the
+first thing `crab_mascot_stage` checks and the event loop only ever clears a line it wrote itself —
+compared by pointer identity, which is why the text is a **literal**: `crab_set_notice` stores the
+pointer without copying, so an arena-allocated line would be freed under the status bar by the next
+`dh_frame_begin`.
+
+⛔ **IT NEEDED ITS OWN IDLE BRANCH, because there is no unconditional per-tick redraw to ride.**
+Every other idle-path `crab_render` fires only when it did work — the tray when a step moved bytes,
+the gallery when a picture landed — deliberately, so the idle loop does not become a busy loop
+drawing the same frame. The mascot renders **on a stage transition only**: at most four frames, then
+nothing. ⚠ *Any* event resets the clock, not just a keypress — pointer motion, a resize and a scroll
+are all the operator being present.
+
+⚠ **`crab_mascot_stage` is a pure function of elapsed time**, so the whole sequence is interrogable
+without a clock and the event loop's only job is to notice when the answer changes. Twenty-one
+assertions cover every beat. Mutation-proven: letting him speak over a notice fails 3, letting the
+closer stick fails 4, and removing the pauses fails 3.
+
+### Added — the PLACES sidebar (M6), on `b`
+
+⛔⛔ **NO dhancha GATE, AND THERE NEVER WAS ONE.** The roadmap carried *"Gate: dhancha TREE widget"*
+for this; it was the **fifth false gate**. `LIST` gives scroll, selection and a toolkit-painted
+highlight, `DH_FLAG_INERT` gives a section header the keyboard steps over, and padding gives indent.
+Nothing was missing — the sidebar was buildable the whole time.
+
+⭐ **A PLACE IS ONLY LISTED IF IT EXISTS.** Home, then the well-known subdirectories in the order a
+desktop lists them, then Root last — every candidate stat'd, non-directories dropped. A sidebar
+listing `Downloads` on a machine that never had one is a row that does nothing, and the operator
+cannot tell it apart from a row that is broken.
+⚠ Built **once at startup**, not per frame: it stats up to six paths, and doing that on the render
+path would put six syscalls on every keystroke — the exact cost the deferred-statting work exists to
+keep off it. The trade is that a `Downloads` created while crab runs is not noticed; that belongs on
+a refresh key, not on the frame.
+
+⛔⛔ **THE SIDEBAR HAS ITS OWN HIT FUNCTION, AND THAT IS THE MOST LOAD-BEARING DECISION HERE.**
+`crab_hit` returns a **0/1 pane index that reaches the write layer** — `crab_drag_targets` rejects
+only negatives and same-pane, so putting a third surface behind that number is one drop away from
+moving a real file. `crab_sidebar_hit` returns a **place** index and shares no vocabulary with it,
+and the click path asks it **first**, so a sidebar coordinate never reaches `crab_hit` at all. Both
+directions are asserted: a click on a place reports **no pane**, and a click in a pane is **not** a
+place.
+
+⛔ **THE MODEL IS BUILT IN `app.cyr` AND PASSED DOWN, AND THE SPLIT WAS VERY NEARLY A SIXTH
+LAYERING VIOLATION.** `src/ui.cyr` is included BY `app.cyr`, and `render_test` includes `ui.cyr`
+alone — so the render path may not call `getenv` or `stat`. The first cut put the record accessors
+upstairs with the builder; it compiled through `main.cyr` and would have left `render_test` with
+undefined symbols the moment the sidebar became reachable. ⇒ **The record layout and its accessors
+are shared vocabulary and live at the bottom; only `crab_places_build`, which needs the filesystem,
+lives in `app.cyr`.**
+
+⚠ **The width rule is the preview's, with a different constant.** The sidebar is subtracted from the
+window *before* the two-pane decision, so `crab_two_panes_fit` and `crab_cols_for_width` are asked
+about the width the panes actually get and **no rule needs an "unless the sidebar is open" clause**.
+It composes with the preview for free — with both open the panes get what is left of both — and
+opening it can legitimately collapse two panes into one, which is the ratified small-window rule
+answering a narrower pane area rather than a second behaviour.
+⚠ `CRAB_SB_W` is `CRAB_COL_NAME_MIN` — ten characters, crab's own floor for a legible label, and
+every place name it can produce is shorter than that. ⚠ Off by default, and `b` refuses out loud on
+a window too narrow, storing the WANT so a later resize shows it without a second keypress.
+
+### Testing
+
+Twenty-four assertions, including a **zero-allocation arm** — a new render-path branch without one
+is a new blind spot, not a covered feature. Mutation-proven three ways: a non-inert section header
+fails 2, a `crab_sidebar_hit` that forgets the header offset fails 4, and a places model that stops
+stat-checking fails 2. Also asserted: the widget is cleared when a frame builds none, and
+hit-testing then refuses rather than walking a dead tree.
+
+### Fixed — clicking a pane's HEADER focuses it (M6; the last M1–M4 residue)
+
+`crab_hit` walked a click up the tree looking for `crab_llst` / `crab_rlst`, so a click on a pane's
+header bar met neither, resolved to no pane, and returned 0 — **clicking pane B's header did nothing
+at all**. The click path had always intended otherwise; its own comment reads *"clicking a pane
+focuses it, even off-row"*. The header simply was not reachable. Headers are now recorded per frame
+and matched in that walk.
+
+⛔ **THE ROW STAYING `-1` IS WHAT MAKES IT SAFE**, not merely possible. The click path does
+`active_pane = hp` unconditionally and only touches the selection `if (hr >= 0)`, so a header click
+focuses and moves nothing. A drop resolves to the pane, which is already the documented drop target
+(*"the pane is the unambiguous target"*) and a header is part of that pane. Scroll guards the index.
+All three consumers of that index — and it **reaches the write layer** — were checked before widening.
+
+⛔⛔ **THE TEST THAT SHOULD HAVE CAUGHT THIS WAS DEFENDING IT, AND A SECOND ERROR HID THE FIRST.**
+The suite asserted `crab_hit(lx, r0y - 26) == 0` under the heading *"a click on the NAME/SIZE header
+is not in a pane"*. Measured: `r0y` is **46**, so `r0y - 26` is **25** — inside the **pane header
+bar** (0–28), not the column header (28–46). So it pinned the residue as if it were intent, *and*
+the column header it named was never covered by anything. ⇒ **A test whose coordinate and whose
+description disagree defends the bug and leaves the real case untested.** Both are now asserted, at
+coordinates verified against the laid-out tree.
+
+⛔ **AND A SECOND GAP THE FIRST MUTATION MISSED.** Removing the header arms failed 4 assertions, but
+removing the *per-frame clear* passed everything — so the slots got an accessor and their own test.
+In solo mode only one pane is built, and a header pointer left from a previous two-pane frame names
+arena memory `dh_frame_begin` has rewound; `crab_hit` compares by identity and the arena reuses
+addresses, so it can match an unrelated widget and report a pane that is not on screen. With the
+clear removed the assertion now reports a live stale pointer (`140580738836688`) instead of 0.
+`crab_pane_header` mirrors `crab_pane_widget`, whose own docs already say the zero is what
+`crab_hit` relies on.
+
 ### Changed — the declared graph moves to rekha 0.3.6 and dhancha 0.9.27
 
 ⛔⛔ **THE UPSTREAM HALF OF THE PROPORTIONAL-TEXT GATE IS CLOSED, AND THE GATE WAS MIS-AIMED.**

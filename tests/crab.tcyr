@@ -982,15 +982,59 @@ fn main() {
     assert_eq(load64(hb), 1, "...and reports the RIGHT pane");
     assert_eq(crab_hit(lx, r1y, hb), 1, "a click one row down lands");
     assert_eq(load64(hb + 8), 1, "...and reports row 1 — the rows are distinguished, not lumped");
-    # ⛔ THE COLUMN HEADER IS NOT A ROW. It sits outside the LIST precisely so it cannot be selected;
-    # a click on "NAME" that selected a file would act on a file the operator never pointed at — the
-    # same class of defect as the status-line check below.
-    assert_eq(crab_hit(lx, r0y - 26, hb), 0, "a click on the NAME/SIZE header is not in a pane");
+    # ⛔⛔ THIS BLOCK ASSERTED THE WRONG THING AT THE WRONG COORDINATE, AND THE TWO ERRORS HID EACH
+    # OTHER. It read `crab_hit(lx, r0y - 26) == 0` under the heading "a click on the NAME/SIZE
+    # header is not in a pane" — but `r0y` is 46 and `r0y - 26` is **25**, which is inside the
+    # PANE HEADER BAR (0..28), not the column header (28..46). So it pinned the pane header
+    # returning "no pane" — the M1-M4 residue, encoded as if it were intent — while the column
+    # header it named was never covered by anything. ⇒ **A test whose coordinate and whose
+    # description disagree defends the bug and leaves the real case untested.**
+
+    # ---- the PANE HEADER BAR focuses its pane, and selects nothing --------------------------
+    # ⭐ This is the residue closed: clicking pane B's header used to do nothing at all.
+    assert_eq(crab_hit(lx, 21, hb), 1, "a click on the pane's HEADER BAR lands in that pane");
+    assert_eq(load64(hb), 0, "...the LEFT pane");
+    # ⛔ AND REPORTS NO ROW, which is what makes it safe. The click path does `active_pane = hp`
+    # unconditionally and only touches the selection `if (hr >= 0)`, so a header click focuses and
+    # moves nothing. A row index here would select a file the operator never pointed at.
+    assert_eq(load64(hb + 8), 0 - 1, "...and reports NO ROW");
+    assert_eq(crab_hit(rx2, 21, hb), 1, "the right pane's header bar lands too");
+    assert_eq(load64(hb), 1, "...and reports the RIGHT pane — the two are distinguished");
+    assert_eq(load64(hb + 8), 0 - 1, "...still with no row");
+
+    # ---- the NAME/SIZE COLUMN header, which nothing tested before ---------------------------
+    # ⛔ IT IS NOT A ROW. It sits outside the LIST precisely so it cannot be selected; a click on
+    # "NAME" that selected a file would act on a file the operator never pointed at.
+    # ⚠ Measured: the column header band is 28..46 with row 0 starting at 46.
+    assert_eq(crab_hit(lx, 37, hb), 0, "a click on the NAME/SIZE column header is not in a pane");
     assert_eq(load64(hb + 8), 0 - 1, "...and reports no row");
+    assert_eq(load64(hb), 0 - 1, "...and no pane");
     # ⛔ THE STATUS LINE IS NOT A PANE. It owns the bottom of the window; a click there that reported
     # a row would select a file the operator never pointed at.
     assert_eq(crab_hit(lx, 220 - 6, hb), 0, "a click on the status line is not in a pane");
     assert_eq(load64(hb), 0 - 1, "...and reports no pane");
+
+    # ---- ⛔ A HEADER FROM A PREVIOUS LAYOUT MUST NOT SURVIVE INTO THIS ONE -------------------
+    # Both headers exist right now, because both panes were drawn.
+    assert(crab_pane_header(0) != 0, "the left pane's header was recorded");
+    assert(crab_pane_header(1) != 0, "...and the right pane's");
+    # ⚠ THIS RUNS LAST IN THE SECTION ON PURPOSE: it re-renders at 380 px, which rebuilds the tree
+    # and invalidates `lx` / `rx2` / `r0y` above. Placed earlier, every assertion after it would
+    # silently be probing a different layout than the one it was written against.
+    # Re-render SOLO: only pane 0 is built, so pane 1's header must be cleared, not stale.
+    # ⛔ `crab_hit` compares by IDENTITY during its parent walk, and the arena reuses addresses —
+    # so a leftover pointer can be matched by an unrelated widget that happens to land there, and
+    # report a pane that is not on screen. That index reaches the write layer.
+    var ssf = dh_surface_new(380, 220);
+    store64(hsl, 0); store64(hsr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, hl, 3, "/bin", hlz, hlm, CRAB_PANE_OK, 0, 0, hsl);
+    crab_rs_pane(rs, 1, hrr, 3, "/", hrz, hrm, CRAB_PANE_OK, 0, 0, hsr);
+    crab_render(ssf, 0, rs);
+    assert_eq(crab_two_panes_fit(380), 0, "380 px draws one pane");
+    assert(crab_pane_header(0) != 0, "...the drawn pane still has its header");
+    assert_eq(crab_pane_header(1), 0, "...and the pane that was NOT drawn reports 0, not a stale pointer");
+    assert_eq(crab_pane_widget(1), 0, "...matching how the pane LIST already behaves");
 
     # --- M3 #33: SORTING -------------------------------------------------------------------------
     # ⛔ The pane rendered raw readdir order — ON-DISK order. Everything here is the replacement.
@@ -2352,6 +2396,10 @@ fn main() {
     t_transfer_plan();
     t_menu_highlight();
     t_tray_height();
+    t_switcher();
+    t_sidebar();
+    t_mascot();
+    t_overlay_geometry();
 
     # ================================================================================
     test_group("crab — M5: the render-state record, and the defaults it owns");
@@ -3751,6 +3799,365 @@ fn t_dir_transfer(): i64 {
     crab_fs_delete("build/m4isdir", "adir", 1, sc1);
     crab_fs_delete("build", "m4isdir", 1, sc1);
     crab_fs_delete("build", "m4isdir2", 1, sc1);
+    return 0;
+}
+
+fn t_overlay_geometry(): i64 {
+    test_group("crab — 0.8.0: the overlay is ON the window, not below it");
+    # ⛔⛆ THIS GROUP EXISTS BECAUSE TWO SHIPPED FEATURES WERE INVISIBLE FOR TWO RELEASES AND EVERY
+    # TEST PASSED. The root was a `BOX_V` with the overlay layer as a FLOW SIBLING after the status
+    # line, so at 760x260 it landed at y=258 — two pixels of window — and the context menu placed
+    # inside it at a requested y=60 was laid out at **y=318**. The rename/batch sheet with it.
+    # ⇒ Every assertion crab had was a STATE check: `crab_menu_list() != 0`,
+    # `dh_list_selected(...) == n`, `dh_list_count(...) == 7`. **All of them pass for a widget
+    # positioned entirely off-screen.** A state check cannot see a geometry bug.
+    var rs = crab_rs();
+    var ob = alloc(8 * CRAB_REC_SZ);
+    t_entry(ob, 0, "boot", 1);
+    t_entry(ob, 1, "notes.txt", 0);
+    var oz = alloc(8 * 8); var om = alloc(8 * 8);
+    var oi = 0;
+    while (oi < 8) { store64(oz + oi * 8, 512); store64(om + oi * 8, 1788136000); oi = oi + 1; }
+    var osl = alloc(8); store64(osl, 0);
+    var osr = alloc(8); store64(osr, 0);
+    var orb = alloc(8 * CRAB_REC_SZ);
+    t_entry(orb, 0, "etc", 1);
+    var OW = 760;
+    var OH = 260;
+    var osurf = dh_surface_new(OW, OH);
+
+    # ---- the ROOT's shape: two full-window children, overlapping, layer LAST ---------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, ob, 2, "/bin", oz, om, CRAB_PANE_OK, 0, 0, osl);
+    crab_rs_pane(rs, 1, orb, 1, "/etc", oz, om, CRAB_PANE_OK, 0, 0, osr);
+    crab_rs_chrome(rs, 0, 1, 40, 60, 0, 0, 0);          # the context menu, OPEN at (40, 60)
+    crab_render(osurf, 0, rs);
+    var rt = crab_hit_root();
+    assert(rt != 0, "the root was recorded");
+    var c0 = dh_widget_first_child(rt);
+    var c1 = dh_widget_next_sibling(c0);
+    assert(c1 != 0, "the root has a content child AND an overlay layer");
+    assert_eq(dh_widget_next_sibling(c1), 0, "...and exactly those two");
+    # ⛔ BOTH AT THE ORIGIN, BOTH FULL HEIGHT. Stacked instead of overlapping is the bug.
+    assert_eq(dh_widget_y(c0), 0, "the content box starts at the top");
+    assert_eq(dh_widget_y(c1), 0, "...and so does the overlay layer — they OVERLAP");
+    assert_eq(dh_widget_h(c1), OH, "the layer is the full window height");
+    # ⚠ Sibling order IS z-order in both the paint and the hit-test, so the layer must be last.
+    var lastc = c0;
+    var wk = c0;
+    while (wk != 0) { lastc = wk; wk = dh_widget_next_sibling(wk); }
+    assert_eq(c1, lastc, "the layer is the LAST child — z-order is sibling order in paint AND hit-test");
+
+    # ---- THE MENU IS WHERE IT WAS ASKED FOR, AND INSIDE THE WINDOW ------------------------------
+    var mw = crab_menu_list();
+    assert(mw != 0, "the menu was built");
+    assert_eq(dh_widget_y(mw), 60, "...at the y it was placed at — NOT pushed below the content");
+    assert_eq(dh_widget_x(mw), 40, "...and the x");
+    assert(dh_widget_h(mw) > 0, "...with a real height");
+    # ⛔ THE ASSERTION THAT WOULD HAVE CAUGHT IT: fully inside the window.
+    assert(dh_widget_y(mw) >= 0, "the menu's top is on screen");
+    assert(dh_widget_y(mw) + dh_widget_h(mw) <= OH, "...and so is its bottom");
+    assert(dh_widget_x(mw) + dh_widget_w(mw) <= OW, "...and its right edge");
+
+    # ---- THE SHEET, WHICH HAD THE SAME BUG -------------------------------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, ob, 2, "/bin", oz, om, CRAB_PANE_OK, 0, 0, osl);
+    crab_rs_pane(rs, 1, orb, 1, "/etc", oz, om, CRAB_PANE_OK, 0, 0, osr);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 1, "Rename");     # the rename SHEET, open
+    crab_render(osurf, 0, rs);
+    var shw = crab_sheet_widget();
+    assert(shw != 0, "the sheet was built");
+    assert(dh_widget_y(shw) >= 0, "the sheet's top is on screen");
+    assert(dh_widget_y(shw) + dh_widget_h(shw) <= OH, "...and its bottom — it was off-screen too");
+    assert(dh_widget_h(shw) > 0, "...and it has a real height");
+
+    # ---- and neither survives a frame that builds no overlay -------------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, ob, 2, "/bin", oz, om, CRAB_PANE_OK, 0, 0, osl);
+    crab_rs_pane(rs, 1, orb, 1, "/etc", oz, om, CRAB_PANE_OK, 0, 0, osr);
+    crab_render(osurf, 0, rs);
+    assert_eq(crab_menu_list(), 0, "a frame with no menu reports none");
+    assert_eq(crab_sheet_widget(), 0, "...and no sheet");
+    return 0;
+}
+
+fn t_mascot(): i64 {
+    test_group("crab — M6: 🦀 Bueller, and the discipline that keeps him quiet");
+    var I = CRAB_MASCOT_IDLE_MS;
+    var B = CRAB_MASCOT_BEAT_MS;
+
+    # ---- ⛔ HE NEVER SPEAKS OVER A REAL MESSAGE. The status line is a SINGLE SLOT, and the notice
+    # channel carries `delete this FOLDER and everything in it? y = yes`. This is the first check
+    # because it is the one whose failure would be the worst bug in the app.
+    assert_eq(crab_mascot_stage(I + B * 4, 1), 0, "a notice present -> silence, even at the last beat");
+    assert_eq(crab_mascot_stage(I, 1), 0, "...and at the first");
+    assert_eq(crab_mascot_stage(I * 100, 1), 0, "...and after an hour");
+
+    # ---- silence until a full minute of nothing --------------------------------------------------
+    assert_eq(crab_mascot_stage(0, 0), 0, "a fresh session says nothing");
+    assert_eq(crab_mascot_stage(I - 1, 0), 0, "...nor one millisecond before the minute");
+    assert_eq(crab_mascot_stage(I, 0), 1, "...and exactly at the minute, the first line");
+
+    # ---- the beats: line · pause · line · pause · line? -------------------------------------------
+    # ⚠ THE PAUSES ARE PART OF THE JOKE. A line that simply sat there would be a status, not the
+    # deadpan roll-call the mascot doc asks for.
+    assert_eq(crab_mascot_stage(I + B * 0, 0), 1, "beat 0: Bueller...");
+    assert_eq(crab_mascot_stage(I + B * 1, 0), 0, "beat 1: (pause)");
+    assert_eq(crab_mascot_stage(I + B * 2, 0), 1, "beat 2: Bueller...");
+    assert_eq(crab_mascot_stage(I + B * 3, 0), 0, "beat 3: (pause)");
+    assert_eq(crab_mascot_stage(I + B * 4, 0), 2, "beat 4: Bueller...? — the closer");
+
+    # ---- ⛔ AND THEN HE STOPS. "Subtle and infrequent... the whole thing dies if it's trying too
+    # hard." A line that stayed on the status bar forever, or a sequence that looped, would be
+    # exactly that. It goes quiet until the operator touches something.
+    assert_eq(crab_mascot_stage(I + B * 5, 0), 0, "beat 5: silence");
+    assert_eq(crab_mascot_stage(I + B * 9, 0), 0, "...still silence");
+    assert_eq(crab_mascot_stage(I * 60, 0), 0, "...an hour later, still nothing — he does not nag");
+
+    # ---- the lines themselves ---------------------------------------------------------------------
+    assert_eq(t_streq(crab_mascot_text(1), "Bueller..."), 1, "stage 1 is the roll-call");
+    assert_eq(t_streq(crab_mascot_text(2), "Bueller...?"), 1, "stage 2 is the question");
+    assert_eq(crab_mascot_text(0), 0, "silence has no text");
+    # ⛔ STRING LITERALS, NOT ARENA MEMORY. `crab_set_notice` stores the pointer WITHOUT copying, so
+    # an arena-allocated line would be freed under the status bar by the next `dh_frame_begin`.
+    # Asking twice must give the SAME pointer — a fresh buffer each call would prove it was not one.
+    assert_eq(crab_mascot_text(1), crab_mascot_text(1), "the line is a literal, not a fresh buffer");
+    # ...and that identity is what the event loop uses to tell "my line" from a real notice.
+    assert_neq(crab_mascot_text(1), crab_mascot_text(2), "the two lines are distinguishable");
+
+    # ---- the notice channel really carries it -----------------------------------------------------
+    crab_clear_notice();
+    assert_eq(crab_get_notice(), 0, "the channel starts clear");
+    crab_set_notice(crab_mascot_text(1));
+    assert_eq(t_streq(crab_get_notice(), "Bueller..."), 1, "...and carries the mascot's line");
+    crab_clear_notice();
+    return 0;
+}
+
+fn t_sidebar(): i64 {
+    test_group("crab — M6: the PLACES sidebar");
+    var sc = alloc(CRAB_PATH_MAX);
+    var st = alloc(STAT_BUFSZ);
+
+    # ---- the model: only places that EXIST are listed --------------------------------------------
+    var pl = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
+    var pn = crab_places_build(pl, sc, st);
+    assert(pn >= 1, "at least one place was found");
+    assert(pn <= CRAB_PLACES_MAX, "...and the buffer's cap is respected");
+    # ⛔ EVERY LISTED PLACE MUST REALLY BE A DIRECTORY. A sidebar row that goes nowhere cannot be
+    # told apart by the operator from one that is broken — that is the whole reason the model stats.
+    var pi = 0;
+    var allreal = 1;
+    while (pi < pn) {
+        var pp = crab_place_path(pl, pn, pi);
+        var lb = crab_place_label(pl, pn, pi);
+        if (crab_fs_isdir(pp, crab_cstr_len(pp, CRAB_PATH_MAX), st) != 1) { allreal = 0; }
+        if (load8(lb) == 0) { allreal = 0; }             # and every one is labelled
+        pi = pi + 1;
+    }
+    assert_eq(allreal, 1, "every listed place is a real directory with a label");
+    # `/` always exists, so Root is always the last entry.
+    assert_eq(t_streq(crab_place_label(pl, pn, pn - 1), "Root"), 1, "Root is last — the escape hatch, not a destination");
+    # ⚠ Out-of-range is 0, not a computed pointer into the next record.
+    assert_eq(crab_place_label(pl, pn, pn), 0, "one past the end reports 0");
+    assert_eq(crab_place_path(pl, pn, 0 - 1), 0, "...and so does a negative index");
+
+    # ---- the fit rule, the same shape as the preview's -------------------------------------------
+    assert_eq(crab_sidebar_fit(760, 0), 0, "want=0 -> no sidebar, whatever the width");
+    assert_eq(crab_sidebar_fit(760, 1), 1, "a wide window fits it");
+    assert_eq(crab_sidebar_fit(120, 1), 0, "a narrow one refuses");
+    # ⛔ IT MUST NOT COST A PANE ITS SIZE COLUMN. The rule is `crab_cols_for_width >= 2` on what is
+    # left, which is the same bar the preview clears — so neither needs to know the other's number.
+    var sbrest = 380 - CRAB_SB_W - CRAB_PANE_GAP;
+    if (crab_cols_for_width(sbrest) < 2) {
+        assert_eq(crab_sidebar_fit(380, 1), 0, "at 380 the sidebar would cost a column, so it refuses");
+    }
+
+    var rs = crab_rs();
+    var db = alloc(8 * CRAB_REC_SZ);
+    t_entry(db, 0, "boot", 1);
+    t_entry(db, 1, "notes.txt", 0);
+    var dz = alloc(8 * 8); var dm = alloc(8 * 8);
+    var di = 0;
+    while (di < 8) { store64(dz + di * 8, 512); store64(dm + di * 8, 1788136000); di = di + 1; }
+    var dsl = alloc(8); store64(dsl, 0);
+    var dsr = alloc(8); store64(dsr, 0);
+    var drb = alloc(8 * CRAB_REC_SZ);
+    t_entry(drb, 0, "etc", 1);
+    var dsurf = dh_surface_new(900, 300);
+
+    # ---- OFF by default ---------------------------------------------------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_render(dsurf, 0, rs);
+    assert_eq(crab_sidebar_widget(), 0, "a reset render state builds no sidebar");
+
+    # ---- ON: the strip is built, header first -----------------------------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_rs_sidebar(rs, 1, pl, pn);
+    crab_render(dsurf, 0, rs);
+    var sb = crab_sidebar_widget();
+    assert(sb != 0, "the sidebar was built");
+    # ⛔ ROW 0 IS THE INERT SECTION HEADER, so the list holds one MORE row than there are places.
+    # That off-by-one is exactly what made the context menu highlight the wrong verb.
+    assert_eq(dh_list_count(sb), pn + 1, "...with a PLACES header plus one row per place");
+    assert_eq(dh_widget_inert(dh_list_row_at(sb, 0)), 1, "...and row 0 is INERT, so it cannot be selected");
+    assert_eq(dh_widget_inert(dh_list_row_at(sb, 1)), 0, "...while the first real place is not");
+
+    # ---- ⛔ ITS OWN HIT FUNCTION, RETURNING A PLACE INDEX — NEVER A PANE INDEX ------------------
+    # This is the load-bearing one. `crab_hit`'s answer is trusted by the write layer; a place must
+    # never be able to masquerade as a pane.
+    var r1 = dh_list_row_at(sb, 1);
+    var pxx = dh_widget_x(r1) + 4;
+    var pyy = dh_widget_y(r1) + 4;
+    assert_eq(crab_sidebar_hit(pxx, pyy), 0, "a click on the first place reports PLACE 0");
+    var r2 = dh_list_row_at(sb, 2);
+    if (pn >= 2) {
+        assert_eq(crab_sidebar_hit(dh_widget_x(r2) + 4, dh_widget_y(r2) + 4), 1, "...and the second reports place 1");
+    }
+    # ⛔ THE INERT HEADER IS A REFUSAL, not place -1 by arithmetic.
+    var r0 = dh_list_row_at(sb, 0);
+    assert_eq(crab_sidebar_hit(dh_widget_x(r0) + 4, dh_widget_y(r0) + 4), 0 - 1,
+      "a click on the PLACES header is refused, not treated as a place");
+    # ⛔ AND A CLICK IN A PANE IS NOT A PLACE. The two surfaces are disjoint and must stay so.
+    var lp = crab_pane_widget(0);
+    assert_eq(crab_sidebar_hit(dh_widget_x(lp) + 20, dh_widget_y(lp) + 40), 0 - 1,
+      "a click inside a PANE is not a place");
+    # ...and the reverse: the sidebar is not a pane, so the write layer never sees it.
+    var hb2 = alloc(16);
+    assert_eq(crab_hit(pxx, pyy, hb2), 0, "a click on a PLACE is not in a pane");
+    assert_eq(load64(hb2), 0 - 1, "...and reports NO pane — the index the write layer trusts stays clean");
+
+    # ---- ⛔ THE ZERO-ALLOCATION ARM ---------------------------------------------------------------
+    var sb0 = alloc_used();
+    var sbf = 0;
+    while (sbf < 20) {
+        store64(dsl, 0); store64(dsr, 0);
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+        crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+        crab_rs_sidebar(rs, 1, pl, pn);
+        crab_render(dsurf, 0, rs);
+        sbf = sbf + 1;
+    }
+    assert_eq(alloc_used() - sb0, 0,
+      "TWENTY frames with the SIDEBAR open cost the global heap 0 bytes");
+    assert(crab_sidebar_widget() != 0, "...and the sidebar branch really was entered");
+
+    # ---- and it is cleared when the next frame does not build one --------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_render(dsurf, 0, rs);
+    assert_eq(crab_sidebar_widget(), 0, "a frame that builds no sidebar reports 0, not a stale pointer");
+    assert_eq(crab_sidebar_hit(pxx, pyy), 0 - 1, "...and hit-testing it refuses rather than using the old tree");
+    return 0;
+}
+
+fn t_switcher(): i64 {
+    test_group("crab — M6: the A/B view switcher");
+
+    # ---- the fit rule, derived not picked -------------------------------------------------------
+    # 40 px of strip + CRAB_COL_NAME_MIN (90 px = 10 characters) of path = 130.
+    assert_eq(crab_switcher_fit(CRAB_SW_W + CRAB_COL_NAME_MIN), 1, "exactly at the floor, the strip fits");
+    assert_eq(crab_switcher_fit(CRAB_SW_W + CRAB_COL_NAME_MIN - 1), 0, "...and one pixel under, it does not");
+    assert_eq(crab_switcher_fit(372), 1, "a solo pane at the shipped 380x220 default has room");
+    assert_eq(crab_switcher_fit(0), 0, "a zero-width pane refuses");
+    # ⚠ The strip is exactly two cells wide — if that ever drifts, the fit rule is reasoning about
+    # a width the widget does not have.
+    assert_eq(CRAB_SW_W, CRAB_SW_CELL_W + CRAB_SW_CELL_W, "the strip is exactly its two cells");
+
+    var rs = crab_rs();
+    var sb = alloc(8 * CRAB_REC_SZ);
+    t_entry(sb, 0, "boot", 1);
+    t_entry(sb, 1, "notes.txt", 0);
+    var sz = alloc(8 * 8); var mt = alloc(8 * 8);
+    var si = 0;
+    while (si < 8) { store64(sz + si * 8, 512); store64(mt + si * 8, 1788136000); si = si + 1; }
+    var ssl = alloc(8); store64(ssl, 0);
+    var ssr = alloc(8); store64(ssr, 0);
+    var rb = alloc(8 * CRAB_REC_SZ);
+    t_entry(rb, 0, "etc", 1);
+
+    # ---- SOLO + room: the strip is built, and dhancha paints the highlight ----------------------
+    # ⛔ 380 px is BELOW crab_two_panes_fit's 600, so this is the shipped default's layout — the
+    # case that has no other signal of which pane is showing.
+    var ssurf = dh_surface_new(380, 220);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+    crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 0, 0);      # active pane 0 -> 'A'
+    crab_render(ssurf, 0, rs);
+    assert_eq(crab_two_panes_fit(380), 0, "380 px is solo — the case the switcher exists for");
+    var swa = crab_switcher_widget();
+    assert(swa != 0, "the strip was built");
+    assert_eq(dh_list_count(swa), 2, "...with exactly two cells, A and B");
+    assert_eq(dh_list_selected(swa), 0, "...and pane A is the selected one");
+    # ⛔ THE HIGHLIGHT IS THE TOOLKIT'S. A selection of -1 means dhancha paints nothing and the
+    # strip says nothing — which is the failure ADR 0001 pushed into dhancha to avoid.
+    assert(dh_list_selected(swa) >= 0, "...so something really is highlighted");
+
+    # ---- the other pane selects the other cell --------------------------------------------------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+    crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 1, 0, 0, 0, 0, 0, 0);      # active pane 1 -> 'B'
+    crab_render(ssurf, 0, rs);
+    var swb = crab_switcher_widget();
+    assert(swb != 0, "the strip is built for pane B too");
+    assert_eq(dh_list_selected(swb), 1, "...and B is selected — `active_pane` IS the index");
+
+    # ---- TWO PANES: no strip, because position already says which is which ---------------------
+    var wsurf = dh_surface_new(760, 260);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+    crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 0, 0);
+    crab_render(wsurf, 0, rs);
+    assert_eq(crab_two_panes_fit(760), 1, "760 px shows both panes");
+    assert_eq(crab_switcher_widget(), 0, "...so NO strip is built — position is the signal");
+
+    # ---- SOLO + cramped: the text prefix, not the strip -----------------------------------------
+    # ⚠ The fallback is the behaviour that shipped before this; it must still work, or a narrow
+    # window loses the only thing telling A from B.
+    var nsurf = dh_surface_new(120, 220);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+    crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 0, 0);
+    crab_render(nsurf, 0, rs);
+    assert_eq(crab_switcher_widget(), 0, "too narrow for the strip -> none built");
+    var pl = alloc(CRAB_PATH_MAX + 4);
+    assert_eq(crab_pane_label(pl, CRAB_PATH_MAX + 4, 0, "/bin"), 7,
+      "...and the text prefix it falls back to still works");
+
+    # ---- ⛔ THE ZERO-ALLOCATION ARM — a new render-path branch without one is a NEW BLIND SPOT --
+    # This is the rule 0.7.6 learned the expensive way: `crab_overlay` leaked 32 B per frame for
+    # three cuts because the gate's fixture never opened an overlay.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+    crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+    crab_rs_chrome(rs, 0, 0, 0, 0, 0, 0, 0);
+    crab_render(ssurf, 0, rs);
+    var sw0 = alloc_used();
+    var swf = 0;
+    while (swf < 20) {
+        store64(ssl, 0); store64(ssr, 0);
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, sb, 2, "/bin", sz, mt, CRAB_PANE_OK, 0, 0, ssl);
+        crab_rs_pane(rs, 1, rb, 1, "/etc", sz, mt, CRAB_PANE_OK, 0, 0, ssr);
+        crab_rs_chrome(rs, 0, 0, 0, 0, 0, 0, 0);
+        crab_render(ssurf, 0, rs);
+        swf = swf + 1;
+    }
+    assert_eq(alloc_used() - sw0, 0,
+      "TWENTY frames with the A/B strip on screen cost the global heap 0 bytes");
+    # ⚠ NON-VACUITY: prove those twenty frames really built a strip, rather than passing because
+    # the branch was never entered.
+    assert(crab_switcher_widget() != 0, "...and the strip branch really was entered");
     return 0;
 }
 
