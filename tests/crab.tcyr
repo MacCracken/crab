@@ -2398,6 +2398,8 @@ fn main() {
     t_tray_height();
     t_switcher();
     t_sidebar();
+    t_volumes();
+    t_del_prompt();
     t_mascot();
     t_overlay_geometry();
     t_menubar();
@@ -4138,6 +4140,176 @@ fn t_mascot(): i64 {
     return 0;
 }
 
+fn t_del_prompt(): i64 {
+    test_group("crab — 0.8.1: the delete prompt names what dies");
+    # ⛔⛆ FIVE SYSTEM BINARIES LEFT AN AGNOS IRON BOX ON ONE CONFIRM and nothing surfaced it until
+    # the machine would not boot. The mechanism is still unproven; this is the guard that would have
+    # prevented the OUTCOME whatever the trigger was — see
+    # docs/development/issues/2026-09-03-five-contiguous-bin-entries-deleted-on-agnos.md
+
+    # ---- the system-directory guard ---------------------------------------------------------------
+    # ⛔ On AGNOS this is not paranoia: single-user, no package manager, `/bin` IS the OS.
+    assert_eq(crab_del_is_system("/bin"), 1, "/bin is the OS");
+    assert_eq(crab_del_is_system("/boot"), 1, "...and /boot");
+    assert_eq(crab_del_is_system("/sbin"), 1, "...and /sbin");
+    assert_eq(crab_del_is_system("/lib"), 1, "...and /lib");
+    assert_eq(crab_del_is_system("/home/macro"), 0, "a home directory is not");
+    assert_eq(crab_del_is_system("/"), 0, "nor the root itself — deleting IN / is not deleting /bin");
+    # ⚠ EXACT MATCH, not a prefix test: a guard that swallowed the whole subtree would make it
+    # undeletable and teach the operator to route around the warning. The rows that died were
+    # DIRECT children of /bin.
+    assert_eq(crab_del_is_system("/bin/sub"), 0, "a subdirectory of /bin is not itself guarded");
+    assert_eq(crab_del_is_system("/binary"), 0, "...and a longer name that merely starts the same");
+    assert_eq(crab_del_is_system(0), 0, "a null path is not a system directory");
+
+    # ---- the prompt names the entry ---------------------------------------------------------------
+    var db = alloc(8 * CRAB_REC_SZ);
+    t_entry(db, 0, "agnsh", 0);
+    t_entry(db, 1, "boot", 1);
+    t_entry(db, 2, "cp", 0);
+    t_entry(db, 3, "crab", 0);
+    t_entry(db, 4, "cyim", 0);
+    var dm = alloc(16);
+    var di = 0;
+    while (di < 16) { store8(dm + di, 0); di = di + 1; }
+
+    # a single FILE is named
+    var m1 = crab_del_prompt("/home/macro", db, dm, 5, 0, 0);
+    assert(t_substr(m1, "agnsh") == 1, "a single-file prompt NAMES the file");
+    assert(t_substr(m1, "y = yes") == 1, "...and still says how to answer");
+    assert_eq(t_substr(m1, "SYSTEM DIR!"), 0, "...with no system warning outside a system dir");
+
+    # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES.
+    var m2 = crab_del_prompt("/home/macro", db, dm, 5, 1, 0);
+    assert(t_substr(m2, "boot") == 1, "a folder prompt names the folder");
+    assert(t_substr(m2, "everything in it") == 1, "...and says what else goes with it");
+
+    # ---- ⛔⛆ THE MARKED CASE — THE ONE THAT COST A MACHINE ---------------------------------------
+    # Five marked, exactly the incident's shape: rows 0..4 of a sorted listing.
+    store8(dm + 0, 1); store8(dm + 1, 1); store8(dm + 2, 1); store8(dm + 3, 1); store8(dm + 4, 1);
+    var m3 = crab_del_prompt("/bin", db, dm, 5, 0, 5);
+    # ⛔ THE COUNT. "delete the MARKED entries?" never said FIVE.
+    assert(t_substr(m3, "5 marked") == 1, "the prompt says HOW MANY");
+    # ⛔ AND THE NAMES — including the one that bricked the boot.
+    assert(t_substr(m3, "agnsh") == 1, "...and names the first few, agnsh among them");
+    assert(t_substr(m3, "boot") == 1, "...the second");
+    assert(t_substr(m3, "cp") == 1, "...the third");
+    # ⚠ Three names then a remainder: the status line is ONE ROW, and nine names wrap into nothing.
+    assert(t_substr(m3, "+2 more") == 1, "...and summarises the rest rather than wrapping");
+    assert_eq(t_substr(m3, "cyim"), 0, "...so the fourth and fifth are NOT spelled out");
+    # ⛔⛆ AND THE SYSTEM WARNING LEADS, where the eye lands.
+    assert(t_substr(m3, "SYSTEM DIR!") == 1, "deleting from /bin says SYSTEM DIR! first");
+
+    # exactly three marked needs no remainder
+    store8(dm + 3, 0); store8(dm + 4, 0);
+    var m4 = crab_del_prompt("/home/macro", db, dm, 5, 0, 3);
+    assert(t_substr(m4, "3 marked") == 1, "three marked says three");
+    assert_eq(t_substr(m4, "more"), 0, "...with no remainder clause");
+
+    # ---- degenerate inputs do not produce a confident-looking question ---------------------------
+    assert(t_substr(crab_del_prompt("/x", db, dm, 0, 0, 0), "nothing to delete") == 1,
+      "an empty pane says so rather than asking about entry 0");
+    return 0;
+}
+
+fn t_volumes(): i64 {
+    test_group("crab — M6: VOLUMES, and the row map two sections need");
+    # ⭐ agnos `mountlist`#104 (1.56.59) closed the gate crab filed on 2026-09-02. ⛔ BOTH SYSCALLS
+    # ARE AGNOS-ONLY — no host arm exists for `sys_mountlist` or `sys_statfs` — so
+    # `crab_volumes_build` cannot be exercised here. Everything DECIDABLE was lifted into pure
+    # helpers precisely so this group can reach it: the accessors, the capacity arithmetic, the
+    # alias dedup, and the row map.
+
+    # ---- the capacity arithmetic -----------------------------------------------------------------
+    # ⛔ USED, NOT FREE. A bar that filled as space was freed would read backwards.
+    assert_eq(crab_vol_pct(100, 100), 0, "an empty volume is 0 permille used");
+    assert_eq(crab_vol_pct(100, 0), 1000, "a full one is 1000");
+    assert_eq(crab_vol_pct(100, 25), 750, "...and three quarters used is 750");
+    # ⚠ 0 FOR UNKNOWABLE, not a guess — a full-looking bar for "I don't know" is the worse lie.
+    assert_eq(crab_vol_pct(0, 0), 0, "a backend that could not answer reports 0, not full");
+    assert_eq(crab_vol_pct(0 - 5, 0), 0, "...and so does a negative block count");
+    # ⚠ Kernel-reported values are clamped, not trusted.
+    assert_eq(crab_vol_pct(100, 500), 0, "more free than total clamps to empty, not to nonsense");
+    assert_eq(crab_vol_pct(100, 0 - 5), 1000, "...and negative free clamps to full");
+
+    # ⚠ The kernel reports BLOCKS; userland does the multiply — the ABI says so explicitly.
+    assert_eq(crab_vol_bytes(1000, 4096), 4096000, "total bytes = blocks * bsize");
+    assert_eq(crab_vol_bytes(0, 4096), 0, "0 when the block count is unknown");
+    assert_eq(crab_vol_bytes(1000, 0), 0, "...or the block size is");
+
+    # ---- backend names: what agnos actually reports, and nothing invented ------------------------
+    assert_eq(t_streq(crab_vol_label(1), "ext2"), 1, "backend 1 is ext2");
+    assert_eq(t_streq(crab_vol_label(2), "FAT"), 1, "backend 2 is FAT");
+    assert_eq(t_streq(crab_vol_label(3), "exFAT"), 1, "backend 3 is exFAT");
+    # ⚠ 0 is FS_NONE, which the ABI says is never emitted — but crab names it rather than trusting.
+    assert_eq(t_streq(crab_vol_label(0), "unknown"), 1, "an unexpected backend is named, not blank");
+    assert_eq(t_streq(crab_vol_label(99), "unknown"), 1, "...whatever it is");
+
+    # ---- ⛔ THE ALIAS DEDUP — the reason a PROBE could not have answered this ---------------------
+    # agnos's `vfs_mount_init` gives an ext2-less boot the SAME backend under BOTH "/" and its
+    # "/mnt/..." prefix — its own comment calls them "harmless redundant aliases". Harmless to
+    # routing; to a sidebar they are ONE VOLUME LISTED TWICE, and `statfs` on each returns identical
+    # numbers, so probing cannot tell them apart. The backend id is what distinguishes them.
+    var vb = alloc(CRAB_VOLS_MAX * CRAB_VOL_SZ);
+    var vi = 0;
+    while (vi < (CRAB_VOLS_MAX * CRAB_VOL_SZ)) { store8(vb + vi, 0); vi = vi + 1; }
+    # slot 0: FAT at "/"        slot 1: FAT at "/mnt/fat"   <- the alias pair
+    store64(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_BACKEND, 2);
+    store64(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_PLEN, 1);
+    store8(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_PREFIX, 47);              # "/"
+    store64(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_BACKEND, 2);
+    store64(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_PLEN, 8);
+    store8(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_PREFIX, 47);
+    store8(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_PREFIX + 1, 109);         # "/m..."
+    # slot 2: exFAT at "/mnt/exfat" — a DIFFERENT backend, must survive
+    store64(vb + 2 * CRAB_VOL_SZ + CRAB_VOL_BACKEND, 3);
+    store64(vb + 2 * CRAB_VOL_SZ + CRAB_VOL_PLEN, 10);
+    store8(vb + 2 * CRAB_VOL_SZ + CRAB_VOL_PREFIX, 47);
+    assert_eq(crab_vol_backend(vb, 3, 0), 2, "slot 0 is FAT");
+    assert_eq(crab_vol_backend(vb, 3, 1), 2, "slot 1 is the SAME backend — the alias");
+    assert_eq(crab_vol_backend(vb, 3, 2), 3, "slot 2 is a different one");
+    var dn = crab_vol_dedup(vb, 3);
+    assert_eq(dn, 2, "the aliased pair collapses to one volume");
+    # ⛔ FIRST WINS, WHICH IS THE ROOT MOUNT — `vfs_mount_init` adds "/" before any "/mnt/...", so
+    # the surviving row is the one an operator means.
+    assert_eq(crab_vol_backend(vb, dn, 0), 2, "...and the survivor is the FAT one");
+    assert_eq(load64(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_PLEN), 1, "...at the SHORT prefix, i.e. /");
+    assert_eq(crab_vol_backend(vb, dn, 1), 3, "...with exFAT still listed separately");
+    # ⚠ Nothing to dedup is not an error.
+    assert_eq(crab_vol_dedup(vb, 0), 0, "an empty table dedups to empty");
+    # ⚠ Out-of-range accessors report 0, never a computed pointer into the next record.
+    assert_eq(crab_vol_backend(vb, dn, dn), 0, "one past the end is 0");
+    assert_eq(crab_vol_prefix(vb, dn, 0 - 1), 0, "...and so is a negative index");
+
+    # ---- ⛔ THE ROW MAP. Two sections and two inert headers ---------------------------------------
+    # This is the mapping that has shipped wrong twice in this codebase, so it is a function.
+    #   row 0 = "PLACES" · rows 1..P = places · row P+1 = "VOLUMES" · rows P+2.. = volumes
+    assert_eq(crab_sb_row_kind(0, 3, 2), CRAB_SB_NONE, "row 0 is the PLACES header");
+    assert_eq(crab_sb_row_kind(1, 3, 2), CRAB_SB_PLACE, "row 1 is the first place");
+    assert_eq(crab_sb_row_kind(3, 3, 2), CRAB_SB_PLACE, "row 3 is the last place");
+    assert_eq(crab_sb_row_kind(4, 3, 2), CRAB_SB_NONE, "row 4 is the VOLUMES header");
+    assert_eq(crab_sb_row_kind(5, 3, 2), CRAB_SB_VOLUME, "row 5 is the first volume");
+    assert_eq(crab_sb_row_kind(6, 3, 2), CRAB_SB_VOLUME, "row 6 is the last volume");
+    assert_eq(crab_sb_row_kind(7, 3, 2), CRAB_SB_NONE, "row 7 is past the end");
+    # indices within their own section
+    assert_eq(crab_sb_row_index(1, 3, 2), 0, "row 1 -> place 0");
+    assert_eq(crab_sb_row_index(3, 3, 2), 2, "row 3 -> place 2");
+    assert_eq(crab_sb_row_index(5, 3, 2), 0, "row 5 -> VOLUME 0, not place 4");
+    assert_eq(crab_sb_row_index(6, 3, 2), 1, "row 6 -> volume 1");
+    assert_eq(crab_sb_row_index(4, 3, 2), 0 - 1, "a header maps to no index");
+    assert_eq(crab_sb_row_index(0, 3, 2), 0 - 1, "...either of them");
+
+    # ⛔ NO VOLUMES AT ALL — the host case, and the section is ABSENT rather than empty.
+    assert_eq(crab_sb_row_kind(4, 3, 0), CRAB_SB_NONE, "with no volumes there is no VOLUMES header");
+    assert_eq(crab_sb_row_kind(5, 3, 0), CRAB_SB_NONE, "...and nothing after the places");
+    assert_eq(crab_sb_row_index(3, 3, 0), 2, "...while the places still map correctly");
+    # ⚠ And no PLACES either — degenerate, but it must not report a volume as a place.
+    assert_eq(crab_sb_row_kind(1, 0, 2), CRAB_SB_NONE, "row 1 with no places is the VOLUMES header");
+    assert_eq(crab_sb_row_kind(2, 0, 2), CRAB_SB_VOLUME, "...and row 2 is the first volume");
+    assert_eq(crab_sb_row_index(2, 0, 2), 0, "...at volume index 0");
+    return 0;
+}
+
 fn t_sidebar(): i64 {
     test_group("crab — M6: the PLACES sidebar");
     var sc = alloc(CRAB_PATH_MAX);
@@ -4201,7 +4373,7 @@ fn t_sidebar(): i64 {
     crab_rs_reset(rs);
     crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
     crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
-    crab_rs_sidebar(rs, 1, pl, pn);
+    crab_rs_sidebar(rs, 1, pl, pn, 0, 0);
     crab_render(dsurf, 0, rs);
     var sb = crab_sidebar_widget();
     assert(sb != 0, "the sidebar was built");
@@ -4217,10 +4389,11 @@ fn t_sidebar(): i64 {
     var r1 = dh_list_row_at(sb, 1);
     var pxx = dh_widget_x(r1) + 4;
     var pyy = dh_widget_y(r1) + 4;
-    assert_eq(crab_sidebar_hit(pxx, pyy), 0, "a click on the first place reports PLACE 0");
+    assert_eq(crab_sidebar_hit(pxx, pyy), 1, "a click on the first place reports LIST ROW 1");
+    assert_eq(crab_sb_row_index(crab_sidebar_hit(pxx, pyy), pn, 0), 0, "...which the row map turns into PLACE 0");
     var r2 = dh_list_row_at(sb, 2);
     if (pn >= 2) {
-        assert_eq(crab_sidebar_hit(dh_widget_x(r2) + 4, dh_widget_y(r2) + 4), 1, "...and the second reports place 1");
+        assert_eq(crab_sb_row_index(crab_sidebar_hit(dh_widget_x(r2) + 4, dh_widget_y(r2) + 4), pn, 0), 1, "...and the second is place 1");
     }
     # ⛔ THE INERT HEADER IS A REFUSAL, not place -1 by arithmetic.
     var r0 = dh_list_row_at(sb, 0);
@@ -4243,7 +4416,7 @@ fn t_sidebar(): i64 {
         crab_rs_reset(rs);
         crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
         crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
-        crab_rs_sidebar(rs, 1, pl, pn);
+        crab_rs_sidebar(rs, 1, pl, pn, 0, 0);
         crab_render(dsurf, 0, rs);
         sbf = sbf + 1;
     }
@@ -4589,6 +4762,28 @@ fn t_queue_refusals(): i64 {
 }
 
 # --- 0.5.0 test helpers ---
+
+# @test — does `hay` contain `needle`? 1 = yes. ⚠ Naive O(n*m), which is right for a test helper
+# over a 256-byte prompt: the assertion is about the MESSAGE, not about search performance.
+fn t_substr(hay, needle): i64 {
+    if (hay == 0) { return 0; }
+    if (needle == 0) { return 0; }
+    if (load8(needle) == 0) { return 1; }
+    var i = 0;
+    while (load8(hay + i) != 0) {
+        var j = 0;
+        var ok = 1;
+        while (load8(needle + j) != 0) {
+            if (load8(hay + i + j) != load8(needle + j)) { ok = 0; }
+            if (ok == 0) { j = 0; }
+            if (ok == 0) { break; }
+            j = j + 1;
+        }
+        if (ok == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
 
 fn t_streq(a, b): i64 {
     var i = 0;

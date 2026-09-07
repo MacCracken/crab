@@ -553,6 +553,8 @@ fn crab_place_path(places, n, i): i64 {
 var CRAB_SB_W  = 90;        # = CRAB_COL_NAME_MIN — ten characters, crab's own floor for a legible
 #   label, and every place name it can produce is shorter than that.
 var CRAB_SB_ROW_H = 22;
+var CRAB_SB_VOL_LAB_H = 12;                # the volume's filesystem name
+var CRAB_SB_VOL_BAR_H = 4;                 # its capacity bar, under the name
 
 # @public — must pointer input be refused right now? 1 = yes, crab is asking a question.
 #
@@ -575,6 +577,115 @@ fn crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel): i64 {
     if (menu_open != 0) { return 1; }
     if (mb_sel >= 0) { return 1; }
     return 0;
+}
+
+# =================================================================================================
+# M6 — VOLUMES. The sidebar's second section, unblocked by agnos `mountlist`#104 (1.56.59).
+# =================================================================================================
+#
+# ⭐⭐ THE GATE crab FILED ON 2026-09-02 IS CLOSED, AND THE FIX WAS THE ONE WE ASKED FOR. agnos's ABI
+# credits the filing and took the two pieces of advice in it: a NEW number rather than widening
+# `mount`#11 (whose unused argument registers carry stale values, not 0), and an ENUMERATION rather
+# than a probe — because `statfs`#103 can answer *is this string mounted* but not *are these two the
+# same volume*.
+#
+# ⛔ THE RECORD LAYOUTS ARE FROZEN ABI AND NEITHER IS VENDORED, so crab spells them here.
+#   `mountlist`#104 -> 80-byte records: backend u64 @0 (1 ext2 · 2 FAT · 3 exFAT; 0 never emitted),
+#   prefixlen u64 @8 (1..64), prefix @16 (**64 bytes, NUL-PADDED — the tail is not meaningful**).
+#   `statfs`#103   -> 32-byte record: f_bsize @0, f_blocks @8, f_bfree @16, f_bavail @24.
+#   ⚠ The kernel reports BLOCKS; userland does the multiply. Total bytes = `f_blocks * f_bsize`.
+#
+# ⚠ crab's own record carries both, because a volume row needs the mount AND its capacity:
+var CRAB_VOL_BACKEND = 0;      # u64, FsBackend id
+var CRAB_VOL_PLEN    = 8;      # u64, 1..64
+var CRAB_VOL_PREFIX  = 16;     # 64 bytes, NUL-padded
+var CRAB_VOL_BSIZE   = 80;     # u64, from statfs
+var CRAB_VOL_BLOCKS  = 88;     # u64
+var CRAB_VOL_BFREE   = 96;     # u64
+var CRAB_VOL_SZ      = 104;
+var CRAB_VOLS_MAX    = 8;      # = agnos's own table capacity (`vfs_mnt_backend[8]`)
+
+fn crab_vol_backend(v, n, i): i64 {
+    if (i < 0) { return 0; }
+    if (i >= n) { return 0; }
+    return load64(v + i * CRAB_VOL_SZ + CRAB_VOL_BACKEND);
+}
+
+fn crab_vol_prefix(v, n, i): i64 {
+    if (i < 0) { return 0; }
+    if (i >= n) { return 0; }
+    return v + i * CRAB_VOL_SZ + CRAB_VOL_PREFIX;
+}
+
+# @public — the backend's display name. ⚠ crab shows the FILESYSTEM, not a device or a label,
+# because that is all agnos reports — `vfs_mnt_*` carries routing data and nothing else. Inventing a
+# friendlier name would be crab claiming knowledge it does not have.
+fn crab_vol_label(backend): i64 {
+    if (backend == 1) { return "ext2"; }
+    if (backend == 2) { return "FAT"; }
+    if (backend == 3) { return "exFAT"; }
+    return "unknown";
+}
+
+# @public — how full a volume is, in PERMILLE (0..1000) — what `dh_progress_set` wants.
+#
+# ⚠ PERMILLE AND NOT A PERCENTAGE, because dhancha's PROGRESS takes a numerator and a denominator
+# and crab already passes tenths elsewhere; a percentage would round a 99.4%-full disk to 99 and
+# lose the last bar of travel exactly where it matters.
+# ⛔ USED, NOT FREE. A capacity bar that filled as space was freed would read backwards.
+# ⚠ RETURNS 0 FOR AN UNKNOWABLE VOLUME rather than a guess: `blocks <= 0` means the backend could
+# not answer, and a full-looking bar for "I don't know" is the worse lie of the two.
+# ⚠ `bfree > blocks` is clamped rather than trusted — it is kernel-reported and crab does not own it.
+fn crab_vol_pct(blocks, bfree): i64 {
+    if (blocks <= 0) { return 0; }
+    var free = bfree;
+    if (free < 0) { free = 0; }
+    if (free > blocks) { free = blocks; }
+    return ((blocks - free) * 1000) / blocks;
+}
+
+# @public — total bytes of a volume: `f_blocks * f_bsize`, the multiply the kernel leaves to us.
+# ⚠ 0 when either factor is unknown, so a caller's "can I say a size?" test is one comparison.
+fn crab_vol_bytes(blocks, bsize): i64 {
+    if (blocks <= 0) { return 0; }
+    if (bsize <= 0) { return 0; }
+    return blocks * bsize;
+}
+
+# @public — drop ALIASED slots in place. -> the new count.
+#
+# ⛔⛆ THIS IS WHY AN ENUMERATION WAS NEEDED AND A PROBE WOULD NOT HAVE DONE. agnos's
+# `vfs_mount_init` gives an ext2-less boot the SAME backend under BOTH `/` and its `/mnt/...`
+# prefix — its own comment calls them "harmless redundant aliases". Harmless to routing; to a
+# sidebar they are **one volume listed twice**, and `statfs` on each returns identical numbers, so
+# probing cannot tell them apart. The backend id travelling with the prefix is what distinguishes
+# them, and that is exactly what #104 added.
+# ⚠ KEEPS THE FIRST OCCURRENCE, which is the shortest prefix: `vfs_mount_init` adds `/` before any
+# `/mnt/...`, so first-wins keeps the root mount — the one an operator means.
+fn crab_vol_dedup(v, n): i64 {
+    var out = 0;
+    var i = 0;
+    while (i < n) {
+        var be = crab_vol_backend(v, n, i);
+        var seen = 0;
+        var j = 0;
+        while (j < out) {
+            if (load64(v + j * CRAB_VOL_SZ + CRAB_VOL_BACKEND) == be) { seen = 1; }
+            j = j + 1;
+        }
+        if (seen == 0) {
+            if (out != i) {
+                var k = 0;
+                while (k < CRAB_VOL_SZ) {
+                    store8(v + out * CRAB_VOL_SZ + k, load8(v + i * CRAB_VOL_SZ + k));
+                    k = k + 1;
+                }
+            }
+            out = out + 1;
+        }
+        i = i + 1;
+    }
+    return out;
 }
 
 # @public — is there room for the sidebar without costing a pane its columns? 1 = yes.
@@ -621,7 +732,7 @@ fn crab_sidebar_widget(): i64 { return crab_sblst; }
 # offset is the whole reason `crab_sidebar_hit` exists rather than returning the row index raw —
 # the same off-by-one that made the context menu highlight the wrong verb when a separator was
 # counted as an item.
-fn crab_sidebar(parent, places, n): i64 {
+fn crab_sidebar(parent, places, n, vols, voln): i64 {
     var sb = dh_list_new(CRAB_SB_ROW_H);
     if (sb == 0) { return 0; }
     dh_widget_set_pref(sb, CRAB_SB_W, 0);
@@ -641,8 +752,80 @@ fn crab_sidebar(parent, places, n): i64 {
         dh_list_add(sb, row);
         i = i + 1;
     }
+    # ---- VOLUMES, when agnos told us about any -------------------------------------------------
+    # ⚠ ABSENT, NOT EMPTY, when there are none. On the host `crab_volumes_build` returns 0 because
+    # neither syscall has a host arm — and a "VOLUMES" heading over nothing would read as a failure
+    # rather than as a platform difference.
+    if (voln > 0) {
+        var vh = dh_widget_new(LABEL);
+        dh_widget_set_text(vh, "VOLUMES");
+        dh_widget_set_fg(vh, dh_theme_mute());
+        dh_widget_set_inert(vh, 1);
+        dh_list_add(sb, vh);
+        var vi = 0;
+        while (vi < voln) {
+            # ⛔⛆ A `BOX_V` ROW, AND NOT A `BOX_H` ONE. `dh_progress_new` leaves its width 0, and in
+            # a `BOX_H` the bar's thickness is the CROSS axis — which `ALIGN_STRETCH` ignores — so
+            # the bar renders 0 px wide. Stacking label over bar sizes both on the main axis.
+            # ⚠ And this deliberately does NOT copy `crab_tray`, whose own bar was 0 px tall for
+            # exactly the mirror-image reason until 0.7.7.
+            var vrow = dh_widget_new(BOX);
+            dh_widget_set_layout(vrow, BOX_V);
+            var vlab = dh_widget_new(LABEL);
+            dh_widget_set_pref(vlab, 0, CRAB_SB_VOL_LAB_H);
+            dh_widget_set_flex(vlab, 0);
+            dh_widget_set_text(vlab, crab_vol_label(crab_vol_backend(vols, voln, vi)));
+            dh_widget_add_child(vrow, vlab);
+            var vbar = dh_progress_new(CRAB_SB_VOL_BAR_H);
+            dh_widget_set_flex(vbar, 0);
+            # ⛔ USED, NOT FREE — a capacity bar that filled as space was freed reads backwards.
+            var vrec = vols + vi * CRAB_VOL_SZ;
+            dh_progress_set(vbar, crab_vol_pct(load64(vrec + CRAB_VOL_BLOCKS),
+                load64(vrec + CRAB_VOL_BFREE)), 1000);
+            dh_widget_add_child(vrow, vbar);
+            dh_list_add(sb, vrow);
+            vi = vi + 1;
+        }
+    }
     dh_widget_add_child(parent, sb);
     return sb;
+}
+
+# =================================================================================================
+# The sidebar's ROW MAP. Two sections, two inert headers, and one index space to get wrong.
+# =================================================================================================
+#
+# ⛔⛆ THIS IS A FUNCTION AND NOT ARITHMETIC AT THE CALL SITE, BECAUSE THIS EXACT OFF-BY-ONE HAS
+# SHIPPED TWICE IN THIS CODEBASE. The context menu highlighted the wrong verb when a separator row
+# was hand-counted; the sidebar's own `row - 1` was correct only while PLACES was the only section.
+# Adding VOLUMES puts a second inert header mid-list, so the mapping is no longer a subtraction.
+#
+#   row 0                     "PLACES"   (inert)
+#   row 1 .. P                places 0..P-1
+#   row P+1                   "VOLUMES"  (inert)   — only when V > 0
+#   row P+2 .. P+1+V          volumes 0..V-1
+var CRAB_SB_NONE   = 0;        # a header, or out of range
+var CRAB_SB_PLACE  = 1;
+var CRAB_SB_VOLUME = 2;
+
+# @public — what kind of thing is at sidebar list row `row`?
+fn crab_sb_row_kind(row, placen, voln): i64 {
+    if (row <= 0) { return CRAB_SB_NONE; }                 # row 0 is the PLACES header
+    if (row <= placen) { return CRAB_SB_PLACE; }
+    if (voln <= 0) { return CRAB_SB_NONE; }
+    if (row == (placen + 1)) { return CRAB_SB_NONE; }      # the VOLUMES header
+    if (row <= (placen + 1 + voln)) { return CRAB_SB_VOLUME; }
+    return CRAB_SB_NONE;
+}
+
+# @public — the index WITHIN its section for sidebar list row `row`, or -1 if it is not an item.
+# ⚠ Paired with `crab_sb_row_kind`: the kind says which array, this says where in it. Splitting them
+# is what keeps the caller from having to know the layout at all.
+fn crab_sb_row_index(row, placen, voln): i64 {
+    var k = crab_sb_row_kind(row, placen, voln);
+    if (k == CRAB_SB_PLACE) { return row - 1; }
+    if (k == CRAB_SB_VOLUME) { return row - placen - 2; }
+    return 0 - 1;
 }
 
 # @public — which PLACE is at (x, y)? -> the model index, or -1 for none.
@@ -662,12 +845,11 @@ fn crab_sidebar_hit(x, y): i64 {
     # ⛔ THAT REFUSAL IS crab's PLACES HEADER, FOR FREE. The header is row 0 and inert, so
     # `dh_list_index_at` answers -1 for it without crab special-casing index 0 — which is the same
     # off-by-one that made the context menu highlight the wrong verb when it was hand-counted.
-    var row = dh_list_index_at(crab_sblst, x, y);
-    if (row <= 0) { return 0 - 1; }        # -1 = outside or inert; 0 = the PLACES header
-    # ⚠ ROW 0 IS THE SECTION HEADER, so a place at model index `i` is LIST row `i + 1`. This single
-    # subtraction is the whole translation, and it is why this returns a PLACE index and never a
-    # pane index — see the ⛔⛔ at the top of this section.
-    return row - 1;
+    # ⚠ RETURNS THE RAW LIST ROW, not a section index. With two sections and two inert headers the
+    # translation is no longer a subtraction — `crab_sb_row_kind` / `crab_sb_row_index` own it, and
+    # keeping them separate is what stops the caller from having to know the layout.
+    # ⛔ It is still a SIDEBAR row and never a pane index — see the ⛔⛔ at the top of this section.
+    return dh_list_index_at(crab_sblst, x, y);
 }
 
 # =================================================================================================
@@ -1501,6 +1683,120 @@ fn crab_get_notice(): i64 { return crab_notice; }
 # without a clock, and so the event loop's only job is to notice when the answer CHANGES.
 var CRAB_MASCOT_IDLE_MS = 60000;   # a minute of nothing before Bueller says anything at all
 var CRAB_MASCOT_BEAT_MS = 2000;    # one beat: a line, or the pause between them
+
+# =================================================================================================
+# THE DELETE PROMPT — name what is about to die, and refuse the OS.
+# =================================================================================================
+#
+# ⛔⛆ THIS EXISTS BECAUSE FIVE SYSTEM BINARIES LEFT AN AGNOS IRON BOX ON ONE CONFIRM AND NOTHING
+# SURFACED IT UNTIL THE MACHINE WOULD NOT BOOT. See
+# `docs/development/issues/2026-09-03-five-contiguous-bin-entries-deleted-on-agnos.md`. The
+# mechanism is still unproven; these two guards are the ones that would have prevented the OUTCOME
+# whatever the trigger was, which is why they are worth having before the cause is known.
+var CRAB_DEL_MSG_CAP  = 256;
+var CRAB_DEL_NAMES    = 3;      # how many names the prompt lists before summarising the rest
+
+var crab_delmsg = 0;
+# ⚠ PROCESS-LIFETIME, like the batch destination and the sort scratch. `crab_set_notice` stores the
+# pointer WITHOUT copying, so a prompt built into arena memory would be freed under the status line
+# by the next `dh_frame_begin` — and the status line is where the question is being asked.
+fn crab_del_msg(): i64 {
+    if (crab_delmsg == 0) { crab_delmsg = alloc(CRAB_DEL_MSG_CAP); }
+    return crab_delmsg;
+}
+
+# @public — is `path` a directory the OS lives in? 1 = yes.
+#
+# ⛔ ON AGNOS THIS IS NOT PARANOIA. AGNOS is single-user with no package manager: `/bin` **is** the
+# operating system, and deleting from it makes the machine unbootable to userland — which is exactly
+# what happened. There is no reinstall path and no undo.
+# ⚠ EXACT MATCH ON THE DIRECTORY, not a prefix test. `/bin` is guarded; `/bin/sub` is not, because a
+# guard that swallowed everything below would make the whole subtree undeletable and teach the
+# operator to route around it. The rows that died were direct children of `/bin`.
+fn crab_del_is_system(path): i64 {
+    if (path == 0) { return 0; }
+    # ⛔ `crab_streq_n` RETURNS 1 FOR EQUAL, NOT 0 — it is not `strcmp`, and the first draft of this
+    # guard tested `== 0` and was therefore INVERTED: it flagged every path EXCEPT the four system
+    # directories, so `/home/macro` warned and `/bin` did not. Caught by the test that names `/bin`
+    # and `/binary` in the same breath, which is the whole reason that pair is in the suite.
+    if (crab_streq_n(path, "/bin", CRAB_PATH_MAX) == 1) { return 1; }
+    if (crab_streq_n(path, "/boot", CRAB_PATH_MAX) == 1) { return 1; }
+    if (crab_streq_n(path, "/sbin", CRAB_PATH_MAX) == 1) { return 1; }
+    if (crab_streq_n(path, "/lib", CRAB_PATH_MAX) == 1) { return 1; }
+    return 0;
+}
+
+# Append a cstring to `dst` at `w`, bounded by `cap`. -> the new write offset.
+fn crab_del_put(dst, w, cap, sm): i64 {
+    var i = 0;
+    var o = w;
+    while (load8(sm + i) != 0) {
+        if (o >= (cap - 1)) { return o; }
+        store8(dst + o, load8(sm + i));
+        o = o + 1;
+        i = i + 1;
+    }
+    return o;
+}
+
+# @public — build the delete confirmation into `crab_del_msg()`. -> the message pointer.
+#
+# ⛔⛆ **NAME WHAT IS ABOUT TO DIE.** The prompt said "delete the MARKED entries?" — true, and it does
+# not tell the operator that the set is five files and one of them is `agnsh`. A count and the first
+# few names make the damage visible BEFORE the keypress rather than after the next reboot. That is
+# the whole point, and it is the cheaper of the two guards.
+# ⚠ THREE NAMES THEN A REMAINDER, because the status line is one row: `agnsh, cp, crab +2 more`
+# reads at a glance, while nine names wrap into nothing.
+# ⛔ THE SYSTEM WARNING GOES FIRST, where the eye lands, not appended after the names.
+fn crab_del_prompt(dir, buf, marks, count, sel, marked): i64 {
+    var d = crab_del_msg();
+    if (d == 0) { return "delete?  y = yes, any other key = no"; }
+    var w = 0;
+    if (crab_del_is_system(dir) == 1) {
+        w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "SYSTEM DIR! ");
+    }
+    w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "delete ");
+    if (marked > 0) {
+        w = w + crab_u2s(d + w, marked);
+        w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " marked: ");
+        var shown = 0;
+        var i = 0;
+        while (i < count) {
+            if (crab_marked(marks, i, count) != 0) {
+                if (shown >= CRAB_DEL_NAMES) { i = count; }
+                else {
+                    if (shown > 0) { w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, ", "); }
+                    w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, buf + i * CRAB_REC_SZ);
+                    shown = shown + 1;
+                    i = i + 1;
+                }
+            } else { i = i + 1; }
+        }
+        if (marked > shown) {
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " +");
+            w = w + crab_u2s(d + w, marked - shown);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " more");
+        }
+    } else {
+        if (count <= 0) {
+            store8(d + w, 0);
+            return "nothing to delete";
+        }
+        var rec = buf + sel * CRAB_REC_SZ;
+        # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected entry?" in front of a
+        # directory is technically true and practically a lie.
+        if (load8(rec + CRAB_REC_TYPE) != 0) {
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "FOLDER ");
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " and everything in it");
+        } else {
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+        }
+    }
+    w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "?  y = yes, any other key = no");
+    store8(d + w, 0);
+    return d;
+}
 
 # @public — what should the mascot say? 0 = nothing, 1 = "Bueller…", 2 = "Bueller…?"
 #
@@ -3122,7 +3418,10 @@ enum CrabRs {
     # bar can be revealed with nothing dropped — that is the state the operator arrows along.
     CRAB_RS_MBDROP   = 336;
     CRAB_RS_MBITEM   = 344;   # the highlighted row WITHIN an open bar drop-down
-    CRAB_RS_SZ       = 352;
+    # ⭐ VOLUMES, built in `app.cyr` and passed down like PLACES — this file asks the kernel nothing.
+    CRAB_RS_VOLS     = 352;
+    CRAB_RS_VOLN     = 360;
+    CRAB_RS_SZ       = 368;
 }
 
 var crab_rs_rec = 0;
@@ -3236,11 +3535,13 @@ fn crab_rs_thumb(rs, pixels, state): i64 {
 # carries them, like the pane state, the tray and the dimensions.
 # @public — the view mode: `CRAB_VIEW_LIST` or `CRAB_VIEW_GRID`. Applies to both panes.
 # @public — the sidebar: the operator's want, plus the places model built in `app.cyr`.
-fn crab_rs_sidebar(rs, want, places, n): i64 {
+fn crab_rs_sidebar(rs, want, places, n, vols, voln): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_SBOPEN, want);
     store64(rs + CRAB_RS_PLACES, places);
     store64(rs + CRAB_RS_PLACEN, n);
+    store64(rs + CRAB_RS_VOLS, vols);
+    store64(rs + CRAB_RS_VOLN, voln);
     return 1;
 }
 
@@ -3435,7 +3736,8 @@ fn crab_render(surf, font, rs): i64 {
     # ⛔ AFTER `availw` IS SETTLED AND BEFORE THE PANES ARE BUILT. Built earlier it would be sized
     # against a width no rule had agreed on yet; built later it would be the wrong child.
     if (sbon == 1) {
-        crab_sblst = crab_sidebar(panes, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN));
+        crab_sblst = crab_sidebar(panes, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN),
+          load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN));
     }
     var twopanes = crab_two_panes_fit(availw);
     var panew = availw - CRAB_PANE_GAP;

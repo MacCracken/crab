@@ -990,6 +990,71 @@ fn crab_places_sub(dst, n, home, name, scr, statbuf): i64 {
     return crab_place_add(dst, n, name, scr, statbuf);
 }
 
+# @public — fill `dst` (CRAB_VOLS_MAX * CRAB_VOL_SZ) with the mounted volumes and their capacity.
+# -> how many were written, or 0.
+#
+# ⭐ agnos `mountlist`#104 + `statfs`#103, both of which crab filed for and both of which shipped.
+# ⛔⛆ AGNOS-ONLY, AND THE `#ifdef` IS THE WHOLE FUNCTION. Neither syscall has a host arm — there is
+# no `sys_mountlist` or `sys_statfs` in `syscalls_x86_64_linux.cyr` — so on the host this returns 0
+# and the sidebar shows PLACES alone. That is the same irreducible shape `crab_readdir_into` has,
+# and it means **no host test can exercise this function**. ⇒ Everything decidable lives in
+# `ui.cyr`'s pure helpers, which the suite CAN reach: the record accessors, the capacity
+# arithmetic, and the alias dedup. What is left here is the two calls and the copy.
+#
+# ⚠ `max` IS A RECORD COUNT, not a byte length — agnos validates it with `is_user_array` precisely
+# because `max * 80` wraps, which is the `#99` defect it fixed at 1.56.51. Passing a byte count here
+# would ask for 104x too many records.
+# ⚠ A VOLUME THAT WILL NOT `statfs` IS STILL LISTED, with zeroed capacity. It is mounted — the
+# operator should see it — and `crab_vol_pct` answers 0 for an unknowable volume by construction.
+fn crab_volumes_build(dst, statbuf): i64 {
+    var n = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    var raw = crab_vol_raw();
+    if (raw == 0) { return 0; }
+    var got = sys_mountlist(raw, CRAB_VOLS_MAX);
+    if (got < 0) { return 0; }
+    if (got > CRAB_VOLS_MAX) { got = CRAB_VOLS_MAX; }
+    var i = 0;
+    while (i < got) {
+        var src = raw + i * 80;                       # the KERNEL's 80-byte record
+        var rec = dst + n * CRAB_VOL_SZ;
+        store64(rec + CRAB_VOL_BACKEND, load64(src + 0));
+        var pl = load64(src + 8);
+        if (pl < 0) { pl = 0; }
+        if (pl > 64) { pl = 64; }
+        store64(rec + CRAB_VOL_PLEN, pl);
+        # ⚠ THE PREFIX IS NUL-PADDED, NOT NUL-TERMINATED, and the ABI says the tail is not
+        # meaningful — so crab copies `prefixlen` bytes and terminates it itself rather than
+        # trusting a byte it was told to ignore.
+        var k = 0;
+        while (k < pl) { store8(rec + CRAB_VOL_PREFIX + k, load8(src + 16 + k)); k = k + 1; }
+        store8(rec + CRAB_VOL_PREFIX + pl, 0);
+        store64(rec + CRAB_VOL_BSIZE, 0);
+        store64(rec + CRAB_VOL_BLOCKS, 0);
+        store64(rec + CRAB_VOL_BFREE, 0);
+        if (sys_statfs(rec + CRAB_VOL_PREFIX, pl, statbuf) == 0) {
+            store64(rec + CRAB_VOL_BSIZE, load64(statbuf + 0));
+            store64(rec + CRAB_VOL_BLOCKS, load64(statbuf + 8));
+            store64(rec + CRAB_VOL_BFREE, load64(statbuf + 16));
+        }
+        n = n + 1;
+        i = i + 1;
+    }
+    # ⛔ DEDUP LAST, so an aliased volume's capacity is read once and the surviving row keeps it.
+    n = crab_vol_dedup(dst, n);
+    #endif
+    return n;
+}
+
+# The kernel's raw 80-byte-record landing buffer, allocated once.
+# ⚠ Separate from crab's own 104-byte records because the layouts differ — copying through a
+# scratch is what lets crab attach capacity without pretending the kernel sent it.
+var crab_volraw = 0;
+fn crab_vol_raw(): i64 {
+    if (crab_volraw == 0) { crab_volraw = alloc(CRAB_VOLS_MAX * 80); }
+    return crab_volraw;
+}
+
 # @public — is `path` a directory? 1 = yes, 0 = no or unstattable.
 #
 # ⛔ ASKED OF THE PATH, NOT OF A readdir RECORD, AND THAT IS THE POINT. Every other "is it a folder"

@@ -158,6 +158,12 @@ fn main(): i64 {
     # refresh key rather than on the frame.
     var places = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
     var placen = crab_places_build(places, pathscr, statbuf);
+    # ⭐ VOLUMES (M6, unblocked by agnos `mountlist`#104). ⚠ Built ONCE at startup like PLACES, and
+    # for the same reason: it is two syscalls per volume and the render path must not pay them.
+    # ⚠ Returns 0 on the host — neither syscall has a host arm — so the sidebar shows PLACES alone
+    # there. That is a platform difference, not a failure.
+    var vols = alloc(CRAB_VOLS_MAX * CRAB_VOL_SZ);
+    var voln = crab_volumes_build(vols, statbuf);
     # ⭐ THE VIEW MODE (M5). ⚠ ONE MODE FOR BOTH PANES, like the sort order — a view is a property of
     # how the operator is reading, and two panes in different modes is a display they would have to
     # remember having toggled.
@@ -213,7 +219,7 @@ fn main(): i64 {
     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     crab_rs_preview(rs, pv_open);
     crab_rs_view(rs, view_mode);
-    crab_rs_sidebar(rs, sb_open, places, placen);
+    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -484,7 +490,17 @@ fn main(): i64 {
                     if (modal == 1) { paneclick = 0; }
                     if (sbi >= 0) {
                         paneclick = 0;
-                        var pp = crab_place_path(places, placen, sbi);
+                        # ⛔ THE ROW MAP OWNS THE TRANSLATION, not arithmetic here. With PLACES and
+                        # VOLUMES the sidebar has two sections and two inert headers, so a row is no
+                        # longer `index + 1` — and hand-counting that is exactly what made the
+                        # context menu highlight the wrong verb.
+                        var skind = crab_sb_row_kind(sbi, placen, voln);
+                        var sidx = crab_sb_row_index(sbi, placen, voln);
+                        var pp = 0;
+                        if (skind == CRAB_SB_PLACE) { pp = crab_place_path(places, placen, sidx); }
+                        # ⚠ A VOLUME IS A PATH TOO — its mount prefix — so clicking one navigates
+                        # exactly as a place does. Nothing else about it is special.
+                        if (skind == CRAB_SB_VOLUME) { pp = crab_vol_prefix(vols, voln, sidx); }
                         if (pp != 0) {
                             # ⭐ NAVIGATE THE ACTIVE PANE, not a fixed one. The sidebar is a
                             # destination list; which pane goes there is the operator's existing
@@ -1119,19 +1135,17 @@ fn main(): i64 {
                                     # ⛔ THE PROMPT MUST SAY HOW MANY. "delete the selected entry?" in
                                     # front of a nine-file marked set is the most dangerous sentence in
                                     # the app — the operator answers the question they were asked.
-                                    if (nmark > 0) { crab_set_notice("delete the MARKED entries?  y = yes, any other key = no"); }
-                                    else {
-                                        # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected
-                                        # entry?" in front of a directory is technically true and
-                                        # practically a lie — the operator answers the question asked.
-                                        var qrec = lbuf + sel_l * CRAB_REC_SZ;
-                                        if (active_pane == 1) { qrec = rbuf + sel_r * CRAB_REC_SZ; }
-                                        if (load8(qrec + CRAB_REC_TYPE) != 0) {
-                                            crab_set_notice("delete this FOLDER and everything in it?  y = yes");
-                                        } else {
-                                            crab_set_notice("delete the selected entry?  y = yes, any other key = no");
-                                        }
+                                    # ⛔⛆ THE PROMPT NAMES WHAT DIES. "delete the MARKED entries?" is
+                                    # true and does not say the set is five files and one of them is
+                                    # `agnsh` — which is how five system binaries left an iron box on
+                                    # one confirm. `crab_del_prompt` puts the count, the first three
+                                    # names and a SYSTEM DIR! warning in front of the keypress.
+                                    var qdir = lpath; var qbuf = lbuf; var qsel = sel_l; var qcnt = ln;
+                                    var qmk = lmarks;
+                                    if (active_pane == 1) {
+                                        qdir = rpath; qbuf = rbuf; qsel = sel_r; qcnt = rn; qmk = rmarks;
                                     }
+                                    crab_set_notice(crab_del_prompt(qdir, qbuf, qmk, qcnt, qsel, nmark));
                                 } else { crab_set_notice("nothing selected to delete"); }
                             }
                             # ⭐ COPY AND MOVE GO TO THE OTHER PANE, WHICH IS WHAT THE SECOND PANE IS FOR.
@@ -1375,7 +1389,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1466,7 +1480,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
-                    crab_rs_sidebar(rs, sb_open, places, placen);
+                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1538,7 +1552,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1628,7 +1642,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
-                    crab_rs_sidebar(rs, sb_open, places, placen);
+                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
@@ -1670,7 +1684,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 var sm = crab_render(surf, 0, rs);
                 if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
@@ -1694,7 +1708,7 @@ fn main(): i64 {
                         crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                         crab_rs_preview(rs, pv_open);
                         crab_rs_view(rs, view_mode);
-                        crab_rs_sidebar(rs, sb_open, places, placen);
+                        crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                         crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
@@ -1731,7 +1745,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on

@@ -2,6 +2,176 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.1] — 2026-09-07 — VOLUMES: the gate crab filed is closed, and the fix was the one we asked for
+
+> ⛔ **THIS SECTION EXISTS SO `[0.8.0]` BELOW IS NEVER TOUCHED.** 0.8.0 is tagged and on the remote,
+> so it is a record now — including where it is wrong. `git describe` answered `0.8.0-1-g254b9e2`
+> before a word of this was written; checking that first is the habit 0.7.2 exists to enforce.
+
+### Fixed — ⛔⛆ the delete prompt now NAMES what dies, and refuses to be quiet about `/bin`
+
+Five system binaries left an AGNOS iron box on one confirm and nothing surfaced it until the machine
+would not boot —
+`docs/development/issues/2026-09-03-five-contiguous-bin-entries-deleted-on-agnos.md`. **The mechanism
+is still unproven.** These are the two guards that would have prevented the OUTCOME whatever the
+trigger was, which is why they are worth having before the cause is known.
+
+**The prompt said `delete the MARKED entries?`** — true, and it never said the set was **five files
+and one of them was `agnsh`**. It now reads `SYSTEM DIR! delete 5 marked: agnsh, boot, cp +2 more?`.
+⚠ Three names then a remainder, because the status line is one row and nine names wrap into nothing.
+⛔ The `SYSTEM DIR!` warning leads, where the eye lands.
+⛔ **Exact match on the directory, not a prefix test** — `/bin` is guarded, `/bin/sub` is not, because
+a guard that swallowed the subtree would make it undeletable and teach the operator to route around
+the warning. The rows that died were direct children of `/bin`.
+
+⛔⛆ **AND THE TEST CAUGHT AN INVERSION BEFORE IT SHIPPED.** `crab_streq_n` returns **1 for equal** —
+it is not `strcmp` — and the first draft tested `== 0`, so the guard was backwards: it warned on
+`/home/macro` and stayed silent on `/bin`. Caught by the assertion pair that names `/bin` and
+`/binary` in the same breath, which is exactly why that pair is in the suite. Mutation-proven:
+re-inverting it fails 8, dropping the names fails 4, dropping the warning fails 2.
+
+### Investigated — what the incident is NOT
+
+Checked against the **tagged 0.8.0**, which is the code that was on the box, not against HEAD:
+
+- **Stale index-based marks surviving a re-list** — the issue's leading hypothesis. **Refuted.**
+  Every `crab_relist` call site in the burned tree clears marks within three lines, and each clears
+  **its own** pane's marks (checked for the cross-pane shape too, which would have been subtler).
+- **Marks surviving a re-SORT**, where a permutation would leave indices pointing at different
+  files. **Refuted** — the `s` handler cleared both panes' marks in 0.8.0 already.
+- **`crab_mark_clear` bounded by the live count**, which would leave high-index marks alive across a
+  small directory. **Refuted** — all 24 call sites pass `CRAB_MAX_ENTRIES`, not the count.
+
+⚠ **One thing found that IS real, and does not explain the shape.** The tagged 0.8.0 has **no**
+`crab_pointer_modal`: a click during a delete confirmation could re-list the pane and change what
+`y` deleted. That was live on the burned box. But it yields **one** wrong entry (or one wrong tree),
+not five contiguous siblings — so it is an unguarded path to a wrong delete, not this incident's
+mechanism. Fixed after the 0.8.0 tag; see the moved section below.
+
+### Added — sidebar VOLUMES (M6), on agnos `mountlist`#104
+
+⭐⭐ **THE BLOCKER crab FILED ON 2026-09-02 IS REPAIRED, AND agnos TOOK BOTH PIECES OF ADVICE IN THE
+FILING.** Their ABI credits it by name and adopts the reasoning verbatim — *"it is an enumeration
+because a probe cannot answer it"* — plus the recommendation to **mint a new number rather than
+widen `mount`#11**, whose unused argument registers carry stale values rather than 0. crab now
+enumerates mounts instead of guessing at three hardcoded prefixes, which is what the filing asked
+for and why it declined to ship the probe.
+
+The sidebar grows a second section: one row per mounted volume, its filesystem name over a capacity
+bar. Clicking one navigates to its mount prefix, exactly as a place does — a volume *is* a path.
+
+⛔ **BOTH RECORD LAYOUTS ARE FROZEN ABI AND NEITHER IS VENDORED**, so crab spells them out:
+`mountlist` gives 80-byte records (backend @0, prefixlen @8, prefix @16 — **64 bytes NUL-PADDED, and
+the ABI says the tail is not meaningful**, so crab copies `prefixlen` bytes and terminates it
+itself); `statfs` gives 32 bytes (`f_bsize` @0, `f_blocks` @8, `f_bfree` @16). ⚠ The kernel reports
+**blocks**; userland does the multiply.
+
+⛔⛆ **THE ALIAS DEDUP IS WHY AN ENUMERATION WAS NEEDED.** agnos's `vfs_mount_init` gives an
+ext2-less boot the **same backend under both `/` and its `/mnt/…` prefix** — its own comment calls
+them "harmless redundant aliases". Harmless to routing; to a sidebar they are **one volume listed
+twice**, and `statfs` on each returns identical numbers, so a probe cannot tell them apart. The
+backend id travelling with the prefix is what distinguishes them. crab keeps the **first** occurrence
+per backend, which is the shortest prefix, because `vfs_mount_init` adds `/` before any `/mnt/…`.
+
+⛔ **AGNOS-ONLY, AND THE `#ifdef` IS THE WHOLE FUNCTION.** Neither syscall has a host arm, so
+`crab_volumes_build` returns 0 on the host and the sidebar shows PLACES alone — a platform
+difference, not a failure, and the VOLUMES heading is **absent rather than empty**. ⇒ **No host test
+can exercise it**, which is why everything decidable was lifted into pure helpers the suite *can*
+reach: the record accessors, the capacity arithmetic, the alias dedup and the row map.
+
+⛔ **THE ROW MAP IS A FUNCTION, NOT ARITHMETIC AT THE CALL SITE.** Two sections and two inert headers
+mean a row is no longer `index + 1`. **This exact off-by-one has shipped twice here** — the context
+menu highlighting the wrong verb when a separator was hand-counted, and the sidebar's own `row - 1`
+which was correct only while PLACES was the only section. `crab_sb_row_kind` / `crab_sb_row_index`
+own it now.
+
+⚠ **The volume row is a `BOX_V`, deliberately.** `dh_progress_new` leaves its width 0, and in a
+`BOX_H` the bar's thickness is the cross axis, which `ALIGN_STRETCH` ignores — so it would render
+0 px wide. It also does **not** copy `crab_tray`, whose own bar was 0 px *tall* for the mirror-image
+reason until 0.7.7.
+
+### Testing
+
+44 assertions over the reachable half. Mutation-proven: removing the alias dedup fails 3, showing
+FREE instead of USED fails 6, and a row map that forgets the VOLUMES header fails 4 — including
+`row 5 -> VOLUME 0` returning place 1.
+
+### Moved here from `[0.8.0]` — these shipped AFTER that tag
+
+⛔⛆ **THE 0.7.2 FAILURE, AGAIN, AND THIS TIME TO OUR OWN NOTES.** The four sections below were
+written into the `[0.8.0]` body and then committed **after `0.8.0` was tagged** (`7db2422`) — so the
+released section described fixes the released artifact does not contain. Verified by measurement:
+`git show 0.8.0:src/ui.cyr` has **no** `crab_pointer_modal`, **no** `crab_mb_item_first` and **no**
+`crab_sidebar_shown`. ⚠ The tag's own copy of the CHANGELOG never claimed them — the drift was
+introduced by the commit that landed past the tag, which is precisely the shape 0.7.2 exists to warn
+about. ⇒ Moved to the release that actually carries them.
+⛔ **This has now happened twice in five days.** `git describe --tags` before writing into the top
+section is not a habit yet; it needs to be.
+
+### Fixed — ⛔⛆ A MODAL QUESTION DID NOT OWN THE POINTER, AND THE WORST CASE WAS A WRONG DELETE
+
+Found by a completeness audit over M1–M6, in code this same release added.
+
+`d` latches a delete confirmation and the status line asks *"delete this FOLDER and everything in
+it? y = yes"*. ⛔ **That latch is on the STATUS LINE, not an overlay** — so nothing pruned pointer
+input the way the overlay layer prunes it for the menu and the sheet. The chain:
+
+1. A sidebar click, unguarded, rewrote `lpath`, ran `crab_relist`, called `crab_mark_clear` and set
+   `sel = 0`.
+2. `y` then found `dmarked == 0` — the marks had just been cleared — and took the **single-entry**
+   branch against `dsel = 0`.
+3. If entry 0 of the newly-listed directory was a folder, that is
+   `crab_walk_begin(CRAB_OP_DTREE, …)` — **a recursive tree delete of a directory the operator never
+   chose, from a "y" they typed about a different file.**
+
+⛔ **THE SAME HOLE EXISTED FOR PANE CLICKS AND PREDATES THE SIDEBAR**: clicking another row between
+`d` and `y` moved the selection, so the prompt named one entry and the delete took another. It was
+invisible while the overlay layer was 2 px tall and pruned nothing — every surface was equally
+unguarded. Fixing the overlay root made `crab_hit` modal and left the sidebar as the one live hit
+path, which is *worse* than uniformly absent, because the comment then described a half-truth.
+
+⇒ `crab_pointer_modal` refuses pointer input while a confirmation, a sheet, the context menu or the
+menu bar is up. The keyboard side was already right — every modal state is checked before the
+bindings and consumes the key — and this is the half that was missing. ⚠ It is a **predicate**, not
+an inline test, because the key dispatch it guards is inside the agnos-only `#ifdef` that no test on
+any target can execute. Mutation-proven: dropping the confirmation arm fails 3, and testing `mb_sel`
+with `!= 0` — which would read menu `File` (index 0) as closed — fails 4.
+
+### Fixed — a bar drop-down could land on a greyed row, and Enter fired it anyway
+
+A disabled entry is made INERT, and `dh_list_select` **refuses** an inert row — storing nothing and
+returning -1 — so an open drop-down painted **no highlight at all** while `mb_item` pointed at the
+greyed verb and Enter rewrote its key and ran it. Opening a menu landed on slot 0 regardless, and
+arrowing stepped over disabled rows without noticing them. The context menu has skipped disabled
+entries since it shipped; the bar simply never grew the equivalent. New `crab_mb_item_first` /
+`crab_mb_item_move`. Mutation-proven: 3 and 4 failures.
+
+### Fixed — `b` reported success and drew nothing whenever the preview was open
+
+The key handler asked `crab_sidebar_fit(w, 1)` — against the whole **window** — while `crab_render`
+asks against what the preview left. On a window wide enough for one of them but not both, the key
+said *"sidebar on"* and nothing appeared. **A key that says it worked and does not is
+indistinguishable from a broken one**, which is the exact discipline `p`'s own comment claims. One
+`crab_sidebar_shown`, asked by both, so the answer cannot differ. Mutation-proven: 2 failures.
+
+### Docs — 38 unfinished items from M1–M6 are now on the roadmap
+
+⛔⛆ **"SHIPPED" AND "FINISHED" HAD DRIFTED APART.** A five-probe audit over M1–M6, the v1.0 criteria
+and every ⚠ marker in `src/` found 38 items done enough to ship and never converted into work —
+most recorded nowhere, several as single sentences inside released CHANGELOG sections, which are
+records rather than backlogs. Three were correctness bugs and are fixed above; the rest are now a
+named section in `docs/development/roadmap.md`, grouped by whether they are wrong today, missing an
+interaction story, an absent affordance, or a fact that was never made an item.
+⇒ **The rule that section enforces: a limitation noticed while shipping is an ITEM, not a comment.**
+
+### Changed — toolchain pin `6.5.41` -> **6.6.0**
+
+`sys_mountlist` arrives with it. ⛔ **The `#50` hazard bit again**: `cyrius lib sync` walks only the
+declared `[deps].stdlib` set, and left **seven** transitive leaves stale — `sankoch`, `thread` and
+its four backends, `sync_macos`. Copied by hand, then the whole vendored tree verified byte-identical
+to the 6.6.0 snapshot (0 drifting). ⚠ No leaf was added this time, so `#51` did not fire. The
+drift warning is gone; the pin is honest again.
+
 ## [0.8.0] — 2026-09-02 — M6: the sidebar, the menu bar, the switcher, and Bueller
 
 > ⛔ **THIS SECTION EXISTS SO THE `[0.7.7]` SECTION BELOW IS NEVER TOUCHED.** 0.7.7 is tagged at
@@ -73,62 +243,6 @@ and a single `alloc(32)` inside the strip fails the arm at **640 bytes** — 32 
 shape of the leak that shipped in 0.7.5.
 Also covered: the fit rule at its floor and one pixel under, both panes selecting their own cell,
 **no** strip in two-pane mode, and the text-prefix fallback still working when the window is narrow.
-
-### Fixed — ⛔⛆ A MODAL QUESTION DID NOT OWN THE POINTER, AND THE WORST CASE WAS A WRONG DELETE
-
-Found by a completeness audit over M1–M6, in code this same release added.
-
-`d` latches a delete confirmation and the status line asks *"delete this FOLDER and everything in
-it? y = yes"*. ⛔ **That latch is on the STATUS LINE, not an overlay** — so nothing pruned pointer
-input the way the overlay layer prunes it for the menu and the sheet. The chain:
-
-1. A sidebar click, unguarded, rewrote `lpath`, ran `crab_relist`, called `crab_mark_clear` and set
-   `sel = 0`.
-2. `y` then found `dmarked == 0` — the marks had just been cleared — and took the **single-entry**
-   branch against `dsel = 0`.
-3. If entry 0 of the newly-listed directory was a folder, that is
-   `crab_walk_begin(CRAB_OP_DTREE, …)` — **a recursive tree delete of a directory the operator never
-   chose, from a "y" they typed about a different file.**
-
-⛔ **THE SAME HOLE EXISTED FOR PANE CLICKS AND PREDATES THE SIDEBAR**: clicking another row between
-`d` and `y` moved the selection, so the prompt named one entry and the delete took another. It was
-invisible while the overlay layer was 2 px tall and pruned nothing — every surface was equally
-unguarded. Fixing the overlay root made `crab_hit` modal and left the sidebar as the one live hit
-path, which is *worse* than uniformly absent, because the comment then described a half-truth.
-
-⇒ `crab_pointer_modal` refuses pointer input while a confirmation, a sheet, the context menu or the
-menu bar is up. The keyboard side was already right — every modal state is checked before the
-bindings and consumes the key — and this is the half that was missing. ⚠ It is a **predicate**, not
-an inline test, because the key dispatch it guards is inside the agnos-only `#ifdef` that no test on
-any target can execute. Mutation-proven: dropping the confirmation arm fails 3, and testing `mb_sel`
-with `!= 0` — which would read menu `File` (index 0) as closed — fails 4.
-
-### Fixed — a bar drop-down could land on a greyed row, and Enter fired it anyway
-
-A disabled entry is made INERT, and `dh_list_select` **refuses** an inert row — storing nothing and
-returning -1 — so an open drop-down painted **no highlight at all** while `mb_item` pointed at the
-greyed verb and Enter rewrote its key and ran it. Opening a menu landed on slot 0 regardless, and
-arrowing stepped over disabled rows without noticing them. The context menu has skipped disabled
-entries since it shipped; the bar simply never grew the equivalent. New `crab_mb_item_first` /
-`crab_mb_item_move`. Mutation-proven: 3 and 4 failures.
-
-### Fixed — `b` reported success and drew nothing whenever the preview was open
-
-The key handler asked `crab_sidebar_fit(w, 1)` — against the whole **window** — while `crab_render`
-asks against what the preview left. On a window wide enough for one of them but not both, the key
-said *"sidebar on"* and nothing appeared. **A key that says it worked and does not is
-indistinguishable from a broken one**, which is the exact discipline `p`'s own comment claims. One
-`crab_sidebar_shown`, asked by both, so the answer cannot differ. Mutation-proven: 2 failures.
-
-### Docs — 38 unfinished items from M1–M6 are now on the roadmap
-
-⛔⛆ **"SHIPPED" AND "FINISHED" HAD DRIFTED APART.** A five-probe audit over M1–M6, the v1.0 criteria
-and every ⚠ marker in `src/` found 38 items done enough to ship and never converted into work —
-most recorded nowhere, several as single sentences inside released CHANGELOG sections, which are
-records rather than backlogs. Three were correctness bugs and are fixed above; the rest are now a
-named section in `docs/development/roadmap.md`, grouped by whether they are wrong today, missing an
-interaction story, an absent affordance, or a fact that was never made an item.
-⇒ **The rule that section enforces: a limitation noticed while shipping is an ITEM, not a comment.**
 
 ### Added — the menu bar (M6, canvas turn 2), on `F10`
 
