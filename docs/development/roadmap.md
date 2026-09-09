@@ -234,18 +234,20 @@ toolkit; see the gate table below for what each turned out to be.
   `crab_hit`. ⚠ The width rule is `crab_preview_fit`'s shape with `CRAB_SB_W`, subtracted before the
   two-pane decision so nothing needs an "unless the sidebar is open" clause.
   ⚠ **SMART FOLDERS and TAGS need M7's index.** VOLUMES is below.
-- **Sidebar VOLUMES + capacity bars** — ⭐ *capacity* is unblocked: cyrius 6.5.37 shipped
-  `sys_statfs` and crab vendors it. ⛔ **Enumeration is filed upstream (2026-09-02)** —
-  `agnos/docs/development/issues/2026-09-02-no-way-to-enumerate-mounts.md`.
-  ⭐⭐ **AND THE ASK TURNED OUT TO BE TINY**: agnos already keeps a `{prefix → backend}` mount table
-  (`kernel/core/vfs.cyr:373-376`, filled on every boot from `main.cyr:922`). Ring 3 simply has no
-  getter for it, so this is *expose what exists*, not *build a mount table*.
-  ⚠ **crab could ship a probe today and deliberately does not**: the mount namespace is three fixed
-  prefixes (`/`, `/mnt/fat`, `/mnt/exfat`) and `statfs` validates its path, so probing those three
-  constants works. It hardcodes agnos's namespace into crab's binary, it cannot enumerate — only
-  confirm strings crab already guessed — and it cannot see the aliasing that lists one volume twice
-  when ext2 is absent. ⇒ **VOLUMES is absent rather than approximated.** Nothing in crab waits on a
-  reply. ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #23.*
+- ✅ **Sidebar VOLUMES + capacity bars — SHIPPED in 0.8.1.** The sidebar grows a second section:
+  one row per mounted volume, its filesystem name over a capacity bar, on agnos `mountlist`**#104**
+  for enumeration and `statfs`#103 for capacity.
+  ⭐⭐ **THIS IS THE ENTRY TO READ WHEN A GATE IS REAL AND THE TEMPTATION IS TO APPROXIMATE IT.**
+  crab **could** have shipped a probe — the namespace was three fixed prefixes (`/`, `/mnt/fat`,
+  `/mnt/exfat`) and `statfs` validates its path — and it **deliberately did not**, because a probe
+  hardcodes agnos's namespace into crab's binary, can only confirm strings crab already guessed, and
+  cannot see the aliasing that lists one volume twice when ext2 is absent. It filed the blocker
+  instead (2026-09-02) and shipped nothing in the meantime.
+  ⭐ **agnos took BOTH halves of the filing's advice and credited it by name**: that this is *"an
+  enumeration because a probe cannot answer it"*, and that the answer should **mint a new number
+  rather than widen `mount`#11**, whose unused argument registers carry stale values rather than 0.
+  ⇒ **Declining to approximate is what got the right primitive built.** ⛔ *We nearly filed the wrong
+  syscall number: it is `mount`#11, not #23 — check the number before the argument.*
 - ✅ **The menu bar — SHIPPED**, on `F10`, collapsed by default so it costs zero rows until
   revealed. **File · Edit · Go · View**, on `dh_list_new_h(0)`'s per-item widths (dhancha 0.9.28).
   Drop-downs are a SELECTION over the context menu's `CRAB_MI_*` — one description of each verb, not
@@ -310,7 +312,7 @@ toolkit; see the gate table below for what each turned out to be.
 | ~~Thumbnail PIXELS~~ | M5 | ✅ **SHIPPED** — operator ruled 2026-08-31 and chitra **1.0.1** is declared (⚠ *not* 1.0.0, as this row and ~10 other places said). ⚠ The cost figures below are from the **pre-grid/gallery tree** and no longer describe the binary: host **+537,112 B (+115.2 %)**, agnos **+534,976 (+108.8 %)**. ⛔ The live constraint is not size but that **every decode is permanent** (~2.5x RGBA, no `free()`); two budgets bound it. | 2026-08-31 ⭐ done |
 | Proportional text | M5 | ⭐ **UPSTREAM HALF CLOSED 2026-09-02 — the remaining work is crab's own.** This row named *"rekha + dhancha font plumbing"*, and the SIXTH false gate was that both already existed; what was missing was **advance widths**. rekha declared `REKHA_TAG_HHEA` / `REKHA_TAG_HMTX` from its first SFNT commit and never read either, so dhancha hard-coded `advf = (h * 6) / 10` and rendered proportional faces at monospace pitch. ✅ **rekha 0.3.6** adds `rekha_advance_width` / `rekha_char_advance_px`; ✅ **dhancha 0.9.27** consumes them in `dh_text_advance`, with the fixed 0.6 em kept only as the no-metrics fallback. crab declares both floors. ⛔ **WHAT IS LEFT IS crab-SIDE**: it still passes `font = 0`, and `CRAB_COL_CHARW = 9` plus the five constants derived from it must move before it can stop. ⚠ The scalable path reads `load8(text + i)` — Latin-1 only. | 2026-09-02 ⭐ done upstream |
 | Sidebar — PLACES | M6 | ⛔ **FALSE GATE (the fifth).** Not dhancha: `LIST` gives scroll/selection/highlight, `DH_FLAG_INERT` gives section headers, `PROGRESS` gives bars, padding gives indent. Buildable in crab today. | 2026-08-31 ⭐ re-derived |
-| Sidebar — VOLUMES + capacity bars | M6 | ⛔ **TWO GATES, AND THE CAPACITY ONE IS NOW CLOSED.** *Capacity*: agnos shipped **`statfs`#103** in 1.56.56, all three backends answer it since **1.56.57**, and agnos's issue is archived. ⭐ **cyrius 6.5.37 shipped the stdlib peer, and crab VENDORS it as of the 0.7.7 pin bump to 6.5.41** — `lib/syscalls_x86_64_agnos.cyr` carries `SYS_STATFS = 103` and `fn sys_statfs(path, pathlen, buf)`; cyrius's issue is archived too. This row said *"filed 🟡 OPEN against cyrius"* and that is **no longer true**; there is nothing left to wait for and no raw-syscall interim needed. ⚠ Two crab-side facts remain: it is **agnos-only** (no host arm, so no host test can exercise it) and **no `STATFS_*` field offsets are vendored** — the frozen 32-byte record's layout has to come from agnos's docs. *Enumeration*: **still fully open** — `mount`#11 / `umount`#24 are documented no-op **stubs**, so crab cannot learn **what is mounted**. | 2026-09-02 ⭐ re-derived |
+| ~~Sidebar — VOLUMES + capacity bars~~ | M6 | ✅ **BOTH GATES CLOSED; SHIPPED 0.8.1.** *Capacity*: agnos shipped **`statfs`#103** (1.56.56; all three backends answer it since 1.56.57) and cyrius 6.5.37 the stdlib peer, which crab vendors. *Enumeration*: this row said **"still fully open — `mount`#11 / `umount`#24 are documented no-op stubs"**, which was true when written. crab filed it upstream 2026-09-02; agnos **minted `mountlist`#104** rather than widening `mount`#11 — adopting both halves of crab's filing and crediting it by name — and 0.8.1 consumes it. ⇒ **The gate was REAL, and it closed because crab declined to ship the probe that would have papered over it.** That is the counter-example to the six false gates: not every gate is a stale claim, and the answer to a real one is to file it, not to approximate it. | 2026-09-08 ⭐ done |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ✅ **The wait is over**: 0.9.26 is pushed (`cb855c8`) and crab's manifest declares it as of 2026-09-01, verified by check four. ⚠ crab consumes none of it yet. | 2026-09-01 ⭐ resolvable |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |

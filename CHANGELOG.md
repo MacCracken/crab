@@ -2,6 +2,103 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.2] — unreleased — the pin moves to 6.6.1, and it is a clock fix on the target crab ships to
+
+> ⛔ **THIS SECTION EXISTS SO `[0.8.1]` BELOW IS NEVER TOUCHED.** 0.8.1 is tagged and on the remote,
+> so it is a record now. `git describe` answered `0.8.1` exactly before a word of this was written —
+> HEAD *was* the tag — which is the check 0.7.2 exists to enforce.
+> ⚠ **`VERSION` still reads `0.8.1` and stays there until the operator cuts.** The heading is where
+> post-tag work accumulates; it is not a claim that a release happened.
+
+### Changed — toolchain pin `6.6.0` -> **6.6.1**
+
+⛔⛆ **THE BUMP LANDS ON crab's SHIPPING TARGET, AND THE OLD BEHAVIOUR FAILED SILENTLY.** 6.6.1
+rebinds `chrono`'s AGNOS monotonic clock from `sys_uptime_ms` (**#40**, `timer_ticks`) to
+`sys_uptime_us` (**#95**, `rdtsc`). A foreground `run` program on AGNOS executes with **IF cleared**
+— only `/bin/agnsh` gets IF=1 — so the 100 Hz timer ISR never fires, `timer_ticks` never advances,
+and #40 is **frozen for that program's entire run**: anything timing itself with it read exactly
+zero, forever, **with no error**. ⭐ **crab is spawned by the compositor, so it is precisely that
+shape of program.** Resolution improves as a side effect — µs rather than the 10 ms tick.
+
+⚠ **The trap was documented two files away the whole time**, above the wrapper `chrono` did not call
+(`lib/syscalls_x86_64_agnos.cyr`, `sys_uptime_us`: *"#95 is the only correct clock there"*), and
+agnos's own ABI note records that it cost two iron burns before it was understood. A general-purpose
+clock still walked into it for four minors. ⇒ **A correct note in the right file is not a guard.**
+
+### Changed — vendored `lib/`: two leaves moved, and only two
+
+- **`lib/chrono.cyr`** — the clock rebind above.
+- **`lib/sankoch.cyr`** — 2.7.11 → **2.7.14**: an `out_max` absolute output ceiling threaded through
+  `_deflate_decode_block` / `_deflate_decompress_inner` and the dict variants, replacing the fixed
+  `DECOMPRESS_MAX_OUTPUT` compare. crab reaches it **transitively through chitra**, which is the
+  ~399 KB inflate leaf PNG requires; crab calls none of it directly.
+
+⭐ **The other five stdlib files 6.6.1 touched are NOT in crab's graph and did not land** — `ganita`,
+`math`, `niyama`, `patra`, `sakshi`. Establishing that is the point: *"the pin moved"* and *"crab's
+vendored tree moved"* are different claims, and only the second one is testable here.
+
+⛔ **`cyrius deps` refreshed both leaves correctly this time, and that was VERIFIED rather than
+assumed** — every file in `lib/` hashed against `~/.cyrius/versions/6.6.1/lib/`, not inferred from
+the command's exit code. The 6.5.41 bump is why: `cyrius lib sync` walks only the **declared** stdlib
+set, so three transitive thread leaves stayed at 6.5.36 content and had to be copied by hand, and
+`lib/hashseed.cyr` arrived untracked. **Diff the whole vendored tree after any bump.**
+
+### Verified — all nine CI gates, at the new pin
+
+`deps --verify` **49/0** · host build **1,036,944 B** (from 1,032,848; +4,096) · `--agnos`
+**1,068,976 B** · `cyrius test` **1462 / 0** · `render_test` **53 checks / 0** · fuzz **100,000
+rounds** · `fmt --check` clean on all 8 files, one invocation each · coverage **87 %** (floor 85) ·
+`vet` + `deny` **0 violations**.
+
+⭐⭐ **AND CHECK FOUR WAS RE-RUN, WITH THE STRONGEST RESULT IT HAS EVER RETURNED.** In a scratch copy
+with **all four `path` overrides disabled**, so `cyrius deps` genuinely clones the tags: 7 deps / 0
+errors, lock **3 → 7 commit-pinned** (the tell the overrides were off), **1462 / 0**, and both
+binaries **byte-identical to the path-resolved ones** — host `1,036,944`, agnos `1,068,976`.
+⇒ That equality says more than *"the declared graph resolves"*: it says **the declared graph is what
+the local build has been compiling all along**. ⚠ It holds only because every sibling tree sits
+exactly on its tag, clean — `path` is what makes drift possible, so re-derive it rather than
+assuming it.
+
+### Changed — dependencies: already current, and confirmed against the remotes
+
+All **seven** declared tags equal that repository's highest tag **on its remote**, fetched rather
+than read from a stale clone: sadish `0.5.3` · rupa `0.1.6` · rekha `0.3.6` · kashi `1.0.6` ·
+dhancha `0.9.28` · setu `0.8.8` · chitra `1.0.1`. **Nothing moved**, which is the finding.
+⚠ rekha's clone is one commit past `0.3.6` (`6560734`, *"update ci gates"*) — crab resolves rekha
+**by tag only**, deliberately, so that commit is outside crab's graph and no floor changes.
+
+### Fixed — documentation currency: state.md rotted a THIRD time, and so had handoff.md and the README
+
+⛔⛆ **THE THIRD ROT SURVIVED THE FIRST TWO BEING WRITTEN UP DIRECTLY ABOVE IT.** From 2026-09-02 to
+2026-09-08, `docs/development/state.md` asserted *"0.8.0 in preparation"* and *"0.7.7 is the last
+RELEASED version"* across **two tagged releases**, a pin that had moved twice (6.5.41 → 6.6.0 →
+6.6.1), a dependency table naming **rekha 0.3.5** and **dhancha 0.9.26** against a manifest declaring
+0.3.6 and 0.9.28, a **"6 deps"** count against seven, *"VOLUMES — enumeration still open"* after
+0.8.1 shipped it, and *"there is no `rekha_advance_width`"* after rekha 0.3.6 added it.
+
+- **`docs/development/handoff.md`** carried the same numbers **in its *Where things stand* table** —
+  the one its own header points at with *"read this and nothing above it for numbers."*
+- **`README.md` § Status was wrong for the THIRD time, and under-claiming again**: *"No columns
+  (miller) view, and no sidebar"*, naming the `mount`/`umount` stubs as *"the one genuine block
+  left"*, when `b` opens PLACES and 0.8.1 ships VOLUMES on `mountlist`#104. ⇒ The section's own ⛔
+  says under-claiming misleads exactly as much as over-claiming; it has now done both twice.
+- **`docs/development/roadmap.md`**'s M6 bullet and gate-table row still described VOLUMES as filed
+  and waiting.
+
+⇒ **The rule was already written and is still the only thing that would have worked**: refresh
+`state.md` in the *same commit* as the CHANGELOG entry. Nothing enforces it — `cyrius audit` does not
+gate doc currency — so it lives in `CLAUDE.md` Process step 5 and nowhere else.
+
+### Investigated — the `/bin` incident, re-checked at HEAD rather than at the burned tag
+
+⛔ **Still 🔴 OPEN; the mechanism is still unproven.** All **16** `crab_relist` call sites in
+`src/main.cyr` were re-audited **at HEAD** (0.8.1 + this section's changes) and every one clears
+marks within four lines — including the sidebar-click path, which rewrites `lpath` and relists a
+*different* directory and is the exact shape hypothesis #1 describes. ⇒ The stale-index-marks
+hypotheses stay **refuted** at HEAD, not merely at the tagged 0.8.0 the issue audited.
+⚠ **What remains is unchanged**: the batch sheet's relist, and ordinary operator error. ⛔ **The two
+preventions shipped in 0.8.1 are not a diagnosis, and there is still no undo.**
+
 ## [0.8.1] — 2026-09-07 — VOLUMES: the gate crab filed is closed, and the fix was the one we asked for
 
 > ⛔ **THIS SECTION EXISTS SO `[0.8.0]` BELOW IS NEVER TOUCHED.** 0.8.0 is tagged and on the remote,

@@ -24,15 +24,32 @@
 
 ## Version
 
-**0.8.0 in preparation** (2026-09-02) — see [`../../CHANGELOG.md`](../../CHANGELOG.md).
-**0.7.7** is the last RELEASED version, tagged `6c9dd18` on the remote.
+**0.8.1** is the last RELEASED version (2026-09-07), tagged on the remote — `git describe` answered
+`0.8.1` exactly before this cycle's work began, so HEAD *was* the tag.
+**0.8.2 is in preparation** (2026-09-08): the 6.6.1 pin and the documentation-currency repair. See
+[`../../CHANGELOG.md`](../../CHANGELOG.md). ⚠ **`VERSION` still reads `0.8.1`** and stays there until
+the operator cuts — the heading is where post-tag work accumulates, not a claim that a release
+happened.
 
-⭐ **M6 ships everything buildable**: the PLACES sidebar (`b`), the menu bar (`F10`), the A/B view
-switcher, 🦀 Bueller's status-bar line, and pane-header focus — the last M1–M4 residue.
-⛔ **Three M6 items remain and all three are GATED, not deferred**: sidebar VOLUMES (agnos cannot
-enumerate mounts — filed upstream 2026-09-02), the 🦀 chrome button (CP437 has no crab glyph; needs
-an icon path or proportional text), and the held-key repeat number (agnos-runtime, no host test can
-see it). ⚠ *A milestone closing with gated items is the normal shape here.*
+⛔⛆ **THIS FILE ROTTED A THIRD TIME, AND THE THIRD TIME IT SURVIVED ITS OWN ⛔ MARKERS.** From
+2026-09-02 to 2026-09-08 it asserted *"0.8.0 in preparation"* and *"0.7.7 is the last RELEASED
+version"* across **two** tagged releases (0.8.0, 0.8.1), a pin that had already moved twice
+(6.5.41 → 6.6.0 → 6.6.1), a dependency table naming **rekha 0.3.5** and **dhancha 0.9.26** while the
+manifest declared **0.3.6** and **0.9.28**, a **"6 deps"** count against seven, and *"VOLUMES —
+enumeration still open"* after 0.8.1 shipped VOLUMES on agnos `mountlist`#104.
+⇒ The two prior rots were written up directly above and did not prevent the third. **The header's
+rule — refresh in the same commit as the CHANGELOG entry — is the only thing that ever would have,
+and nothing enforces it.**
+
+⭐ **M6 ships everything buildable**: the PLACES sidebar (`b`), sidebar **VOLUMES** with capacity
+bars, the menu bar (`F10`), the A/B view switcher, 🦀 Bueller's status-bar line, and pane-header
+focus — the last M1–M4 residue.
+⛔ **Two M6 items remain and both are GATED, not deferred**: the 🦀 chrome button (CP437 has no crab
+glyph; needs an icon path or proportional text) and the held-key repeat number (agnos-runtime, no
+host test can see it). ⚠ *A milestone closing with gated items is the normal shape here.*
+⭐ **VOLUMES is no longer one of them.** The blocker crab filed on 2026-09-02 was answered: agnos
+minted `mountlist`#104 rather than widening `mount`#11, crediting crab's filing by name, and 0.8.1
+enumerates mounts instead of probing three hardcoded prefixes.
 ⛔⛔ **AND 0.8.0 FIXED TWO FEATURES THAT HAD NEVER BEEN VISIBLE** — the context menu and the rename
 sheet, shipped in 0.7.5, were laid out entirely below the window. See the CHANGELOG.
 
@@ -60,7 +77,25 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.5.41` (in `cyrius.cyml [package].cyrius`) — moved 2026-09-02 at the 0.7.7 cut, on operator direction. ⭐ **Not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat` (closing the VOLUMES *capacity* gate outright and turning the symlink gap into a decision), and 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest said 6.5.36 while `cycc` was already 6.5.41, so every build printed `toolchain drift` and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set** — three transitive thread leaves stayed at 6.5.36 content and were copied by hand; `lib/hashseed.cyr` arrived untracked. **Diff the whole vendored tree against the snapshot after any bump.**
+- **Cyrius pin**: `6.6.1` (in `cyrius.cyml [package].cyrius`) — moved **2026-09-08 on operator
+  direction**, from `6.6.0`. ⭐ **Not cosmetic, and the reason is on crab's shipping target**:
+  6.6.1 rebinds `chrono`'s AGNOS monotonic clock from `sys_uptime_ms` (**#40**, `timer_ticks`) to
+  `sys_uptime_us` (**#95**, `rdtsc`). ⛔⛔ **A foreground `run` program on AGNOS executes with IF
+  CLEARED** — only `/bin/agnsh` gets IF=1 — so the 100 Hz timer ISR never fires, `timer_ticks` never
+  advances, and #40 is **frozen for that program's entire run**. Anything timing itself with it read
+  exactly zero, forever, with **no error**. crab is spawned by the compositor, so it is precisely
+  that shape of program. Resolution improves as a side effect: µs rather than the 10 ms tick.
+  ⚠ **Only two vendored leaves moved** — `lib/chrono.cyr` and `lib/sankoch.cyr` (2.7.11 → 2.7.14,
+  an `out_max` output ceiling threaded through the deflate path, reached transitively via chitra).
+  The other five stdlib files 6.6.1 touched — `ganita`, `math`, `niyama`, `patra`, `sakshi` — are
+  **not in crab's graph** and did not land.
+  ⭐ **`cyrius deps` refreshed both leaves correctly this time**, verified by hashing `lib/` against
+  `~/.cyrius/versions/6.6.1/lib/` rather than by trusting the command — the 6.5.41 bump's hand-copy
+  is why that check is written down. Binary: host **1,032,848 → 1,036,944 B** (+4,096), agnos
+  **1,068,976**. Gates: **1462/0**, render_test **53 checks / 0**, fuzz 100,000 rounds, coverage 87 %.
+- *(history)* `6.6.0` — the pin between 6.5.41 and 6.6.1; carried the 0.8.0/0.8.1 cuts. It was never
+  written into this section, which is part of the third rot recorded above.
+- *(history)* `6.5.41` — moved 2026-09-02 at the 0.7.7 cut, on operator direction. ⭐ **Not cosmetic**: 6.5.37 shipped `sys_statfs` and `sys_lstat` (closing the VOLUMES *capacity* gate outright and turning the symlink gap into a decision), and 6.5.39 added the `lib/hashseed.cyr` leaf. ⚠ Before the bump the manifest said 6.5.36 while `cycc` was already 6.5.41, so every build printed `toolchain drift` and the pin was a false declaration. It no longer warns. ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set** — three transitive thread leaves stayed at 6.5.36 content and were copied by hand; `lib/hashseed.cyr` arrived untracked. **Diff the whole vendored tree against the snapshot after any bump.**
 - *(history)* `6.5.36` — moved 2026-08-30 with the defect
   and M4 work, per the standing rule that a repaired repo does not stay on a stale pin.
   ⭐ **This bump retired `CRAB_SYS_READDIR_AT = 101`**: 6.5.36 vendors `sys_readdir_at`, so crab no
@@ -305,17 +340,24 @@ per release stops being readable exactly when a cold start needs it most.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-08-28: every declared tag equals that repo's highest
-tag ON ITS REMOTE**, and the declared graph resolves with all `path` overrides disabled (**6 deps / 0
-errors**, host and `--agnos` both build, **253/0**).
+Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-09-08: all SEVEN declared tags equal that repo's
+highest tag on its remote** (fetched, not read from a stale clone), and the declared graph resolves
+with **all four `path` overrides disabled** — 7 deps / 0 errors, `deps --verify` **49 verified / 0
+failed**, host and `--agnos` both build, **1462/0**.
+⭐⭐ **AND THE OVERRIDE-DISABLED BUILD IS BYTE-IDENTICAL TO THE OVERRIDE BUILD** — host
+**1,036,944 B**, agnos **1,068,976 B**, both ways. That is the strongest form check 4 can take: it
+says not merely *"the declared graph resolves"* but *"the declared graph is what the local build has
+been compiling all along."* ⚠ It holds only because every sibling working tree sits exactly on its
+tag, clean; re-derive it rather than assuming it, since `path` is what makes it possible to drift.
+⚠ **The older "6 deps" count in this section was wrong** — chitra made seven on 2026-08-31.
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
 | sadish  | 0.5.3  | no      | 2D vector — the surface everything else draws into   |
 | rupa    | 0.1.6  | yes     | shared theme tokens + **`on-accent`** and contrast   |
-| rekha   | 0.3.5  | no      | text; references `sd_*`                              |
+| rekha   | 0.3.6  | no      | text; references `sd_*`. ⭐ adds the advance widths   |
 | kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.26 | yes     | widgets, **columns/`dh_table_*`**, `dh_theme_*`      |
+| dhancha | 0.9.28 | yes     | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`    |
 | chitra  | 1.0.1  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
@@ -592,19 +634,26 @@ _None — top-level application._
 
 ## Next
 
-**M4 is complete. Every UNGATED M5 item is in. 0.7.7 advanced no roadmap item — it was a repair
-cut**: five shipped defects closed, the toolchain pin moved, and CI stopped being one step.
+**M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
+0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on
+agnos `mountlist`#104 and hardened the delete prompt after the `/bin` incident.
+⚠ **0.7.7 was a repair cut** — five shipped defects closed, the pin moved, CI went from one step to
+nine — and is kept here only because the *reasoning* below still refers to it.
 
 ⭐ **Done in 0.7.6**: the `crab_render` parameter cleanup, the preview pane, header-only image
 dimensions, **thumbnails**, and **EXIF** (camera + shot) — plus (the fuzz harness)
-closed, a shipped per-frame leak in `crab_overlay` fixed, dhancha at 0.9.26 and chitra at 1.0.1.
+closed, a shipped per-frame leak in `crab_overlay` fixed, and chitra at 1.0.1. ⚠ *dhancha was
+0.9.26 at that cut; it is **0.9.28** now.*
 
 ⛔⛔ **THE 6.5.41 PIN RETIRED TWO GATES THIS SECTION USED TO LIST AS BLOCKED, and neither needed
 crab work to unblock:**
 - **Sidebar VOLUMES — capacity**: cyrius **6.5.37 shipped `sys_statfs`**, crab vendors it, and
   cyrius's issue is archived. ⚠ agnos-only (no host arm, so no host test can exercise it), and **no
   `STATFS_*` field offsets are vendored** — the frozen 32-byte layout must come from agnos's docs.
-  *Enumeration* is still open, because `mount`** / `umount`#24 are no-op stubs.
+  ⭐⭐ ***Enumeration* IS NOW CLOSED TOO** — this line said it was open "because `mount`#11 /
+  `umount`#24 are no-op stubs", which was true when written. crab filed it upstream on 2026-09-02;
+  agnos **minted `mountlist`#104** rather than widening `mount`#11, adopting both halves of the
+  filing's advice, and **0.8.1 consumes it**. ⇒ Another gate that closed without crab waiting.
 - **Symlink detection**: **`sys_lstat`** ships on both targets. What crab should DO with the answer
   is now the open question, not whether it can ask.
 ⇒ **Both had been written as OPEN for four cyrius releases.** Same failure as the idle-poll buffer, carried OPEN for
@@ -614,8 +663,12 @@ nine. ⛔ **Re-derive a gate before believing it — including the ones in this 
 question, not a dependency (`dh_columns_new` is absent from dhancha, but columns was never a dhancha
 gate: it is a `BOX_H` of `LIST`s). And **proportional text**, whose gate is MIS-STATED in the
 roadmap as "rekha + dhancha font plumbing": the plumbing exists and crab already forwards `font`.
-What is missing is **advance widths** — dhancha hard-codes `advf = (h * 6) / 10` and rekha declares
-`REKHA_TAG_HHEA`/`REKHA_TAG_HMTX` without ever reading them. There is no `rekha_advance_width`.
+What was missing was **advance widths** — ⭐ **and that upstream half CLOSED on 2026-09-02**:
+rekha **0.3.6** adds `rekha_advance_width` / `rekha_char_advance_px` and dhancha **0.9.27** consumes
+them in `dh_text_advance`, keeping the old hard-coded `advf = (h * 6) / 10` only as the no-metrics
+fallback. crab declares both floors. ⛔ **What remains is crab-side and is not a dependency**: it
+still passes `font = 0`, and `CRAB_COL_CHARW = 9` plus the five constants derived from it must move
+first — see the roadmap, where that constant is load-bearing correctness rather than cosmetics.
 ⭐ `dh_grid_new` and `dh_list_new_h` are both present and resolvable; GRID is consumed, the
 horizontal strip is not.
 
@@ -661,8 +714,10 @@ horizontal strip is not.
     **horizontal selectable strip**: composing one from a `BOX_H` of labels makes the app paint the
     current item's highlight, which means naming `accent`, which ADR 0001 forbids. dhancha 0.9.26
     adds `dh_list_new_h` — the same container laid the other way — which serves a menu bar, a tab
-    strip, a toolbar and crab's own A/B switcher. ✅ **crab pins 0.9.26 as of 2026-09-01** — it is
-    pushed (`cb855c8`) and check four passes against the declared graph. ⚠ crab consumes none of it yet.
+    strip, a toolbar and crab's own A/B switcher. ✅ **crab pins 0.9.28 as of 2026-09-07**, and
+    check four passes against the declared graph. ⭐ **crab now CONSUMES it** — this line read
+    *"crab consumes none of it yet"*, true on 2026-09-01 and false since **0.8.0**, which built both
+    the `F10` menu bar and the A/B view switcher on `dh_list_new_h`.
   ⇒ **SIX false gates now** — proportional text is the sixth, and it was wrong in a new way again: not about existence or price, but about **which half was missing**. dhancha's font plumbing and rekha's glyph path both exist; what does not is `rekha_advance_width`, so a session would wire a font, watch text render, and only then find every glyph 0.6 em wide.
   ⇒ **Five before it.** A gate is a claim about another repository, and this one was wrong
   about *existence* (TREE), about *price* (thumbnails), and about *what was actually missing*

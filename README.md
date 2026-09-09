@@ -151,13 +151,19 @@ happened rather than showing a blank square.
 - **Thumbnails stop at about 1024×1024**, and larger images say so instead of showing one. That is
   not a rendering limit — it is the decoder's memory, which this stack cannot reclaim. Recorded with
   its measurements in [`docs/development/roadmap.md`](docs/development/roadmap.md).
-- **No columns (miller) view, and no sidebar.** ⛔ **Neither is a `dhancha` gate** — both were
-  re-derived FALSE on 2026-08-31. Columns is a `BOX_H` of `LIST`s and is blocked on crab's own
-  two-pane model, which is a design question rather than a dependency; a PLACES sidebar is
-  buildable today out of `LIST` + `DH_FLAG_INERT` + `PROGRESS`. The one genuine block left is
-  sidebar **VOLUMES enumeration**: agnos `mount`/`umount` are no-op stubs, so crab cannot learn
-  what is mounted. ⚠ **Grid and gallery both SHIP** — see `g` above.
-  (Roadmap M5–M6.)
+- **No columns (miller) view.** ⛔ **Not a `dhancha` gate** — re-derived FALSE on 2026-08-31.
+  Columns is a `BOX_H` of `LIST`s; what it is blocked on is crab's own **two-pane model**, the
+  source/destination pairing the whole write layer rests on. That is a design question, not a
+  dependency. (Roadmap M5.)
+  ⚠ **THE SIDEBAR AND VOLUMES BOTH SHIP NOW — this bullet said "and no sidebar" and named the
+  `mount`/`umount` stubs as "the one genuine block left", and it is the THIRD time this section has
+  been wrong.** `b` opens PLACES; **VOLUMES** lists each mounted filesystem over a capacity bar, on
+  agnos **`mountlist`#104** (0.8.1) for enumeration and `statfs`#103 for capacity. Grid and gallery
+  ship too — see `g` above. ⇒ Under-claiming is the same failure as over-claiming, and this section's
+  own header says so.
+- **The PLACES sidebar has no keyboard route.** A click is the only way to reach a place, in an
+  application that is otherwise keyboard-first by construction — and on agnos the compositor may
+  spawn crab with no pointer at all. `Tab` is unbound. (Roadmap M6.)
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
