@@ -409,12 +409,20 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
   (`dh_list_index_at` is z-order blind, and a drop-down flipped above its anchor lands *on* the bar
   row), then the bar, then sidebar/switcher/panes; **every arm consumes**, including the
   double-click pair, which the sidebar arm omits today — a latent defect.
-- **There is no pointer route to the CONTEXT menu either.** ⛔⛆ **AND crab CANNOT CURRENTLY TELL A
-  RIGHT-CLICK FROM A LEFT ONE**: `POINTER_BTN` carries the button code in `dh_event_a` and crab's arm
-  reads only `dh_event_b`. Worse, **aethersafha forwards button 1 hardcoded** (`ae_ptr_forward(comp,
-  1, 1, …)`, "left button only, for now"), so the code crab would need does not arrive. ⇒ **Gated
-  upstream; file it, do not guess a button number.** ⚠ The dangerous half is the separator: a pointer
-  path must invert `crab_menu_row`'s mapping correctly or it fires the wrong verb.
+- **There is no pointer route to the CONTEXT menu either.** ⛔⛆ **GATED UPSTREAM, AND THE GATE IS NOW
+  MEASURED — see
+  [`../development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).**
+  The kernel publishes a full button bitmap, bhumi passes it through, setu carries it and dhancha
+  delivers it — **aethersafha is the single point of loss**, masking with `1` and forwarding the
+  button number hardcoded. ⭐ The fix there is small. ⛔ **It could not be made: aethersafha does not
+  build on any available toolchain** — its `6.5.33` pin is uninstallable and flagged critical, and
+  under 6.6.0/6.6.1 it throws 57 errors, *none in its own source*, from `sigil`/`agnostik`/`agnodrm`
+  disagreeing about `result_*` arities and the `: stack` multi-return. All three are already at their
+  highest tag. ⇒ **Three upstream repos need the 6.6.x language before this gap can be touched.**
+  ⚠ Do not guess a button number: no repo in the stack defines one, and X11's ordering is the wrong
+  default here — setu already diverged from X11 deliberately on the wheel.
+  ⚠ The dangerous half of crab's own share is the separator: a pointer path must invert
+  `crab_menu_row`'s mapping correctly or it fires the wrong verb.
 - **`View` should be filled; `Go` should NOT be built as proposed.** ⚠ `View` is four constant items
   and every target key is now reachable (the hoist above was its prerequisite — `View ▸ Cycle view`
   would have been born dead exactly as `Open` was). ⛔ **`Go` is refused with reasons**: an 11-to-17

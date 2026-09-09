@@ -26,8 +26,32 @@
 
 **0.8.1** is the last RELEASED version (2026-09-07), tagged on the remote — `git describe` answered
 `0.8.1` exactly before this cycle's work began, so HEAD *was* the tag.
-**0.8.3 is in preparation** (2026-09-09): the M6 interaction gaps — **two of six closed**, plus a
-shipped bug none of them named. `VERSION` reads `0.8.3`; nothing is committed, tagged or pushed.
+**0.8.3 IS CUT** — committed and tagged `a2fa067` on 2026-09-09, while this session's work was in
+flight. ⚠ **Whether it is on the remote could not be checked from here** (`git ls-remote` fails with
+`Permission denied (publickey)`), so it is treated as released and its CHANGELOG section is left
+alone — including its now-false *"unreleased"* header. **0.8.4 is open** for the post-tag work.
+⚠ `VERSION` still reads `0.8.3` and stays there until the operator cuts again.
+
+**0.8.3 contents** (2026-09-09): the M6 interaction gaps — **two of six closed**, plus a
+shipped bug none of them named. `VERSION` reads `0.8.3` and the CHANGELOG header agrees.
+⭐ **Cut checks done**: all nine gates green (**1695 / 0**, render_test 53/0, fuzz 100k, coverage
+88 %, vet/deny 0, fmt clean), and **check four re-run with all four `path` overrides disabled** — 7
+deps / 0 errors, lock 3 → 7 commit-pinned, and both binaries **byte-identical** to the path-resolved
+build (host **1,045,288 B**, agnos **1,081,768 B**).
+⛔ **Nothing is committed, tagged or pushed** — the operator handles every git operation.
+
+⛔⛆ **AND ONE THING WAS ASKED FOR AND COULD NOT BE DONE: the aethersafha button blocker.** crab
+cannot tell a right-click from a left one, and the loss is aethersafha's — it masks button
+transitions with `1` and forwards the number hardcoded. The fix there is small. **aethersafha does
+not build on any available toolchain**: its `6.5.33` pin is uninstallable (*"Package registry not yet
+available"*) and flagged critical by the toolchain itself, and under 6.6.0/6.6.1 it throws **57
+errors, none in its own source** — `sigil` / `agnostik` / `agnodrm` disagreeing about `result_*`
+arities and never updated for the `: stack` multi-return. All three are already at their highest tag.
+⇒ **Three upstream repos need the 6.6.x language first.** Filed in full at
+[`issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
+⚠ **aethersafha was left exactly as found**, at tag `0.16.22` with its `6.5.33` pin — nothing was
+hand-edited into its vendored `lib/`, and no unverified change was pushed to a repo that cannot be
+compiled.
 ⭐⭐ **`Open` WAS DEAD ON BOTH MENU SURFACES.** Both arms rewrite `u` to the chosen entry's key and
 fall through to the one implementation of that command — but they sat BELOW the binding table, and
 `CRAB_MI_OPEN` rewrites to `0x28`, handled above them. `r`/`n`/`d`/`c`/`m` worked, and nothing made

@@ -13,8 +13,16 @@
 > (⛔ plus a SECOND rule for drop-downs: there is a band of widths where the bar fits and `Edit`'s
 > menu opens under the word `File`). Suite **1695 / 0**.
 > ⛔ **Four M6 gaps remain**, with an adversarially-verified design recorded in the roadmap. The
-> pointer routes must land TOGETHER, and the context-menu one is **gated upstream**: crab cannot tell
-> a right-click from a left one, and aethersafha forwards button 1 hardcoded. Do not guess a code.
+> pointer routes must land TOGETHER, and the context-menu one is **gated upstream**.
+> ⛔⛆ **THAT GATE IS NOW MEASURED, AND IT IS BIGGER THAN IT LOOKED.** aethersafha is the single point
+> of button loss (the kernel, bhumi, setu and dhancha all carry the code intact) and the fix there is
+> small — but **aethersafha does not build on any available toolchain**: its `6.5.33` pin is
+> uninstallable and flagged critical, and under 6.6.0/6.6.1 it throws 57 errors, *none in its own
+> source*, from `sigil`/`agnostik`/`agnodrm` disagreeing about `result_*` arities. All three are
+> already at their highest tag. ⇒ **Three upstream repos need the 6.6.x language before this can be
+> touched at all.** Filed at `docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`.
+> ⚠ **aethersafha was left exactly as found** — no hand-edited `lib/`, no unverified push. Do not
+> guess a button number either; no repo defines one and X11's order is the wrong default here.
 
 # Handoff — **0.8.2: the audit backlog's correctness bugs, and a walk that never ran.**
 

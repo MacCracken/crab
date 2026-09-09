@@ -2,6 +2,89 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.4] — unreleased — the aethersafha button blocker, measured and filed rather than guessed
+
+> ⛔ **THIS SECTION EXISTS SO `[0.8.3]` BELOW IS NEVER TOUCHED.** 0.8.3 was committed and tagged
+> (`a2fa067`) while this work was in flight, so it is a record now — **including where it is wrong**:
+> its header still reads *"unreleased"* and its opening note still says *"nothing is committed, tagged
+> or pushed"*. Both were true when written and both are false now. They are **left alone**, because
+> editing a released section is the failure 0.7.2 exists to enforce against — the tag and the notes
+> would disagree, and the notes are what a consumer reads.
+> ⚠ **`VERSION` still reads `0.8.3`** and stays there until the operator cuts. This heading is where
+> post-tag work accumulates, not a claim that a release happened.
+> ⚠ Whether 0.8.3 is on the remote could not be checked from here — `git ls-remote` fails with
+> `Permission denied (publickey)`. **An unverifiable tag is treated as released**, which is the safe
+> direction: the cost of being wrong is a section that could have been edited and was not.
+
+### Investigated — ⛔⛆ the context-menu pointer route is blocked upstream, and the block is bigger than the bug
+
+**Asked for: fix the aethersafha button-code blocker. It could not be done, and shipping nothing was
+the right answer.**
+
+⭐ **The diagnosis is clean, and the loss is not crab's.** crab cannot tell a right-click from a left
+one because the information never arrives:
+
+- the **kernel** publishes a full bitmap — `bit0 left, bit1 right, bit2 middle`
+  (`agnos/kernel/arch/x86_64/usb/hid.cyr:311`), with `buttons_seen` OR-folded beside it;
+- **bhumi** passes both through intact (`bhumi_button_state` / `bhumi_button_seen`);
+- **setu**'s wire carries `button` as a full i64 (`SETU_INPUT_PTR_BTN`);
+- **dhancha** delivers it in `POINTER_BTN`'s `a`.
+
+⛔ **aethersafha is the single point of loss.** `input_btn_transitions(ae_ptr_btn, cur, seen, 1)` —
+mask `1`, commented *"left button only, for now"* — and then `ae_ptr_forward(comp, 1, 1, pressed)`
+with the button number **hardcoded**. Everything else is discarded before the wire.
+
+⭐ **And the fix there is small**: `input_btn_transitions` already takes a mask and `ae_ptr_forward`
+already takes a button number. Only the belief state is a scalar and the two call sites pass
+constants. ⛔⛔ **Window management must stay left-only** — the press arm does click-to-focus,
+`deco_hit` close/maximize/minimize and drag-start, so a naive loop over all buttons would make a
+**right-click close a window**.
+
+### ⛔⛔ Why it was not done: aethersafha does not build on any available toolchain
+
+| toolchain | result |
+|---|---|
+| `6.5.33` (its own pin) | **not installed, and not installable** — `cyrius install 6.5.33` answers *"Package registry not yet available."* The toolchain also flags the pin as carrying a **critical** defect and says to re-pin |
+| `6.5.36` (the prescribed floor) | same — not installable |
+| `6.6.0` | **57 errors**, none in aethersafha's own source |
+| `6.6.1` | **57 errors**, none in aethersafha's own source |
+
+The 57 reproduce against the **committed** `lib/`, so they are not an artifact of re-resolving deps.
+They are dependency-versus-dependency conflicts: `sigil` and `agnostik` disagree about the `result_*`
+arities (`'result_unwrap' expects 2 arguments, got 1`; `duplicate fn 'result_print_err' … last
+definition wins, so calls to the other arity would silently mis-bind`), and `agnodrm` was never
+updated for the `: stack` multi-return. ⚠ **`agnostik 1.5.1`, `agnodrm 1.5.3` and `sigil 3.12.16` are
+each already at their repository's highest tag**, so no combination of existing releases resolves.
+
+⇒ **Three upstream repos must reach the 6.6.x language, and agree with each other, before aethersafha
+can be built, tested or changed at all.**
+
+⛔ **crab shipped nothing rather than route around it.** The two available shortcuts were
+hand-editing vendored `lib/` (forbidden) and pushing an unverified change to a repo that cannot be
+compiled. Both are worse than the gap. ⚠ **aethersafha was left exactly as found**, at tag `0.16.22`
+with its `6.5.33` pin — every file `cyrius deps` touched was reverted.
+
+⚠ **And no button number was guessed.** No repository in the stack defines a button constant and
+aethersafha is the only producer, so the numbering is an unmade decision. **X11's order is the wrong
+default here**: setu already diverged from X11 deliberately on the neighbouring question, giving the
+wheel its own kind rather than spending buttons 4/5 on detents. The filing recommends mirroring the
+kernel's own bit order (`wire = bit + 1`, so `1 = left, 2 = right, 3 = middle`) — derivable rather
+than remembered, and consistent with the one fact that exists. ⇒ Same discipline that declined a
+mount probe before agnos minted `mountlist`#104: **a guess that happens to work is indistinguishable
+from a contract until the day it changes.**
+
+⭐ Filed in full — the fix, the numbering decision, and the toolchain wall — at
+[`docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
+
+### Verified — 0.8.3's cut checks, re-run after the tag
+
+All nine gates green on the tagged tree: **1695 / 0** · host **1,045,288 B** · `--agnos`
+**1,081,768 B** · render_test **53 / 0** · fuzz 100,000 rounds · `deps --verify` 49/0 · coverage
+**88 %** · `vet` + `deny` 0 · `fmt --check` clean.
+⭐ **Check four re-run with all four `path` overrides disabled**: 7 deps / 0 errors, lock **3 → 7
+commit-pinned** (the tell the overrides were really off), and both binaries **byte-identical** to the
+path-resolved build. ⚠ `build/` holds no fixture debris after a run.
+
 ## [0.8.3] — unreleased — M6 interaction gaps: the sidebar answers the keyboard, and `Open` was dead
 
 > ⛔ **THIS SECTION EXISTS SO `[0.8.2]` BELOW IS NEVER TOUCHED.** 0.8.2 is tagged and on the remote.
