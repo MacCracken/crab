@@ -1604,6 +1604,37 @@ fn main() {
     assert_eq(dgot, 14, "...intact, not truncated by the attempt");
     assert_eq(crab_fs_delete(fsdir, "precious.txt", 0, sc1), CRAB_FS_OK, "...and cleaned up");
 
+    # --- 0.8.3: crab_goto — adopt, re-list and DROP THE MARKS, as one indivisible move -------------
+    # ⛔⛆ The three steps must not come apart. crab's marks are INDEX-based, so a mark that outlives
+    # the listing it was made in points at whatever now occupies that index — the shape the
+    # 2026-09-03 `/bin` incident was filed against. This was written out twice in `src/main.cyr`
+    # (once per pane) and the keyboard route would have made four copies, each free to forget the
+    # clear. ⚠ Both existing copies lived inside the agnos-only `#ifdef`, so neither was assertable.
+    var gpath = alloc(CRAB_PATH_MAX);
+    var gbufr = alloc(8 * CRAB_REC_SZ);
+    var ggsz = alloc(8 * 8); var ggmt = alloc(8 * 8);
+    var gmk = alloc(CRAB_MAX_ENTRIES);
+    crab_mark_clear(gmk, CRAB_MAX_ENTRIES);
+    crab_mark_toggle(gmk, 0, 4); crab_mark_toggle(gmk, 2, 4);
+    assert_eq(crab_mark_count(gmk, 4), 2, "two marks are set before the move");
+    var gn = crab_goto("/", gpath, gbufr, ggsz, ggmt, gmk, sc1, fstat);
+    assert(gn >= 0, "crab_goto lists the directory it was sent to");
+    assert(t_streq(gpath, "/"), "...and the pane ADOPTED the path");
+    assert_eq(crab_mark_count(gmk, 4), 0,
+      "⛔ ...and the marks are GONE — an index-based mark may never outlive its listing");
+
+    # ⛔ AN UNUSABLE PATH IS REFUSED AND THE PANE IS LEFT EXACTLY AS IT WAS. Returning a count for a
+    # path it could not adopt would put -1 into the pane's entry count, where `crab_maxsel` and
+    # every verb arm read it as a live number of rows.
+    crab_mark_toggle(gmk, 1, 4);
+    assert_eq(crab_goto(0, gpath, gbufr, ggsz, ggmt, gmk, sc1, fstat), 0 - 1, "a null path is refused");
+    assert_eq(crab_goto("relative/path", gpath, gbufr, ggsz, ggmt, gmk, sc1, fstat), 0 - 1,
+      "a RELATIVE path is refused — crab's readdir takes absolute paths and lists nothing otherwise");
+    assert_eq(crab_goto("", gpath, gbufr, ggsz, ggmt, gmk, sc1, fstat), 0 - 1, "an empty path is refused");
+    assert(t_streq(gpath, "/"), "...and none of those moved the pane");
+    assert_eq(crab_mark_count(gmk, 4), 1,
+      "...nor dropped its marks — a refusal must change nothing at all");
+
     # --- 0.8.2: THE RENAME HALF, SPLIT OUT SO THE EVENT LOOP CAN STOP BLOCKING ----------------------
     # ⛔⛆ `src/main.cyr` carried the comment *"a move still tries `rename` first … so the common case
     # never reads or writes a byte"* and then called `crab_fs_move`, which on a rename failure runs
@@ -2100,6 +2131,18 @@ fn main() {
     # false refusal the operator cannot argue with.
     assert_eq(crab_path_within("/a", "/ab", CRAB_PATH_MAX), 0, "'/ab' is a SIBLING of '/a', not a child");
     assert_eq(crab_path_within("/home/x", "/home/xy", CRAB_PATH_MAX), 0, "...at any length");
+    # ⛔ 0.8.3: AN EMPTY ROOT USED TO READ ONE BYTE BEFORE THE BUFFER. `load8(root + rl - 1)` with
+    # `rl == 0` is `root[-1]` — an out-of-bounds read inside the guard that stands between the
+    # operator and a copy that never terminates. The read is now guarded by `rl > 0`.
+    # ⛔⛔ AND THE ANSWER IS DELIBERATELY UNCHANGED, which is what these two rows pin. Returning 0 for
+    # an empty root would read as tidier and would FLIP A DESTRUCTIVE GUARD'S FAIL-SAFE DIRECTION:
+    # the only production caller is the copy-into-itself refusal, where 1 means *refuse*. A bounds
+    # fix must never change a safety answer in the same edit.
+    assert_eq(crab_path_within("", "/a", CRAB_PATH_MAX), 1,
+      "an empty root still reports containment — the bounds fix changed the READ, not the ANSWER");
+    assert_eq(crab_path_within("", "", CRAB_PATH_MAX), 1, "...and an empty path is inside an empty root");
+    assert_eq(crab_path_within("/", "/a", CRAB_PATH_MAX), 1, "root contains everything, as it must");
+    assert_eq(crab_path_within("/a/", "/a/b", CRAB_PATH_MAX), 1, "a trailing separator is honoured");
     assert_eq(crab_path_within("/a/b", "/a", CRAB_PATH_MAX), 0, "a parent is not inside its child");
     assert_eq(crab_path_within("/a", "/b", CRAB_PATH_MAX), 0, "unrelated paths are unrelated");
     # ⚠ The root ends in a separator already — every absolute path is inside it.
@@ -3655,6 +3698,166 @@ fn t_gallery(): i64 {
     assert_eq(crab_tc_pixels(CRAB_TC_N), 0, "...nor one past the end");
     assert_eq(crab_tc_state(0 - 1), CRAB_TH_NONE, "an invalid slot has no state");
 
+    # --- 0.8.3: THE SIDEBAR'S ROW NAVIGATION, so a keyboard can reach a place ----------------------
+    # ⛔⛆ The PLACES sidebar shipped with NO keyboard route at all: `crab_sidebar_hit` was reachable
+    # only from the POINTER arm, and nothing in the key dispatch mentioned the sidebar except the `b`
+    # toggle. In an application whose own source says it is "keyboard-first by construction: a menu
+    # only a mouse can reach is invisible to an operator who never touches one" — and on agnos, where
+    # the compositor may spawn crab WITH NO POINTER AT ALL, making the sidebar purely decorative.
+    # ⚠ Layout: row 0 "PLACES" (inert) · rows 1..P places · row P+1 "VOLUMES" (inert, only when V>0)
+    # · rows P+2..P+1+V volumes.
+    assert_eq(crab_sb_rows(3, 2), 7, "3 places + 2 volumes is 7 rows, both headers counted");
+    assert_eq(crab_sb_rows(3, 0), 4, "no volumes means NO VOLUMES header — absent, not empty");
+    assert_eq(crab_sb_rows(0, 0), 1, "an empty model is still the PLACES header");
+
+    assert_eq(crab_sb_first_row(3, 2), 1, "the first selectable row is the first place");
+    assert_eq(crab_sb_first_row(0, 2), 2, "⛔ with NO places it is the first VOLUME, past both headers");
+    assert_eq(crab_sb_first_row(0, 0), 0 - 1, "a sidebar with nothing selectable has no first row");
+
+    # ⛔ THE STEP MUST BE TOTAL OVER HEADER ROWS AND OVER -1, or a cursor can be stranded on a row
+    # `dh_list_select` refuses to paint — the app believing in a highlight the toolkit declined.
+    assert_eq(crab_sb_step(0 - 1, 1, 3, 2), 1, "stepping from NO cursor lands on the first selectable row");
+    assert_eq(crab_sb_step(0, 1, 3, 2), 1, "...and from the inert PLACES header too");
+    assert_eq(crab_sb_step(4, 1, 3, 2), 1, "...and from the inert VOLUMES header");
+    assert_eq(crab_sb_step(99, 1, 3, 2), 1, "...and from a row past the end");
+    assert_eq(crab_sb_step(5, 0 - 1, 3, 2), 3,
+      "⛔ stepping UP off the first volume SKIPS the VOLUMES header and lands on the last place");
+    assert_eq(crab_sb_step(3, 1, 3, 2), 5,
+      "⛔ ...and down off the last place skips it the other way");
+    # ⛔ CLAMPED, NOT WRAPPED — a sidebar is a short list travelled along, and wrapping from the last
+    # volume back to the first place reads as the cursor jumping rather than stopping.
+    assert_eq(crab_sb_step(1, 0 - 1, 3, 2), 1, "up from the FIRST place stays put — clamped, not wrapped");
+    assert_eq(crab_sb_step(6, 1, 3, 2), 6, "...and down from the last volume stays put");
+    assert_eq(crab_sb_step(1, 1, 1, 0), 1, "a lone place has nowhere to go in either direction");
+    assert_eq(crab_sb_step(0, 1, 0, 0), 0 - 1, "an empty sidebar has no cursor at all");
+
+    # ⚠ The inverse of the row map, asserted as an actual round-trip in BOTH sections.
+    assert_eq(crab_sb_row_of(CRAB_SB_PLACE, 0, 3, 2), 1, "place 0 is row 1");
+    assert_eq(crab_sb_row_of(CRAB_SB_VOLUME, 0, 3, 2), 5, "volume 0 is row 5, past both headers");
+    var sbi2 = 0;
+    while (sbi2 < 3) {
+        assert_eq(crab_sb_row_index(crab_sb_row_of(CRAB_SB_PLACE, sbi2, 3, 2), 3, 2), sbi2,
+          "a place round-trips row -> index -> row");
+        sbi2 = sbi2 + 1;
+    }
+    sbi2 = 0;
+    while (sbi2 < 2) {
+        assert_eq(crab_sb_row_index(crab_sb_row_of(CRAB_SB_VOLUME, sbi2, 3, 2), 3, 2), sbi2,
+          "a volume round-trips too");
+        assert_eq(crab_sb_row_kind(crab_sb_row_of(CRAB_SB_VOLUME, sbi2, 3, 2), 3, 2), CRAB_SB_VOLUME,
+          "...into the section it came from");
+        sbi2 = sbi2 + 1;
+    }
+    assert_eq(crab_sb_row_of(CRAB_SB_PLACE, 3, 3, 2), 0 - 1, "one past the places is no row");
+    assert_eq(crab_sb_row_of(CRAB_SB_VOLUME, 0, 3, 0), 0 - 1, "a volume when there are none is no row");
+    assert_eq(crab_sb_row_of(CRAB_SB_NONE, 0, 3, 2), 0 - 1, "a header is not an item and has no row");
+    assert_eq(crab_sb_row_of(CRAB_SB_PLACE, 0 - 1, 3, 2), 0 - 1, "a negative index is no row");
+
+    # --- 0.8.3: THE MENU BAR'S FIT RULE — the last M5/M6 surface without one -----------------------
+    # ⛔⛆ Its intrinsic width is fixed and crab accepts any window width, so a narrow window CLIPPED
+    # IT SILENTLY: the operator saw "File Edit Go" and no View, with nothing saying a menu was
+    # missing. Every sibling surface already refuses — `crab_two_panes_fit`, `crab_sidebar_fit`,
+    # `crab_switcher_fit`, `crab_preview_fit`.
+    assert_eq(crab_mb_intrinsic_w(), crab_mb_cell_x(CRAB_MB_COUNT),
+      "the intrinsic width IS the sum of the cells — derived, not a second number");
+    var mbw = crab_mb_intrinsic_w();
+    assert(mbw > 0, "...and it is a real width");
+    # ⛔ `>=` NOT `>`, and the boundary is asserted in both directions — the half that goes wrong
+    # quietly. At exactly the intrinsic width the bar fits, because that is what intrinsic means.
+    assert_eq(crab_menubar_fit(mbw, 1), 1, "exactly at the intrinsic width the bar fits");
+    assert_eq(crab_menubar_fit(mbw - 1, 1), 0, "...and one pixel under, it does not");
+    assert_eq(crab_menubar_fit(mbw + 1000, 1), 1, "a wide window certainly fits it");
+    assert_eq(crab_menubar_fit(mbw, 0), 0, "an unwanted bar is not shown however wide the window");
+    # ⚠ THE WANT IS A BOOLEAN, matching `crab_preview_fit` / `crab_sidebar_fit`, and deliberately NOT
+    # the signed `mb_sel` — there a 0 means "not wanted", while `mb_sel == 0` means "File is current".
+    # Passing the index would invert the rule in the one state it matters.
+    assert_eq(crab_menubar_sel(mbw, 0), 0, "a wide enough window keeps the selection, File included");
+    assert_eq(crab_menubar_sel(mbw - 1, 0), 0 - 1, "⛔ a narrow window collapses it — File is not 'unwanted'");
+    assert_eq(crab_menubar_sel(mbw, 0 - 1), 0 - 1, "a collapsed bar stays collapsed");
+
+    # ⛔⛆ THE DROP-DOWN IS A SECOND RULE AND THE FIRST DOES NOT IMPLY IT. `dh_place_at_point` CLAMPS
+    # a popup that would overhang, sliding it left until it fits — so on a narrow window `Edit`'s
+    # menu, Delete included, hangs under the word `File`. A menu pointing at the wrong label is worse
+    # than an absent one: the operator reads the label to know what they are in.
+    var dropw_file = crab_mb_cell_x(CRAB_MB_FILE) + CRAB_MENU_W + CRAB_MENU_MARGIN;
+    var dropw_edit = crab_mb_cell_x(CRAB_MB_EDIT) + CRAB_MENU_W + CRAB_MENU_MARGIN;
+    assert(dropw_edit > dropw_file, "a later menu's drop needs a wider window than an earlier one's");
+    assert_eq(crab_mb_drop_fit(dropw_file, CRAB_MB_FILE), 1, "File's drop opens exactly at its own width");
+    assert_eq(crab_mb_drop_fit(dropw_file - 1, CRAB_MB_FILE), 0, "...and not one pixel under");
+    assert_eq(crab_mb_drop_fit(dropw_edit, CRAB_MB_EDIT), 1, "Edit's drop opens at its own, wider, width");
+    assert_eq(crab_mb_drop_fit(dropw_edit - 1, CRAB_MB_EDIT), 0, "...and not one pixel under");
+    # ⛔⛆ THE BAND THAT PROVES TWO RULES ARE NEEDED: at a width where the BAR fits, Edit's drop still
+    # does not. A single threshold would certify as good the exact widths where the symptom survives.
+    assert_eq(crab_menubar_fit(mbw, 1), 1, "the bar fits at its intrinsic width...");
+    assert_eq(crab_mb_drop_fit(mbw, CRAB_MB_EDIT), 0,
+      "⛔ ...while Edit's drop-down at that same width would open under the wrong label");
+    # ⚠ A menu with no items has no drop to place, whatever the width.
+    assert_eq(crab_mb_drop_fit(10000, CRAB_MB_GO), 0, "an empty menu has no drop-down to fit");
+    assert_eq(crab_mb_drop_fit(10000, CRAB_MB_COUNT), 0, "...nor does a menu index past the end");
+    assert_eq(crab_mb_drop_fit(10000, 0 - 1), 0, "...nor a negative one");
+
+    # --- 0.8.3: SIDEBAR FOCUS — and the destructive verbs it must EAT -----------------------------
+    assert_eq(crab_sb_key(0x52, 0), CRAB_SBK_UP, "Up moves the sidebar cursor");
+    assert_eq(crab_sb_key(0x0E, 0), CRAB_SBK_UP, "...and so does k");
+    assert_eq(crab_sb_key(0x51, 0), CRAB_SBK_DOWN, "Down moves it the other way");
+    assert_eq(crab_sb_key(0x0D, 0), CRAB_SBK_DOWN, "...and j");
+    assert_eq(crab_sb_key(0x28, 0), CRAB_SBK_OPEN, "Enter sends the active pane to the row");
+    assert_eq(crab_sb_key(0x2B, 0), CRAB_SBK_LEAVE, "Tab hands focus back to the panes");
+    assert_eq(crab_sb_key(0x29, 0), CRAB_SBK_LEAVE, "...and so does Esc");
+
+    # ⛔⛆ THE ASSERTION THAT MAKES THE DESTRUCTIVE HOLE IMPOSSIBLE TO REINTRODUCE. A focus model that
+    # consumed only its OWN keys would leave every mutating verb live against a pane the toolkit is
+    # painting MUTED: `d` deletes, `c`/`m` transfer with no confirmation at all, `r` renames, `n`
+    # makes a directory, Backspace ascends. The operator is looking at the sidebar and `d` deletes
+    # from a pane they are not driving.
+    assert_eq(crab_sb_key(0x07, 0), CRAB_SBK_EAT, "⛔ d is EATEN — no delete from a pane the keys have left");
+    assert_eq(crab_sb_key(0x06, 0), CRAB_SBK_EAT, "⛔ c is eaten — copy has no confirmation at all");
+    assert_eq(crab_sb_key(0x10, 0), CRAB_SBK_EAT, "⛔ m is eaten, for the same reason");
+    assert_eq(crab_sb_key(0x15, 0), CRAB_SBK_EAT, "r is eaten");
+    assert_eq(crab_sb_key(0x11, 0), CRAB_SBK_EAT, "n is eaten");
+    assert_eq(crab_sb_key(0x2A, 0), CRAB_SBK_EAT, "Backspace is eaten — it would move a pane, not the cursor");
+    assert_eq(crab_sb_key(0x2C, 0), CRAB_SBK_EAT, "Space is eaten — it would mark in a pane out of focus");
+    # ⛔ Stated as the PROPERTY rather than the list, because a verb added later could quietly fall
+    # off a list and no assertion would notice.
+    assert_neq(crab_sb_key(0x07, 0), CRAB_SBK_NONE, "no mutating verb may fall through to its binding");
+    assert_neq(crab_sb_key(0x06, 0), CRAB_SBK_NONE, "...c");
+    assert_neq(crab_sb_key(0x10, 0), CRAB_SBK_NONE, "...m");
+    assert_neq(crab_sb_key(0x15, 0), CRAB_SBK_NONE, "...r");
+    assert_neq(crab_sb_key(0x11, 0), CRAB_SBK_NONE, "...n");
+
+    # ⛔ ESC IS NOT UNCONDITIONAL: while a transfer runs it falls through to the arm that cancels it.
+    # Esc has meant "stop the transfer" since 0.7.3, and that outranks leaving a focus mode.
+    assert_eq(crab_sb_key(0x29, 1), CRAB_SBK_NONE, "⛔ Esc during a transfer still CANCELS it");
+    assert_eq(crab_sb_key(0x2B, 1), CRAB_SBK_LEAVE, "...while Tab still leaves, transfer or not");
+    # ⚠ Display toggles fall through — they change what is drawn, not what is acted on.
+    assert_eq(crab_sb_key(0x0A, 0), CRAB_SBK_NONE, "g still cycles the view");
+    assert_eq(crab_sb_key(0x13, 0), CRAB_SBK_NONE, "p still toggles the preview");
+    assert_eq(crab_sb_key(0x43, 0), CRAB_SBK_NONE, "F10 still reaches the menu bar");
+    assert_eq(crab_sb_key(0x05, 0), CRAB_SBK_NONE, "b still closes the sidebar");
+
+    # --- focus is a WANT, answered against the frame that exists ----------------------------------
+    assert_eq(crab_sb_focus_eff(1, 1, 3, 2), 1, "a wanted focus on a shown, non-empty sidebar is effective");
+    assert_eq(crab_sb_focus_eff(0, 1, 3, 2), 0, "...not wanted, not effective");
+    assert_eq(crab_sb_focus_eff(1, 0, 3, 2), 0, "⛔ a CLOSED sidebar cannot hold focus");
+    assert_eq(crab_sb_focus_eff(1, 1, 0, 0), 0, "⛔ nor one with nothing selectable in it");
+    # ⛔ LEAVING IS ALWAYS ALLOWED. A Tab that could not get out would strand the operator in a mode
+    # whose own keys are refused.
+    assert_eq(crab_sb_focus_toggle(1, 0, 0, 0), 0, "Tab always leaves, even from a sidebar that vanished");
+    assert_eq(crab_sb_focus_toggle(0, 1, 3, 2), 1, "Tab enters when there is something to enter");
+    assert_eq(crab_sb_focus_toggle(0, 0, 3, 2), 0, "...and refuses when the sidebar is not shown");
+
+    # --- what the sidebar PAINTS, and the state that would lie -----------------------------------
+    # ⛔⛆ `dh_draw_list_selection` paints the row under ACCENT when the list has focus and under the
+    # MUTED line colour when it does not — so the contract is "muted = you are here, accent = your
+    # keys drive this row". A focused sidebar with NO cursor that fell back to the LOCATION would
+    # paint a location under accent, which reads as "Enter acts on this" while Enter would in fact
+    # send the pane to an ancestor.
+    assert_eq(crab_sb_shown_row(1, 3, 5), 3, "focused: the cursor is painted");
+    assert_eq(crab_sb_shown_row(0, 3, 5), 5, "unfocused: where the pane IS, is painted");
+    assert_eq(crab_sb_shown_row(1, 0 - 1, 5), 0 - 1,
+      "⛔ focused with NO cursor paints NOTHING — a location may never wear the accent");
+    assert_eq(crab_sb_shown_row(0, 3, 0 - 1), 0 - 1, "unfocused and nowhere known paints nothing");
+
     # --- 0.8.2: A GALLERY CELL SAYS WHY THERE IS NO PICTURE ----------------------------------------
     # ⛔⛆ The "four differently-named nothings" rule was honoured in the PREVIEW and nowhere else. A
     # gallery cell whose decode had been refused drew an empty band and said nothing, so "too large",
@@ -3688,6 +3891,48 @@ fn t_gallery(): i64 {
     # states, not a replacement for the first.
     assert(t_streq(crab_thumb_note(CRAB_TH_TOO_BIG), "too large to preview"), "the preview still says it in full");
     assert(t_streq(crab_thumb_note(CRAB_TH_NONE), ""), "...and is still silent where it should be");
+
+    # --- 0.8.3: THE VERB -> ACCELERATOR MAP, LIFTED OUT OF TWO COPIES -----------------------------
+    # ⛔⛆ Both menu surfaces answer Enter by rewriting `u` to the key the chosen entry names and
+    # falling through to the one implementation of that command. Each carried its OWN copy of the
+    # map, both inside `src/main.cyr`'s agnos-only `#ifdef` where nothing could assert either.
+    # ⛔⛆ AND THE DUPLICATION HAD ALREADY COST A SHIPPED VERB: the arms sat BELOW the binding table,
+    # so a rewrite only reached handlers defined further down. `CRAB_MI_OPEN` rewrites to `0x28`,
+    # which is handled ABOVE them — **Open was dead on both surfaces in every build that shipped
+    # either**. `r`/`n`/`d`/`c`/`m` worked only because their line numbers happened to be below.
+    assert_eq(crab_menu_accel(CRAB_MI_OPEN), 0x28, "Open rewrites to Enter");
+    assert_eq(crab_menu_accel(CRAB_MI_COPY), 0x06, "Copy rewrites to c");
+    assert_eq(crab_menu_accel(CRAB_MI_MOVE), 0x10, "Move rewrites to m");
+    assert_eq(crab_menu_accel(CRAB_MI_RENAME), 0x15, "Rename rewrites to r");
+    assert_eq(crab_menu_accel(CRAB_MI_DELETE), 0x07, "Delete rewrites to d");
+    assert_eq(crab_menu_accel(CRAB_MI_NEWDIR), 0x11, "New folder rewrites to n");
+    # ⛔ EVERY ITEM MUST HAVE ONE. A 0 here is a menu entry that consumes the keypress, closes the
+    # menu, and does nothing — which is exactly the shape the dead `Open` had.
+    var mai = 0;
+    while (mai < CRAB_MI_COUNT) {
+        assert(crab_menu_accel(mai) != 0, "every menu item rewrites to a real key");
+        mai = mai + 1;
+    }
+    assert_eq(crab_menu_accel(CRAB_MI_COUNT), 0, "...and one past the end has none");
+    assert_eq(crab_menu_accel(0 - 1), 0, "...nor a negative id");
+
+    # ⭐⭐ THE AGREEMENT THAT MATTERS: the accelerator the operator READS in the menu must be the key
+    # the entry actually sends. `crab_menu_key` is the label; `crab_menu_accel` is the keycode; a
+    # menu whose column disagrees with what it does is worse than one showing no accelerators.
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_COPY), 0), load8(crab_menu_key(CRAB_MI_COPY)),
+      "the 'c' the menu shows is the 'c' it sends");
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_MOVE), 0), load8(crab_menu_key(CRAB_MI_MOVE)),
+      "...and 'm'");
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_RENAME), 0), load8(crab_menu_key(CRAB_MI_RENAME)),
+      "...and 'r'");
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_DELETE), 0), load8(crab_menu_key(CRAB_MI_DELETE)),
+      "...and 'd'");
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_NEWDIR), 0), load8(crab_menu_key(CRAB_MI_NEWDIR)),
+      "...and 'n'");
+    # ⚠ OPEN IS THE ONE EXEMPTION, AND IT IS ASSERTED RATHER THAN SKIPPED: it maps to Enter, which is
+    # not a character, so `crab_key_char` answers 0 while the label reads "Enter".
+    assert_eq(crab_key_char(crab_menu_accel(CRAB_MI_OPEN), 0), 0, "Open's accelerator is not a character");
+    assert(t_streq(crab_menu_key(CRAB_MI_OPEN), "Enter"), "...and its label says so");
 
     # --- 0.8.2: THE ARROWS ANSWER A CELL VIEW, AND THE GALLERY IS ONE ------------------------------
     # ⛔⛆ `src/main.cyr`'s arrow dispatch tested `view_mode == CRAB_VIEW_GRID` in THREE places under a
@@ -4710,7 +4955,7 @@ fn t_sidebar(): i64 {
     crab_rs_reset(rs);
     crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
     crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
-    crab_rs_sidebar(rs, 1, pl, pn, 0, 0);
+    crab_rs_sidebar(rs, 1, pl, pn, 0, 0, 0 - 1, 0);
     crab_render(dsurf, 0, rs);
     var sb = crab_sidebar_widget();
     assert(sb != 0, "the sidebar was built");
@@ -4719,6 +4964,10 @@ fn t_sidebar(): i64 {
     assert_eq(dh_list_count(sb), pn + 1, "...with a PLACES header plus one row per place");
     assert_eq(dh_widget_inert(dh_list_row_at(sb, 0)), 1, "...and row 0 is INERT, so it cannot be selected");
     assert_eq(dh_widget_inert(dh_list_row_at(sb, 1)), 0, "...while the first real place is not");
+    # ⚠ 0.8.3: with no cursor and no focus, nothing is selected — a -1 selects nothing rather than
+    # falling back to row 0, which is the inert header `dh_list_select` would silently refuse.
+    assert_eq(dh_list_selected(sb), 0 - 1, "an unfocused sidebar with no cursor paints no row");
+
 
     # ---- ⛔ ITS OWN HIT FUNCTION, RETURNING A PLACE INDEX — NEVER A PANE INDEX ------------------
     # This is the load-bearing one. `crab_hit`'s answer is trusted by the write layer; a place must
@@ -4731,6 +4980,7 @@ fn t_sidebar(): i64 {
     var r2 = dh_list_row_at(sb, 2);
     if (pn >= 2) {
         assert_eq(crab_sb_row_index(crab_sidebar_hit(dh_widget_x(r2) + 4, dh_widget_y(r2) + 4), pn, 0), 1, "...and the second is place 1");
+
     }
     # ⛔ THE INERT HEADER IS A REFUSAL, not place -1 by arithmetic.
     var r0 = dh_list_row_at(sb, 0);
@@ -4753,7 +5003,7 @@ fn t_sidebar(): i64 {
         crab_rs_reset(rs);
         crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
         crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
-        crab_rs_sidebar(rs, 1, pl, pn, 0, 0);
+        crab_rs_sidebar(rs, 1, pl, pn, 0, 0, 0 - 1, 0);
         crab_render(dsurf, 0, rs);
         sbf = sbf + 1;
     }
@@ -4768,6 +5018,45 @@ fn t_sidebar(): i64 {
     crab_render(dsurf, 0, rs);
     assert_eq(crab_sidebar_widget(), 0, "a frame that builds no sidebar reports 0, not a stale pointer");
     assert_eq(crab_sidebar_hit(pxx, pyy), 0 - 1, "...and hit-testing it refuses rather than using the old tree");
+
+    # ---- 0.8.3: THE KEYBOARD ROUTE ACTUALLY PAINTS ------------------------------------------------
+    # ⛔⛆ The sidebar shipped reachable only by mouse. The focus model is pure and asserted above;
+    # THIS is the half only a render can see — that the row the model chose is the row the toolkit
+    # was told to select, and that focus survives the pane build.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_rs_sidebar(rs, 1, pl, pn, 0, 0, 2, 1);
+    crab_render(dsurf, 0, rs);
+    var sbfw = crab_sidebar_widget();
+    assert(sbfw != 0, "the focused sidebar was built");
+    assert_eq(dh_list_selected(sbfw), 2, "the cursor row is the row the toolkit was told to select");
+    # ⛔⛆ AND FOCUS SURVIVED THE PANE BUILD. The sidebar is built FIRST (it must be, to be the
+    # leftmost child) but `crab_pane` calls `dh_focus_set` on the active pane — so a sidebar that
+    # claimed focus during its own build would lose it three lines later, every frame, and paint its
+    # row under the MUTED line colour instead of `accent`. The operator would drive a list that does
+    # not look driven.
+    assert_eq(dh_focus_within(sbfw), 1, "⛔ ...and the sidebar HOLDS focus, after the panes were built");
+
+    # ⛔ FOCUSED WITH NO CURSOR PAINTS NOTHING. A location would be painted under `accent`, reading
+    # as "Enter acts on this row" while Enter would in fact send the pane to an ancestor.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_rs_sidebar(rs, 1, pl, pn, 0, 0, 0 - 1, 1);
+    crab_render(dsurf, 0, rs);
+    assert_eq(dh_list_selected(crab_sidebar_widget()), 0 - 1,
+      "a focused sidebar with no cursor selects nothing");
+
+    # ⛔ AND A FOCUS WANT ON A **CLOSED** SIDEBAR BUILDS NOTHING AND CLAIMS NOTHING — the renderer
+    # filters the want through `crab_sb_focus_eff`, the same function the key dispatch asks, so the
+    # keyboard can never believe it is driving a sidebar that was not drawn.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, db, 2, "/bin", dz, dm, CRAB_PANE_OK, 0, 0, dsl);
+    crab_rs_pane(rs, 1, drb, 1, "/etc", dz, dm, CRAB_PANE_OK, 0, 0, dsr);
+    crab_rs_sidebar(rs, 0, pl, pn, 0, 0, 2, 1);
+    crab_render(dsurf, 0, rs);
+    assert_eq(crab_sidebar_widget(), 0, "a closed sidebar is not built, focus want or not");
     return 0;
 }
 

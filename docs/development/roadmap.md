@@ -229,7 +229,7 @@ toolkit; see the gate table below for what each turned out to be.
 
 - ✅ **Sidebar, PLACES — SHIPPED**, on `b`. Home + the well-known subdirectories that actually
   exist + Root, each stat-checked so no row goes nowhere. Built once at startup, not per frame.
-  ⛔ **Its own hit function** (`crab_sidebar_hit`), returning a PLACE index — never the pane index
+  ⛔ **Its own hit function** (`crab_sidebar_hit`), returning a sidebar ROW — never the pane index
   the write layer trusts. The click path asks it first, so a sidebar coordinate never reaches
   `crab_hit`. ⚠ The width rule is `crab_preview_fit`'s shape with `CRAB_SB_W`, subtracted before the
   two-pane decision so nothing needs an "unless the sidebar is open" clause.
@@ -380,25 +380,56 @@ no `#else`. Each fix moved its RULE into a pure function the suite can interroga
 untestable is that `main.cyr` still calls it. **The gap is unchanged in shape and smaller in
 surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0.7.7.
 
-### M6 surfaces that shipped without a full interaction story
+### M6 surfaces that shipped without a full interaction story — **2 of 6 closed in 0.8.3**
 
-- ⛔ **The PLACES sidebar has NO keyboard route.** A click is the only way to reach a place, in an
-  application whose own source says it is *"keyboard-first by construction: a menu only a mouse can
-  reach is invisible to an operator who never touches one."* On agnos the compositor may spawn crab
-  with no pointer at all. ⇒ Needs a focus model: a selection slot, `dh_list_select`, and a
-  Tab-to-focus rule against the panes. `Tab` (0x2B) is unbound.
+> ⭐⭐ **AND THE SWEEP FOUND A SHIPPED BUG NONE OF THE SIX NAMED: `Open` WAS DEAD ON BOTH MENU
+> SURFACES.** Both arms rewrite `u` to the chosen entry's key and fall through to the one
+> implementation of that command — but they sat BELOW the binding table, and `CRAB_MI_OPEN` rewrites
+> to `0x28`, which is handled above them. `r`/`n`/`d`/`c`/`m` worked, and nothing made that true but
+> their line numbers. Both arms are hoisted; the map they each copied is now `crab_menu_accel`.
+> ⛔ **Phase 0 first.** These six share one event loop, and three of them depend on repairs that are
+> defects in their own right. Landed: the hoist, `crab_menu_accel`, `crab_goto`, `crab_path_within`'s
+> bounds read, and two stale contracts. **Still to land: trailing-slash normalisation in the two
+> model builders, and splitting `crab_pointer_blocked` out of `crab_pointer_modal`** — the latter
+> gates the pointer routes.
+
+- ✅ **The PLACES sidebar answers the keyboard — CLOSED 0.8.3.** `Tab` moves focus, arrows step over
+  the inert headers, Enter sends the active pane, Tab/Esc returns. ⛔ **Focus is a MODE, never a
+  third `active_pane`** — that variable picks the delete target. ⛔⛆ **The mutating verbs are EATEN
+  and refused out loud**; leaving them live would let `d` delete and `c`/`m` transfer (with no
+  confirmation at all) against a pane the toolkit paints muted. ⛔ The cursor is never seeded from
+  where the pane is — a location is usually an ancestor, so Tab-then-Enter would navigate *up*.
+- ✅ **The menu bar has a fit rule — CLOSED 0.8.3**, plus a **second** rule its drop-downs needed.
+  ⛔⛆ `dh_place_at_point` CLAMPS an overhanging popup, so there is a whole band of widths where the
+  bar fits and `Edit`'s menu opens under the word `File`. One threshold would have certified as good
+  the exact widths where the symptom survives.
 - **The menu bar and the A/B switcher have no pointer route** — only the sidebar got a hit function.
-  Both were shipped display-or-keyboard-only deliberately, but the deferral was recorded in the
-  CHANGELOG and never became an item. Any pointer path must follow `crab_sidebar_hit`'s precedent:
-  its own function, never the pane index the write layer trusts.
-- **There is no pointer route to the CONTEXT menu either** — right-click runs the ordinary
-  left-click path, the open menu cannot be clicked, and there is no click-away dismiss.
-- **`Go` and `View` are drawn on the bar with zero items.** Pressing Enter says so, which is honest,
-  but a menu that can never open is still a menu that should either be filled or removed. `Go` is
-  the natural home for the sidebar's places — the same hole seen from the chrome side.
-- **The menu bar has no fit rule** — the only M5/M6 surface without one. Its intrinsic width is
-  fixed and crab accepts any window width, so a narrow window clips it silently.
-- **The sidebar never shows which place the active pane is in.** It has no selection at all.
+  ⛔ **Must land WITH the context-menu route below**: a bar click that opens a drop-down the pointer
+  can neither pick from nor dismiss is a half-wired gesture. ⚠ Design done: ask the popup FIRST
+  (`dh_list_index_at` is z-order blind, and a drop-down flipped above its anchor lands *on* the bar
+  row), then the bar, then sidebar/switcher/panes; **every arm consumes**, including the
+  double-click pair, which the sidebar arm omits today — a latent defect.
+- **There is no pointer route to the CONTEXT menu either.** ⛔⛆ **AND crab CANNOT CURRENTLY TELL A
+  RIGHT-CLICK FROM A LEFT ONE**: `POINTER_BTN` carries the button code in `dh_event_a` and crab's arm
+  reads only `dh_event_b`. Worse, **aethersafha forwards button 1 hardcoded** (`ae_ptr_forward(comp,
+  1, 1, …)`, "left button only, for now"), so the code crab would need does not arrive. ⇒ **Gated
+  upstream; file it, do not guess a button number.** ⚠ The dangerous half is the separator: a pointer
+  path must invert `crab_menu_row`'s mapping correctly or it fires the wrong verb.
+- **`View` should be filled; `Go` should NOT be built as proposed.** ⚠ `View` is four constant items
+  and every target key is now reachable (the hoist above was its prerequisite — `View ▸ Cycle view`
+  would have been born dead exactly as `Open` was). ⛔ **`Go` is refused with reasons**: an 11-to-17
+  row drop-down at 380×220 is clamped and flipped to cover **both the bar and the status line**, and
+  `d` is not consumed by the drop arm — so the delete prompt would be drawn *underneath the menu*,
+  defeating the ⛔⛆ "THE PROMPT NAMES WHAT DIES" written after five system binaries left an iron box.
+  Also: two FAT volumes render as two identical rows, and `Go ▸ Parent` ships enabled-but-dead at `/`.
+  ⇒ **The right shape for `Go` is the sidebar's keyboard route, which now exists** — reconsider it as
+  a thin projection over `crab_sb_row_of` / `crab_sb_path`, capped by `crab_mb_drop_fit`. Recorded
+  with its reason, exactly as `Tags`/`Index` already are.
+- **The sidebar never shows which place the active pane is in.** ⚠ Design done and it is subtler than
+  it looks: the matching rule is **containment, deepest wins**, not path equality — `/` contains
+  everything and a volume prefix contains its own subtree. ⛔ It must NOT be conflated with the
+  keyboard cursor: `crab_sb_shown_row` already takes both and rules that a focused sidebar with no
+  cursor paints **nothing**, because a location under `accent` would read as "Enter acts on this".
 
 ### Absent affordances
 

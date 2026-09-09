@@ -26,7 +26,22 @@
 
 **0.8.1** is the last RELEASED version (2026-09-07), tagged on the remote — `git describe` answered
 `0.8.1` exactly before this cycle's work began, so HEAD *was* the tag.
-**0.8.2 is in preparation** (2026-09-09), on operator direction: the 6.6.1 pin, the
+**0.8.3 is in preparation** (2026-09-09): the M6 interaction gaps — **two of six closed**, plus a
+shipped bug none of them named. `VERSION` reads `0.8.3`; nothing is committed, tagged or pushed.
+⭐⭐ **`Open` WAS DEAD ON BOTH MENU SURFACES.** Both arms rewrite `u` to the chosen entry's key and
+fall through to the one implementation of that command — but they sat BELOW the binding table, and
+`CRAB_MI_OPEN` rewrites to `0x28`, handled above them. `r`/`n`/`d`/`c`/`m` worked, and nothing made
+that true but their line numbers. ⇒ Both arms hoisted; the map they each copied is `crab_menu_accel`.
+⭐ **Closed**: the PLACES sidebar's keyboard route (`Tab`, arrows, Enter — with the mutating verbs
+EATEN so `d` cannot delete from a pane the keys have left), and the menu bar's fit rule (plus the
+**second** rule its drop-downs needed — there is a band of widths where the bar fits and `Edit`'s
+menu opens under the word `File`).
+⛔ **Open**: the bar/switcher and context-menu pointer routes (which must land together), the
+sidebar's *you are here* marker, and `View`'s items. ⛔⛆ **crab cannot currently tell a right-click
+from a left one** — `POINTER_BTN` carries the button code in `a`, crab reads only `b`, and
+aethersafha forwards button 1 hardcoded. That one is gated UPSTREAM: file it, do not guess a number.
+
+**0.8.2** (2026-09-09), on operator direction: the 6.6.1 pin, the
 documentation-currency repair, and **the audit backlog's eight correctness bugs — all closed, each
 mutation-proven**. `VERSION` reads `0.8.2`. See [`../../CHANGELOG.md`](../../CHANGELOG.md).
 ⚠ **Nothing is committed, tagged or pushed** — the operator handles every git operation.

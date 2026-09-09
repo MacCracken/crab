@@ -1,4 +1,22 @@
-# Handoff — **0.8.2 in preparation: the audit backlog's correctness bugs, and a walk that never ran.**
+# Handoff — **0.8.3 in preparation: the M6 interaction gaps, and a menu verb that was dead.**
+
+> ⭐⭐ **0.8.3, updated 2026-09-09. `Open` WAS DEAD ON BOTH MENU SURFACES, IN EVERY BUILD THAT SHIPPED
+> EITHER.** The context menu and the menu bar both answer Enter by rewriting `u` to the chosen
+> entry's key and falling through to the one implementation of that command — but both arms sat
+> **below** the binding table, and `CRAB_MI_OPEN` rewrites to `0x28`, which is handled above them.
+> `r`/`n`/`d`/`c`/`m` worked, and nothing made that true but their line numbers.
+> ⇒ **The same shape as 0.8.2's dispatcher bug: a correct comment, wrong about where the handler
+> actually sits.** Check the caller's POSITION, not just its logic.
+>
+> ⭐ **Closed in 0.8.3**: the PLACES sidebar's keyboard route (`Tab`/arrows/Enter — ⛔ with the
+> mutating verbs EATEN, or `d` deletes from a pane the keys have left) and the menu bar's fit rule
+> (⛔ plus a SECOND rule for drop-downs: there is a band of widths where the bar fits and `Edit`'s
+> menu opens under the word `File`). Suite **1695 / 0**.
+> ⛔ **Four M6 gaps remain**, with an adversarially-verified design recorded in the roadmap. The
+> pointer routes must land TOGETHER, and the context-menu one is **gated upstream**: crab cannot tell
+> a right-click from a left one, and aethersafha forwards button 1 hardcoded. Do not guess a code.
+
+# Handoff — **0.8.2: the audit backlog's correctness bugs, and a walk that never ran.**
 
 > ⭐⭐ **READ THIS FIRST, BECAUSE IT IS THE TRANSFERABLE PART: RECURSIVE COPY AND RECURSIVE DELETE HAD
 > NEVER RUN IN ANY SHIPPED BUILD, AND THE SUITE WAS GREEN THE WHOLE TIME.** `src/main.cyr`'s idle

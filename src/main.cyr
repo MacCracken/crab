@@ -144,6 +144,17 @@ fn main(): i64 {
     # 380x220 it would cost the panes their MODIFIED column on the first frame, and a view that
     # reflows the moment the app starts is a view the operator did not ask for.
     var sb_open = 0;
+    # ⭐⭐ THE SIDEBAR'S KEYBOARD ROUTE (0.8.3). ⛔ TWO FLAGS, AND NEITHER IS `active_pane`.
+    # `sb_focus` is the operator's WANT — "my keys drive the sidebar" — and `sb_row` is a sidebar
+    # LIST ROW, never a place index and never a pane index.
+    # ⛔⛔ `active_pane` KEEPS ITS 0/1 DOMAIN. A third value would be the pane-index violation in a
+    # new place: `if (active_pane == 1) { … } else { … }` appears dozens of times below, including
+    # the arms that pick the DELETE target and the copy/move source, and a 2 reads as pane A in
+    # every one of them. `active_pane` stays meaningful while the sidebar is focused — it is the
+    # pane Enter sends to, which is the rule the click path already follows.
+    # ⚠ The WANT is published to the renderer raw; `crab_sb_focus_eff` filters it on both sides.
+    var sb_focus = 0;
+    var sb_row = 0 - 1;
     # ⭐ THE MENU BAR (M6, canvas turn 2). -1 = collapsed, which is the DEFAULT and what makes it
     # affordable: at 380x220 an always-present bar would cost a listing row forever to show four
     # words. `mb_drop` is separate — the bar can be revealed with nothing dropped, which is the
@@ -219,7 +230,7 @@ fn main(): i64 {
     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     crab_rs_preview(rs, pv_open);
     crab_rs_view(rs, view_mode);
-    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -494,31 +505,41 @@ fn main(): i64 {
                         # VOLUMES the sidebar has two sections and two inert headers, so a row is no
                         # longer `index + 1` — and hand-counting that is exactly what made the
                         # context menu highlight the wrong verb.
-                        var skind = crab_sb_row_kind(sbi, placen, voln);
-                        var sidx = crab_sb_row_index(sbi, placen, voln);
-                        var pp = 0;
-                        if (skind == CRAB_SB_PLACE) { pp = crab_place_path(places, placen, sidx); }
-                        # ⚠ A VOLUME IS A PATH TOO — its mount prefix — so clicking one navigates
-                        # exactly as a place does. Nothing else about it is special.
-                        if (skind == CRAB_SB_VOLUME) { pp = crab_vol_prefix(vols, voln, sidx); }
+                        # ⚠ `crab_sb_path` OWNS kind-then-index-then-array (0.8.3). This arm used
+                        # to open-code it, and the keyboard route would have been a second copy free
+                        # to disagree about which array a row belongs to.
+                        var pp = crab_sb_path(sbi, places, placen, vols, voln);
+                        # ⛔⛆ THE CLICK WRITES THE CURSOR TOO. Two producers of one cursor that do not
+                        # both write it drift: click a place, then Tab, and the keyboard would resume
+                        # from wherever the arrows last were rather than from the row under the
+                        # operator's own finger.
+                        if (pp != 0) { sb_row = sbi; }
                         if (pp != 0) {
                             # ⭐ NAVIGATE THE ACTIVE PANE, not a fixed one. The sidebar is a
                             # destination list; which pane goes there is the operator's existing
                             # focus, the same rule every other navigation key follows.
                             # ⚠ `crab_relist` reports the count and leaves the error on the notice
                             # channel, so an unreadable place says so instead of blanking the pane.
+                            # ⚠ `crab_goto` OWNS adopt-relist-clear (0.8.3). It was written out here
+                            # twice, and the keyboard route below would have made four copies of a
+                            # move whose three steps must not come apart: marks are INDEX-based, so
+                            # a mark that outlives its listing points at whatever now occupies that
+                            # index. ⛔ Guard `n >= 0` before assigning — a -1 count reaches
+                            # `crab_maxsel` and every verb arm as a live entry count.
                             if (active_pane == 0) {
-                                crab_strcpy_n(lpath, pp, CRAB_PATH_MAX);
-                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                lstate = crab_pane_state(ln, crab_listing_err());
-                                sel_l = 0;
+                                var gn0 = crab_goto(pp, lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
+                                if (gn0 >= 0) {
+                                    ln = gn0;
+                                    lstate = crab_pane_state(ln, crab_listing_err());
+                                    sel_l = 0;
+                                } else { crab_set_notice("crab cannot go there"); }
                             } else {
-                                crab_strcpy_n(rpath, pp, CRAB_PATH_MAX);
-                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                rstate = crab_pane_state(rn, crab_listing_err());
-                                sel_r = 0;
+                                var gn1 = crab_goto(pp, rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
+                                if (gn1 >= 0) {
+                                    rn = gn1;
+                                    rstate = crab_pane_state(rn, crab_listing_err());
+                                    sel_r = 0;
+                                } else { crab_set_notice("crab cannot go there"); }
                             }
                             crab_say("crab: place "); crab_say(pp); crab_say("\n");
                         }
@@ -529,6 +550,11 @@ fn main(): i64 {
                             var hp = load64(hit);
                             var hr = load64(hit + 8);
                             active_pane = hp;             # clicking a pane focuses it, even off-row
+                            # ⛔ A PANE CLICK RETURNS THE KEYS TO THE PANES (0.8.3). Without this the
+                            # operator clicks a row, presses `d`, and is refused by a sidebar focus
+                            # they cannot see any reason for — the toolkit is painting the pane they
+                            # just clicked, and the keys are somewhere else.
+                            sb_focus = 0;
                             var now = clock_now_ms();
                             if (hr >= 0) {
                                 # ⚠ CLAMP AGAINST THE LIVE COUNT. The tree was built from the count at the
@@ -882,6 +908,192 @@ fn main(): i64 {
                             # the selection or descended — and then the gate cancelled, having already acted.
                             # The comment above this gate claimed keys were resolved here first; they were not.
                             if (crab_get_notice() != 0) { crab_clear_notice(); }
+                            # ⛔⛆ THE TWO MENU ARMS ARE HOISTED HERE, ABOVE EVERY BINDING, AND THAT
+                            # POSITION IS LOAD-BEARING (0.8.3). Both arms REWRITE `u` to the key the
+                            # chosen entry names and fall through to the one implementation of that
+                            # command — which is the right design and is why the accelerator column
+                            # cannot drift from what the entry does. But they used to sit BELOW the
+                            # binding table, so a rewrite only reached handlers defined further down.
+                            # ⛔⛆ `CRAB_MI_OPEN` REWRITES `u` TO `0x28`, AND `0x28` IS HANDLED ABOVE
+                            # THEM — so **Open was DEAD on both the menu bar and the context menu**,
+                            # in every build that shipped either. It consumed the keypress, closed the
+                            # menu, and did nothing. `r`/`n`/`d`/`c`/`m` happened to be bound below and
+                            # so happened to work; nothing made that true but their line numbers.
+                            # ⇒ Hoisted above ALL of them, so a rewrite reaches its handler whatever
+                            # the target is, and a verb added to a menu later cannot be born dead.
+                            # ⚠ Behaviour-neutral otherwise: nothing between here and the old site
+                            # reads or writes `mb_sel`/`mb_drop`/`mb_item`/`menu_open`/`menu_sel`, and
+                            # `mcnt2`/`misdir2`/`mmark2` are established far above, on the event.
+                            # ⭐⭐ THE MENU OWNS THE KEYBOARD WHILE OPEN — the same rule as
+                            # the edit field and the delete confirmation. ⛔ Checked BEFORE
+                            # every binding below and it consumes the key, so `d` while the
+                            # menu is open moves the highlight rather than deleting anything.
+                            # ⭐⭐ THE MENU BAR CONSUMES ITS KEYS FIRST, and it must: Left/Right
+                            # already switch panes and Enter already descends, so a bar that did not
+                            # claim them would be navigable only by keys it does not own.
+                            # ⛔ TWO STATES, NOT ONE. `mb_sel >= 0` is the bar revealed and being
+                            # arrowed along; `mb_drop >= 0` is a drop-down open under it. They are
+                            # separate because the same Left/Right means "next menu" in both, but
+                            # Up/Down and Enter mean entirely different things.
+                            if (mb_sel >= 0) {
+                                if (mb_drop < 0) {
+                                    if (u == 0x29) { mb_sel = 0 - 1; u = 0; }              # Esc
+                                    if ((u == 0x50) || (u == 0x0B)) { mb_sel = crab_mb_move(mb_sel, 0 - 1); u = 0; }
+                                    if ((u == 0x4F) || (u == 0x0F)) { mb_sel = crab_mb_move(mb_sel, 1); u = 0; }
+                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `Go` and `View` are on
+                                    # the bar because the canvas draws them and crab will fill them;
+                                    # opening an empty popup would read as a broken menu rather than
+                                    # an unfinished one.
+                                    if (u == 0x28) {
+                                        # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
+                                        # row means `dh_list_select` refuses it and the drop-down
+                                        # paints no highlight at all — while Enter still fires it.
+                                        var f0 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (f0 >= 0) { mb_drop = mb_sel; mb_item = f0; }
+                                        else { crab_set_notice("that menu has no items yet"); }
+                                        u = 0;
+                                    }
+                                } else {
+                                    if (u == 0x29) { mb_drop = 0 - 1; u = 0; }             # Esc — close the drop
+                                    # ⛔ SKIP DISABLED ENTRIES, as the context menu has always done.
+                                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 0 - 1, mcnt2, misdir2, mmark2);
+                                        u = 0;
+                                    }
+                                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 1, mcnt2, misdir2, mmark2);
+                                        u = 0;
+                                    }
+                                    # ⚠ Left/Right walk to the adjacent menu WITH the drop still
+                                    # open, which is how every menu bar behaves.
+                                    if ((u == 0x50) || (u == 0x0B)) {
+                                        mb_sel = crab_mb_move(mb_sel, 0 - 1);
+                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
+                                        else { mb_drop = 0 - 1; }
+                                        u = 0;
+                                    }
+                                    if ((u == 0x4F) || (u == 0x0F)) {
+                                        mb_sel = crab_mb_move(mb_sel, 1);
+                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
+                                        else { mb_drop = 0 - 1; }
+                                        u = 0;
+                                    }
+                                    if (u == 0x28) {                                       # Enter — run it
+                                        # ⛔ THE BAR DOES NOT REIMPLEMENT THE VERBS EITHER. Exactly
+                                        # as the context menu does, it rewrites `u` to the key the
+                                        # entry names and falls through — so there is ONE
+                                        # implementation of each command and the accelerator column
+                                        # cannot drift from what the entry actually does.
+                                        var bi = crab_mb_item(mb_drop, mb_item);
+                                        mb_drop = 0 - 1;
+                                        mb_sel = 0 - 1;
+                                        # ⚠ ONE MAP, IN `ui.cyr`, WHERE THE SUITE CAN REACH IT. This
+                                        # chain was written out here and again in the context arm
+                                        # below — two copies of one rule, both inside the agnos-only
+                                        # `#ifdef`, neither assertable.
+                                        u = crab_menu_accel(bi);
+                                    }
+                                }
+                            }
+                            if (menu_open != 0) {
+                                if (u == 0x29) { menu_open = 0; u = 0; }           # Esc — dismiss
+                                else {
+                                    if ((u == 0x52) || (u == 0x0E)) {
+                                        menu_sel = crab_menu_prev(menu_sel, mcnt2, misdir2, mmark2);
+                                        u = 0;
+                                    }
+                                    else { if ((u == 0x51) || (u == 0x0D)) {
+                                            menu_sel = crab_menu_next(menu_sel, mcnt2, misdir2, mmark2);
+                                            u = 0;
+                                        }
+                                        else { if (u == 0x28) {
+                                                menu_open = 0;
+                                                # ⚠ THE MENU DOES NOT REIMPLEMENT THE VERBS. It
+                                                # rewrites `u` to the key the entry names and falls
+                                                # through, so there is exactly ONE implementation of
+                                                # each command and the accelerator column cannot
+                                                # drift from what the entry actually does.
+                                                u = crab_menu_accel(menu_sel);
+                                            } else { u = 0; } } }
+                                }
+                            }
+                            # ⭐⭐ THE SIDEBAR'S KEYBOARD ROUTE (M6 gap, closed 0.8.3).
+                            # ⛔⛆ THE PLACES SIDEBAR SHIPPED REACHABLE ONLY BY MOUSE, in an
+                            # application whose own source three hundred lines below says it is
+                            # "keyboard-first by construction: a menu only a mouse can reach is
+                            # invisible to an operator who never touches one" — and on agnos the
+                            # compositor may spawn crab WITH NO POINTER AT ALL, which makes the
+                            # sidebar purely decorative there.
+                            # ⛔ PLACED BELOW THE TWO MENU ARMS AND ABOVE EVERY BINDING. A popup
+                            # outranks sidebar focus: Tab handled above the menu gate would pull
+                            # focus onto a sidebar the gated arm then refuses to drive.
+                            # ⚠ `crab_sb_focus_eff` is asked with `crab_sidebar_shown` — the SAME
+                            # pair `crab_render` asks — so the keyboard cannot believe it is driving
+                            # a sidebar the renderer did not draw. That equality is `b`'s own lesson.
+                            var sbon_k = crab_sidebar_shown(w, pv_open, sb_open);
+                            if (u == 0x2B) {                                       # Tab
+                                var nf = crab_sb_focus_toggle(sb_focus, sbon_k, placen, voln);
+                                if ((nf == 1) && (sb_focus == 0)) {
+                                    # ⛔ THE CURSOR IS SEEDED FROM THE FIRST ROW, NEVER FROM WHERE THE
+                                    # PANE IS. A location is usually an ANCESTOR of the pane's path,
+                                    # so seeding from it would make Tab-then-Enter navigate the pane
+                                    # UP and clear its marks — from a gesture that reads as a no-op.
+                                    if (sb_row < 0) { sb_row = crab_sb_first_row(placen, voln); }
+                                    crab_set_notice("sidebar: arrows move, Enter goes, Tab returns");
+                                }
+                                if ((nf == 0) && (sb_focus == 1)) { crab_set_notice("panes"); }
+                                if ((nf == 0) && (sb_focus == 0)) {
+                                    # ⚠ NAME THE REAL CAUSE. Never "press b" while the sidebar is
+                                    # already open — `b` would close it and make the state worse.
+                                    if (sb_open == 0) { crab_set_notice("the sidebar is closed — b opens it"); }
+                                    else { crab_set_notice("sidebar needs a wider window"); }
+                                }
+                                sb_focus = nf;
+                                u = 0;
+                            }
+                            if (crab_sb_focus_eff(sb_focus, sbon_k, placen, voln) == 1) {
+                                var sbk = crab_sb_key(u, crab_op_active());
+                                if (sbk == CRAB_SBK_UP) { sb_row = crab_sb_step(sb_row, 0 - 1, placen, voln); u = 0; }
+                                if (sbk == CRAB_SBK_DOWN) { sb_row = crab_sb_step(sb_row, 1, placen, voln); u = 0; }
+                                if (sbk == CRAB_SBK_LEAVE) { sb_focus = 0; crab_set_notice("panes"); u = 0; }
+                                if (sbk == CRAB_SBK_EAT) {
+                                    # ⛔⛆ THE MUTATING VERBS ARE EATEN, AND REFUSED OUT LOUD. Without
+                                    # this, `d` deletes, `c`/`m` transfer with no confirmation at all,
+                                    # `r` renames and `n` makes a directory — all against a pane the
+                                    # toolkit is painting MUTED because the keyboard is elsewhere.
+                                    # ⚠ Silence is not an option: a key that does nothing and says
+                                    # nothing is indistinguishable from a dropped keypress, and the
+                                    # operator's next move is to press it again.
+                                    crab_set_notice("the sidebar has the keys — Tab returns to the panes");
+                                    u = 0;
+                                }
+                                if (sbk == CRAB_SBK_OPEN) {
+                                    var sbp = crab_sb_path(sb_row, places, placen, vols, voln);
+                                    if (sbp != 0) {
+                                        if (active_pane == 0) {
+                                            var sgn0 = crab_goto(sbp, lpath, lbuf, lsizes, lmtimes,
+                                              lmarks, pathscr, statbuf);
+                                            if (sgn0 >= 0) {
+                                                ln = sgn0;
+                                                lstate = crab_pane_state(ln, crab_listing_err());
+                                                sel_l = 0;
+                                            } else { crab_set_notice("crab cannot go there"); }
+                                        } else {
+                                            var sgn1 = crab_goto(sbp, rpath, rbuf, rsizes, rmtimes,
+                                              rmarks, pathscr, statbuf);
+                                            if (sgn1 >= 0) {
+                                                rn = sgn1;
+                                                rstate = crab_pane_state(rn, crab_listing_err());
+                                                sel_r = 0;
+                                            } else { crab_set_notice("crab cannot go there"); }
+                                        }
+                                        crab_say("crab: place "); crab_say(sbp); crab_say("\n");
+                                    } else { crab_set_notice("nothing to go to"); }
+                                    u = 0;
+                                }
+                            }
                             # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
                             # OPERATOR CANNOT STOP IS A WORSE CONTROL THAN A BLOCKING ONE: the blocking
                             # version at least ended by itself. Shipped in the same change as the
@@ -1050,109 +1262,6 @@ fn main(): i64 {
                                     }
                                 }
                             }
-                            # ⭐⭐ THE MENU OWNS THE KEYBOARD WHILE OPEN — the same rule as
-                            # the edit field and the delete confirmation. ⛔ Checked BEFORE
-                            # every binding below and it consumes the key, so `d` while the
-                            # menu is open moves the highlight rather than deleting anything.
-                            # ⭐⭐ THE MENU BAR CONSUMES ITS KEYS FIRST, and it must: Left/Right
-                            # already switch panes and Enter already descends, so a bar that did not
-                            # claim them would be navigable only by keys it does not own.
-                            # ⛔ TWO STATES, NOT ONE. `mb_sel >= 0` is the bar revealed and being
-                            # arrowed along; `mb_drop >= 0` is a drop-down open under it. They are
-                            # separate because the same Left/Right means "next menu" in both, but
-                            # Up/Down and Enter mean entirely different things.
-                            if (mb_sel >= 0) {
-                                if (mb_drop < 0) {
-                                    if (u == 0x29) { mb_sel = 0 - 1; u = 0; }              # Esc
-                                    if ((u == 0x50) || (u == 0x0B)) { mb_sel = crab_mb_move(mb_sel, 0 - 1); u = 0; }
-                                    if ((u == 0x4F) || (u == 0x0F)) { mb_sel = crab_mb_move(mb_sel, 1); u = 0; }
-                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `Go` and `View` are on
-                                    # the bar because the canvas draws them and crab will fill them;
-                                    # opening an empty popup would read as a broken menu rather than
-                                    # an unfinished one.
-                                    if (u == 0x28) {
-                                        # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
-                                        # row means `dh_list_select` refuses it and the drop-down
-                                        # paints no highlight at all — while Enter still fires it.
-                                        var f0 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (f0 >= 0) { mb_drop = mb_sel; mb_item = f0; }
-                                        else { crab_set_notice("that menu has no items yet"); }
-                                        u = 0;
-                                    }
-                                } else {
-                                    if (u == 0x29) { mb_drop = 0 - 1; u = 0; }             # Esc — close the drop
-                                    # ⛔ SKIP DISABLED ENTRIES, as the context menu has always done.
-                                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
-                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 0 - 1, mcnt2, misdir2, mmark2);
-                                        u = 0;
-                                    }
-                                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                                        mb_item = crab_mb_item_move(mb_drop, mb_item, 1, mcnt2, misdir2, mmark2);
-                                        u = 0;
-                                    }
-                                    # ⚠ Left/Right walk to the adjacent menu WITH the drop still
-                                    # open, which is how every menu bar behaves.
-                                    if ((u == 0x50) || (u == 0x0B)) {
-                                        mb_sel = crab_mb_move(mb_sel, 0 - 1);
-                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
-                                        else { mb_drop = 0 - 1; }
-                                        u = 0;
-                                    }
-                                    if ((u == 0x4F) || (u == 0x0F)) {
-                                        mb_sel = crab_mb_move(mb_sel, 1);
-                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
-                                        else { mb_drop = 0 - 1; }
-                                        u = 0;
-                                    }
-                                    if (u == 0x28) {                                       # Enter — run it
-                                        # ⛔ THE BAR DOES NOT REIMPLEMENT THE VERBS EITHER. Exactly
-                                        # as the context menu does, it rewrites `u` to the key the
-                                        # entry names and falls through — so there is ONE
-                                        # implementation of each command and the accelerator column
-                                        # cannot drift from what the entry actually does.
-                                        var bi = crab_mb_item(mb_drop, mb_item);
-                                        mb_drop = 0 - 1;
-                                        mb_sel = 0 - 1;
-                                        u = 0;
-                                        if (bi == CRAB_MI_COPY) { u = 0x06; }
-                                        if (bi == CRAB_MI_MOVE) { u = 0x10; }
-                                        if (bi == CRAB_MI_RENAME) { u = 0x15; }
-                                        if (bi == CRAB_MI_DELETE) { u = 0x07; }
-                                        if (bi == CRAB_MI_NEWDIR) { u = 0x11; }
-                                        if (bi == CRAB_MI_OPEN) { u = 0x28; }
-                                    }
-                                }
-                            }
-                            if (menu_open != 0) {
-                                if (u == 0x29) { menu_open = 0; u = 0; }           # Esc — dismiss
-                                else {
-                                    if ((u == 0x52) || (u == 0x0E)) {
-                                        menu_sel = crab_menu_prev(menu_sel, mcnt2, misdir2, mmark2);
-                                        u = 0;
-                                    }
-                                    else { if ((u == 0x51) || (u == 0x0D)) {
-                                            menu_sel = crab_menu_next(menu_sel, mcnt2, misdir2, mmark2);
-                                            u = 0;
-                                        }
-                                        else { if (u == 0x28) {
-                                                menu_open = 0;
-                                                # ⚠ THE MENU DOES NOT REIMPLEMENT THE VERBS. It
-                                                # rewrites `u` to the key the entry names and falls
-                                                # through, so there is exactly ONE implementation of
-                                                # each command and the accelerator column cannot
-                                                # drift from what the entry actually does.
-                                                u = 0;
-                                                if (menu_sel == CRAB_MI_COPY) { u = 0x06; }
-                                                if (menu_sel == CRAB_MI_MOVE) { u = 0x10; }
-                                                if (menu_sel == CRAB_MI_RENAME) { u = 0x15; }
-                                                if (menu_sel == CRAB_MI_DELETE) { u = 0x07; }
-                                                if (menu_sel == CRAB_MI_NEWDIR) { u = 0x11; }
-                                                if (menu_sel == CRAB_MI_OPEN) { u = 0x28; }
-                                            } else { u = 0; } } }
-                                }
-                            }
                             # ⭐ r — RENAME the selected entry. `crab_fs_rename` has existed and been asserted since
                             # 0.7.1; this is the field that finally reaches it.
                             if (u == 0x15) {                                       # r
@@ -1244,8 +1353,8 @@ fn main(): i64 {
                                     var smk = lmarks; if (active_pane == 1) { smk = rmarks; }
                                     var smarked = crab_mark_count(smk, scnt);
                                     # ⛔⛔ THE RULE ITSELF LIVES IN `crab_transfer_plan`, NOT HERE, and that is
-                                    # deliberate: everything in this file between the `#ifdef` at 263 and the
-                                    # `#endif` at 1484 is invisible to every test crab has — no `#else`, and
+                                    # deliberate: everything in this file between the `#ifdef` at 293 and the
+                                    # `#endif` at 1907 is invisible to every test crab has — no `#else`, and
                                     # nothing includes `main.cyr`. Both defects this branch shipped were
                                     # decisions, not wiring, so the decision moved somewhere the suite can reach
                                     # it and this stays a dispatch.
@@ -1409,7 +1518,18 @@ fn main(): i64 {
                             # ⚠ F10 is the universal menu-bar key, so the affordance is conventional
                             # even without the chrome the canvas draws.
                             if (u == 0x43) {                                       # F10 — the menu bar
-                                if (mb_sel < 0) { mb_sel = 0; crab_say("crab: menu bar\n"); }
+                                # ⛔⛆ REFUSE OUT LOUD RATHER THAN CLIP (0.8.3). The bar was the only
+                                # M5/M6 surface with no fit rule: its intrinsic width is fixed and
+                                # crab accepts any window width, so a narrow window showed "File Edit
+                                # Go" and no View, with nothing saying a menu was missing.
+                                # ⚠ Asked with the same `crab_menubar_fit` the renderer asks, so the
+                                # key cannot report a bar the frame will not draw — `b`'s own lesson.
+                                if (mb_sel < 0) {
+                                    if (crab_menubar_fit(w, 1) == 1) {
+                                        mb_sel = 0;
+                                        crab_say("crab: menu bar\n");
+                                    } else { crab_set_notice("the menu bar needs a wider window"); }
+                                }
                                 else { mb_sel = 0 - 1; }
                                 # ⛔ COLLAPSING TAKES THE DROP-DOWN WITH IT. A menu left open over a
                                 # bar that is gone is a popup with no owner and no way to dismiss it.
@@ -1485,7 +1605,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1558,13 +1678,26 @@ fn main(): i64 {
                 var rnow = clock_now_ms();
                 if (crab_repeat_due(rnow - held_since, rnow - held_last) == 1) {
                     held_last = rnow;
-                    if ((held_key == 0x52) || (held_key == 0x0E)) {          # Up / k
-                        if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                        if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
-                    }
-                    if ((held_key == 0x51) || (held_key == 0x0D)) {          # Down / j
-                        if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                        if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                    # ⛔⛆ THE REPEAT ARM IS A SECOND COPY OF UP/DOWN AND IT MUST OBEY THE SAME MODE
+                    # (0.8.3). It was mode-blind: holding Down while the sidebar had focus moved the
+                    # PANE's selection under a sidebar cursor that stayed put — two surfaces
+                    # answering one held key. ⚠ It asks `crab_sb_focus_eff` and `crab_sb_key`, the
+                    # same pair the press path asks, rather than reading `sb_focus` raw.
+                    var rsbon = crab_sidebar_shown(w, pv_open, sb_open);
+                    var rsbf = crab_sb_focus_eff(sb_focus, rsbon, placen, voln);
+                    var rsbk = CRAB_SBK_NONE;
+                    if (rsbf == 1) { rsbk = crab_sb_key(held_key, crab_op_active()); }
+                    if (rsbk == CRAB_SBK_UP) { sb_row = crab_sb_step(sb_row, 0 - 1, placen, voln); }
+                    if (rsbk == CRAB_SBK_DOWN) { sb_row = crab_sb_step(sb_row, 1, placen, voln); }
+                    if (rsbf == 0) {
+                        if ((held_key == 0x52) || (held_key == 0x0E)) {          # Up / k
+                            if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
+                            if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                        }
+                        if ((held_key == 0x51) || (held_key == 0x0D)) {          # Down / j
+                            if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
+                            if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                        }
                     }
                     crab_say("crab: key repeat\n");
                     # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
@@ -1576,7 +1709,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
-                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                     # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1664,7 +1797,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
@@ -1761,7 +1894,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
-                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     # ⛔⛆ THE PREVIEW SHOWS THE **SELECTION**, NOT WHAT THIS WALK JUST DECODED (0.8.2).
@@ -1813,7 +1946,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 var sm = crab_render(surf, 0, rs);
                 if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
@@ -1837,7 +1970,7 @@ fn main(): i64 {
                         crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                         crab_rs_preview(rs, pv_open);
                         crab_rs_view(rs, view_mode);
-                        crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                        crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                         crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
@@ -1874,7 +2007,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
+                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
                 # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on

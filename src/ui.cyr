@@ -741,7 +741,7 @@ fn crab_sidebar_widget(): i64 { return crab_sblst; }
 # offset is the whole reason `crab_sidebar_hit` exists rather than returning the row index raw —
 # the same off-by-one that made the context menu highlight the wrong verb when a separator was
 # counted as an item.
-fn crab_sidebar(parent, places, n, vols, voln): i64 {
+fn crab_sidebar(parent, places, n, vols, voln, selrow): i64 {
     var sb = dh_list_new(CRAB_SB_ROW_H);
     if (sb == 0) { return 0; }
     dh_widget_set_pref(sb, CRAB_SB_W, 0);
@@ -797,6 +797,11 @@ fn crab_sidebar(parent, places, n, vols, voln): i64 {
         }
     }
     dh_widget_add_child(parent, sb);
+    # ⛔ SELECT LAST, AFTER EVERY ROW EXISTS. `dh_list_select` validates the index against the rows
+    # already added and refuses an inert one, so selecting before the volumes are built would refuse
+    # every volume row. ⚠ -1 selects nothing, which is what an unfocused sidebar with no known
+    # location wants — and what `crab_sb_shown_row` answers for "focused with no cursor".
+    if (selrow >= 0) { dh_list_select(sb, selrow); }
     return sb;
 }
 
@@ -837,12 +842,187 @@ fn crab_sb_row_index(row, placen, voln): i64 {
     return 0 - 1;
 }
 
-# @public — which PLACE is at (x, y)? -> the model index, or -1 for none.
+# @public — how many LIST rows `crab_sidebar` builds for this model. -> the row count.
+# ⚠ ONE ANSWER, so nothing hand-counts the layout a second time. The builder above adds a PLACES
+# header, `placen` places, and — only when `voln > 0` — a VOLUMES header and `voln` volumes.
+fn crab_sb_rows(placen, voln): i64 {
+    var n = placen + 1;
+    if (voln > 0) { n = n + 1 + voln; }
+    return n;
+}
+
+# @public — the first SELECTABLE row, or -1 when the sidebar holds nothing to select.
+# ⚠ `placen == 0` with volumes present is real: the host builds no volumes, and a model with no
+# places is what a stat-checked build produces when none of the well-known directories exist.
+fn crab_sb_first_row(placen, voln): i64 {
+    var r = 0;
+    var n = crab_sb_rows(placen, voln);
+    while (r < n) {
+        if (crab_sb_row_kind(r, placen, voln) != CRAB_SB_NONE) { return r; }
+        r = r + 1;
+    }
+    return 0 - 1;
+}
+
+# @public — move the sidebar cursor by `d` (+1/-1), stepping OVER the inert headers. -> the new row.
 #
-# ⛔ RETURNS A PLACE INDEX, NEVER A PANE INDEX. See the ⛔⛔ at the top of this section: the pane
-# index is trusted by the write layer and this number must never be mistaken for one.
-# ⚠ Subtracts the inert header row, and refuses row 0 outright rather than returning -1 by
-# arithmetic — so a click on "PLACES" is a refusal, not a place that happens to be out of range.
+# ⛔ CLAMPED, NOT WRAPPED, and deliberately not `dh_list_move_sel`'s edge behaviour. A sidebar is a
+# short destination list the operator is travelling along; wrapping from the last volume back to
+# the first place reads as the cursor jumping rather than stopping.
+# ⚠ TOTAL OVER HEADER ROWS AND OVER -1: from a header (or from "no cursor") it answers the first
+# selectable row, so a cursor can never be stranded on something `dh_list_select` refuses to paint.
+# ⚠ Returns `row` unchanged when nothing selectable lies that way, matching `crab_mb_item_move`'s
+# contract rather than inventing a second one.
+fn crab_sb_step(row, d, placen, voln): i64 {
+    var n = crab_sb_rows(placen, voln);
+    if (crab_sb_first_row(placen, voln) < 0) { return 0 - 1; }
+    if (row < 0) { return crab_sb_first_row(placen, voln); }
+    if (row >= n) { return crab_sb_first_row(placen, voln); }
+    if (crab_sb_row_kind(row, placen, voln) == CRAB_SB_NONE) { return crab_sb_first_row(placen, voln); }
+    var r = row;
+    var g = 0;
+    while (g < n) {
+        r = r + d;
+        if (r < 0) { return row; }
+        if (r >= n) { return row; }
+        if (crab_sb_row_kind(r, placen, voln) != CRAB_SB_NONE) { return r; }
+        g = g + 1;
+    }
+    return row;
+}
+
+# @public — the LIST row for section `kind`'s item `index`, or -1. The exact inverse of
+# `crab_sb_row_kind` / `crab_sb_row_index`.
+fn crab_sb_row_of(kind, index, placen, voln): i64 {
+    if (index < 0) { return 0 - 1; }
+    if (kind == CRAB_SB_PLACE) {
+        if (index >= placen) { return 0 - 1; }
+        return index + 1;
+    }
+    if (kind == CRAB_SB_VOLUME) {
+        if (voln <= 0) { return 0 - 1; }
+        if (index >= voln) { return 0 - 1; }
+        return placen + 2 + index;
+    }
+    return 0 - 1;
+}
+
+# @public — the PATH a sidebar row navigates to, or 0 for a header / out of range.
+#
+# ⛔ ONE RESOLVER FOR BOTH ROUTES. The click path open-coded this — kind, then index, then either
+# `crab_place_path` or `crab_vol_prefix` — and the keyboard route would have been a second copy of
+# the same three steps, free to disagree about which array a row belongs to.
+# ⚠ A VOLUME IS A PATH TOO: its mount prefix. That ruling is the click path's, kept here so both
+# routes inherit it rather than each restating it.
+fn crab_sb_path(row, places, placen, vols, voln): i64 {
+    var k = crab_sb_row_kind(row, placen, voln);
+    var i = crab_sb_row_index(row, placen, voln);
+    if (i < 0) { return 0; }
+    if (k == CRAB_SB_PLACE) { return crab_place_path(places, placen, i); }
+    if (k == CRAB_SB_VOLUME) { return crab_vol_prefix(vols, voln, i); }
+    return 0;
+}
+
+# =================================================================================================
+# M6 — THE SIDEBAR'S KEYBOARD ROUTE (0.8.3). Focus is a MODE, never a third pane.
+# =================================================================================================
+#
+# ⛔⛔ `active_pane` KEEPS ITS 0/1 DOMAIN, FOREVER. A third value would be the pane-index violation
+# in a new place: `if (active_pane == 1) { … } else { … }` appears dozens of times in `src/main.cyr`
+# and a 2 reads as pane A in every one of them — including the arms that pick the DELETE target and
+# the copy/move source. Sidebar focus is therefore its own flag, and `active_pane` stays meaningful
+# while it is set: it is the pane Enter sends to, exactly as the click path already rules.
+var CRAB_SBK_NONE  = 0;    # not a sidebar key — fall through to the ordinary bindings
+var CRAB_SBK_UP    = 1;
+var CRAB_SBK_DOWN  = 2;
+var CRAB_SBK_OPEN  = 3;    # send the active pane to this row's path
+var CRAB_SBK_LEAVE = 4;    # give focus back to the panes
+var CRAB_SBK_EAT   = 5;    # consume it and refuse OUT LOUD — see below
+
+# @public — what does key `u` mean while the sidebar has focus? -> a CRAB_SBK_* answer.
+#
+# ⛔⛆ `CRAB_SBK_EAT` IS THE WHOLE REASON THIS IS A FUNCTION AND NOT FOUR `if`s IN THE EVENT LOOP.
+# A focus model that consumes only its OWN keys leaves every destructive verb live: `d` deletes,
+# `c`/`m` transfer with no confirmation at all, `r` renames, `n` makes a directory and Backspace
+# ascends — all against a pane the toolkit is painting MUTED because the keyboard is somewhere else.
+# The operator is looking at the sidebar and `d` deletes from a pane they are not driving.
+# ⇒ The mutating verbs are EATEN and refused out loud. The refusal is not politeness: a key that
+# does nothing and says nothing is indistinguishable from a dropped keypress, and the operator's
+# next move is to press it again.
+# ⚠ THE ASSERTION THAT MAKES THIS IMPOSSIBLE TO REINTRODUCE is "while the sidebar is focused, `0x10`
+# never answers NONE" — not the list of codes, which a future verb could quietly fall off.
+#
+# ⛔ ESC IS NOT UNCONDITIONAL. `crab_sb_key` answers NONE for Esc while a transfer is running, so it
+# falls through to the arm that cancels one. Esc has meant "stop the transfer" since 0.7.3 and that
+# outranks leaving a focus mode — a stepped operation the operator cannot stop is the worse control.
+fn crab_sb_key(u, op_active): i64 {
+    if (u == 0x52) { return CRAB_SBK_UP; }                       # Up
+    if (u == 0x0E) { return CRAB_SBK_UP; }                       # k
+    if (u == 0x51) { return CRAB_SBK_DOWN; }                     # Down
+    if (u == 0x0D) { return CRAB_SBK_DOWN; }                     # j
+    if (u == 0x28) { return CRAB_SBK_OPEN; }                     # Enter
+    if (u == 0x2B) { return CRAB_SBK_LEAVE; }                    # Tab
+    if (u == 0x29) {                                             # Esc
+        if (op_active == 1) { return CRAB_SBK_NONE; }
+        return CRAB_SBK_LEAVE;
+    }
+    # ⛔ THE MUTATING SET. Every one of these acts on a pane the operator is not driving.
+    if (u == 0x07) { return CRAB_SBK_EAT; }                      # d — delete
+    if (u == 0x06) { return CRAB_SBK_EAT; }                      # c — copy
+    if (u == 0x10) { return CRAB_SBK_EAT; }                      # m — move
+    if (u == 0x15) { return CRAB_SBK_EAT; }                      # r — rename
+    if (u == 0x11) { return CRAB_SBK_EAT; }                      # n — new folder
+    if (u == 0x2A) { return CRAB_SBK_EAT; }                      # Backspace — ascend
+    if (u == 0x2C) { return CRAB_SBK_EAT; }                      # Space — mark
+    return CRAB_SBK_NONE;
+}
+
+# @public — is sidebar focus EFFECTIVE? 1 = the keyboard really is driving the sidebar.
+# ⚠ A WANT FILTERED BY WHAT IS ON SCREEN, the same discipline `sb_open` / `pv_open` already use: the
+# operator's flag is never silently rewritten, it is just answered against the frame that exists. A
+# sidebar that is closed, or that fits nowhere, or that holds nothing selectable, cannot hold focus.
+fn crab_sb_focus_eff(want, sbon, placen, voln): i64 {
+    if (want == 0) { return 0; }
+    if (sbon == 0) { return 0; }
+    if (crab_sb_first_row(placen, voln) < 0) { return 0; }
+    return 1;
+}
+
+# @public — the new focus want after Tab. -> 0 or 1.
+# ⛔ LEAVING IS ALWAYS ALLOWED; entering is conditional. A Tab that could not get out would strand
+# the operator in a mode whose own keys are refused.
+fn crab_sb_focus_toggle(want, sbon, placen, voln): i64 {
+    if (want != 0) { return 0; }
+    return crab_sb_focus_eff(1, sbon, placen, voln);
+}
+
+# @public — which row the sidebar should PAINT: the cursor when focused, otherwise where the pane is.
+#
+# ⛔⛆ THREE ARGUMENTS, NOT TWO, AND THE THIRD STATE IS THE ONE THAT LIES. `dh_draw_list_selection`
+# paints the row under `accent` when the list has focus and under the muted line colour when it does
+# not — so the visual contract is *muted = you are here, accent = your keys drive this row*. A
+# focused sidebar with NO cursor that fell back to showing the location would paint a LOCATION under
+# accent, which reads as "Enter acts on this" while Enter would in fact send the pane to an
+# ancestor. ⇒ Focused with no cursor paints nothing.
+# ⚠ The location is DERIVED per frame and never stored; storing it would be a second copy of the
+# pane path to keep in step. `here` is -1 until the locator lands.
+fn crab_sb_shown_row(focused, cursor, here): i64 {
+    if (focused == 1) {
+        if (cursor >= 0) { return cursor; }
+        return 0 - 1;
+    }
+    return here;
+}
+
+# @public — which sidebar LIST ROW is at (x, y)? -> the raw row, or -1 for none.
+#
+# ⛔ RETURNS A SIDEBAR ROW, NEVER A PANE INDEX. See the ⛔⛔ at the top of this section: the pane
+# index is trusted by the write layer and this number must never be mistaken for one. Feed the row
+# to `crab_sb_row_kind` / `crab_sb_row_index` to learn which section it is in and where.
+# ⛔⛆ THIS HEADER USED TO SAY "-> the model index" AND "subtracts the inert header row", AND IT DID
+# NEITHER — the ⚠ twelve lines below already said so, so the two halves of one comment contradicted
+# each other from the moment VOLUMES landed and made the translation stop being a subtraction. A
+# caller who believed the header would index the PLACES array with a VOLUME's row. Corrected 0.8.3.
 fn crab_sidebar_hit(x, y): i64 {
     if (crab_sblst == 0) { return 0 - 1; }
     # ⭐ `dh_list_index_at` DOES THIS, so crab does not. It was a hand-rolled walk — hit-test the
@@ -998,6 +1178,51 @@ fn crab_mb_item_first(m, count, isdir, marked): i64 {
         i = i + 1;
     }
     return 0 - 1;
+}
+
+# @public — the bar's INTRINSIC width: every cell laid end to end, in pixels.
+# ⚠ `crab_mb_cell_x(CRAB_MB_COUNT)` is exactly that sum — derived from the same widths the bar is
+# built from, so the rule and the bar cannot disagree about how wide it is.
+fn crab_mb_intrinsic_w(): i64 { return crab_mb_cell_x(CRAB_MB_COUNT); }
+
+# @public — can the menu bar be shown honestly in a window `w` px wide? 1 = yes.
+#
+# ⛔⛆ THE MENU BAR WAS THE ONLY M5/M6 SURFACE WITH NO FIT RULE. Its intrinsic width is fixed and crab
+# accepts any window width, so a narrow window CLIPPED IT SILENTLY — the operator sees "File Edit
+# Go" and no View, with nothing saying a menu is missing. Every sibling surface already refuses:
+# `crab_two_panes_fit`, `crab_sidebar_fit`, `crab_switcher_fit`, `crab_preview_fit`.
+# ⚠ `want` IS A BOOLEAN, matching those siblings, and deliberately NOT the signed `mb_sel` the bar
+# carries — in `crab_preview_fit(w, want)` and `crab_sidebar_fit(w, want)` a 0 means "not wanted",
+# while `mb_sel == 0` means "File is current". Passing the index would invert the rule for the one
+# state it matters in. The caller collapses `mb_sel >= 0` to a boolean before asking.
+fn crab_menubar_fit(w, want): i64 {
+    if (want == 0) { return 0; }
+    if (w < crab_mb_intrinsic_w()) { return 0; }
+    return 1;
+}
+
+# @public — the bar selection a window `w` px wide can honestly carry. -> `sel`, or -1.
+fn crab_menubar_sel(w, sel): i64 {
+    if (sel < 0) { return 0 - 1; }
+    if (crab_menubar_fit(w, 1) == 0) { return 0 - 1; }
+    return sel;
+}
+
+# @public — can menu `m`'s DROP-DOWN open under its own bar cell in a window `w` px wide? 1 = yes.
+#
+# ⛔⛆ A SEPARATE RULE, AND THE FIT ABOVE DOES NOT IMPLY IT. `dh_place_at_point` clamps a popup that
+# would overhang, so a drop-down anchored at `crab_mb_cell_x(m)` slides LEFT until it fits — and
+# then it is hanging under a different menu's label than the one it belongs to. The bar needs
+# `crab_mb_intrinsic_w()` (190); a drop needs `crab_mb_cell_x(m) + CRAB_MENU_W + CRAB_MENU_MARGIN`,
+# which is **214 for File and 266 for Edit**. ⇒ In the whole band 190..265 the bar fits and Edit's
+# menu still opens misplaced, so a single threshold would certify as good the exact widths where the
+# symptom survives. Two questions, two rules.
+fn crab_mb_drop_fit(w, m): i64 {
+    if (m < 0) { return 0; }
+    if (m >= CRAB_MB_COUNT) { return 0; }
+    if (crab_mb_item_count(m) <= 0) { return 0; }
+    if (w < (crab_mb_cell_x(m) + CRAB_MENU_W + CRAB_MENU_MARGIN)) { return 0; }
+    return 1;
 }
 
 fn crab_mb_move(i, d): i64 {
@@ -1330,6 +1555,32 @@ fn crab_menu_key(i): i64 {
     if (i == CRAB_MI_DELETE) { return "d"; }
     if (i == CRAB_MI_NEWDIR) { return "n"; }
     return "";
+}
+
+# @public — the HID keycode item `i` rewrites to, or 0 if it has none.
+#
+# ⛔⛆ THIS IS THE THIRD COPY OF A MAP THAT WAS WRITTEN TWICE, AND THE DUPLICATION HAD ALREADY COST A
+# SHIPPED VERB. Both menu surfaces answer Enter by rewriting `u` to the key the chosen entry names
+# and falling through to the one implementation of that command — the right design, and the reason
+# the accelerator column cannot drift from what the entry does. But each surface carried its OWN
+# six-line chain (`src/main.cyr`, the bar arm and the context arm), so the rule lived in two places
+# and neither could be asserted: both sit inside the agnos-only `#ifdef` with no `#else`.
+# ⇒ One home, here, where the suite can reach it. Both arms now call this.
+#
+# ⚠ IT MUST AGREE WITH `crab_menu_key` ABOVE, which is what the operator READS. That agreement is
+# the thing worth testing: a menu whose accelerator column disagrees with what the entry does is
+# worse than one showing no accelerators at all.
+# ⚠ `CRAB_MI_OPEN` is the exception and is exempt on purpose — it maps to **Enter** (`0x28`), which
+# is not a character, so `crab_key_char` answers 0 for it while every other verb round-trips to the
+# first byte of its own label. Asserted explicitly rather than skipped.
+fn crab_menu_accel(i): i64 {
+    if (i == CRAB_MI_OPEN)   { return 0x28; }          # Enter
+    if (i == CRAB_MI_COPY)   { return 0x06; }          # c
+    if (i == CRAB_MI_MOVE)   { return 0x10; }          # m
+    if (i == CRAB_MI_RENAME) { return 0x15; }          # r
+    if (i == CRAB_MI_DELETE) { return 0x07; }          # d
+    if (i == CRAB_MI_NEWDIR) { return 0x11; }          # n
+    return 0;
 }
 
 # @public — does item `i` apply, given the pane's state? 1 = show it live, 0 = show it greyed.
@@ -2228,6 +2479,10 @@ fn crab_tray_pct(dst, done, total): i64 {
 # proportions, lifted as GEOMETRY rather than as position or colour.
 enum CrabMenuGeom {
     CRAB_MENU_W    = 210;
+    # ⚠ LIFTED OUT OF THE BARE `4` at `dh_place_at_point`'s last argument (0.8.3). The drop-down's
+    # fit rule needs the same number, and two spellings of one margin drift silently — the rule would
+    # certify a width the placer then clamps.
+    CRAB_MENU_MARGIN = 4;
     CRAB_MENU_KEYW = 54;
     CRAB_SHEET_H   = 96;
 }
@@ -2435,7 +2690,7 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         # ⇒ The test now renders with the menu open, the sheet open and the preview open. Found
         # 2026-08-31 while making `crab_is_image` allocation-free — the same mistake, one branch over.
         var mr = dh_falloc(32);
-        dh_place_at_point(mr, menux, menuy, CRAB_MENU_W, dh_menu_pref_h(m), w, h, 4);
+        dh_place_at_point(mr, menux, menuy, CRAB_MENU_W, dh_menu_pref_h(m), w, h, CRAB_MENU_MARGIN);
         dh_widget_set_pref(m, load64(mr + 16), load64(mr + 24));
         dh_widget_set_offset(m, load64(mr + 0), load64(mr + 8));
         dh_widget_add_child(layer, m);
@@ -3467,7 +3722,12 @@ enum CrabRs {
     # ⭐ VOLUMES, built in `app.cyr` and passed down like PLACES — this file asks the kernel nothing.
     CRAB_RS_VOLS     = 352;
     CRAB_RS_VOLN     = 360;
-    CRAB_RS_SZ       = 368;
+    # ⭐ 0.8.3 — the sidebar's keyboard route. ⛔ `SBROW` is a sidebar LIST ROW, never a place index
+    # and never a pane index; `SBFOCUS` is the EFFECTIVE focus, already filtered by
+    # `crab_sb_focus_eff`, so the renderer never re-derives it from the raw want.
+    CRAB_RS_SBROW    = 368;
+    CRAB_RS_SBFOCUS  = 376;
+    CRAB_RS_SZ       = 384;
 }
 
 var crab_rs_rec = 0;
@@ -3504,6 +3764,11 @@ fn crab_rs_reset(rs): i64 {
     # is 23 chances to spell it 0.
     store64(rs + CRAB_RS_MBSEL, 0 - 1);
     store64(rs + CRAB_RS_MBDROP, 0 - 1);
+    # ⛔⛆ -1 = NO SIDEBAR ROW, and a zeroed record must not mean "row 0". Row 0 is the inert PLACES
+    # header: `dh_list_select` REFUSES it, silently, so a 0 default leaves the app believing in a
+    # highlight the toolkit declined to paint — the exact shape of the bug where `mb_item` pointed at
+    # a greyed verb the drop-down was not highlighting, and Enter still ran it.
+    store64(rs + CRAB_RS_SBROW, 0 - 1);
     return 0;
 }
 
@@ -3581,13 +3846,18 @@ fn crab_rs_thumb(rs, pixels, state): i64 {
 # carries them, like the pane state, the tray and the dimensions.
 # @public — the view mode: `CRAB_VIEW_LIST` or `CRAB_VIEW_GRID`. Applies to both panes.
 # @public — the sidebar: the operator's want, plus the places model built in `app.cyr`.
-fn crab_rs_sidebar(rs, want, places, n, vols, voln): i64 {
+fn crab_rs_sidebar(rs, want, places, n, vols, voln, row, focuswant): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_SBOPEN, want);
     store64(rs + CRAB_RS_PLACES, places);
     store64(rs + CRAB_RS_PLACEN, n);
     store64(rs + CRAB_RS_VOLS, vols);
     store64(rs + CRAB_RS_VOLN, voln);
+    # ⚠ EXTENDED RATHER THAN JOINED BY A SECOND SETTER. A `crab_rs_sidebar_focus` beside this one is
+    # a call site that can be forgotten at any of the eight places the sidebar is published, and a
+    # forgotten one leaves the previous frame's row painted under this frame's model.
+    store64(rs + CRAB_RS_SBROW, row);
+    store64(rs + CRAB_RS_SBFOCUS, focuswant);
     return 1;
 }
 
@@ -3781,9 +4051,20 @@ fn crab_render(surf, font, rs): i64 {
     # child, and it means neither has to know the other exists.
     # ⛔ AFTER `availw` IS SETTLED AND BEFORE THE PANES ARE BUILT. Built earlier it would be sized
     # against a width no rule had agreed on yet; built later it would be the wrong child.
+    # ⚠ THE EFFECTIVE FOCUS ARRIVES ALREADY FILTERED. `crab_sb_focus_eff` answers it in the event
+    # loop against `sbon`, and the renderer stores that answer rather than re-deriving it — two
+    # derivations of one fact are free to disagree, and this one decides whether a row is painted
+    # under `accent` (your keys drive it) or under the muted line (you are merely here).
+    # ⚠ THE RECORD CARRIES THE **WANT**; THE EFFECTIVE ANSWER IS DERIVED HERE, because this is the
+    # side that knows `sbon`. The event loop asks the SAME `crab_sb_focus_eff` to decide whether to
+    # route keys, so the two cannot disagree — one function, two callers, rather than two
+    # derivations. This is `crab_sidebar_shown`'s own lesson, one surface over.
+    var sbfocus = crab_sb_focus_eff(load64(rs + CRAB_RS_SBFOCUS), sbon,
+      load64(rs + CRAB_RS_PLACEN), load64(rs + CRAB_RS_VOLN));
     if (sbon == 1) {
         crab_sblst = crab_sidebar(panes, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN),
-          load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN));
+          load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN),
+          crab_sb_shown_row(sbfocus, load64(rs + CRAB_RS_SBROW), 0 - 1));
     }
     var twopanes = crab_two_panes_fit(availw);
     var panew = availw - CRAB_PANE_GAP;
@@ -3810,6 +4091,18 @@ fn crab_render(surf, font, rs): i64 {
             rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, 1, rstate, 1, rmarks, pvview);
         }
     }
+    # ⛔⛆ FOCUS IS CLAIMED HERE, AFTER THE PANES, AND THE ORDER IS THE WHOLE POINT (0.8.3). The
+    # sidebar is built FIRST — it must be, to be the leftmost child — but `crab_pane` calls
+    # `dh_focus_set` on whichever pane is active, so a sidebar that claimed focus during its own
+    # build would have it taken away three lines later, every frame. The sidebar would paint its row
+    # under the MUTED line colour instead of `accent`, and the operator would be driving a list that
+    # does not look driven.
+    # ⚠ Re-established every frame on purpose: `dh_frame_begin` rewinds the arena AND drops dhancha's
+    # retained widget pointers (the 0.9.15 contract), so focus cannot survive a frame and must be
+    # restated from app state — the same reason the pane scroll offsets round-trip.
+    if (sbfocus == 1) {
+        if (crab_sblst != 0) { dh_focus_set(crab_sblst); }
+    }
     # ⭐ THE PREVIEW IS THE LAST CHILD OF `panes`, so it sits to the RIGHT of whichever panes were
     # built — including in solo mode, where the one pane and the preview split the window between
     # them. ⚠ It is a sibling of the panes rather than a child of one: it describes the ACTIVE
@@ -3822,7 +4115,11 @@ fn crab_render(surf, font, rs): i64 {
     # of the window — where a menu bar goes. The overlay layer is still the ROOT's last child, so a
     # drop-down opened from the bar paints over everything including this.
     crab_mblst = 0;
-    if (mbsel >= 0) { crab_mblst = crab_menubar(content, mbsel); }
+    # ⚠ THE FIT IS ASKED HERE TOO, not only at F10, so a window RESIZED narrower drops the bar
+    # instead of clipping it. ⛔ And `mbdrop` must go with it: a drop-down over a bar that is not
+    # drawn is a popup with no owner and no way to dismiss it — the same rule F10's collapse states.
+    var mbfit = crab_menubar_sel(w, mbsel);
+    if (mbfit >= 0) { crab_mblst = crab_menubar(content, mbfit); }
     dh_widget_add_child(content, panes);
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
     # ⚠ `content`, not `root` — the flow lives there now; only the overlay layer sits on the root.
@@ -3844,6 +4141,15 @@ fn crab_render(surf, font, rs): i64 {
     # layer, the placement clamp, the arena discipline and the zero-allocation arm all still apply.
     # ⚠ The bar's own row height is the y, so the drop-down hangs directly off the bar.
     var mbdrop = load64(rs + CRAB_RS_MBDROP);
+    # ⛔ A DROP-DOWN GOES WITH THE BAR IT HANGS FROM (0.8.3). If the fit rule refused the bar above,
+    # a drop left open would be a popup with no owner and no way to dismiss it — the same rule F10's
+    # own collapse states, applied to the case where the WINDOW closed the bar rather than the key.
+    if (mbfit < 0) { mbdrop = 0 - 1; }
+    # ⛔⛆ AND A DROP THAT CANNOT OPEN UNDER ITS OWN CELL DOES NOT OPEN AT ALL. `dh_place_at_point`
+    # CLAMPS a popup that would overhang, sliding it left until it fits — so on a narrow window
+    # `Edit`'s menu, Delete included, hangs under the word `File`. A menu pointing at the wrong
+    # label is worse than an absent one: the operator reads the label to know what they are in.
+    if (crab_mb_drop_fit(w, mbdrop) == 0) { mbdrop = 0 - 1; }
     if (mbdrop >= 0) {
         menuopen = 1;
         menux = crab_mb_cell_x(mbdrop);

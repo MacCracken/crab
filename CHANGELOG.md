@@ -2,6 +2,148 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.3] — unreleased — M6 interaction gaps: the sidebar answers the keyboard, and `Open` was dead
+
+> ⛔ **THIS SECTION EXISTS SO `[0.8.2]` BELOW IS NEVER TOUCHED.** 0.8.2 is tagged and on the remote.
+> `git describe` answered `0.8.2` exactly before a word of this was written.
+> ⚠ **`VERSION` reads `0.8.3`; nothing is committed, tagged or pushed.**
+
+### Fixed — ⛔⛆ `Open` was DEAD on both menu surfaces, in every build that shipped either
+
+The context menu and the menu bar both answer Enter by rewriting `u` to the key the chosen entry
+names and falling through to the one implementation of that command. That is the right design, and
+it is why the accelerator column cannot drift from what the entry does. **But both arms sat BELOW
+the binding table**, so a rewrite only reached handlers defined further down. `CRAB_MI_OPEN` rewrites
+to `0x28`, and `0x28` — Enter, descend-or-open — is handled **above** them. Choosing `Open` from
+either menu consumed the keypress, closed the menu, and did nothing.
+
+`r`/`n`/`d`/`c`/`m` worked, and nothing made that true but their line numbers.
+
+⇒ **Both arms are hoisted above every binding**, so a rewrite reaches its handler whatever the
+target is and a verb added to a menu later cannot be born dead. ⚠ Behaviour-neutral otherwise:
+nothing between the new site and the old reads or writes `mb_sel`/`mb_drop`/`mb_item`/`menu_open`/
+`menu_sel`, and `mcnt2`/`misdir2`/`mmark2` are established far above, on the event.
+
+⭐ **And the map they both copied is now one function** — `crab_menu_accel(mi)` in `src/ui.cyr`,
+where the suite can reach it. Both six-line chains lived inside `src/main.cyr`'s agnos-only `#ifdef`
+with no `#else`, so neither was assertable. The test that matters is the **agreement**: the
+accelerator the operator reads in the menu must be the key the entry sends. ⚠ `Open`'s exemption —
+Enter is not a character, so `crab_key_char` answers 0 — is asserted rather than skipped.
+
+### Added — ⛔ the PLACES sidebar answers the keyboard (M6 gap closed)
+
+The sidebar shipped reachable **only by mouse**, in an application whose own source says it is
+*"keyboard-first by construction: a menu only a mouse can reach is invisible to an operator who
+never touches one"* — and on agnos the compositor may spawn crab **with no pointer at all**, which
+made the sidebar purely decorative there.
+
+`Tab` (previously unbound) moves focus between the panes and the sidebar; arrows move a cursor that
+steps **over** the inert section headers; Enter sends the active pane to that row's path; Tab or Esc
+returns. Six pure functions own every rule — `crab_sb_rows`, `crab_sb_first_row`, `crab_sb_step`,
+`crab_sb_row_of`, `crab_sb_path`, `crab_sb_key` — because the dispatch that calls them cannot be
+tested at all.
+
+⛔⛔ **FOCUS IS A MODE, NEVER A THIRD PANE.** `active_pane` keeps its 0/1 domain: `if (active_pane ==
+1) { … } else { … }` appears dozens of times in `src/main.cyr`, including the arms that pick the
+**delete target** and the copy/move source, and a 2 would read as pane A in every one of them.
+`active_pane` stays meaningful while the sidebar is focused — it is the pane Enter sends to, which
+is the rule the click path already followed.
+
+⛔⛆ **AND THE MUTATING VERBS ARE EATEN, NOT LEFT LIVE.** A focus model that consumed only its own
+keys would leave `d` deleting, `c`/`m` transferring **with no confirmation at all**, `r` renaming,
+`n` making a directory and Backspace ascending — every one against a pane the toolkit is painting
+**muted** because the keyboard is somewhere else. They are consumed and refused out loud; silence is
+not an option, because a key that does nothing and says nothing is indistinguishable from a dropped
+keypress and the operator's next move is to press it again. ⚠ The assertion is stated as the
+**property** — *"while the sidebar is focused, `0x10` never answers NONE"* — not as a list of codes a
+future verb could quietly fall off.
+
+⛔ **Esc is not unconditional**: while a transfer runs it still cancels the transfer. That has been
+Esc's meaning since 0.7.3 and it outranks leaving a focus mode.
+
+⛔⛆ **THE CURSOR IS NEVER SEEDED FROM WHERE THE PANE IS.** A location is usually an *ancestor* of the
+pane's path, so seeding from it would make Tab-then-Enter navigate the pane **up** and clear its
+marks — from a gesture that reads as a no-op. Tab seeds from the first selectable row.
+
+⛔⛆ **AND FOCUS IS CLAIMED AFTER THE PANE BUILD.** The sidebar must be built first to be the leftmost
+child, but `crab_pane` calls `dh_focus_set` on the active pane — so a sidebar claiming focus during
+its own build would lose it three lines later, every frame, and paint its row under the muted line
+colour instead of `accent`. The operator would be driving a list that does not look driven. ⚠ Pinned
+by a render assertion, not by reasoning.
+
+⚠ **`crab_sb_shown_row(focused, cursor, here)` takes three arguments, and the third state is the one
+that lies.** `dh_draw_list_selection` paints under `accent` when the list has focus and under the
+muted line otherwise, so the contract is *muted = you are here, accent = your keys drive this*. A
+focused sidebar with no cursor therefore paints **nothing** — falling back to a location would put a
+location under `accent`, reading as "Enter acts on this row" while Enter would send the pane to an
+ancestor.
+
+⚠ The click path writes the cursor too, or the two producers of one cursor drift; a **pane click
+returns the keys to the panes**; and the held-key repeat arm — a second, mode-blind copy of Up/Down —
+now asks the same `crab_sb_key`.
+
+### Added — the menu bar has a fit rule, and its drop-downs have a second one
+
+The bar was the only M5/M6 surface with **no fit rule**. Its intrinsic width is fixed and crab
+accepts any window width, so a narrow window **clipped it silently** — "File Edit Go" and no View,
+with nothing saying a menu was missing. `crab_menubar_fit` / `crab_menubar_sel` refuse it instead,
+asked by **both** F10 and the renderer so the key cannot report a bar the frame will not draw, and a
+window resized narrower drops the bar rather than clipping it.
+
+⛔⛆ **THE DROP-DOWN IS A SECOND RULE AND THE FIRST DOES NOT IMPLY IT.** `dh_place_at_point` **clamps**
+a popup that would overhang, sliding it left until it fits — so on a narrow window `Edit`'s menu,
+Delete included, hangs under the word **File**. A menu pointing at the wrong label is worse than an
+absent one: the operator reads the label to know what they are in. The bar needs its intrinsic width;
+a drop needs `crab_mb_cell_x(m) + CRAB_MENU_W + CRAB_MENU_MARGIN`. ⇒ **There is a whole band of
+widths where the bar fits and Edit's drop still opens misplaced**, so a single threshold would
+certify as good the exact widths where the symptom survives. Asserted as that band.
+
+⚠ `CRAB_MENU_MARGIN` is lifted out of a bare `4` at `dh_place_at_point`'s last argument — two
+spellings of one margin would let the rule certify a width the placer then clamps.
+
+### Fixed — a bounds read in a destructive guard, without changing its answer
+
+`crab_path_within` — the guard that refuses copying a folder into itself — read `root[-1]` when the
+root was empty. ⛔⛔ **The fix guards the READ and deliberately leaves the ANSWER alone.** Returning 0
+for an empty root would read as tidier and would **flip a destructive guard's fail-safe direction**:
+the only production caller is the copy-into-itself refusal, where 1 means *refuse*. A bounds fix must
+never change a safety answer in the same edit. Both halves are asserted.
+
+### Changed — `crab_goto`, and two stale contracts
+
+⭐ **`crab_goto` makes adopt-relist-clear one indivisible move.** crab's marks are INDEX-based, so a
+mark that outlives the listing it was made in points at whatever now occupies that index — the shape
+the 2026-09-03 `/bin` incident was filed against. It was written out twice (once per pane) and the
+keyboard route would have made four copies, each free to forget the clear. ⚠ Callers must guard
+`n >= 0`: a -1 written into a pane's count reaches `crab_maxsel` and every verb arm as a live row
+count.
+
+⛔ **`crab_sidebar_hit`'s header said, three times, that it returns a PLACE index and "subtracts the
+inert header row". It does neither** — it returns the raw LIST row, as its own ⚠ twelve lines below
+already said. The two halves of one comment had contradicted each other since VOLUMES landed and made
+the translation stop being a subtraction; a caller who believed the header would index the PLACES
+array with a VOLUME's row. Corrected here and in the roadmap.
+⛔ `src/main.cyr`'s `#ifdef` self-reference said "263 … 1484"; it is **293 … 1907**.
+
+### Verified
+
+**1695 passed / 0 failed** (from 1676) · host **1,045,288 B** · `--agnos` **1,081,768 B** ·
+render_test **53 / 0** · fuzz 100,000 rounds · `deps --verify` 49/0 · coverage **88 %** ·
+`vet` + `deny` 0 · `fmt --check` clean.
+
+⚠ Mutation-proven, including the two that matter most: dropping `d` from the eaten set fails 2, and
+claiming focus before the pane build instead of after fails the render assertion.
+
+### Still open in this milestone
+
+⛔ **Four of the six M6 interaction gaps remain**, with a designed and adversarially-verified plan
+recorded: the menu bar / A/B switcher pointer routes, the context-menu pointer route (**crab cannot
+currently tell a right-click from a left one — `POINTER_BTN` carries the button code in `a` and
+crab's arm reads only `b`**; aethersafha forwards button 1 hardcoded, so this is gated upstream and
+must not be guessed), the sidebar's *you are here* marker, and `View`'s items. ⚠ The pointer routes
+**must land together**: a bar click that opens a drop-down the pointer can neither pick from nor
+dismiss is a half-wired gesture. ⛔ `Go` is deliberately **not** being filled — see the roadmap.
+
 ## [0.8.2] — 2026-09-09 — the audit backlog's correctness bugs, and a recursive walk that never ran
 
 > ⛔ **THIS SECTION EXISTS SO `[0.8.1]` BELOW IS NEVER TOUCHED.** 0.8.1 is tagged and on the remote,

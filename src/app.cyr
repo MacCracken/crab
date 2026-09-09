@@ -1829,6 +1829,28 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     return cnt;
 }
 
+# @public — send a pane to an absolute `path`: adopt it, re-list, and drop the pane's marks.
+# -> the new entry count, or -1 if `path` is unusable (the pane is then left exactly as it was).
+#
+# ⛔⛆ THE MARKS MUST DIE WITH THE LISTING, AND THAT IS WHY THIS IS ONE FUNCTION. crab's marks are
+# INDEX-based, so a mark that outlives the listing it was made in points at whatever now occupies
+# that index — the shape the 2026-09-03 `/bin` incident was filed against. Every navigation site
+# already clears them; making the clear a separate statement beside the re-list is what gives a
+# later caller the chance to write one and forget the other.
+# ⇒ Adopt-relist-clear is a single indivisible move, and it has exactly one implementation.
+#
+# ⚠ The caller still owns `state` and `sel`, because those are per-pane display state this layer
+# does not hold. ⛔ AND THE CALLER MUST GUARD `n >= 0` BEFORE ASSIGNING: a -1 written into a pane's
+# count reaches `crab_maxsel`, `crab_menu_enabled` and every verb arm as a live entry count.
+fn crab_goto(path, dst, buf, sizes, mtimes, marks, pathscr, statbuf): i64 {
+    if (path == 0) { return 0 - 1; }
+    if (crab_path_usable(path) == 0) { return 0 - 1; }
+    crab_strcpy_n(dst, path, CRAB_PATH_MAX);
+    var n = crab_relist(dst, buf, sizes, mtimes, pathscr, statbuf);
+    crab_mark_clear(marks, CRAB_MAX_ENTRIES);
+    return n;
+}
+
 # ⚠ agnos `spawn_path`#43 caps its path at **127 bytes** (ABI row 43), which is HALF `CRAB_PATH_MAX`.
 # A path crab can list and stat is therefore not necessarily one it can launch, and the difference
 # has to be reported rather than truncated — a truncated path is a different file, and this one gets
@@ -2853,7 +2875,18 @@ fn crab_path_within(root, path, cap): i64 {
     if (pl == rl) { return 1; }
     # ⚠ The next byte must be a separator, or this is a SIBLING whose name merely starts the same.
     # ⚠ Unless the root already ends in one, which is only true of "/" itself.
-    if (load8(root + rl - 1) == 47) { return 1; }
+    # ⛔ THE `rl > 0` GUARD IS FOR THE READ, NOT FOR THE ANSWER (0.8.3). At `rl == 0` — an empty root
+    # — `root + rl - 1` is one byte BEFORE the buffer, an out-of-bounds read inside the guard that
+    # stands between the operator and a copy that never terminates.
+    # ⛔⛔ AND IT DELIBERATELY DOES NOT CHANGE WHAT THIS FUNCTION ANSWERS. An empty root falls through
+    # to the `load8(path + rl)` test below and reports 1 for any absolute path, exactly as before.
+    # Adding `if (rl <= 0) { return 0; }` instead would read as tidier and would FLIP A DESTRUCTIVE
+    # GUARD'S FAIL-SAFE DIRECTION: this function's only production caller is the copy-into-itself
+    # refusal in `crab_walk_begin`, where 1 means *refuse* and is the safe answer. Never make a
+    # bounds fix change a safety answer in the same edit.
+    if (rl > 0) {
+        if (load8(root + rl - 1) == 47) { return 1; }
+    }
     if (load8(path + rl) == 47) { return 1; }
     return 0;
 }
