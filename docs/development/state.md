@@ -26,10 +26,21 @@
 
 **0.8.1** is the last RELEASED version (2026-09-07), tagged on the remote — `git describe` answered
 `0.8.1` exactly before this cycle's work began, so HEAD *was* the tag.
-**0.8.2 is in preparation** (2026-09-08): the 6.6.1 pin and the documentation-currency repair. See
-[`../../CHANGELOG.md`](../../CHANGELOG.md). ⚠ **`VERSION` still reads `0.8.1`** and stays there until
-the operator cuts — the heading is where post-tag work accumulates, not a claim that a release
-happened.
+**0.8.2 is in preparation** (2026-09-09), on operator direction: the 6.6.1 pin, the
+documentation-currency repair, and **the audit backlog's eight correctness bugs — all closed, each
+mutation-proven**. `VERSION` reads `0.8.2`. See [`../../CHANGELOG.md`](../../CHANGELOG.md).
+⚠ **Nothing is committed, tagged or pushed** — the operator handles every git operation.
+
+⭐⭐ **AND THE SWEEP FOUND A NINTH DEFECT, LARGER THAN THE EIGHT IT WENT LOOKING FOR: RECURSIVE COPY
+AND RECURSIVE DELETE HAD NEVER RUN, IN ANY SHIPPED BUILD.** The idle tick called `crab_copy_step`
+(the single-file chunk loop) instead of `crab_op_step` (the dispatcher), so every `CTREE`/`DTREE`
+died on its first tick reading a descriptor that was not open. `d` on a folder took the `y` and
+deleted nothing; a tree copy left an empty directory wearing the source's name. `crab_op_step` had
+**zero callers**, under a comment reading *"THE single entry point the idle tick calls"*.
+⛔⛆ **THE SUITE WAS GREEN THE WHOLE TIME, BECAUSE EVERY WALK TEST DROVE `crab_op_step`** — the right
+entry point — while the only caller that ships drove the wrong one. ⇒ **A test that calls a
+different function than the shipping caller is not testing the shipping path.** Keep this above the
+individual fixes; it is the transferable part.
 
 ⛔⛆ **THIS FILE ROTTED A THIRD TIME, AND THE THIRD TIME IT SURVIVED ITS OWN ⛔ MARKERS.** From
 2026-09-02 to 2026-09-08 it asserted *"0.8.0 in preparation"* and *"0.7.7 is the last RELEASED
@@ -633,6 +644,12 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 _None — top-level application._
 
 ## Next
+
+⭐ **0.8.2 CLOSED THE AUDIT BACKLOG'S CORRECTNESS SECTION — all eight, plus the recursive-walk
+defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinished from earlier
+stages*. What remains open there is the M6 interaction gaps (the PLACES sidebar still has **no
+keyboard route**, and nothing but the sidebar has a pointer route), the absent affordances (no
+REFRESH key, no flag surface, no overwrite policy) and the *Recorded as facts* list.
 
 **M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
 0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on

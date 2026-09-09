@@ -598,14 +598,68 @@ fn main(): i64 {
                                 if (drag_pane == 1) { sp2 = rpath; dp2 = lpath; sb2 = rbuf; sc2 = rn; }
                                 if (drag_row < sc2) {
                                     var srec2 = sb2 + drag_row * CRAB_REC_SZ;
-                                    if (load8(srec2 + CRAB_REC_TYPE) != 0) {
-                                        crab_set_notice("folders cannot be dragged yet — files only");
-                                    } else {
-                                        crab_strcpy_n(namescr, srec2, CRAB_NAME_MAX);
-                                        var rcd2 = crab_fs_move(sp2, namescr, dp2, pathscr, pathscr2, statbuf);
-                                        crab_set_notice(crab_fs_msg(rcd2));
+                                    # ⛔⛆ A DROP IS A MOVE, SO IT ANSWERS TO `crab_transfer_plan` LIKE
+                                    # EVERY OTHER MOVE (0.8.2). Until now this branch read `drag_row`
+                                    # and nothing else: dragging with ten files marked moved the ONE
+                                    # under the pointer and silently discarded the other nine. Drag
+                                    # predates M4's marks and was never revisited, so crab had two
+                                    # descriptions of "move" that disagreed.
+                                    # ⇒ The rule is not restated here. It is the same pure function
+                                    # `c`/`m` calls, which is the only way the two stay in step — and
+                                    # it is reachable by the suite, which this branch is not.
+                                    var dmk = lmarks; if (drag_pane == 1) { dmk = rmarks; }
+                                    var dmarked = crab_mark_count(dmk, sc2);
+                                    var ddir = 0;
+                                    if (load8(srec2 + CRAB_REC_TYPE) != 0) { ddir = 1; }
+                                    # ⛔⛆ CAPTURE THE NAME **BEFORE** THE DISPATCH, NOT INSIDE ONE ARM.
+                                    # `namescr` is a long-lived scratch buffer shared with every other
+                                    # verb, so an arm that reads it without writing it first acts on
+                                    # whatever the LAST operation happened to leave there — a folder
+                                    # move aimed at a name the operator never dragged. One capture,
+                                    # above every arm, is the only shape that cannot drift.
+                                    crab_strcpy_n(namescr, srec2, CRAB_NAME_MAX);
+                                    var dplan = crab_transfer_plan(1, dmarked, ddir);
+                                    if (dplan == CRAB_PLAN_QUEUE) {
+                                        # ⚠ Same queue the keyboard move uses, so a refusal inside the
+                                        # set skips that entry and keeps going, and the tray shows one
+                                        # continuous operation rather than N flashing ones.
+                                        crab_queue_marked(sb2, dmk, sc2);
+                                        crab_queue_dirs(CRAB_OP_MOVE, sp2, dp2);
+                                        var dqn = crab_queue_advance(pathscr, pathscr2, statbuf);
+                                        if (dqn == 1) { crab_set_notice("moving the marked files..."); }
+                                        else { crab_set_notice("nothing could be moved"); }
+                                        crab_say("crab: drag-move marked\n");
+                                    }
+                                    # ⚠ Nested rather than `else if`, which cyrius does not have.
+                                    if (dplan == CRAB_PLAN_MOVEDIR) {
+                                        # ⚠ Same rule as the keyboard move: try the rename, refuse only
+                                        # what rename actually refuses. Dragging a folder within one
+                                        # filesystem now works instead of being told "files only".
+                                        var rcdd = crab_fs_move_rename(sp2, namescr, dp2,
+                                          pathscr, pathscr2, statbuf);
+                                        if (rcdd == CRAB_FS_EXDEV) {
+                                            crab_set_notice(
+                                              "that folder is on another filesystem — copy it, then delete the original");
+                                        } else { crab_set_notice(crab_fs_msg(rcdd)); }
+                                    }
+                                    if (dplan == CRAB_PLAN_SINGLE) {
+                                        # ⚠ Same rename-then-step split as the keyboard move — a drop
+                                        # across a mount point must not block the loop either. This is
+                                        # the SECOND call site of that defect, not a different one.
+                                        var rcd2 = crab_fs_move_rename(sp2, namescr, dp2, pathscr, pathscr2, statbuf);
+                                        if (rcd2 == CRAB_FS_EXDEV) {
+                                            rcd2 = crab_copy_begin(CRAB_OP_MOVE, sp2, namescr, dp2,
+                                              pathscr, pathscr2, statbuf);
+                                            if (rcd2 == CRAB_FS_OK) { crab_set_notice("moving..."); }
+                                            else { crab_set_notice(crab_fs_msg(rcd2)); }
+                                        } else { crab_set_notice(crab_fs_msg(rcd2)); }
                                         crab_say("crab: drag-move "); crab_say(namescr);
                                         crab_say(" -> "); crab_say(crab_fs_msg(rcd2)); crab_say("\n");
+                                    }
+                                    # ⚠ RELIST ONLY IF NOTHING IS STILL RUNNING — a queued move steps on
+                                    # the idle tick, which relists when it ends. Relisting now would
+                                    # readdir a directory the transfer is still writing into.
+                                    if (crab_op_active() == 0) {
                                         ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                         crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
                                         lstate = crab_pane_state(ln, crab_listing_err());
@@ -852,32 +906,50 @@ fn main(): i64 {
                             if (u == 0x29) {                                       # Esc
                                 if (crab_op_active() == 1) {
                                     crab_copy_cancel();
-                                    crab_set_notice("transfer cancelled");
-                                    crab_say("crab: transfer cancelled\n");
-                                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                    crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                                    lstate = crab_pane_state(ln, crab_listing_err());
-                                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                    crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                                    rstate = crab_pane_state(rn, crab_listing_err());
-                                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
-                                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                    # ⭐ A CANCELLED **TREE** COPY LEAVES A CLEANUP RUNNING (0.8.2).
+                                    # `crab_copy_cancel` re-roots the record as a DTREE over what the
+                                    # copy had already written, so the operator is told what is
+                                    # happening rather than watching a pause — and the relist WAITS,
+                                    # exactly as it does for a tree delete: readdir'ing a directory
+                                    # mid-removal is the thing that comment three hundred lines up
+                                    # exists to prevent.
+                                    if (crab_op_active() == 1) {
+                                        crab_set_notice("cancelled — removing the partial copy...");
+                                        crab_say("crab: transfer cancelled, removing partial copy\n");
+                                    } else {
+                                        crab_set_notice("transfer cancelled");
+                                        crab_say("crab: transfer cancelled\n");
+                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                        lstate = crab_pane_state(ln, crab_listing_err());
+                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                        rstate = crab_pane_state(rn, crab_listing_err());
+                                        if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                        if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                                    }
                                 }
                             }
-                            # ⭐⭐ THE GRID VIEW CHANGES WHAT AN ARROW MEANS, AND ONLY IN GRID MODE.
+                            # ⭐⭐ A CELL VIEW CHANGES WHAT AN ARROW MEANS — GRID **AND** GALLERY.
                             # ⛔ In a grid, Left/Right must move the CURSOR — a 2-D arrangement the
                             # operator can see has to answer the arrow that was pressed. But
                             # Left/Right also switch panes, and that binding predates this view.
-                            # ⇒ In grid mode the ARROWS navigate the grid and `h`/`l` keep switching
+                            # ⇒ In a cell view the ARROWS navigate cells and `h`/`l` keep switching
                             # panes; in list mode nothing changes at all. crab has had the vim
                             # aliases since M2, so the pane switch never becomes unreachable.
+                            # ⛔⛆ AND UNTIL 0.8.2 THIS COMMENT WAS TRUE OF ONLY ONE OF THE TWO VIEWS
+                            # IT DESCRIBED. All three tests below read `== CRAB_VIEW_GRID`, so in the
+                            # GALLERY — the same `dh_grid` with a taller cell — Left/Right still
+                            # switched panes and Up/Down stepped by ONE entry rather than by a row.
+                            # ⇒ The rule is now `crab_view_is_grid`, asked in all three places, so a
+                            # fourth view cannot be added and half-wired the way this one was.
                             # ⚠ THE STEP IS THE COLUMN COUNT THE PANE WAS LAID OUT WITH, read back
                             # from the widget rather than recomputed — `dh_grid_cols` reads the
                             # RESOLVED width, so "down" moves by the number of columns the operator
                             # can actually see. Recomputing it here from `panew` would be a second
                             # answer, free to disagree by one at exactly the widths that matter.
                             var gstep = 1;
-                            if (view_mode == CRAB_VIEW_GRID) {
+                            if (crab_view_is_grid(view_mode) == 1) {
                                 var apw = crab_pane_widget(active_pane);
                                 if (apw != 0) { gstep = dh_grid_cols(apw); }
                                 if (gstep < 1) { gstep = 1; }
@@ -885,13 +957,13 @@ fn main(): i64 {
                             if (u == 0x0B) { active_pane = 0; }                    # h — always a pane switch
                             if (u == 0x0F) { active_pane = 1; }                    # l — always a pane switch
                             if (u == 0x50) {                                       # Left
-                                if (view_mode == CRAB_VIEW_GRID) {
+                                if (crab_view_is_grid(view_mode) == 1) {
                                     if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
                                     if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
                                 } else { active_pane = 0; }
                             }
                             if (u == 0x4F) {                                       # Right
-                                if (view_mode == CRAB_VIEW_GRID) {
+                                if (crab_view_is_grid(view_mode) == 1) {
                                     if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
                                     if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
                                 } else { active_pane = 1; }
@@ -1182,11 +1254,23 @@ fn main(): i64 {
                                     var ismv = 0;
                                     if (u == 0x10) { ismv = 1; }
                                     var plan = crab_transfer_plan(ismv, smarked, isdirsel);
-                                    if ((plan == CRAB_PLAN_TREE) || (plan == CRAB_PLAN_NOMOVEDIR)) {
-                                        if (plan == CRAB_PLAN_NOMOVEDIR) {
-                                            crab_set_notice(
-                                              "folders cannot be moved yet — copy it, then delete the original");
-                                            crab_say("crab: move tree refused "); crab_say(namescr); crab_say("\n");
+                                    if ((plan == CRAB_PLAN_TREE) || (plan == CRAB_PLAN_MOVEDIR)) {
+                                        if (plan == CRAB_PLAN_MOVEDIR) {
+                                            # ⭐ 0.8.2: A FOLDER MOVE IS TRIED, NOT REFUSED ON SIGHT.
+                                            # Within one filesystem it is a single `rename` — no walk,
+                                            # no copy, nothing to recurse — and crab refused it anyway
+                                            # because the impossible cross-filesystem case was the only
+                                            # one anyone had looked at. ⛔ That case is still refused,
+                                            # and now for a reason crab has actually established
+                                            # rather than assumed: rename said no.
+                                            var rcmd = crab_fs_move_rename(srcp, namescr, dstp,
+                                              pathscr, pathscr2, statbuf);
+                                            if (rcmd == CRAB_FS_EXDEV) {
+                                                crab_set_notice(
+                                                  "that folder is on another filesystem — copy it, then delete the original");
+                                            } else { crab_set_notice(crab_fs_msg(rcmd)); }
+                                            crab_say("crab: move folder "); crab_say(namescr);
+                                            crab_say(" -> "); crab_say(crab_fs_msg(rcmd)); crab_say("\n");
                                         } else {
                                             # ⭐ A FOLDER IS A RECURSIVE COPY NOW (M4). The tray is what makes it
                                             # acceptable: it shows what is happening and Esc stops it.
@@ -1219,9 +1303,21 @@ fn main(): i64 {
                                         var started = 0;
                                         if (smarked > 0) { started = 0 - 1; }
                                         if ((smarked == 0) && (u == 0x10)) {
-                                            rcc = crab_fs_move(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
+                                            # ⛔⛆ `crab_fs_move_rename`, NOT `crab_fs_move` (0.8.2). The
+                                            # comment above has always said the move tries rename first
+                                            # and steps only when it refuses — but `crab_fs_move` runs a
+                                            # BLOCKING `crab_fs_copy` on that refusal, to completion,
+                                            # right here in the keypress. The loop drew no frames, so the
+                                            # tray never appeared and Esc could not cancel; the stepped
+                                            # `CRAB_OP_MOVE` path was unreachable for the only case it
+                                            # exists for. Moving a large file across a mount point froze
+                                            # crab until it finished.
+                                            # ⇒ Only `EXDEV` means "step it". Every other refusal is a
+                                            # real answer and is reported as one.
+                                            rcc = crab_fs_move_rename(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
                                             if (rcc == CRAB_FS_OK) { started = 0; }
-                                            else { started = 1; }
+                                            if (rcc == CRAB_FS_EXDEV) { started = 1; }
+                                            if ((rcc != CRAB_FS_OK) && (rcc != CRAB_FS_EXDEV)) { started = 0; }
                                         }
                                         if ((smarked == 0) && (u != 0x10)) { started = 1; }
                                         if (started == 1) {
@@ -1518,7 +1614,23 @@ fn main(): i64 {
         # did not fix that; this does.
         if ((running == 1) && (ev == 0)) {
             if (crab_op_active() == 1) {
-                var cstep = crab_copy_step();
+                # ⛔⛆ `crab_op_step`, NOT `crab_copy_step` — AND THIS LINE WAS WRONG FROM M4 UNTIL
+                # 0.8.2. `crab_op_step` is the DISPATCHER: single-file kinds go to the chunk loop,
+                # walk kinds (CTREE/DTREE) go to `crab_walk_step`. `crab_copy_step` is only the
+                # chunk loop, and it reads `CRAB_OP_FIN` unconditionally — which is -1 for a walk
+                # until a file is actually open. So every recursive copy and recursive delete died
+                # on its FIRST idle tick: `sys_read(-1, …)` -> EBADF -> the `got < 0` arm -> EIO,
+                # reported as "failed part-way: the copy is incomplete", having deleted nothing and,
+                # for a copy, having already created the destination directory.
+                # ⇒ `d` on a folder has been answering "and everything in it" with nothing at all.
+                # ⛔ The suite did not catch it because every walk test drives `crab_op_step` — the
+                # right entry point — while this, the only caller that ships, drove the wrong one.
+                # A test that calls a different function than the shipping caller tests nothing here.
+                var cstep = crab_op_step();
+                # ⚠ A WALK STEP ALSO RETURNS 2 ("an item finished, the walk continues"), which is
+                # neither 1 nor a terminal `CRAB_FS_*`. It must keep the operation alive exactly as 1
+                # does, or a tree copy would report "done" at its first completed file.
+                if (cstep == 2) { cstep = 1; }
                 if (cstep != 1) {
                     # ⭐ ADVANCE THE QUEUE BEFORE REPORTING. A multi-file transfer should look like ONE
                     # continuous operation, not N separate ones flashing "done" between files.
@@ -1594,14 +1706,21 @@ fn main(): i64 {
         # files costs one frame. The pictures arrive at one per tick and the operator watches them
         # land — the same shape as the deferred stat sweep and the stepped copy.
         # ⛔ AND IT STOPS BY ITSELF, THREE WAYS: the walk ends at the entry count, `crab_thumb_step`
-        # caches refusals so a file it declined is never retried, and the session budget refuses
-        # every decode once it is spent. None of those needs a flag here.
+        # caches refusals so a file it declined is never retried, and the session budget stops the
+        # walk outright below. None of those needs a flag here.
+        # ⚠ THE THIRD WAY IS NOW CHECKED HERE RATHER THAN INFERRED (0.8.2). It used to rest on the
+        # SPENT refusal being cached — but caching that refusal is what made a spent budget EVICT
+        # working thumbnails, one per image scrolled past, so the refusal is no longer cached. With
+        # nothing in the cache the `crab_tc_find` gate below stays open forever, and the walk would
+        # re-enter `crab_thumb_step` every tick and set `qdid`, turning the idle loop into a busy
+        # loop repainting an unchanged frame. ⇒ Ask the budget directly.
         # ⚠ THE ACTIVE PANE ONLY. Filling both would double the tick's cost and halve the rate at
         # which the pane the operator is looking at fills in.
         if ((running == 1) && (ev == 0)) {
-            if (view_mode == CRAB_VIEW_GALLERY) {
-                var qpath = lpath; var qbuf = lbuf; var qcnt = ln;
-                if (active_pane == 1) { qpath = rpath; qbuf = rbuf; qcnt = rn; }
+            var qbudget = crab_thumb_over_budget(crab_thumb_spent());
+            if ((view_mode == CRAB_VIEW_GALLERY) && (qbudget == 0)) {
+                var qpath = lpath; var qbuf = lbuf; var qcnt = ln; var qsel = sel_l;
+                if (active_pane == 1) { qpath = rpath; qbuf = rbuf; qcnt = rn; qsel = sel_r; }
                 # ⛔⛔ SECURITY AUDIT F1 — ONLY WHAT THE OPERATOR CAN SEE. This walk covered the whole
                 # pane, so opening a folder ran the decoders over every image in it. `chitra` +
                 # `sankoch` are ~22,500 lines running in-process on bytes someone else chose, and the
@@ -1645,7 +1764,17 @@ fn main(): i64 {
                     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
+                    # ⛔⛆ THE PREVIEW SHOWS THE **SELECTION**, NOT WHAT THIS WALK JUST DECODED (0.8.2).
+                    # `crab_thumb_pixels()` reads `crab_th_slot`, which records what the last STEP was
+                    # about — and the step immediately above was about a GALLERY CELL. With the
+                    # preview open this drew that cell's picture in the preview column under the
+                    # selected entry's name, and it PERSISTED: the preview's own redraw fires only
+                    # when its state CHANGES, and OK -> OK is not a change, so nothing corrected it.
+                    # ⇒ Look the selection's slot up directly, which decodes nothing and disturbs
+                    # nothing. A -1 slot yields the zeroed scratch and NONE, i.e. "draw no picture".
+                    var qpsl = 0 - 1;
+                    if (qsel < qcnt) { qpsl = crab_thumb_slot_for(qpath, qbuf + qsel * CRAB_REC_SZ, pathscr); }
+                    crab_rs_thumb(rs, crab_thumb_pixels_of(qpsl), crab_tc_state(qpsl));
                     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
                     var s7 = crab_render(surf, 0, rs);
                     if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }

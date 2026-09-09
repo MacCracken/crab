@@ -340,28 +340,45 @@ and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the depend
 > comment.** Three correctness bugs the sweep found were fixed on the spot (see `CHANGELOG.md`);
 > everything below is open.
 
-### Correctness — buildable now, and each one is wrong today
+### Correctness — ✅ **ALL EIGHT CLOSED IN 0.8.2**, each mutation-proven
 
-- **A cancelled recursive copy leaves the partial tree on disk**, under the source folder's own
-  name. Only the file in flight is removed. The operator sees a folder that looks copied.
-- **Drag between panes ignores the marked set** — dragging with ten files marked moves the one
-  under the pointer. Every other verb honours marks; drag predates them and was never revisited.
-- **`m` on a single file across filesystems runs the BLOCKING copy**, not the stepped one:
-  `crab_fs_move` runs to completion inside the keypress branch before the `EXDEV` fallback, so the
-  event loop draws no frames and the tray never appears. The stepped `CRAB_OP_MOVE` path is
-  effectively unreachable for the case it exists for.
-- **A folder cannot be moved at all**, even within one filesystem where it is a single `rename`
-  syscall. `crab_transfer_plan` refuses it because no `CRAB_OP_MTREE` exists — correct for the
-  cross-filesystem case, needlessly strict for the same-filesystem one.
-- **GALLERY view's arrow keys were never wired.** Left/Right still switch panes and Up/Down step by
-  one entry rather than by a row of cells — the grid rule was applied to GRID and not to GALLERY,
-  while the comment claims both.
-- **A spent thumbnail budget EVICTS working cached thumbnails**: the cache slot is claimed before
-  the budget is consulted, so crossing the ceiling destroys a good entry to store a refusal.
-- **With GALLERY and the preview both open**, the preview column draws the gallery's last-decoded
-  thumbnail instead of the selected entry's, and the wrong frame persists.
-- **GALLERY cells never say WHY a thumbnail is missing.** The "four differently-named nothings"
-  rule — too large / budget spent / cannot decode / not an image — is honoured only in the preview.
+> ⭐⭐ **AND THE SWEEP FOUND A NINTH THAT NOTHING HAD RECORDED, larger than the eight it went looking
+> for: RECURSIVE COPY AND RECURSIVE DELETE HAD NEVER RUN.** `src/main.cyr`'s idle tick called
+> `crab_copy_step` (the single-file chunk loop) instead of `crab_op_step` (the dispatcher), so every
+> `CTREE`/`DTREE` died on its first tick with `EIO`. `d` on a folder took the `y` and deleted
+> nothing. **`crab_op_step` had zero callers**, under a comment reading *"THE single entry point the
+> idle tick calls"*.
+> ⛔⛆ **THE SUITE WAS GREEN THROUGHOUT, BECAUSE EVERY WALK TEST DROVE `crab_op_step`** — the right
+> entry point — while the only caller that ships drove the wrong one. ⇒ **A test that calls a
+> different function than the shipping caller is not testing the shipping path.** That is the
+> durable lesson of this batch, and it is worth more than any single fix in it.
+
+- ✅ **A cancelled recursive copy leaves the partial tree on disk** — it now re-roots the same record
+  as a `DTREE` over what it wrote. ⛔ Safe only because `crab_walk_begin` refuses `EEXIST` and
+  creates the destination root itself, so that root is **always a directory crab made during this
+  operation**; relaxing that guard turns the cleanup into data loss and the code says so.
+  ⚠ A cancel now also resets the QUEUE explicitly — it used to stop the queue only by accident.
+- ✅ **Drag between panes ignores the marked set** — the drop answers to `crab_transfer_plan`, the
+  same pure function `c`/`m` call, rather than a second description of "move".
+- ✅ **`m` on a single file across filesystems runs the BLOCKING copy** — `crab_fs_move_rename` is
+  the cheap half alone and answers the new `CRAB_FS_EXDEV`; both call sites now step the copy.
+- ✅ **A folder cannot be moved at all** — `CRAB_PLAN_NOMOVEDIR` became `CRAB_PLAN_MOVEDIR`. The
+  original reasoning was sound *across* filesystems and had simply been applied to both cases.
+- ✅ **GALLERY view's arrow keys were never wired** — one predicate, `crab_view_is_grid`, asked in
+  all three places, so a fourth view cannot be added and half-wired.
+- ✅ **A spent thumbnail budget EVICTS working cached thumbnails** — the budget is consulted before a
+  slot is claimed, via `crab_thumb_may_claim`. ⚠ The gallery walk now asks the budget directly,
+  since the SPENT refusal is deliberately no longer cached.
+- ✅ **With GALLERY and the preview both open, the preview drew the wrong thumbnail** —
+  `crab_thumb_slot_for` answers about a *named* entry without disturbing the step's own slot.
+- ✅ **GALLERY cells never say WHY a thumbnail is missing** — `crab_thumb_note_cell` gives the same
+  four states cell-width words. ⛔ `NONE` and `OK` stay silent: "not decoded yet" is not a refusal.
+
+⛔ **WHAT THIS BATCH DID NOT CHANGE, and it is why these eight existed at all**: the idle tick, the
+arrow dispatch and the drop all live inside `src/main.cyr`'s single `#ifdef CYRIUS_TARGET_AGNOS` with
+no `#else`. Each fix moved its RULE into a pure function the suite can interrogate; what remains
+untestable is that `main.cyr` still calls it. **The gap is unchanged in shape and smaller in
+surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0.7.7.
 
 ### M6 surfaces that shipped without a full interaction story
 

@@ -2,13 +2,193 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.8.2] — unreleased — the pin moves to 6.6.1, and it is a clock fix on the target crab ships to
+## [0.8.2] — 2026-09-09 — the audit backlog's correctness bugs, and a recursive walk that never ran
 
 > ⛔ **THIS SECTION EXISTS SO `[0.8.1]` BELOW IS NEVER TOUCHED.** 0.8.1 is tagged and on the remote,
 > so it is a record now. `git describe` answered `0.8.1` exactly before a word of this was written —
 > HEAD *was* the tag — which is the check 0.7.2 exists to enforce.
 > ⚠ **`VERSION` still reads `0.8.1` and stays there until the operator cuts.** The heading is where
 > post-tag work accumulates; it is not a claim that a release happened.
+
+### Fixed — ⛔⛆ RECURSIVE COPY AND RECURSIVE DELETE HAD NEVER RUN, IN ANY SHIPPED BUILD
+
+`d` on a folder asked *"delete this FOLDER and everything in it?"*, took the `y`, and **deleted
+nothing** — reporting `failed part-way: the copy is incomplete`. A recursive copy created the
+destination directory and then failed the same way, leaving an empty folder wearing the source's
+name. This has been true since M4 shipped the walk.
+
+**The mechanism is one call.** `crab_op_step` is the dispatcher — single-file kinds to the chunk
+loop, `CTREE`/`DTREE` to `crab_walk_step` — and it carries the comment *"THE single entry point the
+idle tick calls"*. The idle tick called `crab_copy_step` instead, which is only the chunk loop. It
+reads `CRAB_OP_FIN` unconditionally, and a walk's `FIN` is `-1` until a file is actually open, so
+`sys_read(-1, …)` returned EBADF, the loop took its `got < 0` arm, and the walk died on its **first
+idle tick**. `crab_op_step` had **zero callers**.
+
+⛔⛆ **THE SUITE PASSED THROUGHOUT, AND THAT IS THE PART WORTH KEEPING.** Every walk test drove
+`crab_op_step` — the *right* entry point — while the only caller that ships drove the wrong one. The
+tests were green, thorough, and testing a function production did not call. ⇒ **A test that calls a
+different function than the shipping caller is not testing the shipping path.** The new block names
+the production call site rather than the tidy one.
+
+⚠ Proven before it was fixed, not after: driving the new test through `crab_copy_step` returns
+**-15** and leaves the tree on disk; through `crab_op_step` it returns OK and the tree is gone.
+⚠ `crab_copy_step` now **refuses a walk kind** (returns 0, "nothing to do") instead of reading a
+descriptor that is not open — so the wrong caller gets something a test can see rather than a
+plausible I/O failure against a real filesystem.
+⚠ The idle tick also maps the walk's `2` ("an item finished") onto "keep going", or a tree copy
+would report *done* at its first completed file.
+
+### Fixed — a cancelled tree copy takes its partial tree with it
+
+`crab_copy_cancel` unlinked `CRAB_OP_DST` — the **one file in flight** — and left every directory
+and every completed file the walk had already written sitting at the destination under the source
+folder's own name. The operator cancelled and was shown a folder that looks copied.
+
+The function's own rule for a single file — *"leaving a truncated file wearing the real file's name
+is the worst outcome available"* — is **more** true of a tree, not less: a half-copied folder cannot
+be told from a whole one without comparing it entry by entry. A cancelled `CTREE` now re-roots the
+**same record** as a `DTREE` over what it wrote, stepped by the idle tick like any other tree
+operation, with the status line saying `cancelled — removing the partial copy...`.
+
+⛔⛔ **WHY DELETING THERE IS SAFE, AND IT RESTS ON ONE INVARIANT.** `crab_walk_begin` refuses with
+`EEXIST` if the destination already exists, then creates `DROOT` itself. So `DROOT` is **always a
+directory crab made during this very operation** — removing it undoes crab's own work and can never
+reach anything the operator put there. ⇒ **If that guard is ever relaxed to allow merging into an
+existing destination, the cleanup becomes a data-loss bug and must be deleted in the same change.**
+Written into the function, because the 2026-09-03 `/bin` incident is what crab has already paid for
+once. ⚠ Mutation-proven in the dangerous direction: aiming the cleanup at the SOURCE root fails
+`...every level of it`, which is the assertion that separates a correct cleanup from data loss.
+
+⚠ **And a cancel now stops the QUEUE explicitly.** The idle tick's rule is *"a refusal does not stop
+the queue — only a cancel stops everything"*, and a cancel enforced it only by **accident**: it
+released the record, so the tick's `crab_op_active()` guard went false and the rest were stranded
+rather than stopped. The cleanup keeps the record alive, so that accident is gone — without the
+reset the tick would reach `crab_queue_advance` when the cleanup ended and start the next marked
+file, from a keypress the operator meant as *stop*.
+
+### Fixed — drag between panes ignores the marked set
+
+Dragging with ten files marked moved the **one under the pointer** and silently discarded the other
+nine. Every other verb honoured marks; drag predates M4 and was never revisited, so crab held two
+descriptions of "move" that disagreed.
+
+A drop is a move, so it now answers to **`crab_transfer_plan`** — the same pure function `c`/`m`
+call. The rule is not restated at the drop site; that is the only way the two stay in step, and it
+is reachable by the suite, which the drop branch is not.
+
+⛔ **A BUG INTRODUCED AND CAUGHT WHILE WIRING THIS, recorded because the shape recurs**: the folder
+arm read `namescr` before writing it. `namescr` is a long-lived scratch shared with every other
+verb, so that arm would have acted on **whatever name the previous operation left there**. The name
+is now captured once, above every arm.
+
+### Fixed — `m` across filesystems blocked the event loop
+
+`src/main.cyr` read *"a move still tries `rename` first … so the common case never reads or writes a
+byte"* and then called `crab_fs_move`, which on a rename failure runs `crab_fs_copy` — a **blocking**
+whole-file copy — to completion inside the keypress branch. No frames were drawn while it ran, so
+**the tray never appeared and Esc could not cancel it**, and the stepped `CRAB_OP_MOVE` path was
+unreachable for the one case it exists for. A large file moved across a mount point froze crab.
+
+**`crab_fs_move_rename`** is the cheap half alone, answering the new **`CRAB_FS_EXDEV`** when rename
+refuses — an *instruction to the caller*, not an answer for the operator. Both call sites (the `m`
+key and the drag) now step the copy instead of blocking. ⚠ `crab_fs_move` still blocks, deliberately,
+for callers that want the move finished on return; that is asserted so the split is a new entry
+point rather than a silent behaviour change. ⚠ The real refusals stay real — `ESAME` and `EEXIST`
+must not be swallowed by `EXDEV`, or the operator would be told a transfer started when crab refused.
+
+### Fixed — a folder could not be moved at all, even within one filesystem
+
+crab answered *"folders cannot be moved yet — copy it, then delete the original"* on the reasoning
+that no `CRAB_OP_MTREE` walk exists. That reasoning is **sound across filesystems**, where the only
+implementation would be copy-then-delete wearing a move's name. It was **never true within one**,
+where the kernel does the whole job in a single `rename` and there is nothing to walk. One correct
+sentence had been applied to two different cases.
+
+`CRAB_PLAN_NOMOVEDIR` becomes **`CRAB_PLAN_MOVEDIR`**: plan the *attempt*, and let rename — the only
+thing that knows whether two directories share a filesystem — decide. `EXDEV` is then refused out
+loud, which is the original reasoning applied where it is actually true.
+
+### Fixed — a spent thumbnail budget destroyed working thumbnails
+
+`crab_thumb_step` claimed a cache slot and **only then** asked whether it was allowed to decode.
+Slots are evicted round-robin, so once the session ceiling was crossed every image scrolled past
+destroyed a good thumbnail to store a refusal where it had been. **The cache emptied itself fastest
+at the exact moment its contents had become irreplaceable** — past the ceiling no further decode can
+run to rebuild them. ⇒ A refusal that costs a good entry is more expensive than the decode it
+declined to do.
+
+The order is inverted, and the decision is lifted into **`crab_thumb_may_claim`** — the same answer
+this codebase gives whenever a situation needs 32 MB of real spend to reach but the *decision* does
+not. ⚠ The gallery's idle walk now asks the budget **directly** rather than relying on the SPENT
+refusal being cached: that refusal is no longer cached, so the cache-miss gate would have stayed
+open forever and turned the idle loop into a busy loop repainting an unchanged frame.
+
+### Fixed — with a gallery open, the preview drew the gallery's picture
+
+`crab_thumb_pixels()` reads `crab_th_slot`, which records what the last **step** was about — and
+with a gallery open the idle tick steps gallery cells. So the preview column drew whichever cell the
+walk had just decoded, under the selected entry's name. **And it persisted**: the preview's own
+redraw fires only when its state *changes*, and OK -> OK is not a change, so nothing ever corrected
+the frame.
+
+**`crab_thumb_slot_for`** answers about a *named* entry, decoding nothing and touching nothing, and
+the gallery's redraw now uses it for the selection. ⚠ The property the fix rests on — that a lookup
+does not disturb `crab_th_slot` — is asserted directly rather than reasoned about.
+
+### Fixed — the gallery's arrow keys were never wired
+
+The arrow dispatch tested `view_mode == CRAB_VIEW_GRID` in **three** places, under a comment
+describing the behaviour for cell views generally. The gallery is the same `dh_grid` with a taller
+cell, so in it Left/Right still switched panes and Up/Down stepped by **one entry** rather than by a
+row: a 2-D arrangement the operator could see, answering arrows as if it were a list. One predicate,
+**`crab_view_is_grid`**, is now asked in all three places, so a fourth view cannot be added and
+half-wired the way this one was.
+
+### Fixed — gallery cells never said WHY a thumbnail was missing
+
+The *"four differently-named nothings"* rule was honoured in the preview and nowhere else. A cell
+whose decode had been refused drew an empty band and said nothing, so "too large", "budget spent",
+"cannot decode" and "not decoded yet" were one identical blank — **in the view that shows dozens at
+once**, which is exactly where telling them apart matters most. A screen of blanks reads as a broken
+gallery.
+
+`crab_thumb_note_cell` gives the same four states cell-width words: `too large` · `budget` ·
+`no decode`. ⛔ **`NONE` and `OK` stay silent, and that is the load-bearing half** — an entry the
+idle tick has not reached yet is not a refusal, and labelling it would report a failure that never
+happened, on every cell of a gallery the instant it opens. ⚠ The notes are chosen to fit a 10-character
+cell **whole**, asserted against `crab_col_chars(CRAB_GAL_CELL_W)`: a clipped "too large to prev"
+reads as a rendering fault.
+
+⚠ The gallery's reserved band is now a `LABEL` rather than a `BOX`. Three existing assertions pinned
+the widget *kind*; the invariants they were protecting are that **no CANVAS is drawn over a slot
+whose pixels were never written** and that the band keeps its height — both now asserted directly,
+which is stronger than the kind check they replace.
+
+### Verified
+
+**1571 passed / 0 failed** (from 1462; +109 assertions) · host **1,037,024 B** · `--agnos`
+**1,073,288 B** · render_test **53 / 0** · fuzz 100,000 rounds · `deps --verify` 49/0 · coverage
+87 % · `vet` + `deny` 0 · `fmt --check` clean on all 8 files.
+
+⚠ **EVERY FIX ABOVE IS MUTATION-PROVEN**, including the two that matter most for data safety: aiming
+the cancel cleanup at the SOURCE root fails 3 assertions, and reverting the idle tick to
+`crab_copy_step` fails the walk outright.
+⛔ **WHAT NO HOST TEST REACHES, STATED PLAINLY**: the idle tick, the arrow dispatch and the drop all
+live inside `src/main.cyr`'s single `#ifdef CYRIUS_TARGET_AGNOS` with no `#else`. That is *why* this
+batch's defects survived, and it is why each fix moved its RULE into a pure function the suite can
+interrogate — `crab_transfer_plan`, `crab_view_is_grid`, `crab_thumb_may_claim`,
+`crab_thumb_slot_for`, `crab_thumb_note_cell`. What remains untestable is that `main.cyr` still
+calls them: the irreducible gap, unchanged in shape and smaller in surface.
+
+### Investigated — what this batch means for the `/bin` incident
+
+⛔ **Still 🔴 OPEN, and the mechanism is still unproven** — but the search space is smaller.
+**`DTREE` could not delete anything on the burned build**, so every hypothesis routing through a
+recursive tree delete is now impossible for 0.8.0, including the `crab_pointer_modal` path's step 5
+(*"if entry 0 of the newly-listed directory was a folder, that is a recursive tree delete of a
+directory the operator never chose"*). That path could still delete a wrong single FILE, which is
+what the five `/bin` entries were. ⚠ All 16 `crab_relist` call sites were re-audited at HEAD and
+each clears marks within four lines, so the stale-marks hypotheses stay refuted.
 
 ### Changed — toolchain pin `6.6.0` -> **6.6.1**
 

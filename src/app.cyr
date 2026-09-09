@@ -401,9 +401,14 @@ fn crab_transfer_plan(is_move, marked, cursor_is_dir): i64 {
     if (marked > 0) { return CRAB_PLAN_QUEUE; }
     if (cursor_is_dir == 0) { return CRAB_PLAN_SINGLE; }
     # ⛔ NO `CRAB_OP_MTREE` EXISTS — the walk kinds are IDLE/COPY/MOVE/CTREE/DTREE — so there is no
-    # source-removing tree walk to dispatch to. Refusing out loud is the honest answer; running a
-    # copy and calling it a move is not.
-    if (is_move != 0) { return CRAB_PLAN_NOMOVEDIR; }
+    # source-removing tree walk to dispatch to, and running a copy while calling it a move is not an
+    # answer. ⭐ BUT THAT ONLY BINDS THE CROSS-FILESYSTEM CASE (0.8.2): within one filesystem a
+    # folder move is ONE `rename` syscall, which is exactly a move and needs no walk at all. This
+    # branch refused both cases because the impossible one was the only one anybody had looked at.
+    # ⇒ Plan the ATTEMPT; let `crab_fs_move_rename` decide, since rename is the only thing that
+    # knows whether the two directories share a filesystem. `EXDEV` is then refused out loud, which
+    # is the original reasoning applied where it is actually true.
+    if (is_move != 0) { return CRAB_PLAN_MOVEDIR; }
     return CRAB_PLAN_TREE;
 }
 
@@ -1095,6 +1100,11 @@ enum CrabFs {
     CRAB_FS_EBUSY    = -18;    # a transfer is already in flight — crab runs one at a time
     CRAB_FS_ELOOP    = -19;    # the destination is inside the source tree
     CRAB_FS_EISDIR   = -20;    # a folder was handed to the single-entry copy, which cannot carry one
+    # ⭐ NOT A REFUSAL — "rename cannot do this, so the STEPPED copy must". Returned only by
+    # `crab_fs_move_rename`, and the one `CRAB_FS_*` a caller must not print: it is an instruction to
+    # the caller, not an answer for the operator. `crab_fs_msg` still gives it a sentence, because a
+    # code that reaches the status line with no text is worse than one with the wrong emphasis.
+    CRAB_FS_EXDEV    = -21;    # the rename was refused; the caller should start a stepped copy
 }
 
 # ⚠ What `c` / `m` resolves to, as an answer the suite can assert on rather than a shape buried in
@@ -1103,7 +1113,11 @@ enum CrabPlan {
     CRAB_PLAN_QUEUE     = 0;   # marks outrank the cursor — transfer the marked set
     CRAB_PLAN_TREE      = 1;   # nothing marked, cursor on a folder, COPY — recurse
     CRAB_PLAN_SINGLE    = 2;   # nothing marked, cursor on a file — the single-entry path
-    CRAB_PLAN_NOMOVEDIR = 3;   # nothing marked, cursor on a folder, MOVE — refused; no MTREE exists
+    # ⭐ 0.8.2: was `CRAB_PLAN_NOMOVEDIR`, an unconditional refusal. Within ONE filesystem a folder
+    # move is a single `rename` — no walk, no copy, nothing to recurse — so refusing it outright was
+    # needlessly strict. The plan now says ATTEMPT the rename; the refusal moves to the only place
+    # that can actually know, which is after rename has answered.
+    CRAB_PLAN_MOVEDIR   = 3;   # nothing marked, cursor on a folder, MOVE — try rename, refuse if it cannot
 }
 
 # @public — may crab act on this entry name? 1 = yes, 0 = refuse.
@@ -1260,7 +1274,20 @@ fn crab_fs_copy(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
 # ⛔ THE DELETE HAPPENS ONLY AFTER THE COPY REPORTS OK, and never on `EEXIST`. A move that removed
 # the source after a failed copy is data loss, and it is the single most destructive thing this
 # file could get wrong.
-fn crab_fs_move(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+# @public — the RENAME HALF of a move, and nothing else. -> CRAB_FS_OK if the entry was renamed,
+# CRAB_FS_EXDEV if rename refused and a stepped copy is required, or a real CRAB_FS_* refusal.
+#
+# ⛔⛆ THIS EXISTS BECAUSE `crab_fs_move`'s CALLER BELIEVED IT WAS THIS FUNCTION. `src/main.cyr` reads
+# *"a move still tries `rename` first, and only reaches [the stepped path] when it refuses — so the
+# common case never reads or writes a byte"*, and then called `crab_fs_move`, which on a rename
+# failure runs `crab_fs_copy` — a BLOCKING whole-file copy — to completion inside the keypress
+# branch. The event loop drew no frames while it ran, so the tray never appeared, Esc could not
+# cancel it, and the stepped `CRAB_OP_MOVE` path was unreachable for the ONLY case it exists for:
+# a move across filesystems. A 2 GB move across a mount point froze crab until it finished.
+# ⇒ The caller wanted "try the cheap half and tell me if it was not enough". That is this function.
+# ⚠ `CRAB_FS_EXDEV` is named for the errno that motivates it, but it is NOT read from errno — crab's
+# raw shims return a bare negative. It means "rename said no", whatever the reason.
+fn crab_fs_move_rename(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
     var ls = crab_fs_path(scr1, srcdir, name);
     if (ls < 0) { return ls; }
     var ld = crab_fs_path(scr2, dstdir, name);
@@ -1268,6 +1295,18 @@ fn crab_fs_move(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
     if (crab_streq_n(scr1, scr2, CRAB_PATH_MAX) != 0) { return CRAB_FS_ESAME; }
     if (crab_fs_exists(scr2, ld, statbuf) != 0) { return CRAB_FS_EEXIST; }
     if (crab_fs_rename_raw(scr1, ls, scr2, ld) >= 0) { return CRAB_FS_OK; }
+    return CRAB_FS_EXDEV;
+}
+
+# @public — move `name` from `srcdir` to `dstdir`, BLOCKING on the cross-filesystem fallback.
+#
+# ⛔ THE EVENT LOOP MUST NOT CALL THIS. It is kept for callers that genuinely want the whole move to
+# have happened by the time it returns — the suite, and any future non-interactive path. The
+# interactive move is `crab_fs_move_rename` followed by `crab_copy_begin(CRAB_OP_MOVE, …)`, which
+# steps on the idle tick and can be cancelled.
+fn crab_fs_move(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+    var rr = crab_fs_move_rename(srcdir, name, dstdir, scr1, scr2, statbuf);
+    if (rr != CRAB_FS_EXDEV) { return rr; }
     var rc = crab_fs_copy(srcdir, name, dstdir, scr1, scr2, statbuf);
     if (rc != CRAB_FS_OK) { return rc; }
     # ⚠ Re-join: `crab_fs_copy` reused both scratch buffers, so `scr1` no longer holds the source.
@@ -2080,8 +2119,14 @@ var crab_th_spent = 0;
 # once, so a single buffer would have every cell showing the last one decoded. `crab_th_slot` records
 # which entry the last step was ABOUT, so the preview shows that entry rather than whatever the idle
 # tick happened to decode most recently while the operator was looking elsewhere.
-fn crab_thumb_pixels(): i64 {
-    var p = crab_tc_pixels(crab_th_slot);
+fn crab_thumb_pixels(): i64 { return crab_thumb_pixels_of(crab_th_slot); }
+
+# @public — the pixels of an EXPLICIT slot, or a zeroed scratch if there is none.
+# ⚠ Generalised out of `crab_thumb_pixels` in 0.8.2 so a caller can ask about a slot it looked up
+# itself, rather than being forced through `crab_th_slot` — which belongs to whatever the last STEP
+# was about, and is therefore the wrong answer for anything the step was not about.
+fn crab_thumb_pixels_of(slot): i64 {
+    var p = crab_tc_pixels(slot);
     if (p != 0) { return p; }
     # No slot yet — hand back a zeroed scratch so a caller can draw nothing rather than deref 0.
     if (crab_th_buf == 0) {
@@ -2092,6 +2137,24 @@ fn crab_thumb_pixels(): i64 {
         }
     }
     return crab_th_buf;
+}
+
+# @public — the cache slot already holding `dir`/`name`'s thumbnail, or -1. NEVER decodes, never
+# claims, and — the point — never touches `crab_th_slot`.
+#
+# ⛔⛆ THIS EXISTS BECAUSE THE PREVIEW DREW THE GALLERY'S PICTURE. `crab_th_slot` records what the last
+# `crab_thumb_step` was ABOUT, and with a gallery open the idle tick steps GALLERY entries — so the
+# preview column, which reads `crab_thumb_pixels()`, showed whichever cell the walk had just decoded
+# rather than the selected entry. Worse, it PERSISTED: the preview's own redraw is gated on its
+# state having changed, and OK -> OK is not a change, so nothing ever corrected the frame.
+# ⇒ A caller that wants a SPECIFIC entry's thumbnail must not go through the step's slot at all.
+fn crab_thumb_slot_for(dir, name, pathscr): i64 {
+    if (dir == 0) { return 0 - 1; }
+    if (name == 0) { return 0 - 1; }
+    if (pathscr == 0) { return 0 - 1; }
+    if (crab_is_image(name) == 0) { return 0 - 1; }
+    if (crab_fs_path(pathscr, dir, name) < 0) { return 0 - 1; }
+    return crab_tc_find(pathscr);
 }
 
 # Record `st` for the slot the current step claimed, and return it. ⛔ EVERY exit after a claim goes
@@ -2129,6 +2192,25 @@ fn crab_thumb_spent(): i64 { return crab_th_spent; }
 fn crab_thumb_over_budget(spent): i64 {
     if (spent >= CRAB_THUMB_TOTAL_MAX) { return 1; }
     return 0;
+}
+
+# @public — may an attempt at `spent` bytes CLAIM A CACHE SLOT? 1 = yes, 0 = report and touch nothing.
+#
+# ⛔⛆ THIS IS A PREDICATE ABOUT THE CACHE, NOT ABOUT DECODING, AND THE DISTINCTION IS THE 0.8.2 BUG.
+# `crab_thumb_step` claimed a slot and only then asked whether it was allowed to decode. Slots are
+# evicted ROUND-ROBIN, so past the ceiling every image scrolled past destroyed a working thumbnail in
+# order to store a refusal where it had been. The cache emptied itself fastest at the exact moment
+# its contents became irreplaceable — no further decode can run to rebuild them.
+# ⇒ A refusal that costs a good entry is more expensive than the decode it declined to do.
+# ⭐ LIFTED OUT FOR THE SAME REASON `crab_thumb_over_budget` IS: the situation needs 32 MB of real
+# spend to reach, so the SITUATION is untestable but the DECISION does not have to be. What no test
+# can pin is that `crab_thumb_step` still calls this — the same irreducible gap named above.
+# ⚠ Today this is exactly the negation of `crab_thumb_over_budget`. It is a separate function
+# because it answers a different question, and the two would diverge the moment a reason to claim a
+# slot without decoding appeared (a queued retry, say). One name, one meaning.
+fn crab_thumb_may_claim(spent): i64 {
+    if (crab_thumb_over_budget(spent) == 1) { return 0; }
+    return 1;
 }
 
 # @public — forget the cached thumbnail. Called from `crab_relist`, beside `crab_pv_forget`, for the
@@ -2258,11 +2340,23 @@ fn crab_thumb_step(dir, name, pathscr): i64 {
         return crab_th_state;
     }
     crab_strcpy_n(key, pathscr, CRAB_PATH_MAX);
+    # ⛔⛆ THE BUDGET IS CONSULTED **BEFORE** A SLOT IS CLAIMED, AND THE ORDER IS THE WHOLE FIX
+    # (0.8.2). `crab_tc_claim` evicts round-robin, so claiming first meant that once the session
+    # ceiling was crossed, every subsequent image DESTROYED A WORKING CACHED THUMBNAIL in order to
+    # store a refusal in its place. Scrolling a gallery past the ceiling emptied the cache of exactly
+    # the pictures that had already been paid for — the cache degraded fastest at the moment its
+    # contents had become irreplaceable, because no further decode can ever run to rebuild them.
+    # ⇒ Past the ceiling, report SPENT and touch nothing. A refusal that costs a good entry is more
+    # expensive than the decode it was declining to do.
+    # ⚠ `crab_th_slot` is set to -1 rather than left stale: `crab_thumb_pixels` reads it, and a stale
+    # index would hand the preview another file's pixels under this file's name.
+    if (crab_thumb_may_claim(crab_th_spent) == 0) {
+        crab_th_slot = 0 - 1;
+        crab_th_state = CRAB_TH_SPENT;
+        return crab_th_state;
+    }
     crab_th_slot = crab_tc_claim(pathscr);
     crab_th_state = CRAB_TH_NONE;
-    # ⛔ THE SESSION CEILING IS CHECKED BEFORE THE FILE IS EVEN OPENED. Past it, no decode may run,
-    # so there is nothing to gain by reading the bytes.
-    if (crab_thumb_over_budget(crab_th_spent) == 1) { return crab_th_finish(CRAB_TH_SPENT); }
     var fbuf = crab_thumb_file_buf();
     if (fbuf == 0) { return crab_th_finish(CRAB_TH_BAD); }
     var fd = crab_fs_open_r(pathscr, crab_cstr_len(pathscr, CRAB_PATH_MAX));
@@ -2546,11 +2640,77 @@ fn crab_op_release(): i64 {
 fn crab_copy_cancel(): i64 {
     var r = crab_op_rec();
     if (r == 0) { return CRAB_FS_OK; }
-    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return CRAB_FS_OK; }
+    var ck = load64(r + CRAB_OP_KIND);
+    if (ck == CRAB_OP_IDLE) { return CRAB_FS_OK; }
+    # ⛔⛆ A CANCEL STOPS THE WHOLE QUEUE, and saying so here is what makes that true. The idle tick's
+    # rule is *"a refusal does not stop the queue — only a cancel stops everything"*, and before
+    # 0.8.2 a cancel enforced it only by ACCIDENT: it released the record, the tick's
+    # `crab_op_active()` guard then went false, and the remaining entries were left stranded rather
+    # than stopped. The tree cleanup below keeps the record ALIVE, so that accident is gone — without
+    # this reset the tick would reach `crab_queue_advance` when the cleanup finished and cheerfully
+    # start the next marked file, from a cancel the operator meant as "stop".
+    crab_queue_reset();
+    # ⛔⛆ A CANCELLED **TREE** COPY MUST TAKE ITS PARTIAL TREE WITH IT, and until 0.8.2 it did not:
+    # this function unlinked `CRAB_OP_DST`, the ONE file in flight, and left every directory and
+    # every completed file the walk had already written sitting at the destination under the source
+    # folder's own name. The operator cancelled and was shown a folder that looks copied.
+    # ⇒ The rule this function already states for a single file — *"leaving a truncated file wearing
+    # the real file's name is the worst outcome available"* — is MORE true of a tree, not less: a
+    # half-copied folder is indistinguishable from a whole one without comparing it entry by entry.
+    if (ck == CRAB_OP_CTREE) {
+        crab_op_fds_close(r);
+        if (crab_walk_reroot_dtree(r) == 1) { return CRAB_FS_OK; }
+    }
     crab_op_release();
     var dl = crab_cstr_len(r + CRAB_OP_DST, CRAB_PATH_MAX);
     if (dl > 0) { crab_fs_unlink_raw(r + CRAB_OP_DST, dl); }
     return CRAB_FS_OK;
+}
+
+# Turn a live CTREE record into a DTREE that removes what that copy had already written. -> 1 if a
+# cleanup is now running, 0 if there was nothing to remove (the record is left for the caller).
+#
+# ⛔⛔ WHY DELETING HERE IS SAFE, AND IT RESTS ON ONE INVARIANT IN `crab_walk_begin`: that function
+# REFUSES with `EEXIST` if the destination already exists, and then creates `DROOT` itself with
+# `crab_fs_mkdir_raw`. So `CRAB_OP_DROOT` is ALWAYS a directory **crab made during this very
+# operation** — removing it undoes crab's own work and can never reach anything the operator put
+# there. ⇒ If that guard in `crab_walk_begin` is ever relaxed to allow merging into an existing
+# destination, THIS FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same change.
+# ⚠ Written with the 2026-09-03 `/bin` incident in mind: crab deleting something the operator did not
+# name is the failure mode this project has already paid for once.
+#
+# ⚠ It re-uses the SAME record rather than starting a fresh one, so the cleanup cannot be refused
+# with `EBUSY` by the transfer it is cleaning up after.
+fn crab_walk_reroot_dtree(r): i64 {
+    if (r == 0) { return 0; }
+    var dl = crab_cstr_len(r + CRAB_OP_DROOT, CRAB_PATH_MAX);
+    if (dl <= 0) { return 0; }
+    # ⚠ SROOT (624) + CRAB_PATH_MAX ends exactly where DROOT (880) begins, and DROOT + CRAB_PATH_MAX
+    # ends where CURS (1136) begins — no overlap, so these copies are safe in this order. Read DROOT
+    # into both destinations BEFORE clearing it.
+    crab_strcpy_n(r + CRAB_OP_SROOT, r + CRAB_OP_DROOT, CRAB_PATH_MAX);
+    crab_strcpy_n(r + CRAB_OP_CURS, r + CRAB_OP_DROOT, CRAB_PATH_MAX);
+    store8(r + CRAB_OP_DROOT, 0);
+    store8(r + CRAB_OP_CURD, 0);
+    store64(r + CRAB_OP_KIND, CRAB_OP_DTREE);
+    store64(r + CRAB_OP_FIN, 0 - 1);
+    store64(r + CRAB_OP_FOUT, 0 - 1);
+    store64(r + CRAB_OP_DONE, 0);
+    store64(r + CRAB_OP_TOTAL, 0 - 1);
+    store64(r + CRAB_OP_T0, clock_now_ms());
+    store64(r + CRAB_OP_DEPTH, 0);
+    store64(r + CRAB_OP_FILES, 0);
+    store64(r + CRAB_OP_BYTES, 0);
+    store64(r + CRAB_OP_WSTEP, 0);
+    # ⚠ `CRAB_OP_DST` named a file inside the tree about to go; clearing it stops a later cancel
+    # unlinking a path that no longer exists.
+    store8(r + CRAB_OP_DST, 0);
+    var slot = r + CRAB_OP_STACK;
+    store64(slot + CRAB_WS_CUR, 0);
+    store64(slot + CRAB_WS_SLEN, dl);
+    store64(slot + CRAB_WS_DLEN, 0);
+    store64(slot + CRAB_WS_IDX, 0);
+    return 1;
 }
 
 # @public — begin a stepped copy (`kind` = CRAB_OP_COPY) or move (CRAB_OP_MOVE) of `name` from
@@ -2627,6 +2787,16 @@ fn crab_copy_step(): i64 {
     if (r == 0) { return 0; }
     var kind = load64(r + CRAB_OP_KIND);
     if (kind == CRAB_OP_IDLE) { return 0; }
+    # ⛔⛆ THIS IS THE SINGLE-FILE CHUNK LOOP AND IT IS NOT THE DISPATCHER. A walk kind reaches the
+    # `sys_read` below with `CRAB_OP_FIN == -1` and takes the `got < 0` arm, releasing the record and
+    # reporting `EIO` — which is exactly how every recursive copy and delete was broken from M4 until
+    # 0.8.2, because `src/main.cyr`'s idle tick called THIS instead of `crab_op_step`.
+    # ⇒ Refuse the kind rather than reading a descriptor that is not open. A wrong caller now gets a
+    # 0 it can see in a test, not a plausible-looking I/O failure against a real filesystem.
+    # ⚠ Deliberately 0 ("nothing to do") and NOT a `CRAB_FS_*`: the terminal codes all mean the
+    # operation ENDED, and this function ending someone else's walk is the bug, not the report.
+    if (kind == CRAB_OP_CTREE) { return 0; }
+    if (kind == CRAB_OP_DTREE) { return 0; }
     var buf = crab_copy_buf();
     var fin = load64(r + CRAB_OP_FIN);
     var fout = load64(r + CRAB_OP_FOUT);
@@ -3126,6 +3296,10 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_EEXIST)   { return "refused: something of that name is already there"; }
     if (rc == CRAB_FS_ESAME)    { return "refused: the source and the destination are the same"; }
     if (rc == CRAB_FS_EIO)      { return "failed part-way: the copy is incomplete"; }
+    # ⚠ Should never reach the status line — `CRAB_FS_EXDEV` is an instruction to the caller, which
+    # is expected to start the stepped copy instead of reporting it. Given a sentence anyway, because
+    # a code that arrives with no text is a blank status line and no way to tell what happened.
+    if (rc == CRAB_FS_EXDEV)    { return "moving across filesystems — copying instead"; }
     if (rc == CRAB_FS_ENOEXEC)  { return "crab has no way to open that yet"; }
     if (rc == CRAB_FS_ESPAWNLEN) { return "refused: the path is too long to launch"; }
     if (rc == CRAB_FS_EBUSY)    { return "a transfer is already running"; }

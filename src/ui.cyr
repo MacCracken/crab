@@ -432,6 +432,7 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     dh_widget_set_layout(cell, BOX_V);
     if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
     var pix = 0;
+    var tstate = CRAB_TH_NONE;
     if (is_dir == 0) {
         if (crab_is_image(rec) == 1) {
             # ⚠ The join is per cell per frame. `crab_join_n` is bounded and the cache scan is 64
@@ -441,7 +442,8 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
             if (crab_join_n(jp, CRAB_PATH_MAX, dirpath, rec) >= 0) {
                 var slot = crab_tc_find(jp);
                 if (slot >= 0) {
-                    if (crab_tc_state(slot) == CRAB_TH_OK) { pix = crab_tc_pixels(slot); }
+                    tstate = crab_tc_state(slot);
+                    if (tstate == CRAB_TH_OK) { pix = crab_tc_pixels(slot); }
                 }
             }
         }
@@ -454,9 +456,16 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     } else {
         # ⚠ THE BAND IS RESERVED EVEN WITH NO PICTURE, so a cell does not change height when its
         # thumbnail lands and the whole grid does not reflow under the operator's eye mid-scroll.
-        var gap = dh_widget_new(BOX);
+        # ⭐ AND IT NOW SAYS WHY, WHEN crab KNOWS WHY (0.8.2). A refused decode gets one muted word in
+        # the band it would have filled; an entry the idle tick has not reached yet gets nothing,
+        # because "not yet" is not a refusal. ⚠ A LABEL either way so the band's height is set by the
+        # same widget in both arms — an empty LABEL draws nothing and reflows nothing.
+        var gnote = crab_thumb_note_cell(tstate);
+        var gap = dh_widget_new(LABEL);
         dh_widget_set_pref(gap, 0, CRAB_THUMB_H);
         dh_widget_set_flex(gap, 0);
+        dh_widget_set_fg(gap, dh_theme_mute());
+        dh_widget_set_text(gap, gnote);
         dh_widget_add_child(cell, gap);
     }
     var lab = dh_widget_new(LABEL);
@@ -2002,6 +2011,22 @@ fn crab_spec_init(): i64 {
 # is fully on screen arrives after the operator has already looked at it; one row of lead-in is the
 # difference between "fills as you scroll" and "fills after you stop". It widens the exposure by a
 # row, which is a real cost and is the reason it is one row and not five.
+# @public — does `mode` arrange entries in a 2-D grid of cells? 1 = the arrows navigate cells,
+# 0 = the list rules, where Left/Right switch panes.
+#
+# ⛔⛆ THIS EXISTS BECAUSE THE RULE WAS WRITTEN ONCE AND APPLIED TO ONE OF THE TWO VIEWS IT GOVERNS.
+# `src/main.cyr`'s arrow dispatch tested `view_mode == CRAB_VIEW_GRID` in three places, under a
+# comment claiming the behaviour for the grid — but the GALLERY is the same `dh_grid` with a taller
+# cell, and in it Left/Right still switched panes while Up/Down stepped by ONE entry rather than by a
+# row. A 2-D arrangement the operator can see was answering arrows as if it were a list.
+# ⇒ One predicate, asked in all three places, so a fourth view cannot be added and half-wired. The
+# arrow dispatch itself sits inside the agnos `#ifdef` and no host test can reach it; this can.
+fn crab_view_is_grid(mode): i64 {
+    if (mode == CRAB_VIEW_GRID) { return 1; }
+    if (mode == CRAB_VIEW_GALLERY) { return 1; }
+    return 0;
+}
+
 fn crab_grid_visible(g, out16, count): i64 {
     store64(out16, 0 - 1);
     store64(out16 + 8, 0 - 1);
@@ -3090,6 +3115,27 @@ fn crab_thumb_note(state): i64 {
     if (state == CRAB_TH_TOO_BIG) { return "too large to preview"; }
     if (state == CRAB_TH_SPENT) { return "preview budget spent"; }
     if (state == CRAB_TH_BAD) { return "cannot decode"; }
+    return "";
+}
+
+# @public — the same four nothings, sized for a GALLERY CELL rather than the preview column.
+#
+# ⛔⛆ THE RULE ABOVE WAS HONOURED IN THE PREVIEW AND NOWHERE ELSE. A gallery cell whose decode had
+# been refused drew an empty band and said nothing, so "too large", "budget spent", "cannot decode"
+# and "not decoded yet" were one identical blank — in the view that shows dozens of them at once,
+# which is precisely where telling them apart matters most. The operator reads a screen of blanks as
+# a broken gallery.
+# ⇒ Same four states, same distinctions, shorter words.
+# ⚠ A CELL IS 10 CHARACTERS WIDE (`crab_col_chars(CRAB_GAL_CELL_W)` = 90 / 9), so the preview's
+# sentences do not fit and are not merely truncated here — a clipped "too large to prev" reads as a
+# rendering fault. These are chosen to fit whole.
+# ⛔ `CRAB_TH_NONE` AND `CRAB_TH_OK` BOTH RETURN "" AND THAT IS THE LOAD-BEARING PART. `NONE` means
+# the idle tick has not reached this cell YET — it is not a refusal, and labelling it would tell the
+# operator a decode failed when one has not been attempted. Only a DECIDED refusal gets a word.
+fn crab_thumb_note_cell(state): i64 {
+    if (state == CRAB_TH_TOO_BIG) { return "too large"; }
+    if (state == CRAB_TH_SPENT) { return "budget"; }
+    if (state == CRAB_TH_BAD) { return "no decode"; }
     return "";
 }
 

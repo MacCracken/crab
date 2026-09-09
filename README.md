@@ -93,6 +93,14 @@ overwritten, because a status line that under-claims misleads exactly as much as
 ⇒ **Re-read this section at every release.** Nothing gates it — the same absence that let
 `state.md` rot twice.
 
+⛔⛆ **AND IN 0.8.2 IT WAS WRONG A FOURTH WAY, WHICH NO AMOUNT OF RE-READING WOULD HAVE CAUGHT.** Two
+claims below — *"recursive copy and delete"* and *"in grid and gallery modes the arrow keys
+navigate"* — described what crab was **built to do** and not what the binary did: the recursive walk
+died on its first idle tick in every shipped build, and the gallery's arrows were never wired. Both
+are true now.
+⇒ **A status line can be false about behaviour its own source code appears to implement.** Re-reading
+checks it against intent; only running the thing checks it against the program.
+
 ⭐ **Version, binary sizes, test counts and dependency versions are deliberately NOT here** — inlined
 state rots, and this repo has watched it happen twice. They live in
 [`docs/development/state.md`](docs/development/state.md), refreshed every release. **Picking the work

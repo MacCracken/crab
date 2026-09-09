@@ -1,6 +1,23 @@
-# Handoff — **0.8.1 is released; M6 is closed but for two gated items, and the pin is 6.6.1.**
+# Handoff — **0.8.2 in preparation: the audit backlog's correctness bugs, and a walk that never ran.**
 
-> ⭐ **Updated 2026-09-08.** **0.8.1** (2026-09-07) is the last release and HEAD is its tag. It closed
+> ⭐⭐ **READ THIS FIRST, BECAUSE IT IS THE TRANSFERABLE PART: RECURSIVE COPY AND RECURSIVE DELETE HAD
+> NEVER RUN IN ANY SHIPPED BUILD, AND THE SUITE WAS GREEN THE WHOLE TIME.** `src/main.cyr`'s idle
+> tick called `crab_copy_step` — the single-file chunk loop — instead of `crab_op_step`, the
+> dispatcher. A walk's `CRAB_OP_FIN` is `-1` until a file is open, so `sys_read(-1, …)` failed and
+> every `CTREE`/`DTREE` died on its FIRST tick with `EIO`. `d` on a folder took the `y` and deleted
+> nothing. `crab_op_step` had **zero callers**, under its own comment reading *"THE single entry
+> point the idle tick calls"*.
+> ⛔⛆ **Every walk TEST drove `crab_op_step` — the right entry point — while the only caller that
+> ships drove the wrong one.** ⇒ **A test that calls a different function than the shipping caller
+> is not testing the shipping path.** Check the caller, not the function you wish it called.
+>
+> ⭐ **Updated 2026-09-09. 0.8.2 is IN PREPARATION** (`VERSION` = 0.8.2, nothing committed or
+> tagged): the 6.6.1 pin, a documentation-currency repair, and **the audit backlog's eight
+> correctness bugs — all closed, each mutation-proven**, plus the walk defect above. Suite
+> **1571 / 0**. The roadmap's *Correctness* section is now empty; what remains in that audit is the
+> M6 interaction gaps, the absent affordances, and the *Recorded as facts* list.
+>
+> ⭐ **Previously, 2026-09-08.** **0.8.1** (2026-09-07) is the last release and HEAD is its tag. It closed
 > the VOLUMES gate on agnos **`mountlist`#104** — the blocker crab filed on 2026-09-02, which agnos
 > answered by minting a new number rather than widening `mount`#11, crediting the filing by name —
 > and it hardened the delete prompt after the `/bin` incident. **0.8.0** shipped M6.
@@ -201,7 +218,7 @@ prints its check count now — it used to exit **0** whether it ran 26 checks or
 
 | | |
 |---|---|
-| Version | ⭐ **0.8.1 IS THE LAST RELEASE** (2026-09-07), tagged on the remote — and `git describe` answers `0.8.1` exactly, so **HEAD IS THE TAG** and nothing is in preparation. ⛔⛆ **THIS ROW SAID *"0.8.0 IN PREPARATION / 0.7.7 IS THE LAST RELEASE"* THROUGH TWO TAGGED RELEASES** — the same rot `state.md` has now suffered three times, in the file whose own header says to read this table and nothing above it for numbers. **Re-derive from `git describe` before quoting this row.** Lineage: 0.8.1 closed the VOLUMES gate on agnos `mountlist`#104 and hardened the delete prompt after the `/bin` incident; 0.8.0 shipped M6 (sidebar, menu bar, A/B switcher, Bueller) and fixed the context menu and rename sheet, which had shipped in 0.7.5 laid out entirely below the window; 0.7.7 was a repair cut. ⛔ **KEEP THIS LESSON: 0.7.2 exists only because 0.7.1's CHANGELOG section was still being edited after its tag was pushed** — a released section is a record, not a scratchpad. ⛔ **The operator handles all git operations: never commit, tag or push.** |
+| Version | ⭐ **0.8.2 IS IN PREPARATION** (`VERSION` = 0.8.2, dated 2026-09-09, on operator direction) — the 6.6.1 pin, the doc-currency repair, and the audit backlog's eight correctness bugs. ⛔ **Nothing is committed, tagged or pushed; the operator handles every git operation.** **0.8.1 is the last RELEASE** (2026-09-07). ⛔⛆ **THIS ROW ONCE SAID *"0.8.0 IN PREPARATION / 0.7.7 IS THE LAST RELEASE"* THROUGH TWO TAGGED RELEASES** — the rot `state.md` has now suffered three times, in the file whose own header says to read this table and nothing above it for numbers. **Re-derive from `git describe` before quoting this row.** Lineage: 0.8.1 closed the VOLUMES gate on agnos `mountlist`#104 and hardened the delete prompt after the `/bin` incident; 0.8.0 shipped M6. ⛔ **KEEP THIS LESSON: 0.7.2 exists only because 0.7.1's CHANGELOG section was still being edited after its tag was pushed** — a released section is a record, not a scratchpad. |
 | Toolchain | cyrius pin **6.6.1** (moved 2026-09-08 on operator direction, from 6.6.0; trail 6.5.36 → 6.5.41 → 6.6.0 → 6.6.1). ⭐ **The bump is not cosmetic and it lands on crab's SHIPPING target**: 6.6.1 rebinds `chrono`'s AGNOS monotonic clock from `sys_uptime_ms` (#40, `timer_ticks`) to `sys_uptime_us` (#95, `rdtsc`). ⛔⛆ **A foreground `run` program on AGNOS executes with IF CLEARED** — only `/bin/agnsh` gets IF=1 — so the timer ISR never fires, `timer_ticks` never advances, and #40 reads **exactly zero forever, with no error**. crab is spawned by the compositor, so it is precisely that shape of program. ⚠ Only two vendored leaves moved: `lib/chrono.cyr` and `lib/sankoch.cyr` (2.7.11 → 2.7.14). ⛔ **`cyrius lib sync` walks only the DECLARED stdlib set**, so after any bump diff the WHOLE vendored tree against `~/.cyrius/versions/<pin>/lib` — verified by hash this time, which is how the 6.5.41 hand-copy was caught. |
 | Build | x86_64 **1,023,968 B** · `--agnos` **1,047,832 B** at 0.7.7 · `--win` fails (pre-existing, not a regression — two absent syscall stubs, and Windows is not a declared target). ⭐ **Check four re-run in full at the new pin (2026-09-02)**, all four `path` lines disabled so `cyrius deps` really clones the tags: **7 deps / 0 errors**, lock **7 commit-pinned** (3 with the overrides on — that jump is the tell), **1230 / 0**, and both binaries **BYTE-IDENTICAL** to the path-resolved ones (host `5170a452…`, agnos `446b7f6a…`). *That equality is the evidence; everything else is merely consistent with it.* |
 | Tests | `cyrius test` **1230 / 0** · `render_test` **53** checks, 0 failed · `cyrius fuzz` **100,000 rounds**, and it prints the number so it cannot agree with a stale claim about itself · bench measures the sort, not `bench_noop`. ⭐ **All four now run in CI** (*#14 / #36*), alongside the `--agnos` build, a per-file `fmt --check` loop, `coverage --min 85`, `vet` and `deny`. ⛔ Each of 0.7.7's five fixes is **mutation-proven** — the guard was removed and the suite watched to fail — because this project has shipped three tests that could not fail in their first draft. |

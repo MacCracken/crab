@@ -1604,6 +1604,89 @@ fn main() {
     assert_eq(dgot, 14, "...intact, not truncated by the attempt");
     assert_eq(crab_fs_delete(fsdir, "precious.txt", 0, sc1), CRAB_FS_OK, "...and cleaned up");
 
+    # --- 0.8.2: THE RENAME HALF, SPLIT OUT SO THE EVENT LOOP CAN STOP BLOCKING ----------------------
+    # ⛔⛆ `src/main.cyr` carried the comment *"a move still tries `rename` first … so the common case
+    # never reads or writes a byte"* and then called `crab_fs_move`, which on a rename failure runs
+    # `crab_fs_copy` — a BLOCKING whole-file copy — to completion inside the keypress branch. No
+    # frames were drawn while it ran, so the tray never appeared and Esc could not cancel it, and the
+    # stepped `CRAB_OP_MOVE` path was unreachable for the ONE case it exists for: across filesystems.
+    # ⇒ `crab_fs_move_rename` is the cheap half alone. Only `CRAB_FS_EXDEV` means "now step it".
+    var rnf = crab_fs_path(sc1, fsdir, "quick.txt");
+    var rnfd = crab_fs_open_w(sc1, rnf);
+    assert(rnfd >= 0, "a file to rename-move");
+    sys_write(rnfd, "quick", 5); sys_close(rnfd);
+    assert_eq(crab_fs_move_rename(fsdir, "quick.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK,
+      "within one filesystem the rename half alone succeeds");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir2, "quick.txt"), fstat), 1, "...it arrived");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir, "quick.txt"), fstat), 0, "...and the source is gone");
+
+    # ⭐ THE WHOLE POINT: when rename cannot do it, the answer is EXDEV — an INSTRUCTION to step —
+    # and NOT a copy performed on the spot. Forced the same way the data-loss path above is forced.
+    var rnf2 = crab_fs_path(sc1, fsdir, "staythere.txt");
+    var rnfd2 = crab_fs_open_w(sc1, rnf2);
+    sys_write(rnfd2, "stay", 4); sys_close(rnfd2);
+    assert_eq(crab_fs_move_rename(fsdir, "staythere.txt", "build/m4nodir", sc1, sc2, fstat), CRAB_FS_EXDEV,
+      "a rename that refuses answers EXDEV — 'the caller must step this'");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir, "staythere.txt"), fstat), 1,
+      "⛔ ...and it COPIED NOTHING and DELETED NOTHING — that is what makes it non-blocking");
+
+    # ⛔ The real refusals stay real: EXDEV must not swallow them, or the operator would be told a
+    # transfer started when crab had in fact refused it.
+    assert_eq(crab_fs_move_rename(fsdir, "staythere.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
+      "a same-path move is still ESAME, not EXDEV");
+    assert_eq(crab_fs_move_rename(fsdir2, "quick.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_ESAME,
+      "...at the destination too");
+    var rnf3 = crab_fs_path(sc1, fsdir, "collide.txt");
+    var rnfd3 = crab_fs_open_w(sc1, rnf3); sys_write(rnfd3, "c", 1); sys_close(rnfd3);
+    var rnf4 = crab_fs_path(sc1, fsdir2, "collide.txt");
+    var rnfd4 = crab_fs_open_w(sc1, rnf4); sys_write(rnfd4, "c", 1); sys_close(rnfd4);
+    assert_eq(crab_fs_move_rename(fsdir, "collide.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_EEXIST,
+      "an occupied destination is still EEXIST, not EXDEV");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir, "collide.txt"), fstat), 1,
+      "...and the source survives that refusal");
+    assert_neq(CRAB_FS_EXDEV, CRAB_FS_OK, "EXDEV is not success");
+    assert_neq(CRAB_FS_EXDEV, CRAB_FS_ESYS, "...and is distinct from the kernel refusal");
+    assert(load8(crab_fs_msg(CRAB_FS_EXDEV)) != 0, "...and has a sentence, so it can never blank the status line");
+
+    # ⚠ `crab_fs_move` STILL BLOCKS, deliberately, for callers that want the move finished on return.
+    # Asserted so the split is a new entry point rather than a silent behaviour change.
+    assert_eq(crab_fs_move(fsdir, "collide.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
+      "the blocking move still refuses what it always refused");
+    assert_eq(crab_fs_delete(fsdir, "collide.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete(fsdir2, "collide.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete(fsdir, "staythere.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+    assert_eq(crab_fs_delete(fsdir2, "quick.txt", 0, sc1), CRAB_FS_OK, "cleanup");
+
+    # --- 0.8.2: A FOLDER MOVES WITHIN ONE FILESYSTEM, because that is one `rename` ------------------
+    # ⛔⛆ crab refused this outright — "folders cannot be moved yet — copy it, then delete the
+    # original" — on the reasoning that no `CRAB_OP_MTREE` walk exists. That reasoning is sound for a
+    # move ACROSS filesystems, where the only implementation would be copy-then-delete wearing a
+    # move's name. It was never true within one, where the kernel does the whole job in a single
+    # syscall and there is nothing to walk. One correct sentence was applied to two different cases.
+    assert_eq(crab_fs_mkdir(fsdir, "movable", sc1, fstat), CRAB_FS_OK, "a folder to move");
+    var mvf = crab_fs_path(sc1, "build/m4test/movable", "inside.txt");
+    var mvfd = crab_fs_open_w(sc1, mvf);
+    assert(mvfd >= 0, "...with something in it");
+    sys_write(mvfd, "payload", 7); sys_close(mvfd);
+
+    assert_eq(crab_fs_move_rename(fsdir, "movable", fsdir2, sc1, sc2, fstat), CRAB_FS_OK,
+      "a folder moves within one filesystem — it is one rename, not a walk");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir2, "movable"), fstat), 1, "...it arrived");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir, "movable"), fstat), 0, "...and left the source");
+    # ⛔ ITS CONTENTS CAME WITH IT. A "move" that produced an empty directory at the destination would
+    # pass both assertions above and have destroyed the payload.
+    assert_eq(crab_fs_stat_size(sc1, crab_fs_path(sc1, "build/m4test2/movable", "inside.txt"), fstat), 7,
+      "...and everything inside it came too, intact");
+
+    # ⛔ The cross-filesystem case is STILL refused, and now for a reason crab established rather than
+    # assumed: rename said no. It is EXDEV, so the caller reports it — it does not silently copy.
+    assert_eq(crab_fs_move_rename(fsdir2, "movable", "build/m4nodir", sc1, sc2, fstat), CRAB_FS_EXDEV,
+      "a folder move rename cannot do is EXDEV, not a silent copy");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, fsdir2, "movable"), fstat), 1,
+      "...and the folder is untouched by that refusal");
+    assert_eq(crab_fs_delete("build/m4test2/movable", "inside.txt", 0, sc1), CRAB_FS_OK, "cleanup: the payload");
+    assert_eq(crab_fs_delete(fsdir2, "movable", 1, sc1), CRAB_FS_OK, "cleanup: the folder");
+
     # ⚠ A COPY LARGER THAN ONE `CRAB_COPY_CHUNK`, so the read loop actually iterates. Everything
     # above fits in a single 4 KiB read, which leaves the chunking untested — a loop that handled
     # exactly one buffer and stopped would have passed.
@@ -2090,6 +2173,74 @@ fn main() {
     var s1 = crab_fs_path(sc1, "build/m4src", "one.txt");
     assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1, "the SOURCE tree survives a copy");
 
+    # --- 0.8.2: A CANCELLED TREE COPY TAKES ITS PARTIAL TREE WITH IT --------------------------------
+    # ⛔⛆ Until 0.8.2 `crab_copy_cancel` unlinked `CRAB_OP_DST` — the ONE file in flight — and left
+    # every directory and every completed file the walk had already written sitting at the
+    # destination under the source folder's own name. The operator cancelled and was shown a folder
+    # that looks copied. ⇒ The rule the function already stated for a single file is MORE true of a
+    # tree: a half-copied folder cannot be told from a whole one without comparing it entry by entry.
+    assert_eq(crab_fs_mkdir("build", "m4cdst", sc1, fstat), CRAB_FS_OK, "a destination to cancel into");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "m4src", "build/m4cdst", sc1, sc2, fstat),
+      CRAB_FS_OK, "a recursive copy starts");
+    # ⚠ Step it a FEW times, not to completion — the point is to cancel with real bytes on disk.
+    var cg = 0;
+    var cr = crab_op_step();
+    while (((cr == 1) || (cr == 2)) && (cg < 3)) { cg = cg + 1; cr = crab_op_step(); }
+    var croot = crab_fs_path(sc1, "build/m4cdst", "m4src");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1,
+      "...and the partial tree really is on disk before the cancel");
+
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "the cancel is accepted");
+    # ⭐ THE CANCEL DOES NOT FINISH INSTANTLY — it re-roots the SAME record as a DTREE over what the
+    # copy wrote, so the removal is stepped by the idle tick like any other tree operation. Re-using
+    # the record is what stops the cleanup being refused with EBUSY by the transfer it cleans up after.
+    assert_eq(crab_op_active(), 1, "...and a cleanup is now running, not nothing");
+    cg = 0; cr = crab_op_step();
+    while ((cr == 1) || (cr == 2)) { cg = cg + 1; if (cg > 500) { cr = CRAB_FS_EIO; } else { cr = crab_op_step(); } }
+    assert_eq(cr, CRAB_FS_OK, "...the cleanup finishes cleanly");
+    croot = crab_fs_path(sc1, "build/m4cdst", "m4src");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 0,
+      "...and the partial tree is GONE, not merely the file that was in flight");
+    # ⛔⛔ AND THE SOURCE IS UNTOUCHED. A cleanup that walked the wrong root would pass every check
+    # above and still have destroyed the operator's data — this is the assertion that separates them.
+    var csrc = crab_fs_path(sc1, "build/m4src", "one.txt");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1,
+      "...and the SOURCE tree is untouched by the cancel");
+    var csrc2 = crab_fs_path(sc1, "build/m4src/inner", "two.txt");
+    assert_eq(crab_fs_exists(sc1, crab_cstr_len(sc1, CRAB_PATH_MAX), fstat), 1,
+      "...every level of it");
+    # ⚠ The destination PARENT survives too — crab created only the tree root inside it.
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, "build", "m4cdst"), fstat), 1,
+      "...and the destination directory the operator chose is still there");
+
+    # ⛔ A cancelled SINGLE-FILE copy is unchanged: it unlinks the partial destination and stops.
+    # Asserted beside the tree case so the asymmetry is deliberate rather than emergent.
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, "build/m4src", "one.txt", "build/m4cdst", sc1, sc2, fstat),
+      CRAB_FS_OK, "a single-file copy starts");
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "...and is cancelled");
+    assert_eq(crab_op_active(), 0, "...leaving NO cleanup running — there is no tree to remove");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, "build/m4cdst", "one.txt"), fstat), 0,
+      "...and the partial file is gone");
+
+    # ⛔⛆ AND A CANCEL STOPS THE QUEUE. The idle tick's rule is "a refusal does not stop the queue —
+    # only a cancel stops everything", and before 0.8.2 the cancel enforced it only by ACCIDENT: it
+    # released the record, so the tick's `crab_op_active()` guard went false and the rest were
+    # stranded. The tree cleanup keeps the record alive, so the accident is gone and the reset has to
+    # be explicit — otherwise the tick reaches `crab_queue_advance` when the cleanup ends and starts
+    # the next marked file, from a keypress the operator meant as "stop".
+    var qcb = alloc(4 * CRAB_REC_SZ);
+    t_entry(qcb, 0, "one.txt", 0);
+    t_entry(qcb, 1, "two.txt", 0);
+    var qcm = alloc(CRAB_MAX_ENTRIES);
+    crab_mark_clear(qcm, 2);
+    crab_mark_toggle(qcm, 0, 2); crab_mark_toggle(qcm, 1, 2);
+    crab_queue_reset();
+    assert_eq(crab_queue_marked(qcb, qcm, 2), 2, "two files are queued");
+    crab_queue_dirs(CRAB_OP_COPY, "build/m4src", "build/m4cdst");
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), 1, "a queued transfer starts");
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "...and is cancelled");
+    assert_eq(crab_queue_advance(sc1, sc2, fstat), 0, "...the queue is SPENT, not merely paused");
+
     # --- the destination-inside-source refusal, for real --------------------------------------------
     # ⛔ `/a` into `/a/b` recurses until the path bound stops it. Refused BEFORE anything is created.
     assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "m4src", "build/m4src/inner", sc1, sc2, fstat),
@@ -2106,7 +2257,68 @@ fn main() {
     wg = 0; wr = crab_op_step();
     while ((wr == 1) || (wr == 2)) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
     assert_eq(wr, CRAB_FS_OK, "...removed");
+    # ⚠ 0.8.2's cancel fixture too, so a clean run leaves `build/` as it found it. A FAILED run still
+    # leaves debris and the next run then fails on `mkdir` -> EEXIST — that is the suite's existing
+    # shape (every M4 fixture asserts `mkdir == OK`), not something this block introduces.
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4cdst", 0, sc1, sc2, fstat), CRAB_FS_OK, "cleanup: cancel fixture");
+    wg = 0; wr = crab_op_step();
+    while ((wr == 1) || (wr == 2)) { wg = wg + 1; if (wg > 500) { wr = CRAB_FS_EIO; } else { wr = crab_op_step(); } }
+    assert_eq(wr, CRAB_FS_OK, "...removed");
     assert_eq(crab_op_step(), 0, "stepping an idle record is 0, not an error");
+
+    # --- 0.8.2: THE IDLE TICK MUST DRIVE A WALK THROUGH THE DISPATCHER ------------------------------
+    # ⛔⛆ THIS IS THE DEFECT'S OWN SHAPE: `crab_op_step` carries the comment *"THE single entry point
+    # the idle tick calls"* and the idle tick did not call it. `src/main.cyr` called `crab_copy_step`
+    # directly, which is the SINGLE-FILE chunk loop — it reads `CRAB_OP_FIN` unconditionally, and a
+    # walk's `FIN` is -1 until a file is actually open. So `sys_read(-1, …)` returned EBADF, the loop
+    # took its `got < 0` arm, and every recursive copy and recursive delete died on its FIRST idle
+    # tick with `EIO` — "failed part-way: the copy is incomplete" — having removed nothing and, for a
+    # copy, having already created the destination directory.
+    # ⛔⛆ AND THE SUITE PASSED THROUGHOUT, because every walk test above drives `crab_op_step()` — the
+    # RIGHT entry point — while production drove the wrong one. **A test that calls a different
+    # function than the shipping caller is not testing the shipping path.** That is why this block
+    # exists and why it names the production call site rather than the tidy one.
+    assert_eq(crab_fs_mkdir("build", "m4tick", sc1, fstat), CRAB_FS_OK, "a tree the idle tick will delete");
+    assert_eq(crab_fs_mkdir("build/m4tick", "sub", sc1, fstat), CRAB_FS_OK, "...with a level in it");
+    var tkf = crab_fs_path(sc1, "build/m4tick/sub", "leaf.txt");
+    var tkfd = crab_fs_open_w(sc1, tkf); sys_write(tkfd, "x", 1); sys_close(tkfd);
+
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4tick", 0, sc1, sc2, fstat), CRAB_FS_OK,
+      "a recursive delete starts");
+    # ⭐ `crab_op_step` is what `src/main.cyr`'s idle tick now calls. Driving the walk with the
+    # single-file `crab_copy_step` here instead is what reproduces the bug: it returns EIO at once.
+    var tkg = 0;
+    var tkr = crab_op_step();
+    while ((tkr == 1) || (tkr == 2)) {
+        tkg = tkg + 1;
+        if (tkg > 500) { tkr = CRAB_FS_EIO; } else { tkr = crab_op_step(); }
+    }
+    assert_eq(tkr, CRAB_FS_OK, "the walk the idle tick drives finishes cleanly, not EIO");
+    assert_eq(crab_op_active(), 0, "...and leaves the record idle");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, "build", "m4tick"), fstat), 0,
+      "...and the tree is actually GONE — the walk ran, it did not merely return OK");
+
+    # ⛔ THE DISPATCHER'S OWN CONTRACT, asserted directly so a future edit cannot quietly reroute it.
+    # A single-file kind goes to the chunk loop; a walk kind goes to the walk. Both must be reachable
+    # through the ONE function the idle tick calls.
+    assert_eq(crab_op_step(), 0, "the dispatcher on an idle record is 0, not an error");
+
+    # ⛔ AND THE CHUNK LOOP NOW REFUSES A WALK KIND OUTRIGHT, so the wrong caller cannot come back
+    # wearing a plausible I/O failure. Driving a live walk with `crab_copy_step` returns 0 ("nothing
+    # to do") and leaves the walk STANDING — it does not release the record and it does not delete.
+    assert_eq(crab_fs_mkdir("build", "m4guard", sc1, fstat), CRAB_FS_OK, "a tree to guard");
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, "build", "m4guard", 0, sc1, sc2, fstat), CRAB_FS_OK,
+      "a walk is in flight");
+    assert_eq(crab_copy_step(), 0, "the single-file chunk loop refuses a walk kind");
+    assert_eq(crab_op_active(), 1, "...and the walk it refused is STILL running, not released");
+    assert_eq(crab_fs_exists(sc1, crab_fs_path(sc1, "build", "m4guard"), fstat), 1,
+      "...and nothing was deleted by the refusal");
+    tkg = 0; tkr = crab_op_step();
+    while ((tkr == 1) || (tkr == 2)) {
+        tkg = tkg + 1;
+        if (tkg > 500) { tkr = CRAB_FS_EIO; } else { tkr = crab_op_step(); }
+    }
+    assert_eq(tkr, CRAB_FS_OK, "...and the dispatcher still finishes it");
 
     # --- coverage: the queue's captured directories, and the per-target raw shims ------------------
     # ⛔ THE QUEUE'S DESTINATION IS CAPTURED WHEN IT STARTS, NOT READ FROM THE PANE EACH TIME. A
@@ -3009,6 +3221,26 @@ fn t_thumbnails(): i64 {
     assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX - 1), 0, "one byte under the ceiling still may");
     assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX), 1, "AT the ceiling the budget is spent");
     assert_eq(crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX + 1), 1, "...and past it, certainly");
+
+    # --- 0.8.2: A SPENT BUDGET MUST NOT EVICT WORKING THUMBNAILS -----------------------------------
+    # ⛔⛆ `crab_thumb_step` claimed a cache slot and only THEN asked whether it was allowed to decode.
+    # Slots are evicted round-robin, so once the session ceiling was crossed every image scrolled
+    # past destroyed a working thumbnail to store a refusal in its place. The cache emptied itself
+    # fastest at the exact moment its contents had become irreplaceable — past the ceiling no further
+    # decode can ever run to rebuild them. ⇒ A refusal that costs a good entry is more expensive than
+    # the decode it was declining to do.
+    # ⚠ The SITUATION needs 32 MB of real spend to reach, so it is not testable — but the DECISION
+    # is, which is the same answer this file gives for `crab_thumb_over_budget` itself.
+    assert_eq(crab_thumb_may_claim(0), 1, "a fresh session may claim a cache slot");
+    assert_eq(crab_thumb_may_claim(CRAB_THUMB_TOTAL_MAX - 1), 1, "one byte under the ceiling still may");
+    assert_eq(crab_thumb_may_claim(CRAB_THUMB_TOTAL_MAX), 0,
+      "⛔ AT the ceiling NO slot may be claimed — a refusal must not evict a working thumbnail");
+    assert_eq(crab_thumb_may_claim(CRAB_THUMB_TOTAL_MAX + 1), 0, "...and past it, certainly");
+    # ⛔ The two predicates answer OPPOSITE questions and must stay opposite. A build where both say
+    # "yes" past the ceiling is the bug this block exists to stop coming back.
+    assert_neq(crab_thumb_may_claim(CRAB_THUMB_TOTAL_MAX), crab_thumb_over_budget(CRAB_THUMB_TOTAL_MAX),
+      "claiming and decoding disagree exactly where they should");
+    assert_neq(crab_thumb_may_claim(0), crab_thumb_over_budget(0), "...and below the ceiling too");
     # ⚠ WHAT THIS DOES **NOT** PROVE, said plainly rather than left to be assumed: that
     # `crab_thumb_step` still consults the predicate. Proving that needs a test which really spends
     # 32 MB, and a suite that allocated 32 MB per run to check a guard would cost more than the guard
@@ -3423,6 +3655,91 @@ fn t_gallery(): i64 {
     assert_eq(crab_tc_pixels(CRAB_TC_N), 0, "...nor one past the end");
     assert_eq(crab_tc_state(0 - 1), CRAB_TH_NONE, "an invalid slot has no state");
 
+    # --- 0.8.2: A GALLERY CELL SAYS WHY THERE IS NO PICTURE ----------------------------------------
+    # ⛔⛆ The "four differently-named nothings" rule was honoured in the PREVIEW and nowhere else. A
+    # gallery cell whose decode had been refused drew an empty band and said nothing, so "too large",
+    # "budget spent", "cannot decode" and "not decoded yet" were one identical blank — in the view
+    # that shows dozens at once, which is exactly where telling them apart matters most.
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_TOO_BIG), "too large"), "a cell says 'too large'");
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_SPENT), "budget"), "...'budget' when the session is spent");
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_BAD), "no decode"), "...and 'no decode' on a decoder error");
+    # ⛔ THE TWO SILENT STATES ARE THE LOAD-BEARING HALF. `NONE` means the idle tick has not reached
+    # this cell YET — it is not a refusal, and labelling it would report a failure that never
+    # happened. `OK` has a picture and needs no words at all.
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_NONE), ""), "⛔ 'not decoded YET' is silent, not a refusal");
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_OK), ""), "...and a cell with a picture says nothing");
+    # ⛔ THE THREE REFUSALS MUST BE DISTINGUISHABLE FROM EACH OTHER — three identical strings would
+    # pass every assertion above and still be the blank this fixes, wearing words.
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_TOO_BIG), crab_thumb_note_cell(CRAB_TH_SPENT)) == 0,
+      "'too large' and 'budget' are different nothings");
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_SPENT), crab_thumb_note_cell(CRAB_TH_BAD)) == 0,
+      "...as are 'budget' and 'no decode'");
+    assert(t_streq(crab_thumb_note_cell(CRAB_TH_TOO_BIG), crab_thumb_note_cell(CRAB_TH_BAD)) == 0,
+      "...and 'too large' and 'no decode'");
+    # ⚠ EVERY NOTE MUST FIT A CELL WHOLE. A clipped "too large to prev" reads as a rendering fault,
+    # so these are chosen to fit rather than truncated — asserted against the cell's real width.
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_TOO_BIG), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+      "'too large' fits a cell whole");
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_SPENT), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+      "...'budget' fits");
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_BAD), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+      "...and 'no decode' fits");
+    # ⚠ The preview's own sentences are UNCHANGED — the cell is a second phrasing of the same four
+    # states, not a replacement for the first.
+    assert(t_streq(crab_thumb_note(CRAB_TH_TOO_BIG), "too large to preview"), "the preview still says it in full");
+    assert(t_streq(crab_thumb_note(CRAB_TH_NONE), ""), "...and is still silent where it should be");
+
+    # --- 0.8.2: THE ARROWS ANSWER A CELL VIEW, AND THE GALLERY IS ONE ------------------------------
+    # ⛔⛆ `src/main.cyr`'s arrow dispatch tested `view_mode == CRAB_VIEW_GRID` in THREE places under a
+    # comment describing the behaviour for cell views generally. The gallery is the same `dh_grid`
+    # with a taller cell, so in it Left/Right still switched panes and Up/Down stepped by ONE entry
+    # rather than by a row: a 2-D arrangement the operator could see, answering arrows like a list.
+    assert_eq(crab_view_is_grid(CRAB_VIEW_LIST), 0, "a list is not a cell view — Left/Right switch panes");
+    assert_eq(crab_view_is_grid(CRAB_VIEW_GRID), 1, "the grid is a cell view");
+    assert_eq(crab_view_is_grid(CRAB_VIEW_GALLERY), 1,
+      "⛔ AND SO IS THE GALLERY — it is the same dh_grid with a taller cell");
+    # ⚠ An unknown mode is NOT a cell view. `g` cycles and clamps, so this is unreachable today; the
+    # honest default for "crab does not know what this view is" is the one that changes no bindings.
+    assert_eq(crab_view_is_grid(99), 0, "an unknown view falls back to list behaviour");
+    assert_eq(crab_view_is_grid(0 - 1), 0, "...and so does a negative one");
+
+    # --- 0.8.2: LOOKING A THUMBNAIL UP MUST NOT MOVE THE STEP'S OWN SLOT ---------------------------
+    # ⛔⛆ With a gallery open the idle tick steps GALLERY cells, so `crab_th_slot` — which records
+    # what the last STEP was about — pointed at a cell. `crab_thumb_pixels()` reads that slot, and
+    # the gallery's redraw handed its result to the PREVIEW column: the preview drew whichever cell
+    # the walk had just decoded, under the selected entry's name. And it persisted, because the
+    # preview's own redraw fires only when its state CHANGES and OK -> OK is not a change.
+    # ⇒ `crab_thumb_slot_for` answers about a NAMED entry and touches nothing.
+    assert_eq(crab_thumb_pixels_of(0 - 1), crab_thumb_pixels_of(0 - 1),
+      "an absent slot yields the same zeroed scratch every time");
+    assert(crab_thumb_pixels_of(0 - 1) != 0, "...and never a null pointer to draw from");
+    var tscr = alloc(CRAB_PATH_MAX);
+    assert_eq(crab_thumb_slot_for(0, "a.png", tscr), 0 - 1, "no directory, no slot");
+    assert_eq(crab_thumb_slot_for("/tmp", 0, tscr), 0 - 1, "no name, no slot");
+    assert_eq(crab_thumb_slot_for("/tmp", "a.png", 0), 0 - 1, "no scratch, no slot");
+    # ⛔ A NON-IMAGE HAS NO THUMBNAIL AND MUST NOT BE LOOKED UP AS ONE — otherwise a text file next to
+    # a picture in the cache could match a stale path and draw the picture under the text file's name.
+    assert_eq(crab_thumb_slot_for("/tmp", "notes.txt", tscr), 0 - 1, "a non-image has no thumbnail slot");
+
+    # ⭐ THE PROPERTY THE FIX RESTS ON, asserted directly: a lookup does not disturb `crab_th_slot`.
+    crab_tc_clear();
+    var nd1 = crab_tc_claim("/g/cell.png");
+    assert(nd1 >= 0, "the gallery walk claimed a slot");
+    var ndbefore = crab_thumb_pixels();
+    assert_eq(crab_thumb_slot_for("/g", "other.png", tscr), 0 - 1, "a MISS looks nothing up");
+    assert_eq(crab_thumb_pixels(), ndbefore, "...and the step's own slot is untouched by the miss");
+    assert(crab_thumb_slot_for("/g", "cell.png", tscr) >= 0, "a HIT finds the cached slot");
+    assert_eq(crab_thumb_pixels(), ndbefore, "...and the step's own slot is untouched by the hit too");
+    # ⛔ AND THE TWO ANSWERS ARE INDEPENDENT: asking about one entry returns THAT entry's pixels, not
+    # the pixels of whatever the step last handled. This is the whole bug in one assertion.
+    var nd2 = crab_tc_claim("/g/second.png");
+    assert(nd2 != nd1, "a second entry is a different slot");
+    assert_eq(crab_thumb_pixels_of(crab_thumb_slot_for("/g", "cell.png", tscr)), crab_tc_pixels(nd1),
+      "asking about the FIRST entry returns the first entry's pixels...");
+    assert_neq(crab_thumb_pixels_of(crab_thumb_slot_for("/g", "cell.png", tscr)), crab_tc_pixels(nd2),
+      "...and NOT the pixels of the one the step most recently claimed");
+    crab_tc_clear();
+
     # ⚠ ROUND-ROBIN REPLACEMENT, not LRU: a gallery is browsed in index order, so the oldest slot is
     # the one furthest from the eye and an LRU's bookkeeping would cost more than the miss it avoids.
     # Claiming N+1 entries must evict the first.
@@ -3526,14 +3843,29 @@ fn t_gallery(): i64 {
     var cell0 = dh_grid_cell_at(gp, 0);
     var cell1 = dh_grid_cell_at(gp, 1);
     assert_eq(dh_widget_kind(dh_widget_first_child(cell0)), CANVAS, "the cached image cell draws a CANVAS");
-    assert_eq(dh_widget_kind(dh_widget_first_child(cell1)), BOX, "the .txt cell reserves a plain BOX");
+    # ⚠ 0.8.2: the reserved band is a LABEL rather than a BOX, so a refused cell can say WHY. The
+    # invariant these rows protect was never the widget KIND — it is that no CANVAS is drawn over a
+    # slot whose pixels were never written, and that the band keeps its height either way. Both are
+    # asserted directly now, which is stronger than the kind check they replace.
+    assert_neq(dh_widget_kind(dh_widget_first_child(cell1)), CANVAS, "the .txt cell draws no canvas");
+    assert_eq(dh_widget_h(dh_widget_first_child(cell1)), CRAB_THUMB_H,
+      "...and still reserves the band, so the grid does not reflow when a neighbour's picture lands");
+    # ⛔ A NON-IMAGE IS SILENT. It was never a candidate for a thumbnail, so "no decode" would be a
+    # refusal crab never made.
+    assert(t_streq(dh_widget_text(dh_widget_first_child(cell1)), ""), "...and says nothing, being no image");
     assert_eq(dh_widget_h(dh_widget_first_child(cell0)), CRAB_THUMB_H, "the canvas is the thumbnail's height");
     # ⛔ AND A CACHED-BUT-REFUSED IMAGE DRAWS NO CANVAS. Its slot exists and its pixels were never
     # written; a canvas over it would paint the previous occupant of that slot.
     var cell2 = dh_grid_cell_at(gp, 2);
     assert(crab_tc_find(scr) >= 0, "the refused entry really is in the cache");
-    assert_eq(dh_widget_kind(dh_widget_first_child(cell2)), BOX,
-      "a cached-but-REFUSED image reserves the band and draws no canvas");
+    assert_neq(dh_widget_kind(dh_widget_first_child(cell2)), CANVAS,
+      "a cached-but-REFUSED image draws no canvas over its unwritten slot");
+    assert_eq(dh_widget_h(dh_widget_first_child(cell2)), CRAB_THUMB_H, "...and still reserves the band");
+    # ⭐ 0.8.2: AND IT SAYS WHY. This entry was cached as TOO_BIG above, so the cell carries the
+    # cell-width form of the preview's "too large to preview" — the "four differently-named nothings"
+    # rule, finally honoured in the view that shows dozens of them at once.
+    assert(t_streq(dh_widget_text(dh_widget_first_child(cell2)), "too large"),
+      "⛔ ...and NAMES the refusal instead of drawing an anonymous blank");
     # ⛔ THE CELL SIZE IS DERIVED: the picture plus one list row.
     assert_eq(CRAB_GAL_CELL_H, CRAB_THUMB_H + CRAB_GRID_CELL_H, "a gallery cell is a thumbnail plus a name row");
     assert_eq(CRAB_GAL_CELL_W, CRAB_COL_NAME_MIN, "...and as wide as the NAME column's floor");
@@ -3546,8 +3878,13 @@ fn t_gallery(): i64 {
     crab_rs_view(rs, CRAB_VIEW_GALLERY);
     crab_render(gsurf, 0, rs);
     var gp2 = crab_pane_widget(0);
-    assert_eq(dh_widget_kind(dh_widget_first_child(dh_grid_cell_at(gp2, 0))), BOX,
-      "an image with no cached thumbnail reserves the band and draws no canvas");
+    assert_neq(dh_widget_kind(dh_widget_first_child(dh_grid_cell_at(gp2, 0))), CANVAS,
+      "an image with no cached thumbnail draws no canvas");
+    # ⛔⛆ AND IT IS SILENT, WHICH IS THE HALF THAT IS EASY TO GET WRONG. An uncached entry is one the
+    # idle tick has not REACHED yet — not a refusal. Labelling it would report a decode failure that
+    # never happened, on every cell of a gallery the instant it opens.
+    assert(t_streq(dh_widget_text(dh_widget_first_child(dh_grid_cell_at(gp2, 0))), ""),
+      "...and says NOTHING, because 'not decoded yet' is not a refusal");
 
     # ⚠ THE VIEW CONSTANTS CYCLE IN ORDER — `g` steps list -> grid -> gallery -> list, and the
     # wrap in `src/main.cyr` is `> CRAB_VIEW_GALLERY`.
@@ -4668,15 +5005,40 @@ fn t_transfer_plan(): i64 {
     # ⛔⛔ THE SECOND DEFECT, IN ONE ASSERTION. `m` on a folder ran `CRAB_OP_CTREE` — a COPY — and
     # then set the notice `copying folder...`. There is no `CRAB_OP_MTREE` to dispatch to, so the
     # honest answer is a refusal, not a different operation wearing the right label.
-    assert_eq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_NOMOVEDIR,
-      "move: no marks, cursor on a folder -> REFUSED, because no move-tree walk exists");
+    # ⭐ 0.8.2: was an unconditional refusal (`CRAB_PLAN_NOMOVEDIR`). Within ONE filesystem a folder
+    # move is a single `rename` — no walk, no copy, nothing to recurse — and crab refused it anyway,
+    # because the impossible cross-filesystem case was the only one anybody had looked at.
+    # ⇒ The plan is now the ATTEMPT; only rename can know whether the two directories share a
+    # filesystem, so the refusal moved to where that is actually established.
+    assert_eq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_MOVEDIR,
+      "move: no marks, cursor on a folder -> ATTEMPT the rename");
     assert_neq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_TREE,
       "...and specifically NOT the recursive copy it used to run");
+    assert_neq(CRAB_PLAN_MOVEDIR, CRAB_PLAN_SINGLE,
+      "...and not the single-file path either — a folder is not a file");
 
     # ⚠ The four answers are distinct — a plan enum whose members collide would make the dispatch
     # above unfalsifiable.
     assert_neq(CRAB_PLAN_QUEUE, CRAB_PLAN_TREE, "the plan answers are distinct: QUEUE vs TREE");
-    assert_neq(CRAB_PLAN_SINGLE, CRAB_PLAN_NOMOVEDIR, "...and SINGLE vs NOMOVEDIR");
+    assert_neq(CRAB_PLAN_SINGLE, CRAB_PLAN_MOVEDIR, "...and SINGLE vs MOVEDIR");
+
+    # --- 0.8.2: THE DROP IS A MOVE, AND ANSWERS TO THE SAME FUNCTION -------------------------------
+    # ⛔⛆ Drag predates M4's marks and was never revisited: the drop branch read `drag_row` and
+    # nothing else, so dragging with ten files marked moved the ONE under the pointer and discarded
+    # the other nine. Every other verb honoured marks. crab had two descriptions of "move" and they
+    # disagreed.
+    # ⇒ The drop now calls THIS function with `is_move = 1`, so the three rows below ARE the drag's
+    # behaviour rather than a parallel account of it. ⚠ What no host test can reach is that
+    # `src/main.cyr` still calls it — the drop lives inside the agnos `#ifdef`, the same irreducible
+    # gap this function was extracted to shrink.
+    assert_eq(crab_transfer_plan(1, 10, 0), CRAB_PLAN_QUEUE,
+      "drag: ten marked, dragging a file -> the marked set moves, not the row under the pointer");
+    assert_eq(crab_transfer_plan(1, 10, 1), CRAB_PLAN_QUEUE,
+      "drag: ten marked, dragging a FOLDER row -> still the marked set; marks outrank the grab");
+    assert_eq(crab_transfer_plan(1, 0, 0), CRAB_PLAN_SINGLE,
+      "drag: nothing marked -> the dragged row alone, which is what drag always did");
+    assert_eq(crab_transfer_plan(1, 0, 1), CRAB_PLAN_MOVEDIR,
+      "drag: nothing marked, dragging a folder -> attempted, by the SAME rule `m` uses");
     return 0;
 }
 
