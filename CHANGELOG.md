@@ -73,8 +73,16 @@ than remembered, and consistent with the one fact that exists. ⇒ Same discipli
 mount probe before agnos minted `mountlist`#104: **a guess that happens to work is indistinguishable
 from a contract until the day it changes.**
 
-⭐ Filed in full — the fix, the numbering decision, and the toolchain wall — at
+⭐ **Filed IN aethersafha** — `docs/development/issues/2026-09-09-forwards-only-the-left-button.md` —
+because an issue about another repository that lives only in crab is one nobody who could act on it
+will ever read. crab keeps a copy at
 [`docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
+
+⭐⭐ **AND THE CAUSE IS A PIN SKEW, NOT A WALL.** cyrius changed `: stack` enums to return two values;
+`sigil` (pin **6.6.0**) was migrated, `agnostik` and `agnodrm` (both **6.5.35**) were not. The work is
+mechanical: **291 call sites** in agnostik, agnodrm's own set, `cyrius distlib` in each, then
+aethersafha's pin. ⚠ `path` wins over `tag`, so the sibling's `dist/` is what compiles — a source fix
+with no `cyrius distlib` behind it changes nothing.
 
 ### Verified — 0.8.3's cut checks, re-run after the tag
 

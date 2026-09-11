@@ -1,5 +1,9 @@
 # aethersafha forwards only the left button, so no client can see a right-click
 
+> ⚠ **This is crab's COPY. The canonical filing is in aethersafha**, at
+> `docs/development/issues/2026-09-09-forwards-only-the-left-button.md` — an issue about another
+> repository that lives only here is one nobody who could act on it will ever read.
+
 **Status:** 🔴 **OPEN — and BLOCKED BEHIND A SECOND, LARGER PROBLEM.** The fix itself is small and is
 described below. It cannot be made, because **aethersafha does not build on any available toolchain.**
 **Filed by:** crab, 2026-09-09, while closing the M6 interaction gaps (crab 0.8.3).
@@ -83,13 +87,28 @@ they reproduce against the committed `lib/`. They are dependency-versus-dependen
 - `'result_unwrap' expects 2 arguments, got 1`, `'err_code_of' expects 2 arguments, got 1`,
   `'result_unwrap_or' expects 3 arguments, got 2`.
 
-⚠ **And there is nothing newer to pull.** `agnostik 1.5.1`, `agnodrm 1.5.3` and `sigil 3.12.16` are
-each already at their repository's highest tag. `sigil` and `agnostik` disagree with each other about
-the `result_*` API, so no combination of the existing releases resolves.
+### ⭐ THE ACTUAL CAUSE: A PIN SKEW ACROSS THREE REPOS, NOT A MYSTERY
 
-⇒ **Three upstream repos — `sigil`, `agnostik`, `agnodrm` — must be brought up to the 6.6.x language
-and into agreement with each other before aethersafha can be built, tested, or changed at all.**
-That is a far larger piece of work than the button fix, and it is not crab's to do.
+⛔ **cyrius changed `: stack` enum functions to return TWO values** (`var tag, val = f();`).
+`sigil` was migrated for it; `agnostik` and `agnodrm` were not. That is the whole disagreement.
+
+| repo | cyrius pin | migrated for `: stack`? |
+|---|---|---|
+| `sigil` 3.12.16 | **6.6.0** | ✅ yes — hence its 2-arg `result_unwrap` / `result_print_err` |
+| `agnostik` 1.5.1 | **6.5.35** | ❌ no |
+| `agnodrm` 1.5.3 | **6.5.35** | ❌ no |
+
+⚠ Every one is already at its repository's highest tag, so **there is nothing newer to pull** — the
+skew is in the pins, not in the releases.
+
+⇒ **The work is a migration, and it is mechanical.** Bumping `agnostik` to 6.6.1 and building it
+reports **291 call sites** needing `var tag, val = f();`; `agnodrm` has its own set. Then
+`cyrius distlib` in each so aethersafha resolves against fresh dists, then aethersafha's own pin
+moves off the uninstallable `6.5.33`, and only then is the ten-line button fix above reachable.
+
+⚠ **Order matters**: `agnostik` and `agnodrm` first (they are what disagree with `sigil`), dists
+regenerated, then `aethersafha`. `path` overrides mean the sibling's `dist/` is what compiles, not
+the vendored `lib/` — so a source fix with no `cyrius distlib` behind it changes nothing.
 
 ⛔ **crab deliberately shipped nothing rather than route around this.** The two things that would
 have been available — hand-editing `lib/` (forbidden: vendored) or pushing an unverified change to a
