@@ -2,6 +2,68 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.6] — 2026-09-13 — `View` is filled: the last M6 interaction gap
+
+> `git describe --tags` answered `0.8.5` exactly before a word of this was written — 0.8.5 is
+> tagged `4344cb9`, on the remote, CI and Release both green — so `[0.8.5]` below is a record and is
+> left alone. Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Added — ⭐ the menu bar's `View` holds the four display switches the keyboard already has
+
+Since 0.8.0 the bar shipped `View` as a label that opened on nothing (*"that menu has no items
+yet"*). It now drops down **Cycle view · Cycle sort · Preview · Sidebar** — `g` · `s` · `p` · `b`,
+with the real accelerators in the column — and each entry is the key with a label on it: the same
+rewrite-and-fall-through the other menus use, so there is still exactly one implementation of every
+command. The 0.8.3 hoist was the prerequisite: before it, `View ▸ Cycle view` would have been born
+dead exactly as `Open` was, and the roadmap said so.
+
+⛔ **THE IDS LIVE ABOVE `CRAB_MI_COUNT`, WHICH IS THE CONTEXT MENU'S BOUND — AND THAT IS THE DESIGN.**
+`CRAB_MI_VIEW` … `CRAB_MI_SIDEBAR` (6..9) share the four maps (`crab_menu_label` / `_key` / `_accel`
+/ `_enabled`) with the file verbs, and `CRAB_MI_ALL` (10) is the new bound for *is this an item at
+all*; the context menu keeps walking `0..CRAB_MI_COUNT`. A right-click on a file offers what can be
+done TO the file, not how to look at it. Pinned both ways: the render assertion that counts the
+context menu's rows (seven for six items, separator included) fails at eleven if the display items
+leak, and every View slot is asserted to be a display id and never a file verb.
+
+⭐ **A display item is always live.** It acts on the VIEW, not on a row, so an empty pane is no
+reason to grey it — and whether the window can HONOUR a toggle is the key handler's answer (`p` and
+`b` flip the operator's want and refuse out loud when nothing fits). Greying the entry would be a
+second, silent copy of that rule. ⚠ None of the four keys is one the sidebar-focus gate eats, so a
+View pick acts even while the keys live on the sidebar — asserted as the property over all four.
+
+⚠ `View`'s drop-down needs `crab_mb_cell_x(3) + CRAB_MENU_W + CRAB_MENU_MARGIN` — it fits at the
+shipped 380 px, asserted, and one pixel under its rule it does not open, also asserted; the render
+refuses a drop that would clamp under the wrong label, for the keyboard and the pointer alike.
+
+⛔ **`Go` stays empty, with its reasons on record.** The roadmap refused it as a drop-down: an
+11-to-17-row popup at 380×220 is clamped and flipped over both the bar and the status line, `d` is
+not consumed by the drop arm so the delete prompt would draw underneath it, and `Go ▸ Parent` ships
+dead at `/`. The sidebar's keyboard route is `Go`'s shape. The bar label stays because the canvas
+draws it; opening it says so.
+
+⚠ **A note that was wrong by one.** The overlay's *"unexercised defence"* note on the separator
+mapping said it becomes load-bearing *"the moment a bar menu grows a fourth item"*. View grew one
+and nothing moved: `crab_menu_row` shifts indices ABOVE `CRAB_MI_RENAME` (3), and a fourth item is
+index 3. It is the FIFTH. The note, and its twin in the suite, now say so — and the suite asserts
+that index 4 *would* be shifted, so the day it matters is already pinned.
+
+### Verified — the cut checks
+
+`cyrius test` **1790 → 1838 / 0** (+48: the View group, the id-space loops widened to
+`CRAB_MI_ALL`, and the View drop-down rendered — four live rows under its own cell, the last one
+highlighted unmapped) · render_test **53 / 0** · fuzz 100,000 rounds · `fmt --check` clean ·
+coverage **88 %** (265/298) · `vet` + `deny` 0 · `deps --verify` 50 / 0 · host **1,049,568 B**
+`ebe13334…` · `--agnos` **1,090,304 B** `59eeae79…` (+88 / +88 over 0.8.5). Five mutations, each
+caught: View emptied; display items greyed on an empty pane; a file verb leaked into View; Sidebar
+sending `c`; the context menu listing every id. ⭐ **Check four re-run at the cut**, all four `path`
+overrides disabled: 7 deps / 0 errors, lock 3 → 7 commit-pinned, both binaries **byte-identical**,
+1838 / 0 in the scratch copy. ⛔ **Not run on QEMU or iron**; the View pick rides the same
+synthesised-key road as every other bar pick, which the host suite cannot reach past the maps.
+
+⭐ **M6's six interaction gaps are closed — 2 in 0.8.3, 3 in 0.8.5, 1 here.** What M6 still carries
+is gated, not deferred: the 🦀 chrome button (no crab glyph in CP437 — proportional text or an icon
+path) and the held-key repeat number (agnos-runtime, needs the on-target harness).
+
 ## [0.8.5] — 2026-09-13 — the pointer reaches every surface, and the sidebar knows where you are
 
 > ⛔ **`[0.8.4]` BELOW IS RELEASED — tagged `7929ae1`, on the remote, CI and Release both green —

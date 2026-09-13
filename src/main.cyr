@@ -1083,10 +1083,11 @@ fn main(): i64 {
                                     if (u == 0x29) { mb_sel = 0 - 1; u = 0; }              # Esc
                                     if ((u == 0x50) || (u == 0x0B)) { mb_sel = crab_mb_move(mb_sel, 0 - 1); u = 0; }
                                     if ((u == 0x4F) || (u == 0x0F)) { mb_sel = crab_mb_move(mb_sel, 1); u = 0; }
-                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `Go` and `View` are on
-                                    # the bar because the canvas draws them and crab will fill them;
+                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `View` is filled (0.8.6);
+                                    # `Go` is on the bar because the canvas draws it and is EMPTY on
+                                    # purpose — refused as a drop-down, reasons in the roadmap — and
                                     # opening an empty popup would read as a broken menu rather than
-                                    # an unfinished one.
+                                    # a refused one.
                                     if (u == 0x28) {
                                         # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
                                         # row means `dh_list_select` refuses it and the drop-down

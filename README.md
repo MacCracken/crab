@@ -173,11 +173,12 @@ happened rather than showing a blank square.
   the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors
   forward every button as left), left picks and dismisses, and a press with the middle button is
   consumed and ignored — stated rather than left to be discovered.
-- **`View` on the menu bar is empty.** The bar ships File · Edit · Go · View; `View`'s items — the
-  view switches the keyboard already has — are the last M6 interaction gap, and `Go` is deliberately
-  not built as a drop-down: the sidebar's keyboard route is its shape. (Roadmap M6.) ⚠ A line here said
-  *"the sidebar has no keyboard route… `Tab` is unbound"* through two releases after 0.8.3 bound it,
-  and *"no you-are-here marker"* until 0.8.5 lit one; re-read this list at every cut.
+- **`Go` on the menu bar is empty, deliberately.** The bar ships File · Edit · Go · View; `View`
+  holds the display switches (0.8.6), and `Go` is refused as a drop-down — an 11-to-17-row popup at
+  380×220 would cover the bar and the status line, and the delete prompt would draw underneath it.
+  The sidebar's keyboard route is its shape. (Roadmap M6.) ⚠ A line here said *"the sidebar has no
+  keyboard route… `Tab` is unbound"* through two releases after 0.8.3 bound it, *"no you-are-here
+  marker"* until 0.8.5 lit one, and *"`View` is empty"* until 0.8.6; re-read this list at every cut.
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —

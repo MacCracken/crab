@@ -24,12 +24,17 @@
 
 ## Version
 
-**0.8.5 IS CUT** — `VERSION` reads `0.8.5` and the CHANGELOG header agrees, on operator direction,
+**0.8.6 IS CUT** — `VERSION` reads `0.8.6` and the CHANGELOG header agrees, on operator direction,
 2026-09-13. ⛔ **The tag, the commit and the push are the operator's**; until `git ls-remote --tags`
-shows `0.8.5`, **0.8.4** (2026-09-11, `7929ae1`) is the last RELEASED version — on the remote, CI and
-Release both green. ⚠ 0.8.4's CHANGELOG header still reads *"unreleased"*, as 0.8.3's does; both are
-records and are left alone. ⚠ The first half of 0.8.5 was committed as `8bdcbfe` with `VERSION`
-still 0.8.4; `git describe` answered `0.8.4-1-g8bdcbfe` when the cut was written.
+shows `0.8.6`, **0.8.5** (2026-09-13, `4344cb9`) is the last RELEASED version — on the remote, CI and
+Release both green, `git describe` answering `0.8.5` exactly before the cut was written. ⚠ 0.8.4's
+and 0.8.3's CHANGELOG headers still read *"unreleased"*; both are records and are left alone.
+
+**0.8.6 contents** (2026-09-13): the menu bar's **`View` is filled** — Cycle view · Cycle sort ·
+Preview · Sidebar (`g` · `s` · `p` · `b`), display ids 6..9 above `CRAB_MI_COUNT` so the context menu
+never lists them, always live, the same one-implementation rewrite as every other menu entry. `Go`
+stays empty with its reasons on record. **The six M6 interaction gaps are all closed.** 1838 / 0,
+all nine gates green, check four byte-identical. ⚠ Not run on QEMU or iron.
 
 **0.8.5 contents** (2026-09-12/13): all seven deps re-pinned to their 6.6.2 releases (chitra
 1.0.1 → **1.0.3** is the one with content — its P-1 sweep closed a SIGSEGV on the first PNG a
@@ -83,7 +88,7 @@ menu opens under the word `File`).
 ✅ **CLOSED in 0.8.5**: the bar/switcher and context-menu pointer routes, together (the upstream
 gate closed first — aethersafha 0.16.24, on the remote, forwards every button in the numbering
 crab's filing proposed — and crab reads `POINTER_BTN`'s `a` now), and the sidebar's *you are here*
-marker. ⛔ **Still open**: `View`'s items — the last of the six M6 interaction gaps.
+marker. ✅ **CLOSED in 0.8.6**: `View`'s items. **All six M6 interaction gaps are closed.**
 
 **0.8.2** (2026-09-09), on operator direction: the 6.6.1 pin, the
 documentation-currency repair, and **the audit backlog's eight correctness bugs — all closed, each
@@ -506,8 +511,12 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,790 passed / 0 failed**
-  *(0.8.5; 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,838 passed / 0 failed**
+  *(0.8.6; 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+  ⭐ **+48 at 0.8.6** — `t_view_menu` (the display ids sit above the context menu's bound, every
+  View slot is a display item, the accelerator column agrees with the key sent, none is eaten by
+  sidebar focus, always live, the drop fits at 380 px) plus the View drop-down rendered; five
+  mutations, each caught.
   ⭐ **+95 at 0.8.5** — `t_pointer_routes` (+53: the blocked/modal split, the button numbers pinned
   against X11, the separator inverse's round trip for every item, the z-order of
   `crab_pointer_action` — 31 assertions, seven mutations each caught) and `t_sb_here` (+42: the
@@ -573,8 +582,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,049,480 B · `fa588e69…`** *(0.8.5; 1,045,296 at the 6.6.2 dep bump, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* ⚠ the size did not move across the marker while the hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,090,216 B · `3438489f…`** *(0.8.5; 1,085,872 at the dep bump, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
+| x86_64 linux | ✅ builds, **1,049,568 B · `ebe13334…`** *(0.8.6; 1,049,480 at 0.8.5, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,090,304 B · `59eeae79…`** *(0.8.6; 1,090,216 at 0.8.5, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -725,12 +734,12 @@ _None — top-level application._
 
 ⭐ **0.8.2 CLOSED THE AUDIT BACKLOG'S CORRECTNESS SECTION — all eight, plus the recursive-walk
 defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinished from earlier
-stages*. ⭐ **The M6 interaction gaps are down to ONE** (2026-09-13): 0.8.3 gave the sidebar its
-keyboard route; 0.8.5 gives every surface its pointer route — right-click, popup pick and dismiss,
-bar and switcher clicks — on aethersafha 0.16.24's button numbering, and lights the sidebar row the
-active pane is in. Left: `View`'s four items (every target key is reachable since the 0.8.3 hoist).
-Still open beyond them: the absent affordances (no REFRESH key, no flag surface, no overwrite policy)
-and the *Recorded as facts* list.
+stages*. ⭐ **The six M6 interaction gaps are CLOSED** (2026-09-13): 0.8.3 gave the sidebar its
+keyboard route; 0.8.5 gave every surface its pointer route — right-click, popup pick and dismiss,
+bar and switcher clicks — on aethersafha 0.16.24's button numbering, and lit the sidebar row the
+active pane is in; 0.8.6 filled `View`. What remains from that audit: the absent affordances (no
+REFRESH key, no flag surface, no overwrite policy) and the *Recorded as facts* list. M6's two
+GATED items stand (the 🦀 chrome button, the held-key repeat number).
 
 **M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
 0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on

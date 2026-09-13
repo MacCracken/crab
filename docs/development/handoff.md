@@ -1,3 +1,40 @@
+# Handoff — **0.8.6 cut: `View` is filled, and M6's six interaction gaps are all closed.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
+> **0.8.6 IS CUT on operator direction** — `VERSION` = 0.8.6, CHANGELOG `[0.8.6]`, every gate and
+> check four green — **and the commit, the tag and the push are the operator's.** Until
+> `git ls-remote --tags` shows `0.8.6`, **0.8.5** (`4344cb9`, on the remote, CI and Release green)
+> is the last release; `git describe` answered `0.8.5` exactly before the cut was written.
+>
+> ⭐ **What 0.8.6 holds — one thing:** the menu bar's **`View` drop-down** — Cycle view · Cycle sort
+> · Preview · Sidebar, the `g` · `s` · `p` · `b` keys with labels on them. Display ids **6..9, above
+> `CRAB_MI_COUNT`** (the context menu's bound, unchanged) with `CRAB_MI_ALL = 10` as the new
+> "is this an item at all" bound; the four maps (`crab_menu_label` / `_key` / `_accel` / `_enabled`)
+> answer for them, the bar's `crab_mb_item(CRAB_MB_VIEW, j)` is the slice, and a pick is the same
+> rewrite-and-fall-through every other entry uses. Always live (they act on the view, not a row);
+> none of the four keys is eaten by sidebar focus; the drop fits at 380 px. `Go` stays empty with its
+> reasons on record. ⚠ A note that was wrong by one: the separator mapping's "unexercised defence"
+> becomes load-bearing at a FIFTH bar item, not a fourth — index 3 is not above `CRAB_MI_RENAME`;
+> the note and its twin in the suite say so, and the suite pins that index 4 would shift.
+>
+> **Suite 1838 / 0** (+48), render_test 53 / 0, fuzz 100k, fmt clean, coverage 88 % (265/298),
+> vet/deny 0, deps --verify 50 / 0. Host **1,049,568 B** `ebe13334…` · agnos **1,090,304 B**
+> `59eeae79…`. Five mutations, each caught. Check four: 7 / 0, 3 → 7 commit-pinned, byte-identical.
+> ⛔ **NOT run on QEMU or iron** — 0.8.5's pointer arm and this cut's View pick both ride the
+> agnos-only synthesised-key road; 0.8.5's six oracle lines still stand for the run that will.
+> ⚠ **Sequencing that run is the operator's call.**
+>
+> ⭐ **M6 is closed but for its two GATED items** (the 🦀 chrome button — no crab glyph in CP437;
+> the held-key repeat number — agnos-runtime). **Next, ungated:** the absent affordances — a REFRESH
+> key (the source names one as the intended home in two places), a flag surface for `--about`
+> (`docs/development/mascot.md` asks for it by name), and the overwrite policy (an operator decision:
+> replace / keep-both / skip / rename-on-collision, against a load-bearing overwrite guard). Small
+> and cheap: drop the redundant `net` stdlib declaration (its own change; measured same size,
+> different layout). Then M5's remainder — columns/miller (a design question on the two-pane model)
+> and proportional text (crab-side: the 9 px constants) — and M7's daimon decision, which three
+> milestones name and the manifest declares nowhere.
+> ⚠ **The 0.8.5 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.5 cut: the 6.6.2 stack, the pointer reaches every surface, the sidebar knows where you are.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**

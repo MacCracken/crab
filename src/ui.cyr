@@ -1248,13 +1248,18 @@ fn crab_mb_cell_w(i): i64 {
 # bar that defined its own would be a second place for `Delete` to be described, and the two would
 # drift. ⇒ A bar menu is a SELECTION over the existing items, and `crab_menu_label`,
 # `crab_menu_key` and `crab_menu_enabled` answer for both surfaces unchanged.
-# ⚠ `Go` and `View` have no `CRAB_MI_*` equivalents because they are navigation and display, not
-# verbs on a file — they carry their own items below, and `-1` marks a slot that is not one.
+# ⭐ `View` HOLDS THE DISPLAY ITEMS (0.8.6) — `CRAB_MI_VIEW` … `CRAB_MI_SIDEBAR`, ids above
+# `CRAB_MI_COUNT` so the context menu never lists them. Same maps, same rewrite, same one
+# implementation: `View ▸ Cycle view` is the `g` key with a label on it.
+# ⛔ `Go` STAYS EMPTY, WITH ITS REASONS ON RECORD (roadmap, *M6 surfaces*): an 11-to-17-row
+# drop-down at 380×220 is clamped and flipped over BOTH the bar and the status line, `d` is not
+# consumed by the drop arm so the delete prompt would draw underneath it, and `Go ▸ Parent` ships
+# dead at `/`. The sidebar's keyboard route is `Go`'s shape; `-1` marks a slot that is not an item.
 fn crab_mb_item_count(i): i64 {
     if (i == CRAB_MB_FILE) { return 3; }       # Open, New folder..., Rename...
     if (i == CRAB_MB_EDIT) { return 3; }       # Copy, Move, Delete
-    if (i == CRAB_MB_GO)   { return 0; }       # navigation — no file verbs yet
-    if (i == CRAB_MB_VIEW) { return 0; }       # display — no file verbs yet
+    if (i == CRAB_MB_GO)   { return 0; }       # navigation — refused as a drop-down, see above
+    if (i == CRAB_MB_VIEW) { return 4; }       # Cycle view, Cycle sort, Preview, Sidebar
     return 0;
 }
 
@@ -1268,6 +1273,12 @@ fn crab_mb_item(i, j): i64 {
         if (j == 0) { return CRAB_MI_COPY; }
         if (j == 1) { return CRAB_MI_MOVE; }
         if (j == 2) { return CRAB_MI_DELETE; }
+    }
+    if (i == CRAB_MB_VIEW) {
+        if (j == 0) { return CRAB_MI_VIEW; }
+        if (j == 1) { return CRAB_MI_SORT; }
+        if (j == 2) { return CRAB_MI_PREVIEW; }
+        if (j == 3) { return CRAB_MI_SIDEBAR; }
     }
     return 0 - 1;
 }
@@ -1680,7 +1691,16 @@ enum CrabMenuItem {
     CRAB_MI_RENAME = 3;
     CRAB_MI_DELETE = 4;
     CRAB_MI_NEWDIR = 5;
-    CRAB_MI_COUNT  = 6;
+    CRAB_MI_COUNT  = 6;      # ⛔ THE CONTEXT MENU'S count — every verb ON A FILE, and nothing else
+    # ⭐ DISPLAY ITEMS (0.8.6) — the bar's `View` menu. Same maps (`crab_menu_label` / `_key` /
+    # `_accel` / `_enabled`), same rewrite-and-fall-through, one implementation of each — but they
+    # live ABOVE `CRAB_MI_COUNT` so the context menu, which walks `0..CRAB_MI_COUNT`, never shows
+    # them: a right-click on a file offers what can be done TO the file, not how to look at it.
+    CRAB_MI_VIEW    = 6;     # g — cycle list / grid / gallery
+    CRAB_MI_SORT    = 7;     # s — cycle the sort mode
+    CRAB_MI_PREVIEW = 8;     # p — the preview column
+    CRAB_MI_SIDEBAR = 9;     # b — the PLACES sidebar
+    CRAB_MI_ALL     = 10;    # every item id there is; the bound for "is this an item at all"
 }
 
 # @public — the label for item `i`, or "" out of range. Never 0.
@@ -1691,6 +1711,10 @@ fn crab_menu_label(i): i64 {
     if (i == CRAB_MI_RENAME) { return "Rename..."; }
     if (i == CRAB_MI_DELETE) { return "Delete"; }
     if (i == CRAB_MI_NEWDIR) { return "New folder..."; }
+    if (i == CRAB_MI_VIEW)    { return "Cycle view"; }
+    if (i == CRAB_MI_SORT)    { return "Cycle sort"; }
+    if (i == CRAB_MI_PREVIEW) { return "Preview"; }
+    if (i == CRAB_MI_SIDEBAR) { return "Sidebar"; }
     return "";
 }
 
@@ -1704,6 +1728,10 @@ fn crab_menu_key(i): i64 {
     if (i == CRAB_MI_RENAME) { return "r"; }
     if (i == CRAB_MI_DELETE) { return "d"; }
     if (i == CRAB_MI_NEWDIR) { return "n"; }
+    if (i == CRAB_MI_VIEW)    { return "g"; }
+    if (i == CRAB_MI_SORT)    { return "s"; }
+    if (i == CRAB_MI_PREVIEW) { return "p"; }
+    if (i == CRAB_MI_SIDEBAR) { return "b"; }
     return "";
 }
 
@@ -1730,6 +1758,10 @@ fn crab_menu_accel(i): i64 {
     if (i == CRAB_MI_RENAME) { return 0x15; }          # r
     if (i == CRAB_MI_DELETE) { return 0x07; }          # d
     if (i == CRAB_MI_NEWDIR) { return 0x11; }          # n
+    if (i == CRAB_MI_VIEW)    { return 0x0A; }         # g
+    if (i == CRAB_MI_SORT)    { return 0x16; }         # s
+    if (i == CRAB_MI_PREVIEW) { return 0x13; }         # p
+    if (i == CRAB_MI_SIDEBAR) { return 0x05; }         # b
     return 0;
 }
 
@@ -1741,6 +1773,11 @@ fn crab_menu_accel(i): i64 {
 # ⚠ `count == 0` is an EMPTY PANE, where only "New folder" applies — everything else needs a row.
 fn crab_menu_enabled(i, count, isdir, marked): i64 {
     if (i == CRAB_MI_NEWDIR) { return 1; }             # always: it needs no selection
+    # ⭐ A DISPLAY ITEM IS ALWAYS LIVE (0.8.6): it acts on the VIEW, not on a row, so an empty pane
+    # is no reason to grey it. Whether the window can HONOUR a toggle is the key handler's answer —
+    # `p` and `b` flip the operator's want and refuse out loud when nothing fits — and greying the
+    # entry here would be a second, silent copy of that rule.
+    if (i >= CRAB_MI_COUNT) { if (i < CRAB_MI_ALL) { return 1; } }
     if (count <= 0) { return 0; }                      # every other verb needs a row
     if (i == CRAB_MI_OPEN) {
         # ⚠ Open on a directory means DESCEND, which is always legal; on a file it means run, which
@@ -2841,10 +2878,11 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         # ⚠ `crab_menu_row` maps a MODEL index past the separator; a bar menu has none, so its
         # index space and the list's already agree and the mapping must NOT be applied.
         # ⛔ THIS GUARD IS UNEXERCISED DEFENCE TODAY, AND SAYING SO IS THE POINT. `crab_menu_row`
-        # only shifts indices ABOVE `CRAB_MI_RENAME` (3), and the largest bar menu holds three items
-        # (0..2) — so applying the mapping anyway returns the same number and **no test can tell the
-        # difference**. Mutating this line out fails nothing. It becomes load-bearing the moment a
-        # bar menu grows a fourth item, which `Go` and `View` will when M7 fills them. Kept and
+        # only shifts indices ABOVE `CRAB_MI_RENAME` (3), and the largest bar menu holds four items
+        # (0..3, `View` as of 0.8.6) — so applying the mapping anyway returns the same number and
+        # **no test can tell the difference**. Mutating this line out fails nothing. It becomes
+        # load-bearing the moment a bar menu grows a FIFTH item (index 4). ⚠ This note said "a
+        # fourth item" until View grew one and nothing moved: index 3 is not above 3. Kept and
         # labelled rather than deleted, the same way `crab_thumb_draw`'s clip test is.
         var msrow = menusel;
         if (mbmenu < 0) { msrow = crab_menu_row(menusel); }

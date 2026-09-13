@@ -380,7 +380,7 @@ no `#else`. Each fix moved its RULE into a pure function the suite can interroga
 untestable is that `main.cyr` still calls it. **The gap is unchanged in shape and smaller in
 surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0.7.7.
 
-### M6 surfaces that shipped without a full interaction story — **5 of 6 closed: 2 in 0.8.3, 3 in 0.8.5**
+### M6 surfaces that shipped without a full interaction story — ✅ **ALL SIX CLOSED: 2 in 0.8.3, 3 in 0.8.5, 1 in 0.8.6**
 
 > ⭐⭐ **AND THE SWEEP FOUND A SHIPPED BUG NONE OF THE SIX NAMED: `Open` WAS DEAD ON BOTH MENU
 > SURFACES.** Both arms rewrite `u` to the chosen entry's key and fall through to the one
@@ -392,7 +392,7 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
 > bounds read, two stale contracts, and — `[Unreleased]`, 2026-09-13 — **`crab_pointer_blocked`
 > split out of `crab_pointer_modal`**, which the pointer routes were gated on, and **trailing-slash
 > normalisation in the two model builders**, which the *you are here* marker needed. **Phase 0 is
-> complete.** ⭐ **5 of 6 closed.** What the pointer work found on the way: the WHEEL had no modal
+> complete.** ⭐ **6 of 6 closed.** What the pointer work found on the way: the WHEEL had no modal
 > guard at all (a scroll between `d` and `y` moved the selection — 0.8.0's click hole, one input
 > kind over), and the sidebar arm never consumed the double-click pair. Both closed. What the marker
 > found: a 64-byte volume prefix lost its terminator to `BSIZE`. Closed.
@@ -432,9 +432,10 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
   than by absence); pointer MOTION does not move a popup's highlight; and focus on the compositor
   side is still a left-button gesture, so a right-click reaches an unfocused crab without focusing
   its window — aethersafha's policy, not crab's.
-- **`View` should be filled; `Go` should NOT be built as proposed.** ⚠ `View` is four constant items
-  and every target key is now reachable (the hoist above was its prerequisite — `View ▸ Cycle view`
-  would have been born dead exactly as `Open` was). ⛔ **`Go` is refused with reasons**: an 11-to-17
+- ✅ **`View` is filled — CLOSED (0.8.6)**: Cycle view · Cycle sort · Preview · Sidebar, the display
+  switches the keyboard has (`g` · `s` · `p` · `b`), as display ids above `CRAB_MI_COUNT` so the
+  context menu never lists them. The 0.8.3 hoist was its prerequisite — `View ▸ Cycle view` would
+  have been born dead exactly as `Open` was. ⛔ **`Go` stays EMPTY, refused with reasons**: an 11-to-17
   row drop-down at 380×220 is clamped and flipped to cover **both the bar and the status line**, and
   `d` is not consumed by the drop arm — so the delete prompt would be drawn *underneath the menu*,
   defeating the ⛔⛆ "THE PROMPT NAMES WHAT DIES" written after five system binaries left an iron box.

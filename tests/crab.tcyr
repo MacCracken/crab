@@ -2510,12 +2510,12 @@ fn main() {
     # exists, and the accelerator column says which — a menu that could do something the keyboard
     # cannot is a second implementation drifting from the first.
     var mi = 0;
-    while (mi < CRAB_MI_COUNT) {
+    while (mi < CRAB_MI_ALL) {
         assert(load8(crab_menu_label(mi)) != 0, "every menu item has a label");
         assert(load8(crab_menu_key(mi)) != 0, "...and an accelerator");
         mi = mi + 1;
     }
-    assert_eq(load8(crab_menu_label(CRAB_MI_COUNT)), 0, "out of range is the empty string, not garbage");
+    assert_eq(load8(crab_menu_label(CRAB_MI_ALL)), 0, "out of range is the empty string, not garbage");
     assert_eq(load8(crab_menu_key(0 - 1)), 0, "...in both directions");
     # ⚠ The labels must differ, or the menu is decorative.
     assert_eq(t_streq(crab_menu_label(CRAB_MI_COPY), crab_menu_label(CRAB_MI_MOVE)), 0, "copy and move read differently");
@@ -2661,6 +2661,7 @@ fn main() {
     t_pointer_modal();
     t_pointer_routes();
     t_sb_here();
+    t_view_menu();
     t_menubar_enabled();
 
     # ================================================================================
@@ -3911,11 +3912,11 @@ fn t_gallery(): i64 {
     # ⛔ EVERY ITEM MUST HAVE ONE. A 0 here is a menu entry that consumes the keypress, closes the
     # menu, and does nothing — which is exactly the shape the dead `Open` had.
     var mai = 0;
-    while (mai < CRAB_MI_COUNT) {
+    while (mai < CRAB_MI_ALL) {
         assert(crab_menu_accel(mai) != 0, "every menu item rewrites to a real key");
         mai = mai + 1;
     }
-    assert_eq(crab_menu_accel(CRAB_MI_COUNT), 0, "...and one past the end has none");
+    assert_eq(crab_menu_accel(CRAB_MI_ALL), 0, "...and one past the end has none");
     assert_eq(crab_menu_accel(0 - 1), 0, "...nor a negative id");
 
     # ⭐⭐ THE AGREEMENT THAT MATTERS: the accelerator the operator READS in the menu must be the key
@@ -4593,6 +4594,77 @@ fn t_sb_here(): i64 {
     return 0;
 }
 
+fn t_view_menu(): i64 {
+    test_group("crab — 0.8.6: View holds the display switches, and the context menu does not");
+    # ⛔ THE IDS SIT ABOVE `CRAB_MI_COUNT`, WHICH IS THE CONTEXT MENU'S BOUND. That is the whole
+    # design: one set of maps, and the file menu never lists a display toggle.
+    assert(CRAB_MI_VIEW >= CRAB_MI_COUNT, "Cycle view is not a context-menu item");
+    assert(CRAB_MI_SIDEBAR >= CRAB_MI_COUNT, "...nor is Sidebar");
+    assert(CRAB_MI_SIDEBAR < CRAB_MI_ALL, "...but it IS an item");
+    assert_eq(CRAB_MI_ALL - CRAB_MI_COUNT, 4, "exactly four display items");
+    # ---- the slice the bar shows --------------------------------------------------------------
+    assert_eq(crab_mb_item(CRAB_MB_VIEW, 0), CRAB_MI_VIEW, "View[0] = Cycle view");
+    assert_eq(crab_mb_item(CRAB_MB_VIEW, 1), CRAB_MI_SORT, "View[1] = Cycle sort");
+    assert_eq(crab_mb_item(CRAB_MB_VIEW, 2), CRAB_MI_PREVIEW, "View[2] = Preview");
+    assert_eq(crab_mb_item(CRAB_MB_VIEW, 3), CRAB_MI_SIDEBAR, "View[3] = Sidebar");
+    assert_eq(crab_mb_item(CRAB_MB_VIEW, 4), 0 - 1, "View[4] is not a slot");
+    var vj = 0;
+    var vok = 1;
+    while (vj < crab_mb_item_count(CRAB_MB_VIEW)) {
+        var vmi = crab_mb_item(CRAB_MB_VIEW, vj);
+        if (vmi < CRAB_MI_COUNT) { vok = 0; }
+        if (vmi >= CRAB_MI_ALL) { vok = 0; }
+        vj = vj + 1;
+    }
+    assert_eq(vok, 1, "every View slot is a display item and none is a file verb");
+    # ---- labels, keys, and the keys they SEND -----------------------------------------------
+    assert(t_streq(crab_menu_key(CRAB_MI_VIEW), "g"), "Cycle view really is g");
+    assert(t_streq(crab_menu_key(CRAB_MI_SORT), "s"), "Cycle sort really is s");
+    assert(t_streq(crab_menu_key(CRAB_MI_PREVIEW), "p"), "Preview really is p");
+    assert(t_streq(crab_menu_key(CRAB_MI_SIDEBAR), "b"), "Sidebar really is b");
+    # ⛔ THE ACCELERATOR COLUMN AGREES WITH WHAT THE ENTRY SENDS — the property, over all four.
+    var ai = CRAB_MI_COUNT;
+    var agree = 1;
+    while (ai < CRAB_MI_ALL) {
+        if (crab_key_char(crab_menu_accel(ai), 0) != load8(crab_menu_key(ai))) { agree = 0; }
+        ai = ai + 1;
+    }
+    assert_eq(agree, 1, "for every display item, the key the menu shows is the key it sends");
+    assert_eq(crab_menu_accel(CRAB_MI_VIEW), 0x0A, "Cycle view rewrites to g's usage");
+    assert_eq(crab_menu_accel(CRAB_MI_SIDEBAR), 0x05, "Sidebar rewrites to b's usage");
+    # ⛔ AND NONE OF THEM IS A KEY THE SIDEBAR-FOCUS GATE EATS: a View pick must act even while the
+    # keys live on the sidebar — it acts on the VIEW, not on a pane the operator is not driving.
+    var ei = CRAB_MI_COUNT;
+    var eaten = 0;
+    while (ei < CRAB_MI_ALL) {
+        if (crab_sb_key(crab_menu_accel(ei), 0) == CRAB_SBK_EAT) { eaten = eaten + 1; }
+        ei = ei + 1;
+    }
+    assert_eq(eaten, 0, "no display item's key is eaten by sidebar focus");
+    # ---- always enabled: they act on the view, not a row ------------------------------------
+    assert_eq(crab_menu_enabled(CRAB_MI_VIEW, 0, 0, 0), 1, "Cycle view is live on an EMPTY pane");
+    assert_eq(crab_menu_enabled(CRAB_MI_PREVIEW, 0, 0, 0), 1, "...and Preview");
+    assert_eq(crab_menu_enabled(CRAB_MI_SORT, 0, 0, 0), 1, "...and Cycle sort");
+    assert_eq(crab_menu_enabled(CRAB_MI_SIDEBAR, 0, 0, 0), 1, "...and Sidebar");
+    assert_eq(crab_menu_enabled(CRAB_MI_SIDEBAR, 5, 0, 3), 1, "...and with a marked set, which greys Rename");
+    assert_eq(crab_menu_enabled(CRAB_MI_RENAME, 5, 0, 3), 0, "  (control: Rename IS greyed by a marked set)");
+    assert_eq(crab_mb_item_first(CRAB_MB_VIEW, 0, 0, 0), 0, "View opens onto its first item even on an empty pane");
+    # ---- the drop fits at the shipped window ------------------------------------------------
+    assert_eq(crab_mb_drop_fit(380, CRAB_MB_VIEW), 1, "View's drop-down opens under its own cell at 380 px");
+    assert_eq(crab_mb_drop_fit(crab_mb_cell_x(CRAB_MB_VIEW) + CRAB_MENU_W + CRAB_MENU_MARGIN - 1, CRAB_MB_VIEW), 0,
+      "...and one pixel narrower than its rule, it does not");
+    # ---- the context menu never lists a display item ------------------------------------------
+    var ci = 0;
+    var leak = 0;
+    while (ci < CRAB_MI_COUNT) {
+        if (crab_menu_row(ci) > CRAB_MI_COUNT) { leak = 1; }
+        ci = ci + 1;
+    }
+    assert_eq(leak, 0, "every context-menu item maps to a row within its own list");
+    assert_eq(crab_menu_item_at(crab_menu_row(CRAB_MI_NEWDIR) + 1), 0 - 1, "the row after the last file verb is no item — Cycle view is not there");
+    return 0;
+}
+
 fn t_pointer_routes(): i64 {
     test_group("crab — 0.8.5: the pointer is BLOCKED by a question and CAPTURED by a popup");
     # ⭐ The split: `crab_pointer_blocked` is the half with nothing to click; `crab_pointer_modal`
@@ -4690,8 +4762,8 @@ fn t_menubar(): i64 {
     assert_eq(t_streq(crab_mb_label(CRAB_MB_COUNT), ""), 1, "out of range is empty, not a stray pointer");
     # ⛔ TAGS AND INDEX ARE ABSENT ON PURPOSE. The canvas draws six; they are M7 (daimon) and have no
     # items at all. A menu that opens on nothing is a promise crab is not keeping.
-    assert_eq(crab_mb_item_count(CRAB_MB_GO), 0, "Go has no items yet");
-    assert_eq(crab_mb_item_count(CRAB_MB_VIEW), 0, "...nor View");
+    assert_eq(crab_mb_item_count(CRAB_MB_GO), 0, "Go has no items — refused as a drop-down, with reasons on record");
+    assert_eq(crab_mb_item_count(CRAB_MB_VIEW), 4, "View has four (0.8.6) — the display switches the keyboard has");
     assert_eq(crab_mb_item_count(CRAB_MB_FILE), 3, "File has three");
     assert_eq(crab_mb_item_count(CRAB_MB_EDIT), 3, "Edit has three");
 
@@ -4782,12 +4854,34 @@ fn t_menubar(): i64 {
     # mapping must NOT be applied — item 1 is row 1.
     assert_eq(dh_list_selected(drop), 1, "the highlighted row is the item index, unmapped");
     # ⛔ AND THAT ASSERTION CANNOT CURRENTLY FAIL, WHICH IS WORTH SAYING. `crab_menu_row` shifts only
-    # indices above `CRAB_MI_RENAME` (3) and the largest bar menu holds three items, so applying the
-    # context menu's separator mapping here returns the SAME number — mutating the guard out fails
-    # nothing. It starts mattering when a bar menu reaches a fourth item, which `Go` and `View` will
-    # when M7 fills them. Recorded so the next reader knows this row is defence, not proof.
+    # indices above `CRAB_MI_RENAME` (3) and the largest bar menu holds FOUR items (View, 0.8.6;
+    # index 3 is not above 3), so applying the context menu's separator mapping here returns the
+    # SAME number — mutating the guard out fails nothing. It starts mattering at a FIFTH item.
+    # ⚠ This note said "a fourth item" until View grew one and nothing moved. Recorded so the next
+    # reader knows this row is defence, not proof.
     assert_eq(crab_menu_row(0), 0, "the mapping is the identity below the separator...");
-    assert_eq(crab_menu_row(2), 2, "...across every index a bar menu can currently hold");
+    assert_eq(crab_menu_row(3), 3, "...across every index a bar menu can currently hold (View's last is 3)");
+    assert_neq(crab_menu_row(4), 4, "  (a fifth item WOULD be shifted — that is when the guard bites)");
+
+    # ---- View (0.8.6): the drop holds its four display items and lands under its own cell --------
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, bb, 2, "/bin", bz, bm, CRAB_PANE_OK, 0, 0, bsl);
+    crab_rs_pane(rs, 1, brb, 1, "/etc", bz, bm, CRAB_PANE_OK, 0, 0, bsr);
+    crab_rs_menubar(rs, CRAB_MB_VIEW, CRAB_MB_VIEW, 3);
+    crab_render(bsurf, 0, rs);
+    var vdrop = crab_menu_list();
+    assert(vdrop != 0, "View's drop-down is built");
+    assert_eq(dh_list_count(vdrop), 4, "...holding its four display items, no separator");
+    assert_eq(dh_widget_x(vdrop), crab_mb_cell_x(CRAB_MB_VIEW), "...under View's own cell");
+    assert_eq(dh_list_selected(vdrop), 3, "...with the LAST item highlighted, unmapped (index 3 = row 3)");
+    var vr = 0;
+    var vlive = 1;
+    while (vr < 4) {
+        if (dh_widget_inert(dh_list_row_at(vdrop, vr)) == 1) { vlive = 0; }
+        vr = vr + 1;
+    }
+    assert_eq(vlive, 1, "every View row is live — display items are never greyed");
+    assert(dh_widget_y(vdrop) + dh_widget_h(vdrop) <= 260, "...and fully inside the window");
     assert_eq(crab_menu_row(4), 5, "...and only diverges above it, where no bar menu reaches yet");
     return 0;
 }
