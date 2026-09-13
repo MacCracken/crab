@@ -130,6 +130,24 @@ fn crab_key_acts(mods): i64 {
     return 0;
 }
 
+# @public — is usage `u` a MODIFIER key's own edge (0xE0..0xE7: LCtrl LShift LAlt LGui RCtrl RShift
+# RAlt RGui)? 1 = yes, and crab must not act on it.
+#
+# ⛔⛔ THE COMPOSITOR FORWARDS MODIFIER EDGES, AND crab TREATED THEM AS KEYS. aethersafha delivers a
+# Ctrl or Shift press as an ordinary key event (bhumi maps the boot report's modifier byte to usages
+# 0xE0..0xE7), and until 0.8.7 crab's dispatch took that press like any other: it CANCELLED a pending
+# delete confirmation (`confirm_del` answers to any key), cleared a notice, and cleared the held-key
+# repeat. As of aethersafha 0.16.25 every chrome key is a Ctrl chord — the chord's own key is
+# swallowed by the compositor but the Ctrl edge still comes through — so the operator pressing
+# Ctrl+Q to leave the desktop would first have answered "no" to a prompt they were reading. A
+# modifier edge means nothing to crab on its own (Shift for capital letters is roadmap work and would
+# read this same usage as STATE, not as a keystroke); it is ignored before any gate sees it.
+fn crab_key_is_modifier(u): i64 {
+    if (u < 0xE0) { return 0; }
+    if (u > 0xE7) { return 0; }
+    return 1;
+}
+
 # ⭐⭐ HELD-KEY REPEAT (M2, *deferral #06* second half), AND IT NEEDED NO KERNEL CHANGE.
 # ⛔ AN EARLIER NOTE HERE CLAIMED IT WAS BLOCKED ON agnos FOR WANT OF A BOUNDED WAIT. THAT WAS WRONG,
 # and it was wrong because it read syscall SIGNATURES and stopped there: `#14 pause` takes no timeout
@@ -227,6 +245,259 @@ enum CrabPointer {
     # dhancha's `DH_DRAG_THRESHOLD`, and the same value — a hand resting on a mouse jitters by a
     # pixel or two, and a drag that triggers on jitter would move files on an intended click.
     CRAB_DRAG_THRESHOLD = 4;
+}
+
+# =================================================================================================
+# THE OVERWRITE POLICY (0.8.7) — ask, per collision, with an "all" that the operator arms first.
+# =================================================================================================
+#
+# ⛔⛆ UNTIL NOW A COLLISION ENDED THE WHOLE WALK. `crab_fs_exists` before every create returned
+# `CRAB_FS_EEXIST` and `crab_walk_stop` tore the operation down — so copying a folder of 500 files
+# into one that already held ONE of them moved nothing, and the operator was told *"something of that
+# name is already there"* without being told which name or being offered anything to do about it.
+#
+# ⭐ **THE POLICY IS THE OPERATOR'S (2026-09-13): ASK, PER COLLISION.** Four answers — **replace ·
+# skip · keep both · cancel** — and an **all** that applies the next answer to every remaining
+# collision in this operation.
+#
+# ⛔⛔ "ALL" IS ARMED BEFORE THE VERB, NOT SPELLED BY A CAPITAL, because **shift is not on the wire**
+# (`mods` carries the press/release edge; `crab_key_char`'s shift flag is hard-coded to 0 at its only
+# call site). `R` for replace-all is the obvious design and it is unreachable on this stack. ⇒ `a`
+# TOGGLES the all-flag, the prompt shows `[all]` while it is armed, and the next `r`/`s`/`k` applies
+# to every remaining collision. Two keystrokes, both lowercase, and the armed state is visible before
+# it is acted on — which a capital letter would not be.
+#
+# ⛔ CANCEL IS Esc AND ONLY Esc, and it means what Esc already means on a running transfer: stop, and
+# for a copy-tree, clean up what was written. A collision prompt that also answered `c` would put
+# "cancel" one key away from "copy" on a surface where the next keystroke can destroy a file.
+enum CrabOvAnswer {
+    CRAB_OVA_NONE     = 0;    # not an answer — the key belongs to somebody else
+    CRAB_OVA_REPLACE  = 1;
+    CRAB_OVA_SKIP     = 2;
+    CRAB_OVA_KEEPBOTH = 3;
+    CRAB_OVA_CANCEL   = 4;
+    CRAB_OVA_ALL      = 5;    # toggles the all-flag; applies to the NEXT answer
+}
+
+# The sticky policy for the rest of this operation. `ASK` is the default and the only state that
+# stops the walk; the other three are what an armed `a` leaves behind.
+enum CrabOvPolicy {
+    CRAB_OVP_ASK      = 0;
+    CRAB_OVP_REPLACE  = 1;
+    CRAB_OVP_SKIP     = 2;
+    CRAB_OVP_KEEPBOTH = 3;
+}
+
+# @public — what key `u` answers at a collision prompt. -> a `CRAB_OVA_*`.
+# ⚠ These are HID usages, the same space every other binding reads.
+fn crab_ov_answer(u): i64 {
+    if (u == 0x15) { return CrabOvAnswer.CRAB_OVA_REPLACE; }     # r — replace
+    if (u == 0x16) { return CrabOvAnswer.CRAB_OVA_SKIP; }        # s — skip
+    if (u == 0x0E) { return CrabOvAnswer.CRAB_OVA_KEEPBOTH; }    # k — keep both
+    if (u == 0x04) { return CrabOvAnswer.CRAB_OVA_ALL; }         # a — arm "all"
+    if (u == 0x29) { return CrabOvAnswer.CRAB_OVA_CANCEL; }      # Esc — cancel the operation
+    return CrabOvAnswer.CRAB_OVA_NONE;
+}
+
+# @public — the policy an answer leaves behind, given whether "all" was armed. -> a `CRAB_OVP_*`.
+# ⚠ Without `all` the policy stays `ASK`, so the NEXT collision asks again — that is the whole point
+# of a per-collision prompt. With `all` armed, the answer becomes the policy for the rest of the run.
+fn crab_ov_policy_after(answer, all_armed): i64 {
+    if (all_armed == 0) { return CrabOvPolicy.CRAB_OVP_ASK; }
+    if (answer == CrabOvAnswer.CRAB_OVA_REPLACE) { return CrabOvPolicy.CRAB_OVP_REPLACE; }
+    if (answer == CrabOvAnswer.CRAB_OVA_SKIP) { return CrabOvPolicy.CRAB_OVP_SKIP; }
+    if (answer == CrabOvAnswer.CRAB_OVA_KEEPBOTH) { return CrabOvPolicy.CRAB_OVP_KEEPBOTH; }
+    return CrabOvPolicy.CRAB_OVP_ASK;
+}
+
+# @public — what a standing policy does to the NEXT collision without asking. -> a `CRAB_OVA_*`,
+# or NONE when the policy is ASK (meaning: stop and put the question up).
+fn crab_ov_auto(policy): i64 {
+    if (policy == CrabOvPolicy.CRAB_OVP_REPLACE) { return CrabOvAnswer.CRAB_OVA_REPLACE; }
+    if (policy == CrabOvPolicy.CRAB_OVP_SKIP) { return CrabOvAnswer.CRAB_OVA_SKIP; }
+    if (policy == CrabOvPolicy.CRAB_OVP_KEEPBOTH) { return CrabOvAnswer.CRAB_OVA_KEEPBOTH; }
+    return CrabOvAnswer.CRAB_OVA_NONE;
+}
+
+# @public — the prompt, into `dst` (cap bytes). -> the length written, or -1.
+#
+# ⛔ IT NAMES THE FILE, for the reason the delete prompt names what dies: "something is already
+# there" is a sentence the operator cannot act on, and the answer they are about to give destroys
+# one of two files they cannot tell apart. ⚠ The name is truncated to what fits rather than dropped.
+var CRAB_OV_PROMPT_CAP = 200;
+fn crab_ov_prompt(dst, cap, name, all_armed): i64 {
+    if (dst == 0) { return -1; }
+    if (cap < 64) { return -1; }
+    var w = 0;
+    w = w + crab_strcpy_n(dst + w, "exists: ", cap - w);
+    if (name != 0) {
+        if (load8(name) != 0) {
+            # ⚠ Leave room for the answer list: the name yields, never the keys.
+            var room = cap - w - 56;
+            if (room > 1) { w = w + crab_strcpy_n(dst + w, name, room); }
+        }
+    }
+    if (all_armed == 1) { w = w + crab_strcpy_n(dst + w, "  [all] ", cap - w); }
+    else { w = w + crab_strcpy_n(dst + w, "  ", cap - w); }
+    w = w + crab_strcpy_n(dst + w, "r replace  s skip  k keep both  a all  Esc stop", cap - w);
+    return w;
+}
+
+# @public — the keep-both name for `name` at attempt `n` (2, 3, 4…), into `dst` (cap bytes).
+# -> the length written, or -1 if it will not fit.
+#
+# ⛔ THE SUFFIX GOES BEFORE THE EXTENSION, `report (2).txt` not `report.txt (2)`, because the
+# extension is what every other program on the disk dispatches on — a copy that renames
+# `photo.png` to `photo.png (2)` produces a file nothing will open.
+# ⚠ A DOTFILE HAS NO EXTENSION. `.bashrc` is a name that begins with a dot, not an empty stem with a
+# `bashrc` extension, so the split ignores a dot at position 0 — otherwise the copy would be
+# ` (2).bashrc`, which is a different dotfile and sorts somewhere else entirely.
+# ⚠ The LAST dot wins (`archive.tar.gz` → `archive.tar (2).gz`), which is what a human reads as the
+# extension even though the compound one is arguably `.tar.gz`. Stated because it is a choice.
+fn crab_ov_keepboth_name(dst, cap, name, n): i64 {
+    if (dst == 0) { return -1; }
+    if (name == 0) { return -1; }
+    var nl = crab_cstr_len(name, cap);
+    if (nl < 0) { return -1; }
+    if (nl == 0) { return -1; }
+    if (n < 2) { return -1; }
+    # Find the last dot that is not the first byte.
+    var dot = 0 - 1;
+    var i = 1;
+    while (i < nl) {
+        if (load8(name + i) == 46) { dot = i; }
+        i = i + 1;
+    }
+    var stem = nl;
+    if (dot >= 0) { stem = dot; }
+    # " (NN)" — the digits, then the closing paren.
+    var digits = 1;
+    var probe = n;
+    while (probe >= 10) { digits = digits + 1; probe = probe / 10; }
+    var total = nl + 3 + digits;                   # " (" + digits + ")"
+    if (total >= cap) { return -1; }
+    var w = 0;
+    while (w < stem) { store8(dst + w, load8(name + w)); w = w + 1; }
+    store8(dst + w, 32); w = w + 1;                # ' '
+    store8(dst + w, 40); w = w + 1;                # '('
+    # Write the digits most-significant first.
+    var place = 1;
+    var k = 1;
+    while (k < digits) { place = place * 10; k = k + 1; }
+    var rest = n;
+    while (place > 0) {
+        var d = rest / place;
+        store8(dst + w, 48 + d); w = w + 1;
+        rest = rest - d * place;
+        place = place / 10;
+    }
+    store8(dst + w, 41); w = w + 1;                # ')'
+    var j = stem;
+    while (j < nl) { store8(dst + w, load8(name + j)); w = w + 1; j = j + 1; }
+    store8(dst + w, 0);
+    return w;
+}
+
+# =================================================================================================
+# THE FLAG SURFACE (0.8.7) — `crab --help`, `crab --about`, and an unknown flag that says so.
+# =================================================================================================
+#
+# ⛔⛆ crab PARSED POSITIONAL PATHS AND NOTHING ELSE, so `crab --about` — which
+# `docs/development/mascot.md` asks for BY NAME — could not be built, and `crab --anything` was read
+# as a PATH and refused with "left path unusable", which names the wrong problem. A flag surface is
+# the affordance that was missing, not the about screen.
+#
+# ⛔ A FLAG IS NEVER AMBIGUOUS WITH A PATH, and that is not luck: `crab_path_usable` requires an
+# ABSOLUTE path, so anything beginning with `-` cannot be one. ⇒ An unrecognised `-x` is a FLAG crab
+# does not know, never a path — and it is refused by name rather than mis-diagnosed.
+#
+# ⚠ **NO `--version`, AND THE ABSENCE IS DELIBERATE.** `VERSION` at the repo root is the single
+# source of truth (CLAUDE.md), the manifest interpolates it (`version = "${file:VERSION}"`), and
+# cyrius offers no build-time define that would reach a source file — so a `--version` string would
+# be a SECOND copy of the number, drifting at the first cut nobody remembered. That is the exact
+# failure aethersafha's `version-bump.sh` carries a ⛔⛆ about. It becomes possible the day the
+# toolchain can inject the manifest's version; until then crab does not claim a version it cannot
+# keep true.
+enum CrabFlag {
+    CRAB_FLAG_NONE    = 0;    # not a flag — a positional argument
+    CRAB_FLAG_HELP    = 1;    # -h · --help
+    CRAB_FLAG_ABOUT   = 2;    # --about
+    CRAB_FLAG_UNKNOWN = 3;    # begins with '-' and is none of the above
+}
+
+# @public — is `arg` a flag at all? 1 = it begins with '-'. An empty string is not.
+fn crab_arg_is_flag(arg): i64 {
+    if (arg == 0) { return 0; }
+    if (load8(arg) != 45) { return 0; }            # '-' is 45
+    return 1;
+}
+
+# @public — which flag `arg` is. -> a `CRAB_FLAG_*`.
+# ⚠ `-` ALONE IS UNKNOWN, not none: it begins with `-`, so it is not a path, and reading it as one
+# would hand `crab_path_usable` a string it would refuse for the wrong reason.
+fn crab_flag_of(arg): i64 {
+    if (crab_arg_is_flag(arg) == 0) { return CrabFlag.CRAB_FLAG_NONE; }
+    if (crab_streq_n(arg, "-h", 3) == 1) { return CrabFlag.CRAB_FLAG_HELP; }
+    if (crab_streq_n(arg, "--help", 7) == 1) { return CrabFlag.CRAB_FLAG_HELP; }
+    if (crab_streq_n(arg, "--about", 8) == 1) { return CrabFlag.CRAB_FLAG_ABOUT; }
+    return CrabFlag.CRAB_FLAG_UNKNOWN;
+}
+
+# @public — the FIRST flag in the argument vector, or NONE. `out_idx` (8 bytes) takes its index so a
+# refusal can name the argument it refused.
+#
+# ⛔ THE FIRST ONE WINS, AND IT IS SCANNED BEFORE ANY PATH IS ADOPTED. `crab --about /bin` prints and
+# leaves; `crab /bin --about` does too. A flag that only counted when it came first would make the
+# order load-bearing for no reason, and an unknown flag that ran the GUI anyway would be a typo the
+# operator never learns about.
+fn crab_first_flag(n, out_idx): i64 {
+    store64(out_idx, 0 - 1);
+    var i = 1;                                     # argv(0) is the program path
+    while (i < n) {
+        var f = crab_flag_of(argv(i));
+        if (f != CrabFlag.CRAB_FLAG_NONE) {
+            store64(out_idx, i);
+            return f;
+        }
+        i = i + 1;
+    }
+    return CrabFlag.CRAB_FLAG_NONE;
+}
+
+# @public — the `k`-th POSITIONAL argument (0-based), skipping flags, or 0 if there is none.
+# ⚠ This is what keeps `crab /bin /` working unchanged: the paths are the non-flag arguments in the
+# order they were given, not `argv(1)` and `argv(2)` by position.
+fn crab_positional(n, k): i64 {
+    var seen = 0;
+    var i = 1;
+    while (i < n) {
+        var a = argv(i);
+        if (crab_arg_is_flag(a) == 0) {
+            if (seen == k) { return a; }
+            seen = seen + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# @public — the help text. One string, so the suite can read it and `crab_say` can print it.
+# ⚠ IT LISTS THE KEYS, because nothing else does: the menu bar shows six verbs behind `F10` and the
+# context menu the same six, and every other binding — the views, the sort, the sidebar, refresh — is
+# discoverable only by being told. A file manager whose keys exist nowhere in writing is one an
+# operator has to be taught by a person.
+fn crab_help_text(): i64 {
+    return "crab — the sovereign Cyrius-native file manager for AGNOS\n\nusage: crab [LEFT] [RIGHT]\n  LEFT, RIGHT   absolute paths to open in the two panes (default /bin and /)\n\n  -h, --help    this text\n      --about   who Bueller is\n\nkeys:\n  arrows/hjkl   move · Enter descend or open · Backspace up\n  Space         mark · c copy · m move · r rename · n new folder · d delete\n  g             cycle list/grid/gallery · s cycle sort · p preview · b sidebar\n  u             refresh both panes · Tab sidebar focus · F10 menu bar\n  Menu key      the context menu; right-click does the same\n\n⚠ Esc cancels a transfer or closes a popup. On the AGNOS desktop the compositor\n  owns Ctrl+Q (quit), Ctrl+Tab (switch windows) and Ctrl+F4-F10 (window ops).\n";
+}
+
+# @public — the about text. ⛔⛔ READ `docs/development/mascot.md` BEFORE EDITING THIS, AND DO NOT
+# "SIMPLIFY" IT. The joke is deliberately indirect: Rust's mascot is Ferris the crab, crab replaces
+# the Rust interim, and the mascot is named **Bueller** — the surname — so it implies Ferris without
+# ever saying it. The Ben-Stein roll-call is the last line and is NOT explained; explaining it is
+# what kills it. ⚠ The doc's discipline, verbatim: *"subtle and infrequent… Do not make it loud or
+# frequent — the whole thing dies if it's trying too hard."*
+fn crab_about_text(): i64 {
+    return "crab 🦀 — the sovereign Cyrius-native file manager for AGNOS.\nDual-pane, keyboard-first, on the dhancha/setu desktop stack.\nGPL-3.0-only. The hermit crab carries its $HOME and reaches out to grab.\n\nThe mascot is Bueller.\n\n...anyone? ...anyone?\n";
 }
 
 # =================================================================================================
@@ -1112,11 +1383,15 @@ enum CrabFs {
     CRAB_FS_EBUSY    = -18;    # a transfer is already in flight — crab runs one at a time
     CRAB_FS_ELOOP    = -19;    # the destination is inside the source tree
     CRAB_FS_EISDIR   = -20;    # a folder was handed to the single-entry copy, which cannot carry one
+    CRAB_FS_ECANCEL  = -22;    # the collision prompt was answered with Esc — cancel the operation
     # ⭐ NOT A REFUSAL — "rename cannot do this, so the STEPPED copy must". Returned only by
     # `crab_fs_move_rename`, and the one `CRAB_FS_*` a caller must not print: it is an instruction to
     # the caller, not an answer for the operator. `crab_fs_msg` still gives it a sentence, because a
     # code that reaches the status line with no text is worse than one with the wrong emphasis.
     CRAB_FS_EXDEV    = -21;    # the rename was refused; the caller should start a stepped copy
+    # ⚠ AN INSTRUCTION TO THE CALLER, like EXDEV — never a status line. `crab_op_ov_answer` returns it
+    # when the collision prompt was answered with Esc, and the caller cancels exactly as it would for
+    # a keyboard Esc on a running transfer (which is the same code path, and the same cleanup).
 }
 
 # ⚠ What `c` / `m` resolves to, as an answer the suite can assert on rather than a shape buried in
@@ -2564,7 +2839,20 @@ enum CrabOp {
     CRAB_OP_BYTES  = 1664;   # bytes moved across the WHOLE operation — the rate's numerator
     CRAB_OP_WSTEP  = 1672;   # walk steps taken — the backstop counter
     CRAB_OP_STACK  = 1680;   # CRAB_WALK_DEPTH_MAX * CRAB_WALK_SLOT
-    CRAB_OP_SZ     = 5776;
+    # ⭐ THE OVERWRITE POLICY'S STATE (0.8.7), appended AFTER the stack so no existing offset moves.
+    # ⛔ `PEND` IS WHAT STOPS THE WALK: while it is 1 the idle tick must not step, because the answer
+    # that decides what happens to the file has not been given yet. It is a property of the RUN, not
+    # of a key handler, which is why it lives in the record the walk owns rather than beside
+    # `confirm_del` — a transfer that is waiting is waiting even if the operator clicks elsewhere.
+    CRAB_OP_OVPOL  = 5776;   # a CRAB_OVP_* — the standing policy for the rest of this run
+    CRAB_OP_OVALL  = 5784;   # 1 = the operator armed `all`; the next answer becomes the policy
+    CRAB_OP_OVPEND = 5792;   # 1 = a collision is waiting for an answer; the walk is stopped
+    CRAB_OP_OVSKIP = 5800;   # entries skipped by a skip answer — reported at the end
+    # ⚠ THE ANSWER TO APPLY ON RESUME. The walk re-derives the collision from the path it is standing
+    # on, so the resume needs to know what was decided about THIS entry, separately from the standing
+    # policy — a one-shot `replace` must not become a `replace` for the next one.
+    CRAB_OP_OVACT  = 5808;   # a CRAB_OVA_* to apply to the pending entry, or NONE
+    CRAB_OP_SZ     = 5816;
     # ⛔ THE DEPTH BOUND IS DERIVED, NOT CHOSEN, AND IT IS PROVABLY UNREACHABLE. `CRAB_PATH_MAX` is
     # 256, root "/" is one character and every level costs at least two more, so `crab_join_n`
     # refuses at depth 127 before this clamp can fire. It exists so that if `CRAB_PATH_MAX` ever
@@ -3011,6 +3299,116 @@ fn crab_walk_restore(r, slot): i64 {
 }
 
 # End the walk, leaving the record idle. -> `rc`, so callers can `return crab_walk_stop(r, code)`.
+# @public — is the running operation waiting for a collision answer? 1 = yes.
+# ⛔ THE IDLE TICK ASKS THIS BEFORE IT STEPS. A tick that stepped anyway would either re-ask the same
+# question every 16 ms or, worse, walk past the file the operator is being asked about.
+fn crab_op_waiting(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    if (load64(r + CRAB_OP_KIND) == CRAB_OP_IDLE) { return 0; }
+    return load64(r + CRAB_OP_OVPEND);
+}
+
+# @public — the name the pending collision is about (a pointer into the record), or 0.
+fn crab_op_ov_name(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    if (load64(r + CRAB_OP_OVPEND) != 1) { return 0; }
+    return r + CRAB_OP_NAME;
+}
+
+# @public — is `all` armed on the running operation? 1 = yes.
+fn crab_op_ov_all(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    return load64(r + CRAB_OP_OVALL);
+}
+
+# @public — how many entries a `skip` answer has passed over in this run.
+fn crab_op_ov_skipped(): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    return load64(r + CRAB_OP_OVSKIP);
+}
+
+# @public — answer the pending collision. -> 1 = the walk may resume, 0 = nothing was pending,
+# CRAB_FS_ECANCEL when the answer was Esc (the caller then cancels as it would for a keyboard Esc).
+#
+# ⛔ ARMING IS NOT ANSWERING. `a` toggles and returns 0: the walk stays stopped and the prompt
+# re-renders with `[all]`, so the operator sees what they armed before the key that acts on it.
+fn crab_op_ov_answer(u): i64 {
+    var r = crab_op_rec();
+    if (r == 0) { return 0; }
+    if (load64(r + CRAB_OP_OVPEND) != 1) { return 0; }
+    var a = crab_ov_answer(u);
+    if (a == CrabOvAnswer.CRAB_OVA_NONE) { return 0; }
+    if (a == CrabOvAnswer.CRAB_OVA_ALL) {
+        if (load64(r + CRAB_OP_OVALL) == 1) { store64(r + CRAB_OP_OVALL, 0); }
+        else { store64(r + CRAB_OP_OVALL, 1); }
+        return 0;
+    }
+    if (a == CrabOvAnswer.CRAB_OVA_CANCEL) { return CRAB_FS_ECANCEL; }
+    store64(r + CRAB_OP_OVPOL, crab_ov_policy_after(a, load64(r + CRAB_OP_OVALL)));
+    store64(r + CRAB_OP_OVACT, a);
+    store64(r + CRAB_OP_OVALL, 0);
+    store64(r + CRAB_OP_OVPEND, 0);
+    return 1;
+}
+
+# What to do about the collision the walk is standing on. -> a `CRAB_OVA_*` to act on, or NONE
+# meaning "stopped, the prompt is up". `name` is the entry, copied into the record so the prompt can
+# name it after the walk's scratch has moved on.
+#
+# ⛔ THE ONE-SHOT ANSWER IS CONSUMED HERE, not by the key handler: the handler cannot know whether
+# the walk will reach this entry again (a retry re-derives the collision from the path), so the
+# record carries the decision and this is the only place that spends it.
+fn crab_walk_collide(r, name): i64 {
+    var act = load64(r + CRAB_OP_OVACT);
+    if (act != CrabOvAnswer.CRAB_OVA_NONE) {
+        store64(r + CRAB_OP_OVACT, CrabOvAnswer.CRAB_OVA_NONE);
+        return act;
+    }
+    var auto = crab_ov_auto(load64(r + CRAB_OP_OVPOL));
+    if (auto != CrabOvAnswer.CRAB_OVA_NONE) { return auto; }
+    # Nothing standing: stop and ask. The name is what the prompt reads.
+    crab_strcpy_n(r + CRAB_OP_NAME, name, CRAB_NAME_MAX);
+    store64(r + CRAB_OP_OVPEND, 1);
+    return CrabOvAnswer.CRAB_OVA_NONE;
+}
+
+# Rewrite the walk's live destination path to a keep-both name for `name`, trying (2), (3)… until
+# one does not exist. -> the new length of CURD, or -1 if nothing fits or nothing is free.
+#
+# ⛔ IT TRIES UNTIL IT FINDS A FREE NAME, bounded — `photo (2).png` can collide too, and a keep-both
+# that overwrote `photo (2).png` would destroy a file while answering "keep both", which is the one
+# answer that promises it will not.
+var CRAB_OV_KEEPBOTH_MAX = 99;
+var crab_kbbuf = 0;
+fn crab_walk_kbbuf(): i64 {
+    if (crab_kbbuf == 0) { crab_kbbuf = alloc(CRAB_NAME_MAX); }
+    return crab_kbbuf;
+}
+fn crab_walk_keepboth(r, name, dlen): i64 {
+    var base = load64(r + CRAB_OP_DEPTH);
+    var slot = r + CRAB_OP_STACK + base * CRAB_WALK_SLOT;
+    var dl0 = load64(slot + CRAB_WS_DLEN);         # the directory this entry sits in
+    var kb = crab_walk_kbbuf();
+    if (kb == 0) { return -1; }
+    var n = 2;
+    while (n <= CRAB_OV_KEEPBOTH_MAX) {
+        if (crab_ov_keepboth_name(kb, CRAB_NAME_MAX, name, n) > 0) {
+            # Rebuild CURD as <dir>/<keepboth name>.
+            store8(r + CRAB_OP_CURD + dl0, 0);
+            var nl = crab_join_n(r + CRAB_OP_CURD, CRAB_PATH_MAX, r + CRAB_OP_CURD, kb);
+            if (nl > 0) {
+                if (crab_fs_exists(r + CRAB_OP_CURD, nl, crab_walk_statbuf()) == 0) { return nl; }
+            }
+        }
+        n = n + 1;
+    }
+    return -1;
+}
+
 fn crab_walk_stop(r, rc): i64 {
     crab_op_fds_close(r);
     store64(r + CRAB_OP_KIND, CRAB_OP_IDLE);
@@ -3037,14 +3435,32 @@ fn crab_walk_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
         # real directories under the source root and builds the destination from the destination
         # root, so this static check holds for the whole run.
         if (crab_path_within(scr1, dstdir, CRAB_PATH_MAX) == 1) { return CRAB_FS_ELOOP; }
-        if (crab_fs_exists(scr2, ld, statbuf) != 0) { return CRAB_FS_EEXIST; }
-        if (crab_fs_mkdir_raw(scr2, ld) < 0) { return CRAB_FS_ESYS; }
+        # ⭐ THE ROOT MERGES LIKE ANY OTHER DIRECTORY (0.8.7). It used to return `EEXIST` and the copy
+        # never started, so "copy this folder into one that already has a folder of that name" — the
+        # single most ordinary thing an operator does with two panes — was refused outright.
+        # ⛔ A NON-DIRECTORY IN THE WAY IS STILL A REFUSAL: crab cannot merge a tree into a file, and
+        # there is no per-file question to ask about it.
+        var rex = crab_fs_exists(scr2, ld, statbuf);
+        if (rex != 0) {
+            if (crab_fs_isdir(scr2, ld, statbuf) == 0) { return CRAB_FS_EEXIST; }
+        }
+        if (rex == 0) {
+            if (crab_fs_mkdir_raw(scr2, ld) < 0) { return CRAB_FS_ESYS; }
+        }
     }
     store64(r + CRAB_OP_KIND, kind);
     store64(r + CRAB_OP_FIN, 0 - 1);
     store64(r + CRAB_OP_FOUT, 0 - 1);
     store64(r + CRAB_OP_DONE, 0);
     store64(r + CRAB_OP_TOTAL, 0 - 1);
+    # ⭐ THE OVERWRITE STATE STARTS CLEAN ON EVERY RUN (0.8.7). ⛔ A policy that survived a run would
+    # be the worst kind of sticky setting: the operator armed `replace all` for one folder, and the
+    # next copy — minutes later, different files — destroys without asking.
+    store64(r + CRAB_OP_OVPOL, CrabOvPolicy.CRAB_OVP_ASK);
+    store64(r + CRAB_OP_OVALL, 0);
+    store64(r + CRAB_OP_OVPEND, 0);
+    store64(r + CRAB_OP_OVSKIP, 0);
+    store64(r + CRAB_OP_OVACT, CrabOvAnswer.CRAB_OVA_NONE);
     store64(r + CRAB_OP_T0, clock_now_ms());
     store64(r + CRAB_OP_DEPTH, 0);
     store64(r + CRAB_OP_FILES, 0);
@@ -3100,8 +3516,13 @@ fn crab_walk_file_step(): i64 {
 }
 
 # Advance the directory walk by at most `CRAB_WALK_STEP_ENTRIES` entries.
-# -> 1 = more to do, 2 = an item finished (redraw, but the panes did not change), CRAB_FS_OK when the
-#    whole tree is done, or a CRAB_FS_* failure.
+# -> 1 = more to do, 2 = an item finished (redraw, but the panes did not change), 3 = stopped on a
+#    collision and waiting for an answer, CRAB_FS_OK when the whole tree is done, or a CRAB_FS_*
+#    failure.
+# ⛔⛆ **`CRAB_FS_OK` IS 0, AND SO IS "NO PROGRESS" IF ANYONE WRITES `return 0`.** The caller treats
+# anything that is not 1, 2 or 3 as TERMINAL, so a `return 0` meaning "nothing happened this step"
+# ends the operation and reports **"done"**. That shipped once, in the `DT_UNKNOWN` retry below.
+# ⇒ **Never `return 0` from this function for a non-terminal case. 1 is "call me again".**
 #
 # ⛔⛔ A DELETE GOES CHILDREN-FIRST AND A COPY GOES PARENTS-FIRST, and neither order is a preference.
 # `rmdir` refuses a non-empty directory, so a delete must empty a level before it can remove it; and
@@ -3216,15 +3637,29 @@ fn crab_walk_step(): i64 {
                     return crab_walk_stop(r, CRAB_FS_ETOOLONG);
                 }
                 if (kind == CRAB_OP_CTREE) {
-                    if (crab_fs_exists(r + CRAB_OP_CURD, dl2, crab_walk_statbuf()) != 0) {
-                        crab_walk_restore(r, slot);
-                        return crab_walk_stop(r, CRAB_FS_EEXIST);
+                    # ⭐ A DIRECTORY COLLISION IS NOT A FILE COLLISION, AND IT IS NOT ASKED ABOUT.
+                    # ⛔ Two directories of the same name MERGE — that is what a copy into an existing
+                    # tree means, and it is what every file manager does. The question the operator
+                    # cares about is asked per FILE, below, where the answer actually destroys
+                    # something. Asking "replace this folder?" would either mean "delete a tree the
+                    # operator did not ask to delete" (replace) or produce `docs (2)` wrappers around
+                    # files that individually did not collide (keep both) — both worse than merging.
+                    # ⚠ A non-directory sitting where the directory should go is a REAL conflict and
+                    # still stops the run: crab cannot merge a tree into a file.
+                    var dex = crab_fs_exists(r + CRAB_OP_CURD, dl2, crab_walk_statbuf());
+                    if (dex != 0) {
+                        if (crab_fs_isdir(r + CRAB_OP_CURD, dl2, crab_walk_statbuf()) == 0) {
+                            crab_walk_restore(r, slot);
+                            return crab_walk_stop(r, CRAB_FS_EEXIST);
+                        }
                     }
-                    if (crab_fs_mkdir_raw(r + CRAB_OP_CURD, dl2) < 0) {
-                        crab_walk_restore(r, slot);
-                        return crab_walk_stop(r, CRAB_FS_ESYS);
+                    if (dex == 0) {
+                        if (crab_fs_mkdir_raw(r + CRAB_OP_CURD, dl2) < 0) {
+                            crab_walk_restore(r, slot);
+                            return crab_walk_stop(r, CRAB_FS_ESYS);
+                        }
+                        store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
                     }
-                    store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
                 }
                 store64(r + CRAB_OP_DEPTH, d + 1);
                 var down = r + CRAB_OP_STACK + (d + 1) * CRAB_WALK_SLOT;
@@ -3254,16 +3689,57 @@ fn crab_walk_step(): i64 {
                         if (crab_walk_retry_as_dir(load8(rec + CRAB_REC_TYPE)) == 1) {
                             store8(rec + CRAB_REC_TYPE, 1);
                             store64(slot + CRAB_WS_IDX, idx);
-                            return 0;
+                            # ⛔⛆ `return 1`, NOT `return 0` — AND THIS WAS A SHIPPED DEFECT (fixed
+                            # 0.8.7). `CRAB_FS_OK` **is** 0, and the idle tick treats anything that is
+                            # not 1 or 2 as terminal: a `DT_UNKNOWN` entry that needed retrying as a
+                            # directory therefore ended the whole delete and reported **"done"** on a
+                            # half-emptied tree. The retry did not even happen — the caller tore the
+                            # operation down on the way out. ⚠ Needs a filesystem that answers
+                            # `DT_UNKNOWN`, which the host's `getdents64` does not, which is why it
+                            # survived: the arm is unreachable from the suite and the RETURN VALUE was
+                            # never the thing under test. Found while adding a second `return 0` beside
+                            # it and asking what 0 meant.
+                            return 1;
                         }
                         return crab_walk_stop(r, CRAB_FS_ESYS);
                     }
                     store64(r + CRAB_OP_FILES, load64(r + CRAB_OP_FILES) + 1);
                     crab_walk_restore(r, slot);
                 } else {
+                    # ⭐⭐ A FILE COLLISION ASKS (0.8.7) — it used to END THE WALK. Copying 500 files
+                    # into a folder holding ONE of them moved nothing and named no file.
+                    # ⛔ THE INDEX IS REWOUND BEFORE STOPPING, so the resume re-derives this same
+                    # entry rather than skipping it: `crab_walk_restore` puts the paths back and
+                    # `CRAB_WS_IDX` is left pointing AT this record, not past it.
                     if (crab_fs_exists(r + CRAB_OP_CURD, dl2, crab_walk_statbuf()) != 0) {
-                        crab_walk_restore(r, slot);
-                        return crab_walk_stop(r, CRAB_FS_EEXIST);
+                        var ovf = crab_walk_collide(r, rec);
+                        if (ovf == CrabOvAnswer.CRAB_OVA_NONE) {
+                            crab_walk_restore(r, slot);
+                            store64(slot + CRAB_WS_IDX, idx);
+                            return 3;                       # stopped, waiting for an answer
+                        }
+                        if (ovf == CrabOvAnswer.CRAB_OVA_SKIP) {
+                            store64(r + CRAB_OP_OVSKIP, load64(r + CRAB_OP_OVSKIP) + 1);
+                            crab_walk_restore(r, slot);
+                            return 1;                       # ⛔ NOT 0: `CRAB_FS_OK` is 0 — see above
+                        }
+                        if (ovf == CrabOvAnswer.CRAB_OVA_REPLACE) {
+                            # ⛔ UNLINK FIRST, because `crab_fs_open_w` is `O_EXCL` on the host — the
+                            # two targets disagree (agnos has no `AO_EXCL` and already truncates), and
+                            # replacing by unlink is the one sequence that means the same on both.
+                            if (crab_fs_unlink_raw(r + CRAB_OP_CURD, dl2) < 0) {
+                                crab_walk_restore(r, slot);
+                                return crab_walk_stop(r, CRAB_FS_ESYS);
+                            }
+                        }
+                        if (ovf == CrabOvAnswer.CRAB_OVA_KEEPBOTH) {
+                            var kbl = crab_walk_keepboth(r, rec, dl2);
+                            if (kbl < 0) {
+                                crab_walk_restore(r, slot);
+                                return crab_walk_stop(r, CRAB_FS_ETOOLONG);
+                            }
+                            dl2 = kbl;
+                        }
                     }
                     var fin2 = crab_fs_open_r(r + CRAB_OP_CURS, sl2);
                     if (fin2 < 0) { crab_walk_restore(r, slot); return crab_walk_stop(r, CRAB_FS_ESYS); }

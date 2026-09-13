@@ -173,11 +173,15 @@ happened rather than showing a blank square.
   the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors
   forward every button as left), left picks and dismisses, and a press with the middle button is
   consumed and ignored — stated rather than left to be discovered.
-- **`Esc`, `Tab` and `F10` never reach crab on agnos — the compositor claims them, and `Esc` quits
-  the desktop.** Measured on QEMU 2026-09-13. So on the real desktop the menu bar (`F10`) and
-  `View`, the sidebar's keyboard route (`Tab`) and every `Esc` cancel are unreachable; the pointer
-  routes are the popup's only road. Filed upstream; the bindings stay until aethersafha decides.
-  `u` refreshes (F5 is claimed too).
+- **The compositor's chrome keys are Ctrl chords (aethersafha ≥ 0.16.25): Ctrl+Q quits the desktop,
+  Ctrl+Tab cycles windows, Ctrl+F4–F10 close/maximize/minimize/move.** On an OLDER compositor bare
+  Esc/Tab/F4–F10 were claimed and `Esc` ended the desktop — measured on QEMU 2026-09-13, fixed the
+  same day. `u` refreshes (F5 was claimed at the time it was chosen).
+- **A copy onto an existing name asks**: `r` replace · `s` skip · `k` keep both · `Esc` stop, and `a`
+  arms an *all* for the rest of the operation. Folders of the same name merge; only files ask.
+- **`crab --help` lists the keys**, `crab --about` introduces Bueller, and an unknown flag says which
+  one it did not know. ⚠ There is no `--version`: `VERSION` is the single source of truth and nothing
+  in the toolchain can inject it into the binary, so crab does not claim one it cannot keep true.
 - **`Go` on the menu bar is empty, deliberately.** The bar ships File · Edit · Go · View; `View`
   holds the display switches (0.8.6), and `Go` is refused as a drop-down — an 11-to-17-row popup at
   380×220 would cover the bar and the status line, and the delete prompt would draw underneath it.

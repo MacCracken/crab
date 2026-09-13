@@ -37,14 +37,46 @@ fn main(): i64 {
     # ⛔ A REFUSED ARGUMENT IS ANNOUNCED. Silently falling back would leave the operator looking at
     # `/bin` having asked for something else, with nothing to explain it.
     args_init();
+    # ⭐⭐ THE FLAG SURFACE (0.8.7) — BEFORE ANY WINDOW EXISTS. `--help` and `--about` print and leave;
+    # an unknown flag says which one it did not know and leaves with a non-zero status. ⛔ Scanned
+    # before a path is adopted, so `crab --about /bin` prints rather than opening /bin, and a typo'd
+    # flag never runs the GUI and never gets mis-diagnosed as a path (`crab_path_usable` requires an
+    # absolute path, so a `-x` could only ever be refused for the wrong reason).
+    # ⚠ ON AGNOS THIS IS UNREACHABLE TODAY and that is honest, not broken: the compositor's launcher
+    # spawns `/bin/crab` with no arguments, and crab cannot start from a shell there at all (it needs
+    # `AGNOS_CHAN`, which only the compositor mints). The surface exists for the host, and for the day
+    # the launcher or a shell passes one.
+    var flagi = alloc(8);
+    var flag = crab_first_flag(argc(), flagi);
+    if (flag == CrabFlag.CRAB_FLAG_HELP) {
+        crab_say(crab_help_text());
+        return 0;
+    }
+    if (flag == CrabFlag.CRAB_FLAG_ABOUT) {
+        crab_say(crab_about_text());
+        return 0;
+    }
+    if (flag == CrabFlag.CRAB_FLAG_UNKNOWN) {
+        # ⛔ NAME THE ARGUMENT. "unknown flag" alone leaves the operator re-reading their own command
+        # line to find which one; the same discipline as the delete prompt naming what dies.
+        crab_say("crab: unknown flag: ");
+        crab_say(argv(load64(flagi)));
+        crab_say("\n");
+        crab_say(crab_help_text());
+        return 2;
+    }
     var lstart = "/bin";
     var rstart = "/";
-    if (argc() > 1) {
-        if (crab_path_usable(argv(1)) == 1) { lstart = argv(1); }
+    # ⚠ POSITIONAL, NOT `argv(1)`/`argv(2)`: the paths are the non-flag arguments in the order given,
+    # so a flag anywhere in the line cannot shift which argument is the left pane.
+    var apos0 = crab_positional(argc(), 0);
+    var apos1 = crab_positional(argc(), 1);
+    if (apos0 != 0) {
+        if (crab_path_usable(apos0) == 1) { lstart = apos0; }
         else { crab_say("crab: left path unusable (must be absolute and fit) -- using /bin\n"); }
     }
-    if (argc() > 2) {
-        if (crab_path_usable(argv(2)) == 1) { rstart = argv(2); }
+    if (apos1 != 0) {
+        if (crab_path_usable(apos1) == 1) { rstart = apos1; }
         else { crab_say("crab: right path unusable (must be absolute and fit) -- using /\n"); }
     }
     crab_strcpy_n(lpath, lstart, CRAB_PATH_MAX);   # mutable pane paths — Enter/Backspace rewrite them
@@ -174,6 +206,9 @@ fn main(): i64 {
     var rf_lkeep = alloc(CRAB_NAME_MAX);
     var rf_rkeep = alloc(CRAB_NAME_MAX);
     var rf_sbpath = alloc(CRAB_PATH_MAX);
+    # ⚠ The collision prompt's buffer, allocated ONCE: it is rebuilt every tick while a prompt is up,
+    # and a per-tick `alloc` on a heap with no `free()` is a leak measured in ticks.
+    var ovbuf = alloc(CRAB_OV_PROMPT_CAP);
     # ⭐ VOLUMES (M6, unblocked by agnos `mountlist`#104). ⚠ Built ONCE at startup like PLACES, and
     # for the same reason: it is two syscalls per volume and the render path must not pay them.
     # ⚠ Returns 0 on the host — neither syscall has a host arm — so the sidebar shows PLACES alone
@@ -462,7 +497,7 @@ fn main(): i64 {
             # of its own to take: while anything is up, it does nothing.
             if (k == POINTER_SCROLL) {
                 var sdel = dh_event_a(ev);
-                if (crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel) == 1) { sdel = 0; }
+                if (crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel, crab_op_waiting()) == 1) { sdel = 0; }
                 if (sdel != 0) {
                     if (crab_hit(ptr_x, ptr_y, hit) == 1) {
                         var sp = load64(hit);
@@ -523,7 +558,7 @@ fn main(): i64 {
                     # not blocked — its rows are exactly what the press is for. The wheel still asks
                     # the union, because it has no rows to take.
                     var pbtn = dh_event_a(ev);
-                    var blocked = crab_pointer_blocked(confirm_del, edit_open);
+                    var blocked = crab_pointer_blocked(confirm_del, edit_open, crab_op_waiting());
                     var popup_open = 0;
                     if (menu_open != 0) { popup_open = 1; }
                     if (mb_drop >= 0) { popup_open = 1; }
@@ -855,6 +890,10 @@ fn main(): i64 {
                 if (k == KEY) {
                     u = dh_event_a(ev);
                     kacts = crab_key_acts(dh_event_b(ev));
+                    # ⛔ A MODIFIER'S OWN EDGE IS NOT A KEYSTROKE (0.8.7) — see `crab_key_is_modifier`.
+                    # Gated here, before the held-key latch and every dispatch gate, so a Ctrl press
+                    # can neither answer the delete prompt nor count as a `crab: key press`.
+                    if (crab_key_is_modifier(u) == 1) { kacts = 0; }
                     crab_say("crab: key received\n");
                     # ⛔⛔ PRESS ONLY. crab asks for `SETU_SURF_FULL_KEYS` (see `crab_surface_flags`), so
                     # every key now arrives TWICE — `mods` 1 on the press, 0 on the release. Acting on
@@ -1241,6 +1280,30 @@ fn main(): i64 {
                                         crab_say("crab: place "); crab_say(sbp); crab_say("\n");
                                     } else { crab_set_notice("nothing to go to"); }
                                     u = 0;
+                                }
+                            }
+                            # ⭐⭐ A COLLISION PROMPT OWNS THE KEYBOARD WHILE IT IS UP (0.8.7), and it
+                            # sits ABOVE every binding including Esc-cancels-a-transfer — because the
+                            # operation is not merely running, it is STOPPED on a question whose
+                            # answer destroys or keeps a file. ⛔ `r`, `s` and `k` are ordinary verbs
+                            # elsewhere (rename, sort, nothing) and MUST NOT reach them here; the arm
+                            # consumes every key it recognises and leaves the rest alone so a stray
+                            # keystroke does nothing rather than something.
+                            # ⚠ Esc answers CANCEL and falls into the same cancel the transfer arm
+                            # below runs — one implementation, reached two ways.
+                            if (crab_op_waiting() == 1) {
+                                var ovr = crab_op_ov_answer(u);
+                                if (ovr == CRAB_FS_ECANCEL) {
+                                    u = 0x29;                      # fall through to the Esc-cancel arm
+                                } else {
+                                    if (crab_ov_answer(u) != CrabOvAnswer.CRAB_OVA_NONE) { u = 0; }
+                                    # ⚠ The notice is refreshed either way: arming `[all]` must show
+                                    # before the key that acts on it, and a resumed walk should stop
+                                    # showing a question nobody is being asked any more.
+                                    if (crab_op_waiting() == 1) {
+                                        crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
+                                        crab_set_notice(ovbuf);
+                                    } else { crab_clear_notice(); }
                                 }
                             }
                             # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
@@ -1968,7 +2031,25 @@ fn main(): i64 {
                 # ⛔ The suite did not catch it because every walk test drives `crab_op_step` — the
                 # right entry point — while this, the only caller that ships, drove the wrong one.
                 # A test that calls a different function than the shipping caller tests nothing here.
+                # ⛔⛔ A WAITING OPERATION DOES NOT STEP (0.8.7). A collision prompt is up and the
+                # answer decides what happens to a file; a tick that stepped anyway would either
+                # re-ask every 16 ms or walk past the very entry being asked about. The prompt is
+                # re-rendered from the record each tick so an armed `[all]` shows immediately.
+                if (crab_op_waiting() == 1) {
+                    crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
+                    crab_set_notice(ovbuf);
+                    continue;
+                }
                 var cstep = crab_op_step();
+                # ⚠ 3 = "stopped, waiting for a collision answer" — not a terminal code and not
+                # progress. It leaves the operation ALIVE with `OVPEND` set; the branch above owns
+                # every tick after it until the operator answers.
+                if (cstep == 3) {
+                    crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
+                    crab_set_notice(ovbuf);
+                    crab_say("crab: collision -- waiting for an answer\n");
+                    continue;
+                }
                 # ⚠ A WALK STEP ALSO RETURNS 2 ("an item finished, the walk continues"), which is
                 # neither 1 nor a terminal `CRAB_FS_*`. It must keep the operation alive exactly as 1
                 # does, or a tree copy would report "done" at its first completed file.

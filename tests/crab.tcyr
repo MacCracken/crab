@@ -765,6 +765,18 @@ fn main() {
     # descending twice — the second descend landing wherever the first left the selection.
     assert_eq(crab_key_acts(1), 1, "a PRESS is acted on (mods = 1)");
     assert_eq(crab_key_acts(0), 0, "a RELEASE is not (mods = 0)");
+    # ⛔ A MODIFIER'S OWN EDGE IS NOT A KEYSTROKE (0.8.7): the compositor forwards Ctrl/Shift presses as
+    # usages 0xE0..0xE7, and crab used to take them as keys — a Ctrl press answered "no" to a pending
+    # delete prompt. As of aethersafha 0.16.25 every chrome key is a Ctrl chord, so that edge precedes
+    # every Ctrl+Q; it must be a no-op here.
+    assert_eq(crab_key_is_modifier(0xE0), 1, "LCtrl is a modifier edge");
+    assert_eq(crab_key_is_modifier(0xE1), 1, "LShift too");
+    assert_eq(crab_key_is_modifier(0xE4), 1, "RCtrl too");
+    assert_eq(crab_key_is_modifier(0xE7), 1, "RGUI is the last of the row");
+    assert_eq(crab_key_is_modifier(0xDF), 0, "0xDF is not");
+    assert_eq(crab_key_is_modifier(0xE8), 0, "0xE8 is not");
+    assert_eq(crab_key_is_modifier(0x14), 0, "q is a key");
+    assert_eq(crab_key_is_modifier(0x29), 0, "Esc is a key — the client's, as of aethersafha 0.16.25");
     # ⚠ THE GATE AND THE FLAG MUST MOVE TOGETHER. On a press-only surface `mods` is 0 for a PRESS, so
     # a client that dropped FULL_KEYS but kept this gate would act on nothing at all. That coupling is
     # why they live side by side in `src/app.cyr` and why these assertions sit together here.
@@ -2663,6 +2675,9 @@ fn main() {
     t_sb_here();
     t_view_menu();
     t_refresh();
+    t_flags();
+    t_overwrite();
+    t_overwrite_walk();
     t_menubar_enabled();
 
     # ================================================================================
@@ -4458,27 +4473,27 @@ fn t_pointer_modal(): i64 {
     # **recursive tree delete** on it. The prompt named one thing and the delete took another.
 
     # ---- the ordinary case: nothing modal, the pointer works --------------------------------------
-    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1), 0, "no modal state -> pointer input is live");
+    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1, 0), 0, "no modal state -> pointer input is live");
 
     # ---- each modal state alone refuses ----------------------------------------------------------
     # ⛔ THE DELETE CONFIRMATION IS THE ONE THAT MATTERS, because it is the only modal state with no
     # overlay to prune clicks for it — and the only one whose next keystroke destroys data.
-    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1), 1, "a delete confirmation refuses the pointer");
-    assert_eq(crab_pointer_modal(0, 1, 0, 0 - 1), 1, "the rename sheet refuses it");
-    assert_eq(crab_pointer_modal(0, 2, 0, 0 - 1), 1, "...whichever edit mode it is in");
-    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1), 1, "the context menu refuses it");
+    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1, 0), 1, "a delete confirmation refuses the pointer");
+    assert_eq(crab_pointer_modal(0, 1, 0, 0 - 1, 0), 1, "the rename sheet refuses it");
+    assert_eq(crab_pointer_modal(0, 2, 0, 0 - 1, 0), 1, "...whichever edit mode it is in");
+    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1, 0), 1, "the context menu refuses it");
     # ⚠ The menu bar is modal in the same sense: its keys are consumed before the bindings, so a
     # click landing behind it would act on a surface the operator is not looking at.
-    assert_eq(crab_pointer_modal(0, 0, 0, 0), 1, "the menu bar refuses it — index 0 is REVEALED");
-    assert_eq(crab_pointer_modal(0, 0, 0, CRAB_MB_COUNT - 1), 1, "...at any menu");
+    assert_eq(crab_pointer_modal(0, 0, 0, 0, 0), 1, "the menu bar refuses it — index 0 is REVEALED");
+    assert_eq(crab_pointer_modal(0, 0, 0, CRAB_MB_COUNT - 1, 0), 1, "...at any menu");
 
     # ⛔ AND `mb_sel` USES -1 FOR COLLAPSED, SO `0` MUST NOT READ AS "CLOSED". That is exactly the
     # off-by-one that a `!= 0` test would introduce, and `File` is menu 0.
-    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1), 0, "-1 is collapsed, and collapsed is not modal");
+    assert_eq(crab_pointer_modal(0, 0, 0, 0 - 1, 0), 0, "-1 is collapsed, and collapsed is not modal");
 
     # ---- combinations still refuse ---------------------------------------------------------------
-    assert_eq(crab_pointer_modal(1, 1, 1, 0), 1, "everything at once still refuses");
-    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1), 1, "...and the confirmation alone is enough");
+    assert_eq(crab_pointer_modal(1, 1, 1, 0, 0), 1, "everything at once still refuses");
+    assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1, 0), 1, "...and the confirmation alone is enough");
     return 0;
 }
 
@@ -4667,6 +4682,330 @@ fn t_view_menu(): i64 {
     return 0;
 }
 
+# Remove every file and directory `t_overwrite_walk` can produce, innermost first. Results ignored:
+# most of these are expected not to exist on any given call.
+fn t_ov_clean(scr): i64 {
+    var n = 2;
+    while (n <= 4) {
+        var kb = alloc(CRAB_NAME_MAX);
+        crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "a.txt", n);
+        crab_fs_delete("build/ovdst/ovsrc", kb, 0, scr);
+        crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "keep.txt", n);
+        crab_fs_delete("build/ovdst/ovsrc", kb, 0, scr);
+        n = n + 1;
+    }
+    crab_fs_delete("build/ovdst/ovsrc", "a.txt", 0, scr);
+    crab_fs_delete("build/ovdst/ovsrc", "keep.txt", 0, scr);
+    crab_fs_delete("build/ovdst", "ovsrc", 1, scr);
+    crab_fs_delete("build", "ovdst", 1, scr);
+    crab_fs_delete("build/ovsrc", "a.txt", 0, scr);
+    crab_fs_delete("build/ovsrc", "keep.txt", 0, scr);
+    crab_fs_delete("build", "ovsrc", 1, scr);
+    return 0;
+}
+
+fn t_overwrite_walk(): i64 {
+    test_group("crab — 0.8.7: a real tree copied onto an existing one STOPS and asks, per file");
+    # ⭐⭐ THIS DRIVES THE SHIPPING WALK AGAINST REAL DIRECTORIES, not a predicate: `crab_walk_readdir`
+    # has a host arm over `getdents64`, so `crab_op_step` here is the same function the idle tick
+    # calls. ⛔ That distinction is this codebase's most expensive lesson — recursive copy and delete
+    # never ran in any shipped build because the tick called a DIFFERENT function than the tests did.
+    var w1 = alloc(CRAB_PATH_MAX); var w2 = alloc(CRAB_PATH_MAX); var wst = alloc(STAT_BUFSZ);
+    # A source tree: build/ovsrc/{a.txt, keep.txt} — and a destination already holding a.txt.
+    # ⛔⛆ A TEST THAT LEAVES DEBRIS FAILS THE **NEXT** RUN, WHICH IS THE WORST KIND OF FLAKE — it
+    # passes for whoever wrote it and fails for whoever runs it next. Measured here: the keep-both
+    # runs left `keep (2).txt` and `keep (3).txt` behind, and the following run's `mkdir` fixture
+    # returned `EEXIST` with nothing in the output naming the real cause.
+    # ⇒ `t_ov_clean` removes EVERY name these groups can produce, is called before AND after, and
+    # ignores every result — `crab_fs_delete` does not recurse, so the order is innermost-first.
+    t_ov_clean(w1);
+    assert_eq(crab_fs_mkdir("build", "ovsrc", w1, wst), CRAB_FS_OK, "fixture: a source directory");
+    var ovs = "build/ovsrc";
+    var pa = crab_fs_path(w1, ovs, "a.txt");
+    var fa = crab_fs_open_w(w1, pa); sys_write(fa, "SOURCE", 6); sys_close(fa);
+    var pk = crab_fs_path(w1, ovs, "keep.txt");
+    var fk = crab_fs_open_w(w1, pk); sys_write(fk, "K", 1); sys_close(fk);
+    assert_eq(crab_fs_mkdir("build", "ovdst", w1, wst), CRAB_FS_OK, "fixture: a destination directory");
+    assert_eq(crab_fs_mkdir("build/ovdst", "ovsrc", w1, wst), CRAB_FS_OK, "  ...already holding a folder of the same name");
+    var pc = crab_fs_path(w1, "build/ovdst/ovsrc", "a.txt");
+    var fc = crab_fs_open_w(w1, pc); sys_write(fc, "DEST", 4); sys_close(fc);
+
+    # ⛔ THE ROOT COLLIDES AND THE WALK STILL STARTS: two directories of the same name MERGE.
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "ovsrc", "build/ovdst", w1, w2, wst), CRAB_FS_OK,
+      "a tree copy onto an existing directory of the same name STARTS — directories merge");
+    assert_eq(crab_op_waiting(), 0, "nothing is pending yet");
+    # Step as the idle tick does, until the walk stops to ask.
+    var st = 1; var guard = 0; var stopped = 0;
+    while (guard < 400) {
+        st = crab_op_step();
+        if (st == 3) { stopped = 1; guard = 400; }
+        if (st == CRAB_FS_OK) { guard = 400; }
+        if (st < 0) { guard = 400; }
+        guard = guard + 1;
+    }
+    assert_eq(stopped, 1, "⛔ the colliding FILE stops the walk (it used to END it, moving nothing)");
+    assert_eq(crab_op_waiting(), 1, "...and the operation is WAITING, not dead");
+    # ⚠ GUARDED: `crab_op_ov_name()` is 0 when nothing is pending, and `t_streq` would dereference it —
+    # a mutation that stops the walk from waiting should FAIL this group, not segfault out of it
+    # before the verdict. (Measured: it did, until this guard.)
+    var ovn = crab_op_ov_name();
+    assert(ovn != 0, "...there is a name to show");
+    if (ovn != 0) { assert_eq(t_streq(ovn, "a.txt"), 1, "...and it names the file the question is about"); }
+    assert_eq(crab_op_ov_all(), 0, "`all` is not armed until the operator arms it");
+    # ⛔ THE OPERATION IS STILL ALIVE — a cancel would have to be asked for.
+    assert_eq(crab_op_active(), 1, "the operation is still active while it waits");
+
+    test_group("crab — 0.8.7: `a` arms without answering; `s` skips this one and the walk resumes");
+    assert_eq(crab_op_ov_answer(0x04), 0, "`a` ARMS — it does not answer, so the walk stays stopped");
+    assert_eq(crab_op_ov_all(), 1, "...and the prompt can now say [all]");
+    assert_eq(crab_op_waiting(), 1, "...still waiting");
+    assert_eq(crab_op_ov_answer(0x04), 0, "`a` again toggles it back off");
+    assert_eq(crab_op_ov_all(), 0, "...disarmed");
+    assert_eq(crab_op_ov_answer(0x28), 0, "Enter answers nothing — there is no default here");
+    assert_eq(crab_op_waiting(), 1, "...so it is still waiting");
+    assert_eq(crab_op_ov_answer(0x16), 1, "`s` answers SKIP and the walk may resume");
+    assert_eq(crab_op_waiting(), 0, "...nothing is pending now");
+    assert_eq(crab_op_ov_skipped(), 0, "the skip is not counted until the walk consumes it");
+    # Run the walk to the end.
+    var g2 = 0; var fin = 0;
+    while (g2 < 400) {
+        var s2 = crab_op_step();
+        if (s2 == 3) { crab_op_ov_answer(0x16); }          # any further collision: skip it too
+        if (s2 == CRAB_FS_OK) { fin = 1; g2 = 400; }
+        if (s2 < 0) { fin = s2; g2 = 400; }
+        g2 = g2 + 1;
+    }
+    assert_eq(fin, 1, "the walk RUNS TO COMPLETION past the collision");
+    assert_eq(crab_op_ov_skipped(), 1, "...having skipped exactly the one file it asked about");
+    # ⛔ SKIP MEANS THE DESTINATION IS UNTOUCHED: the original bytes are still there.
+    var vbuf = alloc(16);
+    var vf = crab_fs_open_r(w1, crab_fs_path(w1, "build/ovdst/ovsrc", "a.txt"));
+    var vn = sys_read(vf, vbuf, 15); sys_close(vf);
+    store8(vbuf + vn, 0);
+    assert_eq(t_streq(vbuf, "DEST"), 1, "⛔ SKIP left the destination's own bytes alone");
+    # ...and the file that did NOT collide was copied.
+    var kpl = crab_fs_path(w1, "build/ovdst/ovsrc", "keep.txt");
+    assert(crab_fs_exists(w1, kpl, wst) != 0, "the non-colliding file WAS copied — the walk did not abort");
+
+    test_group("crab — 0.8.7: `r` replaces, and the bytes prove it");
+    crab_fs_delete("build/ovdst/ovsrc", "keep.txt", 0, w1);
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "ovsrc", "build/ovdst", w1, w2, wst), CRAB_FS_OK, "run it again");
+    var g3 = 0; var asked = 0;
+    while (g3 < 400) {
+        var s3 = crab_op_step();
+        if (s3 == 3) {
+            asked = asked + 1;
+            assert_eq(crab_op_ov_answer(0x15), 1, "`r` answers REPLACE");
+        }
+        if (s3 == CRAB_FS_OK) { g3 = 400; }
+        if (s3 < 0) { g3 = 400; }
+        g3 = g3 + 1;
+    }
+    assert(asked >= 1, "it asked about the collision again — a one-shot answer does NOT persist across runs");
+    var vf2 = crab_fs_open_r(w1, crab_fs_path(w1, "build/ovdst/ovsrc", "a.txt"));
+    var vn2 = sys_read(vf2, vbuf, 15); sys_close(vf2);
+    store8(vbuf + vn2, 0);
+    assert_eq(t_streq(vbuf, "SOURCE"), 1, "⛔ REPLACE really wrote the source's bytes — on a host whose open_w is O_EXCL");
+
+    test_group("crab — 0.8.7: `k` keeps both, suffixed before the extension");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "ovsrc", "build/ovdst", w1, w2, wst), CRAB_FS_OK, "a third run");
+    var g4 = 0;
+    while (g4 < 400) {
+        var s4 = crab_op_step();
+        if (s4 == 3) { crab_op_ov_answer(0x0E); }          # k — keep both
+        if (s4 == CRAB_FS_OK) { g4 = 400; }
+        if (s4 < 0) { g4 = 400; }
+        g4 = g4 + 1;
+    }
+    var kbp = crab_fs_path(w1, "build/ovdst/ovsrc", "a (2).txt");
+    assert(crab_fs_exists(w1, kbp, wst) != 0, "⛔ KEEP BOTH wrote `a (2).txt` — the suffix before the extension");
+    var vf3 = crab_fs_open_r(w1, crab_fs_path(w1, "build/ovdst/ovsrc", "a.txt"));
+    var vn3 = sys_read(vf3, vbuf, 15); sys_close(vf3);
+    store8(vbuf + vn3, 0);
+    assert_eq(t_streq(vbuf, "SOURCE"), 1, "  ...and the file that was already there is untouched");
+
+    test_group("crab — 0.8.7: an armed answer applies to every remaining collision");
+    # Two collisions now: a.txt and a (2).txt both exist in the destination.
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, "build", "ovsrc", "build/ovdst", w1, w2, wst), CRAB_FS_OK, "a fourth run");
+    var g5 = 0; var asked5 = 0;
+    while (g5 < 400) {
+        var s5 = crab_op_step();
+        if (s5 == 3) {
+            asked5 = asked5 + 1;
+            crab_op_ov_answer(0x04);                        # arm `all`
+            crab_op_ov_answer(0x16);                        # ...then skip
+        }
+        if (s5 == CRAB_FS_OK) { g5 = 400; }
+        if (s5 < 0) { g5 = 400; }
+        g5 = g5 + 1;
+    }
+    assert_eq(asked5, 1, "⛔ ARMED, it asked ONCE — a 500-file walk is not 500 questions");
+    assert(crab_op_ov_skipped() >= 1, "...and the remaining collisions were skipped without asking");
+    t_ov_clean(w1);
+    return 0;
+}
+
+fn t_overwrite(): i64 {
+    test_group("crab — 0.8.7: the collision prompt's answers (no shift on the wire, so `all` is armed)");
+    assert_eq(crab_ov_answer(0x15), CrabOvAnswer.CRAB_OVA_REPLACE, "r replaces");
+    assert_eq(crab_ov_answer(0x16), CrabOvAnswer.CRAB_OVA_SKIP, "s skips");
+    assert_eq(crab_ov_answer(0x0E), CrabOvAnswer.CRAB_OVA_KEEPBOTH, "k keeps both");
+    assert_eq(crab_ov_answer(0x04), CrabOvAnswer.CRAB_OVA_ALL, "a arms `all`");
+    assert_eq(crab_ov_answer(0x29), CrabOvAnswer.CRAB_OVA_CANCEL, "Esc cancels the operation");
+    assert_eq(crab_ov_answer(0x1C), CrabOvAnswer.CRAB_OVA_NONE, "y is not an answer here — that is the delete prompt");
+    assert_eq(crab_ov_answer(0x28), CrabOvAnswer.CRAB_OVA_NONE, "nor Enter: there is no default, because one of the answers destroys a file");
+    assert_eq(crab_ov_answer(0x07), CrabOvAnswer.CRAB_OVA_NONE, "nor d");
+    # ⛔ THE ANSWERS ARE DISTINCT KEYS, and none of them is `c`: cancel sits one key from copy on a
+    # surface where the next keystroke can destroy a file, so cancel is Esc and only Esc.
+    assert_eq(crab_ov_answer(0x06), CrabOvAnswer.CRAB_OVA_NONE, "c answers nothing — cancel is Esc, never a letter beside `copy`");
+
+    test_group("crab — 0.8.7: `all` is what makes an answer stick, and only `all`");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_REPLACE, 0), CrabOvPolicy.CRAB_OVP_ASK, "replace once leaves the policy ASKing");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_SKIP, 0), CrabOvPolicy.CRAB_OVP_ASK, "...skip once too");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_KEEPBOTH, 0), CrabOvPolicy.CRAB_OVP_ASK, "...and keep-both once");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_REPLACE, 1), CrabOvPolicy.CRAB_OVP_REPLACE, "armed, replace sticks");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_SKIP, 1), CrabOvPolicy.CRAB_OVP_SKIP, "armed, skip sticks");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_KEEPBOTH, 1), CrabOvPolicy.CRAB_OVP_KEEPBOTH, "armed, keep-both sticks");
+    # ⛔ CANCEL NEVER BECOMES A POLICY. "cancel them all" is not a thing — a cancel ends the run.
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_CANCEL, 1), CrabOvPolicy.CRAB_OVP_ASK, "armed cancel is still just a cancel, never a policy");
+    assert_eq(crab_ov_policy_after(CrabOvAnswer.CRAB_OVA_ALL, 1), CrabOvPolicy.CRAB_OVP_ASK, "arming `all` twice is not an answer");
+
+    test_group("crab — 0.8.7: a standing policy answers without asking; ASK is what stops the walk");
+    assert_eq(crab_ov_auto(CrabOvPolicy.CRAB_OVP_ASK), CrabOvAnswer.CRAB_OVA_NONE, "ASK auto-answers NOTHING — that is what raises the prompt");
+    assert_eq(crab_ov_auto(CrabOvPolicy.CRAB_OVP_REPLACE), CrabOvAnswer.CRAB_OVA_REPLACE, "replace-all answers replace");
+    assert_eq(crab_ov_auto(CrabOvPolicy.CRAB_OVP_SKIP), CrabOvAnswer.CRAB_OVA_SKIP, "skip-all answers skip");
+    assert_eq(crab_ov_auto(CrabOvPolicy.CRAB_OVP_KEEPBOTH), CrabOvAnswer.CRAB_OVA_KEEPBOTH, "keep-both-all answers keep both");
+    # The round trip an armed answer makes: answer -> policy -> the same answer, every time after.
+    var rt = 1;
+    var ai = CrabOvAnswer.CRAB_OVA_REPLACE;
+    while (ai <= CrabOvAnswer.CRAB_OVA_KEEPBOTH) {
+        if (crab_ov_auto(crab_ov_policy_after(ai, 1)) != ai) { rt = 0; }
+        ai = ai + 1;
+    }
+    assert_eq(rt, 1, "an armed answer becomes the policy that keeps giving that same answer");
+
+    test_group("crab — 0.8.7: the prompt NAMES the file, and never at the keys' expense");
+    var pb = alloc(CRAB_OV_PROMPT_CAP);
+    var pl = crab_ov_prompt(pb, CRAB_OV_PROMPT_CAP, "report.txt", 0);
+    assert(pl > 0, "the prompt is written");
+    assert_eq(t_substr(pb, "report.txt"), 1, "it names the file — 'something is already there' is not actionable");
+    assert_eq(t_substr(pb, "r replace"), 1, "...and offers replace");
+    assert_eq(t_substr(pb, "s skip"), 1, "...skip");
+    assert_eq(t_substr(pb, "k keep both"), 1, "...keep both");
+    assert_eq(t_substr(pb, "Esc stop"), 1, "...and Esc");
+    assert_eq(t_substr(pb, "[all]"), 0, "unarmed, it does not claim [all]");
+    crab_ov_prompt(pb, CRAB_OV_PROMPT_CAP, "report.txt", 1);
+    assert_eq(t_substr(pb, "[all]"), 1, "ARMED, the prompt says so BEFORE the answer is given — which a capital letter could not");
+    assert_eq(t_substr(pb, "report.txt"), 1, "...and still names the file");
+    # ⛔ A LONG NAME YIELDS; THE KEYS DO NOT. An operator who cannot see the answers cannot answer.
+    var longname = alloc(CRAB_NAME_MAX);
+    var li = 0;
+    while (li < 60) { store8(longname + li, 120); li = li + 1; }
+    store8(longname + 60, 0);
+    var pl2 = crab_ov_prompt(pb, CRAB_OV_PROMPT_CAP, longname, 1);
+    assert(pl2 > 0, "a 60-character name still produces a prompt");
+    assert(pl2 < CRAB_OV_PROMPT_CAP, "...that fits the buffer");
+    assert_eq(t_substr(pb, "Esc stop"), 1, "...and the KEYS survive it");
+    assert_eq(crab_ov_prompt(0, CRAB_OV_PROMPT_CAP, "x", 0), 0 - 1, "no buffer, no prompt");
+    assert_eq(crab_ov_prompt(pb, 8, "x", 0), 0 - 1, "a cap too small to hold the keys is refused, not truncated");
+
+    test_group("crab — 0.8.7: keep-both puts the suffix BEFORE the extension");
+    var kb = alloc(CRAB_NAME_MAX);
+    # ⛔ `photo.png (2)` is a file nothing will open: the extension is what every other program
+    # dispatches on.
+    assert(crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "photo.png", 2) > 0, "a name is produced");
+    assert_eq(t_streq(kb, "photo (2).png"), 1, "photo.png -> photo (2).png");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "photo.png", 3);
+    assert_eq(t_streq(kb, "photo (3).png"), 1, "...and (3) on the next attempt");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "photo.png", 10);
+    assert_eq(t_streq(kb, "photo (10).png"), 1, "...two digits work");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "photo.png", 123);
+    assert_eq(t_streq(kb, "photo (123).png"), 1, "...and three");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "README", 2);
+    assert_eq(t_streq(kb, "README (2)"), 1, "no extension: the suffix goes at the end");
+    # ⚠ A DOTFILE IS A NAME, NOT AN EMPTY STEM: ` (2).bashrc` would be a different dotfile.
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, ".bashrc", 2);
+    assert_eq(t_streq(kb, ".bashrc (2)"), 1, ".bashrc -> .bashrc (2), NOT ' (2).bashrc'");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "archive.tar.gz", 2);
+    assert_eq(t_streq(kb, "archive.tar (2).gz"), 1, "the LAST dot is the extension — stated because it is a choice");
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "a.b", 2);
+    assert_eq(t_streq(kb, "a (2).b"), 1, "a one-character stem works");
+    assert_eq(crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "x", 1), 0 - 1, "attempt 1 is not a keep-both — 1 is the original");
+    assert_eq(crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "x", 0), 0 - 1, "...nor 0");
+    assert_eq(crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "", 2), 0 - 1, "an empty name yields nothing");
+    assert_eq(crab_ov_keepboth_name(kb, CRAB_NAME_MAX, 0, 2), 0 - 1, "...and a null one");
+    assert_eq(crab_ov_keepboth_name(0, CRAB_NAME_MAX, "x", 2), 0 - 1, "no destination, no name");
+    # ⛔ IT REFUSES RATHER THAN TRUNCATES: a truncated name is a DIFFERENT file, silently.
+    assert_eq(crab_ov_keepboth_name(kb, 8, "longer-than-eight.txt", 2), 0 - 1, "a name that will not fit is REFUSED, never truncated into a different file");
+    # And the produced name is one crab would accept for a write.
+    crab_ov_keepboth_name(kb, CRAB_NAME_MAX, "photo.png", 2);
+    assert_eq(crab_name_ok(kb), 1, "the keep-both name passes crab's own name guard");
+    return 0;
+}
+
+fn t_flags(): i64 {
+    test_group("crab — 0.8.7: the flag surface — a flag is never mistaken for a path");
+    # ⛔ THE AMBIGUITY THAT ISN'T: `crab_path_usable` requires an ABSOLUTE path, so anything starting
+    # with '-' cannot be one. Before this, `crab --about` was refused as "left path unusable", which
+    # names the wrong problem entirely.
+    assert_eq(crab_arg_is_flag("--about"), 1, "--about is a flag");
+    assert_eq(crab_arg_is_flag("-h"), 1, "-h is a flag");
+    assert_eq(crab_arg_is_flag("-"), 1, "a bare - is a flag (it is certainly not a path)");
+    assert_eq(crab_arg_is_flag("/bin"), 0, "an absolute path is not");
+    assert_eq(crab_arg_is_flag("bin"), 0, "nor a relative one");
+    assert_eq(crab_arg_is_flag(""), 0, "an empty string is not a flag");
+    assert_eq(crab_arg_is_flag(0), 0, "nor is a null pointer");
+    assert_eq(crab_path_usable("--about"), 0, "  (control: --about is not a usable path either — which is why it needed a flag)");
+
+    test_group("crab — 0.8.7: which flag is which");
+    assert_eq(crab_flag_of("-h"), CrabFlag.CRAB_FLAG_HELP, "-h is help");
+    assert_eq(crab_flag_of("--help"), CrabFlag.CRAB_FLAG_HELP, "--help is help");
+    assert_eq(crab_flag_of("--about"), CrabFlag.CRAB_FLAG_ABOUT, "--about is about");
+    assert_eq(crab_flag_of("/bin"), CrabFlag.CRAB_FLAG_NONE, "a path is no flag");
+    assert_eq(crab_flag_of(""), CrabFlag.CRAB_FLAG_NONE, "an empty argument is no flag");
+    # ⛔ UNKNOWN IS NOT NONE. A `-x` read as NONE would reach crab_path_usable and be refused as a
+    # path — the operator would be told their FLAG was a bad path.
+    assert_eq(crab_flag_of("--nope"), CrabFlag.CRAB_FLAG_UNKNOWN, "an unrecognised long flag is UNKNOWN, never NONE");
+    assert_eq(crab_flag_of("-x"), CrabFlag.CRAB_FLAG_UNKNOWN, "...and a short one");
+    assert_eq(crab_flag_of("-"), CrabFlag.CRAB_FLAG_UNKNOWN, "...and a bare -");
+    # ⚠ PREFIXES AND EXTENSIONS ARE NOT MATCHES: crab_streq_n compares to the NUL inside the cap.
+    assert_eq(crab_flag_of("--help-me"), CrabFlag.CRAB_FLAG_UNKNOWN, "--help-me is not --help");
+    assert_eq(crab_flag_of("--hel"), CrabFlag.CRAB_FLAG_UNKNOWN, "--hel is not --help either");
+    assert_eq(crab_flag_of("--aboutx"), CrabFlag.CRAB_FLAG_UNKNOWN, "--aboutx is not --about");
+    assert_eq(crab_flag_of("-help"), CrabFlag.CRAB_FLAG_UNKNOWN, "-help (one dash) is not --help");
+    assert_neq(CrabFlag.CRAB_FLAG_NONE, CrabFlag.CRAB_FLAG_UNKNOWN, "NONE and UNKNOWN are different answers");
+
+    test_group("crab — 0.8.7: the help and about texts say what they must");
+    var ht = crab_help_text();
+    assert(load8(ht) != 0, "the help text is not empty");
+    assert_eq(t_substr(ht, "usage: crab"), 1, "help states a usage line");
+    assert_eq(t_substr(ht, "--about"), 1, "  ...and names every flag it accepts: --about");
+    assert_eq(t_substr(ht, "--help"), 1, "  ...--help");
+    assert_eq(t_substr(ht, "-h"), 1, "  ...-h");
+    # ⛔ THE KEYS ARE IN IT, because nothing else writes them down: the menus carry six verbs and
+    # every other binding is discoverable only by being told.
+    assert_eq(t_substr(ht, "u "), 1, "help lists the refresh key");
+    assert_eq(t_substr(ht, "F10"), 1, "  ...the menu bar");
+    assert_eq(t_substr(ht, "Ctrl+Q"), 1, "  ...and says the compositor owns Ctrl+Q, so Esc is not the way out");
+    var at = crab_about_text();
+    assert(load8(at) != 0, "the about text is not empty");
+    # ⛔⛔ THE JOKE IS THE POINT AND IT IS INDIRECT (docs/development/mascot.md): the mascot is named
+    # Bueller — the surname — so it implies Ferris without saying it, and the roll-call is the LAST
+    # line and is never explained. This asserts BOTH halves, because "simplifying" either kills it.
+    assert_eq(t_substr(at, "Bueller"), 1, "about names the mascot");
+    assert_eq(t_substr(at, "...anyone? ...anyone?"), 1, "  ...and closes on the Ben-Stein line");
+    assert_eq(t_substr(at, "Ferris"), 0, "  ...and NEVER says Ferris — saying it is what kills the joke");
+    assert_eq(t_substr(at, "Rust"), 0, "  ...nor explains the Rust half");
+    assert_eq(t_substr(at, "GPL-3.0-only"), 1, "about carries the licence");
+    # ⚠ NO VERSION, DELIBERATELY: VERSION is the single source of truth and no build-time define
+    # reaches a source file, so a version string here would be a second copy that drifts at the first
+    # cut nobody remembered.
+    assert_eq(t_substr(at, "0.8."), 0, "about claims no version — there is no way to keep one true");
+    assert_eq(t_substr(ht, "0.8."), 0, "  ...nor does help");
+    assert_eq(crab_flag_of("--version"), CrabFlag.CRAB_FLAG_UNKNOWN, "  ...and --version is honestly UNKNOWN rather than a lie");
+    return 0;
+}
+
 fn t_refresh(): i64 {
     test_group("crab — 0.8.7: the REFRESH key keeps the NAME under the cursor, and the marks die");
     # crab_refresh_sel(old_sel, found, count): found = crab_index_of's answer, -1 when the name is gone
@@ -4761,16 +5100,16 @@ fn t_pointer_routes(): i64 {
     test_group("crab — 0.8.5: the pointer is BLOCKED by a question and CAPTURED by a popup");
     # ⭐ The split: `crab_pointer_blocked` is the half with nothing to click; `crab_pointer_modal`
     # is the union and must not have changed its answer for any input the 0.8.0 group pins.
-    assert_eq(crab_pointer_blocked(0, 0), 0, "nothing asked -> not blocked");
-    assert_eq(crab_pointer_blocked(1, 0), 1, "the delete confirmation blocks");
-    assert_eq(crab_pointer_blocked(0, 1), 1, "the rename sheet blocks");
-    assert_eq(crab_pointer_blocked(0, 3), 1, "...the batch sheet too (edit mode 3)");
-    assert_eq(crab_pointer_blocked(0, 0), crab_pointer_modal(0, 0, 0, 0 - 1), "with no popup the two agree: live");
-    assert_eq(crab_pointer_blocked(1, 0), crab_pointer_modal(1, 0, 0, 0 - 1), "...and blocked");
+    assert_eq(crab_pointer_blocked(0, 0, 0), 0, "nothing asked -> not blocked");
+    assert_eq(crab_pointer_blocked(1, 0, 0), 1, "the delete confirmation blocks");
+    assert_eq(crab_pointer_blocked(0, 1, 0), 1, "the rename sheet blocks");
+    assert_eq(crab_pointer_blocked(0, 3, 0), 1, "...the batch sheet too (edit mode 3)");
+    assert_eq(crab_pointer_blocked(0, 0, 0), crab_pointer_modal(0, 0, 0, 0 - 1, 0), "with no popup the two agree: live");
+    assert_eq(crab_pointer_blocked(1, 0, 0), crab_pointer_modal(1, 0, 0, 0 - 1, 0), "...and blocked");
     # ⛔ A popup is MODAL but not BLOCKED — that is the whole reason for the split.
-    assert_eq(crab_pointer_blocked(0, 0), 0, "an open menu does not BLOCK the pointer...");
-    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1), 1, "...but it is still MODAL (the wheel asks this)");
-    assert_eq(crab_pointer_modal(0, 0, 0, 0), 1, "a revealed bar is modal too");
+    assert_eq(crab_pointer_blocked(0, 0, 0), 0, "an open menu does not BLOCK the pointer...");
+    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1, 0), 1, "...but it is still MODAL (the wheel asks this)");
+    assert_eq(crab_pointer_modal(0, 0, 0, 0, 0), 1, "a revealed bar is modal too");
 
     test_group("crab — 0.8.5: the button numbers are aethersafha's, not X11's");
     assert_eq(CRAB_BTN_LEFT, 1, "left is 1");

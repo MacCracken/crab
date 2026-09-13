@@ -2,11 +2,11 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — the REFRESH key, and crab on a real kernel again
+## [0.8.7] — 2026-09-13 — the REFRESH key, crab on a real kernel again, chrome keys on Ctrl, a flag surface, and a collision you can answer
 
 > `git describe --tags` answered `0.8.6` exactly before a word of this was written — 0.8.6 is tagged
-> `249279f`, on the remote — so `[0.8.6]` below is a record and is left alone. ⚠ `VERSION` reads
-> `0.8.6`; no cut was asked for. Nothing here is committed by anyone but the operator.
+> `249279f`, on the remote — so `[0.8.6]` below is a record and is left alone. Cut on operator
+> direction; the commit, the tag and the push are the operator's.
 
 ### Added — ⭐ `u` is REFRESH: both panes, PLACES and VOLUMES re-read from disk
 
@@ -116,15 +116,203 @@ verb ran instead of assuming; the pick arm ascends to `/` first so Open can only
 ⚠ **Still not on target**: the *you are here* marker (a pixel claim; the rule is pinned on the host),
 the sidebar keyboard route (unreachable — see above), and iron.
 
+### Added — ⭐⭐ an overwrite policy: a collision STOPS the walk and asks, per file
+
+Until now a collision **ended the whole operation**. Copying a folder of 500 files into one that
+already held **one** of them moved nothing, said *"something of that name is already there"*, and
+named neither the file nor anything to do about it. Worse, the copy could not start at all if the
+destination held a folder of the same name — the single most ordinary thing two panes are for.
+
+⭐ **The policy is the operator's (2026-09-13): ASK, PER COLLISION.** The walk stops, the status line
+names the file, and four answers are offered — **`r` replace · `s` skip · `k` keep both · `Esc`
+stop** — with **`a`** arming an **all** that applies the next answer to every remaining collision.
+
+⛔⛔ **"ALL" IS ARMED BEFORE THE VERB, NOT SPELLED BY A CAPITAL, because shift is not on the wire.**
+`R` for replace-all is the obvious design and it is unreachable on this stack (`mods` carries the
+press/release edge; `crab_key_char`'s shift flag is hard-coded to 0). ⇒ `a` toggles, the prompt shows
+`[all]` while armed, and the next `r`/`s`/`k` applies to the rest. Two lowercase keystrokes, and the
+armed state is **visible before it is acted on** — which a capital could not be.
+
+⛔ **DIRECTORIES MERGE; ONLY FILES ASK.** Two folders of the same name are what a copy into an
+existing tree means. Asking "replace this folder?" would mean either deleting a tree the operator
+never asked to delete, or wrapping `docs (2)` around files that individually did not collide — both
+worse than merging. The question is asked where the answer actually destroys something. ⚠ A
+NON-directory in a directory's way still stops the run: crab cannot merge a tree into a file.
+
+⛔ **KEEP BOTH PUTS THE SUFFIX BEFORE THE EXTENSION** — `report (2).txt`, never `report.txt (2)`,
+because the extension is what every other program dispatches on. ⚠ A dotfile is a NAME, not an empty
+stem: `.bashrc` → `.bashrc (2)`, not ` (2).bashrc`. ⚠ It tries (2), (3)… until a free name is found,
+because `photo (2).png` can collide too and a keep-both that overwrote it would destroy a file while
+answering the one thing that promises not to.
+
+⛔ **REPLACE UNLINKS FIRST, and that is the two targets agreeing for once.** `crab_fs_open_w` is
+`O_WRONLY|O_CREAT|O_EXCL` on the host and `AO_WRONLY|AO_CREAT|AO_TRUNC` on agnos, which has no
+`AO_EXCL` — unlink-then-create is the one sequence that means the same on both. The suite proves it
+by reading the bytes back on a host whose open is exclusive.
+
+⛔ **A WAITING OPERATION DOES NOT STEP, AND A COLLISION PROMPT OWNS THE KEYBOARD AND THE POINTER.**
+The walk advances on the idle tick, so the tick asks `crab_op_waiting()` before stepping — one that
+stepped anyway would re-ask every 16 ms or walk past the entry in question. The key arm sits **above
+every binding including Esc-cancels-a-transfer**, because the operation is not merely running, it is
+stopped on a question; `r`/`s`/`k` are rename/sort/nothing elsewhere and must not reach them. And
+`crab_pointer_blocked` takes the waiting state: it is `confirm_del`'s exact shape — a status-line
+question with no overlay to prune clicks, whose next keystroke decides whether a file is destroyed.
+⚠ The policy resets on **every run**: a `replace all` that survived would destroy without asking in
+some later copy the operator armed nothing for.
+
+### Fixed — ⛔⛆ a `DT_UNKNOWN` retry ended a delete and reported "done" on a half-emptied tree
+
+`crab_walk_step` returns `1` for "more to do" and `CRAB_FS_OK` for "the whole tree is done" — and
+**`CRAB_FS_OK` is 0**. The `DT_UNKNOWN` retry arm (an entry `readdir` typed as a file, whose `unlink`
+failed, to be retried as a directory) did `return 0`. The idle tick treats anything that is not 1, 2
+or 3 as terminal, so that arm **ended the operation and reported "done"** — and the retry never
+happened. ⚠ Reaching it needs a filesystem answering `DT_UNKNOWN`, which the host's `getdents64`
+does not, so no test could see it and the RETURN VALUE was never the thing under test. Found while
+adding a second `return 0` beside it and asking what 0 meant. ⇒ Both return `1`, and the function's
+contract now says: **never `return 0` for a non-terminal case.**
+
+### Added — ⭐ a flag surface: `crab --help`, `crab --about`, and an unknown flag that says so
+
+crab parsed positional paths and nothing else, so `crab --about` — which `docs/development/mascot.md`
+asks for **by name** — could not be built, and `crab --anything` was refused as *"left path
+unusable"*, which names the wrong problem entirely. `--help` (also `-h`) prints usage, the flags, and
+**the key list**; `--about` closes on the Ben-Stein line; an unknown flag names itself, prints help
+and exits **2**. Flags are scanned before any path is adopted and before any window exists.
+
+⛔ **A FLAG IS NEVER AMBIGUOUS WITH A PATH, and that is not luck**: `crab_path_usable` requires an
+ABSOLUTE path, so anything beginning with `-` cannot be one. That is what lets an unrecognised `-x`
+be refused *as a flag crab does not know* rather than mis-diagnosed as a bad path — and why
+`crab_flag_of` answers `UNKNOWN`, never `NONE`, for anything starting with a dash. ⚠ The paths are
+the **positional** arguments now (`crab_positional`), not `argv(1)`/`argv(2)`, so a flag anywhere in
+the line cannot shift which argument is the left pane.
+
+⭐ **`--help` lists the KEYS, because nothing else does.** The menu bar shows six verbs behind `F10`
+and the context menu the same six; the views, the sort, the sidebar, refresh and the sidebar's Tab
+route were discoverable only by being told. It also says the compositor owns `Ctrl+Q` / `Ctrl+Tab` /
+`Ctrl+F4–F10`, so an operator looking for the way out does not reach for Esc.
+
+⚠ **NO `--version`, AND THE ABSENCE IS THE POINT.** `VERSION` at the repo root is the single source
+of truth, the manifest interpolates it, and cyrius offers no build-time define that would reach a
+source file — so a `--version` string would be a **second copy of the number**, drifting at the first
+cut nobody remembered. That is the exact failure aethersafha's `version-bump.sh` carries a ⛔⛆ about.
+`--version` is honestly `UNKNOWN` rather than a lie, and the suite asserts neither text carries a
+version. It becomes possible the day the toolchain can inject the manifest's.
+
+⚠ **On agnos the surface is unreachable today**, and that is recorded rather than pretended: the
+launcher spawns `/bin/crab` with no arguments, and crab cannot start from a shell there at all (it
+needs `AGNOS_CHAN`, which only the compositor mints). It exists for the host and for the day one of
+those changes. ⚠ **What the suite can and cannot reach**: the DECISIONS are pure and pinned
+(`crab_arg_is_flag`, `crab_flag_of`, both texts — 38 assertions, five mutations each caught, including
+"the about text explains the joke" and "the roll-call is dropped"); the two functions that walk
+`argv` are verified by running the binary (`--about`, `--help`, `-h`, `--nope`, and `crab /bin /`
+unchanged), the same split every agnos-only arm in this codebase has.
+
+⛔⛔ **`crab_about_text` CARRIES A JOKE AND THE JOKE IS INDIRECT — read `docs/development/mascot.md`
+before touching it.** Rust's mascot is Ferris the crab; crab replaces the Rust interim; the mascot is
+named **Bueller** — the surname — so it implies Ferris *without ever saying it*, and the roll-call is
+the last line and is never explained. The suite asserts both halves: the line is present, and the
+words "Ferris" and "Rust" are **absent**. The doc's own discipline: *"subtle and infrequent… the
+whole thing dies if it's trying too hard."*
+
+### Changed — the roadmap is 631 → 466 lines, and 42 stale claims are corrected
+
+An audit of every claim in `docs/development/roadmap.md` against the code, the suite, the CHANGELOG
+and the sibling repos (a workflow: four readers over disjoint sections, two skeptics per DONE/STALE
+verdict, 142 agents) returned **124 findings — 48 open, 42 stale, 27 done-but-still-listed, 7 gated**.
+**M5 and M6 are collapsed into the shipped table**, as M1–M4 were before them and for the same
+reason: they had become 140 lines of shipped-feature narrative, some still carrying `(unreleased)`
+labels that outlived their own tags. What a collapse keeps is what is NOT done and the lessons that
+still govern. Corrections worth naming:
+
+- *"It reads surface/text/accent from aethersafha via `dh_theme_*`"* — **there is no wire.** rupa's
+  active theme is per-process and defaults to MUDRA dark; crab and aethersafha agree by sharing a
+  default, not because one hands the other a theme. No setu kind carries one. The invariant crab
+  actually keeps (it names no colour) is intact and now stated separately from the claim it did not.
+- *"F1 is a change in the TRUST MODEL"* in the present tense — **F1 closed in 0.7.6**, in the release
+  that raised it; the gallery walks only the visible range. What does not close is that ~22,500 lines
+  of third-party parser still run in-process on attacker-chosen bytes.
+- *"The keycode confusion… dhancha's `DhKey` constants are evdev"* — **they never were**; `DhKey` is
+  puka's ASCII/Unicode sym space, and the word *evdev* appears nowhere in dhancha. The item is real
+  (three key spaces across four repos) and its central claim was false for four releases.
+- *"Two ADRs exist"* (three), *"three false gates"* (**seven**, wrong in four different ways),
+  *"M3 … 0.7.0"* (three of its seven items closed their gates at 0.7.1), the M5 heading's `v0.9.0`
+  (it shipped inside `[0.7.6]`), *"crab consumes none of it yet"* for the menu-bar strip (since
+  0.8.0), *"83 over-long lines"* (**147**, and nearly all of the growth is in the suite, not the
+  event loop), and the idle mascot line listed under *"the only parts of M1–M4 that are not done"*
+  while shipped in M6.
+- The **gates table** now lists only live gates; the closed ones are named once as a group. ⛔ The
+  false-gate lesson is kept and sharpened: **a price is not a gate**, and a table of gates invites
+  reading one as the other — which is exactly how thumbnails were read.
+
+### Changed — ⭐⭐ the compositor's chrome keys are Ctrl chords now, so crab's Esc, Tab and F10 ARRIVE
+
+**aethersafha 0.16.25** (prepared in the sibling on operator direction: *"it was easy for initial
+testing of the desktop but now it's time to fix that right"*) moves every chrome key onto Ctrl —
+**Ctrl+Q** quits, **Ctrl+Tab** cycles windows, **Ctrl+F4–F10** close/maximize/minimize/move — and
+forwards the bare keys. The gate above is closed by the third shape the filing offered. Measured on
+QEMU, `crab-pointer-test.py` with its ARM 7 rewritten to the new contract — **PASS, run 14**, and the
+seven chord/bare lines below were identical in runs 6, 7, 9, 11, 12, 13 and 14 (the runs between
+were the harness's own pointer timing, not this contract):
+
+```
+right click: compositor forwarded a non-left button: True wire number: 2 | crab opened the context menu: 1
+pick: a left press ran a menu entry | verb by pointer: True | what ran: crab: cd /bin
+dismiss: presses off the popup dismissed it 1 time(s)
+refresh: `u` -> relists; display keys g/b answer
+bare F10: crab opened the menu bar: True | compositor moved the window: 0
+View via the keyboard: F10 → Right x3 → Enter → Enter -> 1 view change(s)
+bare Esc x3: crab acted on 3 | compositor quit: False
+bare Tab x3: crab acted on 3 | compositor claimed 0
+Ctrl+Tab x3: compositor answered 1 | crab acted on 0
+Ctrl+F10 x3: compositor answered 1 (one-shot) | crab acted on 0
+Ctrl+Q x3: compositor quit: True | crab acted on 0
+```
+
+⚠ **And the harness learned three more things about driving a pointer under TCG**, all in its
+header: the kernel ACCUMULATES deltas between drains, so a pin (−4000) and a walk folded into one
+drain land the cursor at (0,0) — crab's titlebar — and the press "had NO client content under the
+cursor"; where to press to MISS a popup is derived from `dh_place_at_point`'s flip, not guessed; and
+a pick can open a SHEET (Rename…/New folder…) whose scrim blocks the pointer, so the arms reset
+crab's modal state with bare Esc — which only works because Esc arrives now. A dismiss arm that
+cannot re-open a menu reports UNMEASURED, not FAIL: an assertion over an empty set is not a pass.
+
+⭐ **So the menu bar, `View`, the sidebar's keyboard route and every `Esc` cancel are live on the
+real desktop for the first time** — `View` was driven from the keyboard on a real kernel in that run.
+Nothing in crab's bindings changed; they were correct the day the key arrived, as the filing said.
+
+⛔ **One crab change was REQUIRED by the new contract, and it closes an older defect: a modifier's own
+edge is not a keystroke.** The compositor forwards Ctrl/Shift presses as usages `0xE0..0xE7` (bhumi
+maps the boot report's modifier byte) and always did; crab's dispatch took that press like any other
+— it **answered "no" to a pending delete prompt**, cleared a notice, cleared the held-key repeat. With
+every chrome key now a chord, that edge precedes every Ctrl+Q. `crab_key_is_modifier` gates it before
+the latch and before every dispatch gate; the harness's "crab acted on 0" for the chords is that gate
+at work. ⚠ Shift for capital letters (a *Recorded as facts* item) would read the same usages as
+STATE — the road is open now, not built.
+
+⚠ The pointer harness's ARM 7 is a gate now, not an observation: bare F10 must open the bar, bare Esc
+must not quit, Ctrl+Q must. Every other harness that sent a bare chrome key sends the chord
+(`crab-resize-test` maximizes with `ctrl-f5`); `puka-terminal-test` expects its typed Tab to reach
+puka. `docs/development/issues/2026-09-13-aethersafha-claims-esc-tab-f10.md` records the resolution.
+
 ### Verified
 
-`cyrius test` **1838 → 1879 / 0** (+41: `t_refresh` — the selection rule, the exact re-seat against
+`cyrius test` **1838 → 2012 / 0** (+174: `t_refresh` — the selection rule, the exact re-seat against
 the containment rule and against the `/` alias, the menu entry, the accelerator agreement, the
 sidebar gate, the kept thumbnail with the write-op relist as control; and View's fifth row rendered)
-· render_test 53 / 0 · fmt clean · coverage **89 %** · `vet`/`deny` 0 · `deps --verify` 50 / 0 · host
-**1,053,680 B** · `--agnos` **1,094,480 B**. Six mutations, each caught: a vanished name resetting
+; `crab_key_is_modifier` over the modifier row; `t_flags`; and `t_overwrite` + `t_overwrite_walk`,
+the second of which drives the **shipping** `crab_op_step` against real directories on disk — the
+lesson recursive copy cost this project — asserting the bytes after a replace, the `(2)` name after a
+keep-both, the untouched destination after a skip, and that an armed answer asks **once**)
+· render_test 53 / 0 · fmt clean · coverage
+**89 %** · `vet`/`deny` 0 · `deps --verify` 50 / 0 · host **1,053,680 B** · `--agnos` **1,094,480 B**.
+Sixteen mutations, each caught: a vanished name resetting
 to 0; the re-seat by containment; the re-seat ignoring the section; the refresh relist wiping the
-cache; the bar applying the separator mapping (`got -1`); Refresh on F5. ⭐ **Adversarial review**
+cache; the bar applying the separator mapping (`got -1`); Refresh on F5; an unknown flag answering NONE; a
+prefix match on `--hel`; the about text explaining the joke; the about text dropping the roll-call; a
+flag test that accepts a path; the skip returning 0 (the defect's own shape); a collision tearing the
+walk down again; an unarmed answer sticking; replace forgetting to unlink; the root refusing instead
+of merging. ⚠ One of those mutations **segfaulted out of the group before the verdict** (a null name
+dereferenced by the test itself) — guarded, so a mutation now FAILS the assertion it should. ⭐ **Adversarial review**
 (a workflow: three finder lenses over the diff, two refuters per finding, 23 agents): 10 findings
 raised, 3 distinct defects survived both skeptics and are fixed above; the rest were refuted or were
 the same defect seen from another lens.

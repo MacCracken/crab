@@ -1,6 +1,14 @@
 # aethersafha claims Esc, Tab and F4–F10 — crab's `Esc`, `Tab` and `F10` bindings never receive a keypress on agnos
 
 > ⚠ **This is crab's COPY. The canonical filing is in aethersafha**, at
+> `docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md`.
+> ✅ **CLOSED by aethersafha 0.16.25 (2026-09-13)** — chrome keys are Ctrl chords (Ctrl+Q / Ctrl+Tab /
+> Ctrl+F4–F10) and bare Esc/Tab/F-keys are forwarded. Measured on QEMU: crab's F10 menu bar opened,
+> `View` was driven from the keyboard, bare Esc and Tab reached crab, Ctrl+Q ended the desktop. crab's
+> one required change: a modifier's own edge (`0xE0..0xE7`) is not a keystroke (`crab_key_is_modifier`).
+> ⚠ Everything below is the filing as written — the OLD contract, kept as the record of why.
+
+> ⚠ **This is crab's COPY. The canonical filing is in aethersafha**, at
 > `docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md` — an issue about another
 > repository that lives only here is one nobody who could act on it will ever read.
 > ⛔ **What it means for crab, in one line**: on the real desktop the menu bar (`F10`), the sidebar's

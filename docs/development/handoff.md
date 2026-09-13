@@ -1,4 +1,4 @@
-# Handoff — **crab ran on a real kernel again: the pointer routes are proven, `u` refreshes, and the compositor eats Esc/Tab/F10.**
+# Handoff — **0.8.7 cut: a collision you can answer, a flag surface, `u` refreshes, chrome keys on Ctrl, and crab proven on a real kernel.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 is the last release** (`249279f`, on the remote). `[Unreleased]` holds two things and no
@@ -19,17 +19,20 @@
 >    rather than assuming); press beside the popup → dismissed; `u` ×6 → 4 refreshes / 8 listings;
 >    `g`, `b` answer; no faults. Verdict log beside the serial log in `agnos/build/crab-pointer/`.
 >
-> ⛔⛔ **THE FINDING THAT OUTRANKS BOTH: aethersafha's `input_map` CLAIMS Esc, Tab AND F4–F10 AND
-> CONSUMES THEM UNFORWARDED — AND Esc QUITS THE DESKTOP.** Read in its source, then MEASURED: Tab ×6
-> and F10 ×6 → the compositor answered, crab acted on 0; Esc ×4 → `quit on a key`. So on the real
-> desktop the **`F10` menu bar and everything under it (`View` included), the `Tab` sidebar route,
-> and every `Esc` cancel are unreachable** — three shipped affordances, two releases of them, dead
-> on the target and green on the host, because the host pins crab's dispatch table and the wire never
-> delivers the press. ⚠ The RELEASE of a claimed key IS forwarded (`input_map` answers nothing for a
-> release), so `crab: key received` moves and `crab: key press` does not — count the second.
-> Filed in aethersafha (`docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md`,
-> crab's copy in `docs/development/issues/`) with three shapes for the decision — a setu surface
-> flag, modifiers on the wire, or rebinding. **The bindings stay; the decision is not crab's.**
+> ⛔⛔ **THE FINDING THAT OUTRANKED BOTH, AND ITS CLOSE:** aethersafha's `input_map` claimed Esc, Tab
+> and F4–F10 bare and consumed them — MEASURED: crab acted on 0, Esc ×4 → `quit on a key`. Three
+> shipped affordances dead on the target, green on the host. **The operator ruled the same day** —
+> *"it was easy for initial testing … now it's time to fix that right"* — and **aethersafha 0.16.25**
+> (prepared in the sibling, git theirs) moves chrome onto Ctrl: **Ctrl+Q** quits, **Ctrl+Tab** cycles,
+> **Ctrl+F4–F10** close/max/min/move; bare keys are forwarded; a chord is swallowed whole. Ctrl was
+> already observable (usages 0xE0/0xE4 — the kernel diffs the modifier byte, bhumi maps it): no
+> kernel or bhumi change. MEASURED AGAIN (run 6, ARM 7 rewritten as a gate): **bare F10 opened crab's
+> menu bar and `View` was driven from the keyboard for the first time; bare Esc ×3 and Tab ×3 reached
+> crab; Ctrl+Tab / Ctrl+F10 were the compositor's with crab acting on 0; Ctrl+Q ended the desktop.**
+> crab's required half: `crab_key_is_modifier` — a modifier's own edge (forwarded, always was) is not
+> a keystroke; it used to answer the delete prompt. ⚠ F2/F3 stay bare — not in the ruling, open.
+> ⚠ Every harness in `agnos/scripts/harness` that sent a bare chrome key sends the chord now;
+> `puka-terminal-test` expects its typed Tab to reach puka. Only the two crab harnesses were re-run.
 >
 > ⚠ **What driving crab under QEMU taught, kept in the harness header:** crab-resize-test's Enter ×8
 > launch burst leaks into crab, where Enter is OPEN on the selected row — `/bin`'s first row is
@@ -40,8 +43,14 @@
 > (Open = descend) and reports which verb ran. ⚠ `crab-resize-test.py` still has the burst.
 > ⚠ `println(lnch_name_at(lsel))` in aethersafha prints the app name's ADDRESS — noted in the filing.
 >
-> ⭐ **Next, ungated:** a flag surface for `--about`; the overwrite policy (operator decision). Then
-> M5's remainder and M7's daimon decision. ⛔ **The keys gate is the one to settle first**: until
+> ⭐ **0.8.7 IS CUT** (operator direction) — the overwrite policy, the flag surface, the REFRESH key,
+> the chord contract and the QEMU runs. ⛔ Commit, tag and push are the operator's.
+> ⭐ **Next, in the operator's order (2026-09-13):** **columns** (M5's design question on the two-pane
+> model — never a dhancha gate), **proportional text** (crab-side: `font = 0` and the 9 px constants,
+> which are load-bearing for the truncation rule, not cosmetics), and the ***Small, cheap,
+> unblocked*** list (drop the redundant `net` declaration; park `--win`; give the stat trace an arm
+> that works on agnos; correct the CHANGELOG's harvested-deferral count).
+> ⚠ **daimon is deliberately NOT in that order** — M7/M8 stay gated on it and it stays open. ⛔ **The keys gate is the one to settle first**: until
 > aethersafha decides, every keyboard-only surface crab builds is built for a key that cannot arrive.
 > ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
 
