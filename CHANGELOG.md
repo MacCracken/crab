@@ -2,6 +2,154 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — the pointer reaches every surface, on the 6.6.2 stack
+
+> ⛔ **`[0.8.4]` BELOW IS RELEASED — tagged `7929ae1`, on the remote, CI and Release both green —
+> and its header still reads *"unreleased"*, as `[0.8.3]`'s does.** Both are records now and are left
+> alone; that is the 0.7.2 rule. This section is `[Unreleased]` rather than a pre-named number so it
+> cannot make the same false claim: the operator names it at the cut. ⚠ `VERSION` reads `0.8.4`.
+
+### Changed — the whole dependency graph moved to the cyrius 6.6.2 siblings
+
+Every one of crab's seven deps was released for 6.6.2 while crab still declared the previous tag,
+and — `path` winning over `tag` — the local build was already compiling four of the new ones:
+0.8.4's `lib/` carried **dhancha 0.9.29 · rupa 0.1.7 · setu 0.8.9** under a manifest naming
+0.9.28 · 0.1.6 · 0.8.8, so CI and a local build compiled different code and neither said so.
+
+| dep | from | to | what moved in the module crab consumes |
+|---|---|---|---|
+| `sadish` | 0.5.3 | **0.5.4** | version header only |
+| `rupa` | 0.1.6 | **0.1.7** | version header only |
+| `rekha` | 0.3.6 | **0.3.7** | version header only (a `_distprobe.cyr` landed at its root; not in the dist) |
+| `kashi` | 1.0.6 | **1.0.7** | nothing — `src/font_data.cyr` is byte-identical; its tests moved |
+| `dhancha` | 0.9.28 | **0.9.29** | version header only |
+| `setu` | 0.8.8 | **0.8.9** | version header only |
+| `chitra` | 1.0.1 | **1.0.3** | ⭐ **real content** — see below |
+
+Every tag verified on its remote with `git ls-remote --tags` and on a clean sibling tree, and read
+from the tag-to-tag diff of the consumed module rather than from the release note.
+
+⭐ **chitra 1.0.3 is the one that matters, and it matters to crab specifically.** Its P-1 sweep
+closed 19 defects, headed by *"a valid PNG could kill the process"*: `crc32_init_table()`'s OOM return
+was discarded and the next `crc32()` read through a NULL table — **SIGSEGV on the first PNG a
+memory-pressured process decodes**, no hostile file required. crab is exactly that process: it runs
+chitra on a bump allocator with no `free()`, behind two budgets that exist because every decode is
+permanent. Also in it: JFIF files whose colour space was overridable by their component ids, a
+truncated JPEG scan reporting a clean close, and every RLE BMP whose width is not a multiple of 4
+being refused. ⚠ None of it changes a crab test; the fuzz and thumbnail groups stayed green through
+the bump, which is what a decoder fix should look like from the consumer's side.
+
+⚠ **One stdlib leaf had been left behind by the 0.8.4 pin bump**: `lib/sankoch.cyr` was still 6.6.1's
+2.7.14 while every other file matched the 6.6.2 snapshot — the transitive leaf `cyrius lib sync`
+does not walk, again. `cyrius deps` corrected it to 2.7.15; the whole vendored tree now `cmp`s
+byte-identical to `~/.cyrius/versions/6.6.2/lib`, file by file.
+
+⭐ **Check four re-run against the new graph**: a scratch copy with all four `path` overrides disabled,
+`cyrius deps` really cloning the tags — **7 deps / 0 errors**, lock **3 → 7 commit-pinned** (the tell
+the overrides were really off), and both binaries **byte-identical** to the path-resolved ones —
+host **1,045,296 B** `d75c35a9…`, `--agnos` **1,085,872 B** `9ca89ea3…`. *That equality is the
+evidence.* `deps --verify` 50 / 0.
+
+### Added — ⭐⭐ the pointer routes M6 shipped without: right-click, the popup, the bar, the switcher
+
+Since 0.8.0 the context menu opened from the Menu key alone, the menu bar and its drop-downs from
+`F10` and the arrows alone, and the A/B strip was *"a display, not a control"*. crab read only `b`
+of `POINTER_BTN` — press or release — so a right-click was a left one. The information was never
+on the wire: aethersafha forwarded a hardcoded `1`. **aethersafha 0.16.24** (prepared 2026-09-12 on
+operator direction, in the sibling — see *Upstream*) forwards every button, and this is the
+consumer.
+
+- **Right-click on a pane opens the context menu there**, over the row under the point: the pane
+  is focused and that row selected first, so the verbs act on what the operator pointed at rather
+  than on what the arrows last touched. The Menu key still opens it at the tracked position.
+- **A left press on a popup row runs that entry** — a context-menu verb or a bar drop-down item —
+  by the same road Enter takes: the entry's accelerator is **synthesised** and falls through the
+  one binding table. There is still exactly one implementation of every verb.
+- **A press anywhere else while a popup or the bar is up dismisses it**, and is consumed. It never
+  falls through to the surface underneath — that surface is one the operator is not looking at.
+- **A left press on a bar cell** selects that menu and opens its drop-down onto the first enabled
+  item, as Enter does; on the cell whose drop is already open it closes it; a neighbouring cell
+  while a drop is open switches menus, as every menu bar does.
+- **A left press on the A/B strip focuses that pane.** Its own hit, never `crab_hit`'s pane index.
+
+⛔⛔ **ONE FUNCTION DECIDES, AND ITS ORDER IS THE DESIGN.** `crab_pointer_action` in `src/ui.cyr`
+takes what every surface answered about the point and names the ONE arm that takes the press. The
+first two lines of that order are not obvious: `dh_list_index_at` is z-order blind, and
+`dh_place_at_point` FLIPS a drop-down above its anchor when there is no room below, so a drop's rows
+can lie **on the bar row** and a context menu always lies on a pane — asked in the wrong order, a
+press on `Delete` also reads as a bar cell or a pane row. Popup first, then bar, then strip (which
+sits inside a header `crab_hit` also records), then sidebar, then panes. **Every arm consumes**:
+there is no answer that means "not mine, try the panes". Pinned by 31 assertions and seven
+mutations (bar before popup; fall-through instead of dismiss; right on a pane as a click; pane
+before strip; the separator shift forgotten; trusting the popup widget rather than the open flag;
+blocked ignored) — each producing a named failure.
+
+⛔ **THE BUTTON NUMBERS ARE aethersafha's, MIRRORED, AND NOT X11's.** `CRAB_BTN_LEFT = 1`,
+`CRAB_BTN_RIGHT = 2`, `CRAB_BTN_MIDDLE = 3` — `wire = kernel_bit + 1`, the decision recorded in
+aethersafha's `src/input.cyr` and pinned by both suites. X11 is 1=left **2=middle 3=right**; a reader
+who "corrects" these puts Delete on the middle button. ⚠ setu is the right eventual home for the
+constants; until it names them, crab's copy sits next to the one function that reads them. ⚠ On a
+compositor older than 0.16.24 every press still arrives as `1`, which is inert rather than wrong.
+
+⛔ **THE SEPARATOR IS THE DANGEROUS HALF, AND IT HAS ITS INVERSE NOW.** `crab_menu_row` maps a menu
+item to the list row it lands on once the separator is counted; the pointer needs the other
+direction, and feeding a list row straight to `crab_menu_accel` would fire **Delete for a press on
+New folder** — the off-by-one that once painted the wrong highlight, now acting instead of painting.
+`crab_menu_item_at` inverts it; the suite pins the round trip for every item. ⚠ `dh_list_index_at`
+already refuses inert rows — the separator and every greyed verb — so a pick never names a disabled
+entry; that is dhancha's contract, pinned in dhancha's own suite, and the -1 here is defence.
+
+⭐ **Phase 0's last piece: `crab_pointer_blocked` split out of `crab_pointer_modal`.** The delete
+prompt and the edit sheet REFUSE the pointer (nothing on them to click); an open popup or a revealed
+bar CAPTURE it (its own rows are what the press is for, everything else dismisses). The press arm
+asks the first; `crab_pointer_modal` is the union and still gates the wheel. The 0.8.0 group's every
+assertion holds unchanged.
+
+⚠ Two things deliberately not done, and named: the middle button does nothing anywhere yet and
+says so by returning `CRAB_PA_NONE` rather than by being absent from the table; and pointer MOTION
+does not move a popup's highlight — only a press acts. ⚠ **Not run on QEMU or iron.** The whole
+arm is inside `src/main.cyr`'s agnos-only `#ifdef`; the decisions were lifted into `src/ui.cyr`
+for exactly that reason, and the wiring is what an on-target run is for. New oracle lines for it:
+`crab: context menu opened by pointer` · `crab: menu pick by pointer` · `crab: verb by pointer`
+(a synthesised verb, kept separate from `crab: key press` so the harness's received-vs-acted ratio
+is not disturbed) · `crab: popup dismissed by pointer` · `crab: bar click` · `crab: switcher click`.
+
+### Fixed — ⛔⛆ the wheel was not gated by a modal question, and it was the same hole 0.8.0 closed
+
+`POINTER_SCROLL` moved `sel_l` / `sel_r` with no guard at all. A scroll between `d` and `y` moved the
+selection, so the prompt named one entry and the delete took another — exactly the pane-click path
+0.8.0 closed, one input kind over. Gated on `crab_pointer_modal` — the union, popup and bar included,
+because a wheel has no rows of its own to take: while anything is up, it does nothing.
+
+### Fixed — the sidebar arm never consumed the double-click pair
+
+Click a row, click a place (the pane re-lists), click the same row index inside 400 ms — and
+`crab_is_double` descended into whatever entry now sat at that index in a directory the first click
+never saw. Named as latent in the roadmap; closed by one line above every arm rather than one per
+arm, so a route added later cannot omit it.
+
+### Fixed — a right or middle release could end a left drag
+
+Before 0.16.24 every release was left; now a right release arriving mid-drag would have dropped or
+disarmed it. The release arm acts on `CRAB_BTN_LEFT` only.
+
+### Upstream — aethersafha 0.16.24, prepared in the sibling on operator direction
+
+The fix crab filed on 2026-09-09 is made: every kernel button bit is forwarded, window management
+stays left-only structurally, the numbering is decided and pinned, and six assertions that had never
+run in its input suite run now. Its own pre-cut gate (`scripts/check-dep-tags.sh`) failed on five
+stale dep tags and they were moved after reading each diff. **27 / 27 suites, `input` 136 → 183.**
+⚠ Nothing there is committed, tagged or pushed; `git ls-remote` says what is released, not this
+line. crab's copy of the issue records the resolution:
+[`docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
+
+### Verified
+
+`cyrius test` **1695 → 1748 / 0** (+53) · render_test **53 / 0** · fuzz 100,000 rounds · `fmt --check`
+clean across `src/` and `tests/` · coverage **88 %** (262/296) · `vet` + `deny` 0 · `deps --verify`
+50 / 0 · host **1,049,480 B** · `--agnos` **1,090,216 B** (+4,184 / +4,344 over the bumped graph:
+the decision layer and the routes). Every gate `ci.yml` runs, run here, at the 6.6.2 pin.
+
 ## [0.8.4] — unreleased — the aethersafha button blocker, measured and filed rather than guessed
 
 > ⛔ **THIS SECTION EXISTS SO `[0.8.3]` BELOW IS NEVER TOUCHED.** 0.8.3 was committed and tagged

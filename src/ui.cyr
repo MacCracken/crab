@@ -580,12 +580,113 @@ var CRAB_SB_VOL_BAR_H = 4;                 # its capacity bar, under the name
 # than inline in `src/main.cyr`, whose key dispatch no test on any target can execute.
 # ⚠ THE MENU BAR COUNTS TOO. It is modal in the same sense: its keys are consumed before the
 # bindings, so a click landing behind it would act on a surface the operator is not looking at.
-fn crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel): i64 {
+# ⭐ SPLIT IN TWO (0.8.5), BECAUSE THE TWO HALVES MEAN DIFFERENT THINGS TO A POINTER. The delete
+# prompt and the edit sheet REFUSE the pointer outright — there is nothing on them to click, and a
+# click anywhere else is the data-loss path above. An open popup or a revealed bar CAPTURE it: the
+# popup's own rows take a press and everything else dismisses. `crab_pointer_blocked` is the first
+# half; this predicate is the union, and it is what still gates the wheel (which has no rows to take).
+fn crab_pointer_blocked(confirm_del, edit_open): i64 {
     if (confirm_del != 0) { return 1; }
     if (edit_open != 0) { return 1; }
+    return 0;
+}
+
+fn crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel): i64 {
+    if (crab_pointer_blocked(confirm_del, edit_open) == 1) { return 1; }
     if (menu_open != 0) { return 1; }
     if (mb_sel >= 0) { return 1; }
     return 0;
+}
+
+# =================================================================================================
+# M6 — THE POINTER ROUTES (0.8.5): every surface answers a press, in one z-order, decided here.
+# =================================================================================================
+#
+# ⭐⭐ THE BUTTON NUMBERS ARE aethersafha's, MIRRORED — `wire = kernel_bit + 1`, decided at
+# aethersafha 0.16.24 when crab's filing made it forward every button (it used to forward a
+# hardcoded `1`). ⛔ NOT X11: X11 is 1=left 2=MIDDLE 3=RIGHT. This stack diverged from X11 on the
+# wheel deliberately (setu gives it its own kind) and the buttons follow the kernel's bit order
+# instead. ⚠ setu is the right eventual home for these; until it names them, crab's copy is here,
+# next to the one function that reads them. A reader who "corrects" them to X11 puts Delete on the
+# middle button.
+var CRAB_BTN_LEFT   = 1;
+var CRAB_BTN_RIGHT  = 2;
+var CRAB_BTN_MIDDLE = 3;
+
+# What a pointer PRESS means. One table, one order, where the suite can reach it.
+var CRAB_PA_NONE    = 0;   # consumed, nothing happens: blocked, a middle button, or empty space
+var CRAB_PA_PICK    = 1;   # left on a popup row — run that entry
+var CRAB_PA_DISMISS = 2;   # any button outside an open popup / off a revealed bar — close it
+var CRAB_PA_BAR     = 3;   # left on a bar cell — open or switch to that menu
+var CRAB_PA_SWITCH  = 4;   # left on the A/B strip — focus that pane
+var CRAB_PA_PLACE   = 5;   # left on a sidebar row — send the active pane there
+var CRAB_PA_PANE    = 6;   # left on a pane — the 0.6.1 click: focus, select, arm the drag
+var CRAB_PA_MENU    = 7;   # right on a pane — open the context menu there
+
+# @public — decide what a press does from what each surface answered about the point.
+#   btn         the wire button number (`POINTER_BTN`'s `a`)
+#   blocked     `crab_pointer_blocked` — a question is being asked
+#   popup_open  a context menu or a bar drop-down is open (`menu_open != 0` or `mb_drop >= 0`)
+#   popup_row   `dh_list_index_at` on the popup, or -1 (inert rows — separators, greyed verbs — are -1)
+#   bar_shown   the menu bar is revealed (`mb_sel >= 0`)
+#   bar_cell    `dh_list_index_at` on the bar, or -1
+#   sw_cell     `dh_list_index_at` on the A/B strip, or -1
+#   sb_row      `crab_sidebar_hit`, or -1
+#   pane_hit    `crab_hit` answered 1
+#
+# ⛔⛔ THE ORDER IS THE DESIGN, AND THE FIRST TWO LINES OF IT ARE NOT OBVIOUS. `dh_list_index_at`
+# is z-order BLIND — it tests one list's containment and nothing else — and `dh_place_at_point`
+# FLIPS a popup above its anchor when there is no room below, so a drop-down's rows can lie ON the
+# bar row, and a context menu always lies on a pane. Asked in the wrong order a press on `Delete`
+# also reads as a bar cell or a pane row. ⇒ The popup is asked FIRST, then the bar (so a click on a
+# neighbouring cell switches menus while a drop is open, as every menu bar does), then everything
+# else — and while anything is open, nothing else is reachable at all: a press that is not on the
+# popup or the bar DISMISSES, it never falls through to a surface the operator is not looking at.
+# ⛔ EVERY ARM CONSUMES. There is no answer here that means "the press was not for me, try the
+# panes" — a surface that is hit takes the press whatever the button, and refusing a button is
+# `CRAB_PA_NONE`, not a fall-through. That is also why the switcher is asked before the pane it sits
+# in: `crab_hit` records headers, so a strip press is also a header press.
+# ⛔ RIGHT OPENS THE CONTEXT MENU ON A PANE AND DOES NOTHING ANYWHERE ELSE. A right press on a
+# popup row must not fire the verb, on a bar cell must not open a menu, on a place must not
+# navigate. The middle button does nothing anywhere yet, and says so by returning NONE rather than
+# by being absent from this table.
+fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row,
+  pane_hit): i64 {
+    if (blocked != 0) { return CRAB_PA_NONE; }
+    if (popup_open != 0) {
+        if (popup_row >= 0) {
+            if (btn == CRAB_BTN_LEFT) { return CRAB_PA_PICK; }
+            return CRAB_PA_NONE;
+        }
+        if (bar_shown != 0) {
+            if (bar_cell >= 0) {
+                if (btn == CRAB_BTN_LEFT) { return CRAB_PA_BAR; }
+                return CRAB_PA_NONE;
+            }
+        }
+        return CRAB_PA_DISMISS;
+    }
+    if (bar_shown != 0) {
+        if (bar_cell >= 0) {
+            if (btn == CRAB_BTN_LEFT) { return CRAB_PA_BAR; }
+            return CRAB_PA_NONE;
+        }
+        return CRAB_PA_DISMISS;
+    }
+    if (sw_cell >= 0) {
+        if (btn == CRAB_BTN_LEFT) { return CRAB_PA_SWITCH; }
+        return CRAB_PA_NONE;
+    }
+    if (sb_row >= 0) {
+        if (btn == CRAB_BTN_LEFT) { return CRAB_PA_PLACE; }
+        return CRAB_PA_NONE;
+    }
+    if (pane_hit != 0) {
+        if (btn == CRAB_BTN_LEFT) { return CRAB_PA_PANE; }
+        if (btn == CRAB_BTN_RIGHT) { return CRAB_PA_MENU; }
+        return CRAB_PA_NONE;
+    }
+    return CRAB_PA_NONE;
 }
 
 # =================================================================================================
@@ -1279,11 +1380,13 @@ fn crab_menubar(parent, sel): i64 {
 # switcher exists for the case that has no other signal — and at the shipped 380x220 default that is
 # every case, because `crab_two_panes_fit` needs 600 px.
 #
-# ⚠ IT IS A DISPLAY, NOT A CONTROL, AND THAT IS DELIBERATE. `crab_hit` walks parents against exactly
+# ⭐ IT IS A CONTROL AS OF 0.8.5, AND ITS HIT IS ITS OWN. `crab_hit` walks parents against exactly
 # `crab_llst` / `crab_rlst` and returns a 0/1 pane index that reaches the WRITE layer —
 # `crab_drag_targets` rejects only negatives and same-pane, so a drop resolved against a widened
-# index would execute a real `crab_fs_move`. Making the strip clickable means giving it its own hit
-# function, which is a separate change. The keyboard already switches panes.
+# index would execute a real `crab_fs_move`. The strip is therefore never resolved through
+# `crab_hit`: the pointer arm asks `dh_list_index_at(crab_switcher_widget(), …)` and
+# `crab_pointer_action` ranks that answer ABOVE the pane's, because the strip sits inside a header
+# `crab_hit` also records. A strip press focuses the pane its cell names, and nothing else.
 var CRAB_SW_CELL_W = 20;                                  # one 'A' / 'B' cell
 var CRAB_SW_W      = 40;                                  # the whole strip: two cells
 
@@ -1731,6 +1834,26 @@ fn crab_menu_prev(i, count, isdir, marked): i64 {
 # ⚠ Derived from `CRAB_MI_RENAME`, not written as a literal 4, so moving the separator moves this.
 fn crab_menu_row(mi): i64 {
     if (mi > CRAB_MI_RENAME) { return mi + 1; }
+    return mi;
+}
+
+# @public — the INVERSE: the menu item a LIST row is, or -1 for the separator and for any row that
+# is not an item. The pointer route needs this and the keyboard never did (0.8.5).
+#
+# ⛔⛔ THIS IS THE DANGEROUS HALF OF THE POINTER ROUTE. `dh_list_index_at` answers a LIST row, and
+# past the separator a list row is one more than the item it shows — so a route that fed the row
+# straight to `crab_menu_accel` would fire `Delete` for a press on `New folder…`, the same off-by-one
+# that once painted the wrong highlight, now acting instead of painting. ⚠ The separator row itself
+# is inert and `dh_list_index_at` already refuses it, so the -1 here is defence for a caller that
+# arrived by another road; it is asserted, not assumed.
+# ⚠ Derived from `crab_menu_row`, and the suite pins the round trip for every item so the two
+# cannot be edited apart.
+fn crab_menu_item_at(row): i64 {
+    if (row < 0) { return 0 - 1; }
+    if (row <= CRAB_MI_RENAME) { return row; }
+    if (row == CRAB_MI_RENAME + 1) { return 0 - 1; }     # the separator has no model index
+    var mi = row - 1;
+    if (mi >= CRAB_MI_COUNT) { return 0 - 1; }
     return mi;
 }
 

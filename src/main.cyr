@@ -357,6 +357,11 @@ fn main(): i64 {
         }
         if (ev > 0) {
             var k = dh_event_kind(ev);
+            # ⭐ A POINTER PICK IS A KEY (0.8.5). A left press on a popup row sets this to the entry's
+            # accelerator — `crab_menu_accel`, the same map Enter uses — and the key dispatch below
+            # runs it through the one binding table. There is still exactly one implementation of
+            # every verb; the pointer did not grow a second one.
+            var synth_u = 0;
             # ⛔⛔ THE COMPOSITOR CLOSED OUR WINDOW — EXIT, do not keep drawing into a surface nobody
             # composites. Before this, aethersafha's F4 removed the window from its own list and said
             # nothing, so crab carried on forever: on the 2026-08-08 iron burn the process was left
@@ -445,8 +450,14 @@ fn main(): i64 {
             # ⚠ IT SCROLLS THE PANE UNDER THE CURSOR, not the focused one — that is what a wheel does
             # everywhere else, and it does NOT steal focus. A wheel that also focused would make an
             # accidental scroll-over change which pane the arrow keys drive.
+            # ⛔⛆ AND THE WHEEL IS GATED LIKE A CLICK (0.8.5) — IT WAS NOT, AND IT WAS THE SAME HOLE.
+            # A scroll between `d` and `y` moved `sel_l`, so the prompt named one entry and the
+            # delete took another: exactly the pane-click path 0.8.0 closed, one input kind over.
+            # `crab_pointer_modal` — the UNION, popup and bar included — because a wheel has no rows
+            # of its own to take: while anything is up, it does nothing.
             if (k == POINTER_SCROLL) {
                 var sdel = dh_event_a(ev);
+                if (crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel) == 1) { sdel = 0; }
                 if (sdel != 0) {
                     if (crab_hit(ptr_x, ptr_y, hit) == 1) {
                         var sp = load64(hit);
@@ -462,15 +473,13 @@ fn main(): i64 {
             # the selection.
             if (k == POINTER_BTN) {
                 if (dh_event_b(ev) == 1) {
-                    # ⛔⛔ THE SIDEBAR IS ASKED FIRST, AND IT IS ASKED BY ITS OWN FUNCTION. A place
-                    # click must never reach `crab_hit`, whose answer is a 0/1 PANE index that the
-                    # write layer trusts — `crab_drag_targets` rejects only negatives and same-pane,
-                    # so a third surface behind that number is one drop away from moving a real file.
-                    # `crab_sidebar_hit` returns a PLACE index and shares no vocabulary with it.
-                    # ⚠ Ordered first rather than guarded afterwards: the sidebar and the panes are
-                    # disjoint regions, so whichever is asked first is authoritative, and asking the
-                    # narrower one first means the pane path never sees a coordinate that was not a
-                    # pane's.
+                    # ⛔⛔ EVERY SURFACE HAS ITS OWN HIT FUNCTION, AND NONE OF THEM SPEAKS `crab_hit`'s
+                    # VOCABULARY. `crab_hit` answers a 0/1 PANE index that the write layer trusts —
+                    # `crab_drag_targets` rejects only negatives and same-pane, so a third surface
+                    # behind that number is one drop away from moving a real file. The sidebar
+                    # answers a PLACE row, the bar a CELL, the strip a CELL, the popup a ROW; which
+                    # of them takes the press is `crab_pointer_action`'s z-order, below, and the pane
+                    # arm runs only when that decision named the pane.
                     # ⛔⛆ NO POINTER INPUT REACHES A SURFACE WHILE crab IS ASKING A QUESTION.
                     # This guard is the fix for a DATA-LOSS path, and the path is worth stating in
                     # full because nothing about it is obvious from any one line:
@@ -494,13 +503,126 @@ fn main(): i64 {
                     # ⇒ A modal question owns the pointer as well as the keyboard. The keyboard side
                     # was already right — `confirm_del` is checked before every binding and consumes
                     # the key — and this is the half that was missing.
-                    var modal = crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel);
-                    var sbi = 0 - 1;
-                    if (modal == 0) { sbi = crab_sidebar_hit(ptr_x, ptr_y); }
-                    var paneclick = 1;
-                    if (modal == 1) { paneclick = 0; }
-                    if (sbi >= 0) {
-                        paneclick = 0;
+                    # ⭐⭐ EVERY SURFACE ANSWERS A PRESS NOW, AND ONE FUNCTION DECIDES WHICH (0.8.5).
+                    # This arm used to know two surfaces — the sidebar, then the panes — and refuse
+                    # everything while a popup or the bar was up. The popup's own rows, the bar's
+                    # cells and the A/B strip had no pointer route at all, and a RIGHT press was a
+                    # left one: crab read only `b`. Now each surface is asked what it has under the
+                    # point and `crab_pointer_action` — in `src/ui.cyr`, where the suite pins its
+                    # z-order — says which ONE arm takes the press. The arms below are wiring.
+                    # ⛔ `a` IS THE BUTTON, in aethersafha 0.16.24's numbering: 1 left, 2 right,
+                    # 3 middle — `CRAB_BTN_*`, not X11's. Before 0.16.24 the compositor forwarded a
+                    # hardcoded 1, so every press read as left here; on an older compositor it still
+                    # does, which is inert rather than wrong.
+                    # ⛔ `crab_pointer_blocked`, NOT `crab_pointer_modal`: a popup is modal but it is
+                    # not blocked — its rows are exactly what the press is for. The wheel still asks
+                    # the union, because it has no rows to take.
+                    var pbtn = dh_event_a(ev);
+                    var blocked = crab_pointer_blocked(confirm_del, edit_open);
+                    var popup_open = 0;
+                    if (menu_open != 0) { popup_open = 1; }
+                    if (mb_drop >= 0) { popup_open = 1; }
+                    var bar_shown = 0;
+                    if (mb_sel >= 0) { bar_shown = 1; }
+                    # ⚠ Every hit is asked unconditionally and the DECISION orders them. Each is a
+                    # containment walk over the tree the last render built; `dh_list_index_at` on a
+                    # widget that frame did not draw is 0 and answers -1.
+                    var popup_row = dh_list_index_at(crab_menu_list(), ptr_x, ptr_y);
+                    var bar_cell = dh_list_index_at(crab_menubar_widget(), ptr_x, ptr_y);
+                    var sw_cell = dh_list_index_at(crab_switcher_widget(), ptr_x, ptr_y);
+                    var sbi = crab_sidebar_hit(ptr_x, ptr_y);
+                    var phit = crab_hit(ptr_x, ptr_y, hit);
+                    var pact = crab_pointer_action(pbtn, blocked, popup_open, popup_row, bar_shown,
+                      bar_cell, sw_cell, sbi, phit);
+                    # ⛔ EVERY ARM BUT THE PANE CLICK CONSUMES THE DOUBLE-CLICK PAIR. The sidebar arm
+                    # never did: click a row, click a place (the pane re-lists), click the same row
+                    # index inside 400 ms — and `crab_is_double` descended into whatever entry now
+                    # sat at that index in a directory the first click never saw. One line, above
+                    # every arm, so a route added later cannot omit it.
+                    if (pact != CRAB_PA_PANE) { last_pane = 0 - 1; last_row = 0 - 1; }
+                    # ⭐ PICK — a left press on a popup row runs that entry, exactly as Enter does:
+                    # the entry's key is SYNTHESISED and falls through the one binding table below.
+                    # ⛔ THE ROW IS NOT THE ITEM. A context menu carries a separator, so a list row
+                    # past it is one more than its item — `crab_menu_item_at` inverts that, and it is
+                    # the difference between New folder and Delete. A bar drop-down has no separator
+                    # and indexes its own slice; `crab_mb_item` is its map.
+                    # ⚠ `dh_list_index_at` already refuses inert rows — the separator and every
+                    # greyed verb — so a PICK never names a disabled entry; that is dhancha's
+                    # contract, pinned in dhancha's own suite.
+                    if (pact == CRAB_PA_PICK) {
+                        var pmi = 0 - 1;
+                        if (mb_drop >= 0) { pmi = crab_mb_item(mb_drop, popup_row); }
+                        else { pmi = crab_menu_item_at(popup_row); }
+                        menu_open = 0;
+                        mb_drop = 0 - 1;
+                        mb_sel = 0 - 1;
+                        # ⛔ A PICK RETURNS THE KEYS TO THE PANES, as a pane click does (0.8.3). The
+                        # synthesised key passes the sidebar gate below like any other, and while
+                        # the sidebar holds focus that gate EATS the mutating verbs — so Delete chosen
+                        # from a menu would be refused with a notice about a surface the operator
+                        # was not using. The verb acts on the active pane; the keys go there too.
+                        sb_focus = 0;
+                        if (pmi >= 0) { synth_u = crab_menu_accel(pmi); }
+                        crab_say("crab: menu pick by pointer\n");
+                    }
+                    # ⭐ DISMISS — a press anywhere else while a popup or the bar is up closes it and
+                    # is consumed. It never falls through to the surface underneath.
+                    if (pact == CRAB_PA_DISMISS) {
+                        menu_open = 0;
+                        mb_drop = 0 - 1;
+                        mb_sel = 0 - 1;
+                        crab_say("crab: popup dismissed by pointer\n");
+                    }
+                    # ⭐ BAR — a left press on a bar cell selects that menu and opens its drop-down
+                    # onto the first ENABLED item, as Enter does; on the cell whose drop is already
+                    # open it closes it, as every menu bar does. ⚠ The render still owns the fit:
+                    # `crab_mb_drop_fit` refuses a drop that would clamp under the wrong label, for
+                    # the keyboard and the pointer alike.
+                    if (pact == CRAB_PA_BAR) {
+                        if (mb_drop == bar_cell) { mb_drop = 0 - 1; mb_sel = bar_cell; }
+                        else {
+                            mb_sel = bar_cell;
+                            var bcnt = ln; var bmkp = lmarks; var bbufp = lbuf; var bselp = sel_l;
+                            if (active_pane == 1) { bcnt = rn; bmkp = rmarks; bbufp = rbuf; bselp = sel_r; }
+                            var bisdir = 0;
+                            if (bcnt > 0) { bisdir = load8(bbufp + bselp * CRAB_REC_SZ + CRAB_REC_TYPE); }
+                            var bmark = crab_mark_count(bmkp, bcnt);
+                            var bf0 = crab_mb_item_first(bar_cell, bcnt, bisdir, bmark);
+                            if (bf0 >= 0) { mb_drop = bar_cell; mb_item = bf0; }
+                            else { mb_drop = 0 - 1; crab_set_notice("that menu has no items yet"); }
+                        }
+                        crab_say("crab: bar click\n");
+                    }
+                    # ⭐ SWITCH — the A/B strip is a CONTROL now, not only a display. Its own hit,
+                    # never `crab_hit`'s pane index, and a strip press is also a header press, which
+                    # is why the decision asks the strip first.
+                    if (pact == CRAB_PA_SWITCH) {
+                        if (sw_cell <= 1) { active_pane = sw_cell; }
+                        sb_focus = 0;
+                        crab_say("crab: switcher click\n");
+                    }
+                    # ⭐ MENU — a RIGHT press on a pane opens the context menu at the pointer, over
+                    # the row under it: focus the pane and select the row first, so the verbs act on
+                    # what the operator pointed at rather than on what the arrows last touched. The
+                    # keyboard route (the Menu key) opens it the same way at the tracked position.
+                    if (pact == CRAB_PA_MENU) {
+                        var mhp = load64(hit);
+                        var mhr = load64(hit + 8);
+                        active_pane = mhp;
+                        sb_focus = 0;
+                        if (mhr >= 0) {
+                            if (mhp == 0) { if (mhr < ln) { sel_l = mhr; } }
+                            if (mhp == 1) { if (mhr < rn) { sel_r = mhr; } }
+                        }
+                        menu_open = 1;
+                        menu_sel = 0;
+                        menu_x = ptr_x;
+                        menu_y = ptr_y;
+                        crab_say("crab: context menu opened by pointer\n");
+                    }
+                    var paneclick = 0;
+                    if (pact == CRAB_PA_PANE) { paneclick = 1; }
+                    if (pact == CRAB_PA_PLACE) {
                         # ⛔ THE ROW MAP OWNS THE TRANSLATION, not arithmetic here. With PLACES and
                         # VOLUMES the sidebar has two sections and two inert headers, so a row is no
                         # longer `index + 1` — and hand-counting that is exactly what made the
@@ -546,7 +668,8 @@ fn main(): i64 {
                     }
                     # ⚠ Nested rather than `else if`, which cyrius does not have.
                     if (paneclick == 1) {
-                        if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                        # ⚠ `hit` was filled by the `crab_hit` call above; `phit` is its answer.
+                        if (phit == 1) {
                             var hp = load64(hit);
                             var hr = load64(hit + 8);
                             active_pane = hp;             # clicking a pane focuses it, even off-row
@@ -609,7 +732,12 @@ fn main(): i64 {
                 }
                 # ⭐⭐ RELEASE — THE DROP. crab had no release arm at all before M4; a press did
                 # everything and the button coming back up was ignored.
-                if (dh_event_b(ev) == 0) {
+                # ⛔ THE LEFT BUTTON'S RELEASE, ONLY (0.8.5). A drag is armed by a left press, so a
+                # right or middle release arriving mid-drag must neither drop nor disarm it. Before
+                # aethersafha 0.16.24 every release was left, so this gate changes nothing there.
+                var prel = 0;
+                if (dh_event_b(ev) == 0) { if (dh_event_a(ev) == CRAB_BTN_LEFT) { prel = 1; } }
+                if (prel == 1) {
                     if (dragging == 1) {
                         var dropped = 0;
                         if (crab_hit(ptr_x, ptr_y, hit) == 1) {
@@ -710,34 +838,49 @@ fn main(): i64 {
                     dragging = 0;
                 }
             }
-            if (k == KEY) {
-                var u = dh_event_a(ev);
-                crab_say("crab: key received\n");
-                # ⛔⛔ PRESS ONLY. crab asks for `SETU_SURF_FULL_KEYS` (see `crab_surface_flags`), so
-                # every key now arrives TWICE — `mods` 1 on the press, 0 on the release. Acting on
-                # both edges moves the selection two rows per Down and descends twice on Enter, the
-                # second descend landing wherever the first left the selection. The compositor hit
-                # exactly this on its own chrome handlers and measured it on the 2026-08-18 burn.
-                # ⚠ `crab: key received` stays OUTSIDE the gate deliberately: it is the input-arrival
-                # oracle the QEMU harnesses read, and it should count every event the wire delivered.
-                # `crab: key press` below counts what crab ACTED on. The two together are what
-                # distinguish "releases are arriving" from "releases are being acted on".
-                # ⚠ TRACK THE EDGE BEFORE ACTING. A release must clear the latch even though it is
-                # not acted on, or the key repeats forever after the operator lets go — the stuck-key
-                # failure `SETU_SURF_FULL_KEYS` exists to make avoidable.
-                if (crab_key_acts(dh_event_b(ev)) == 1) {
-                    if (crab_key_repeats(u) == 1) {
-                        held_key = u;
-                        held_since = clock_now_ms();
-                        held_last = held_since;
+            # ⛔ TWO ROADS IN, ONE TABLE: a real KEY event, or a key a pointer pick synthesised above.
+            # `kacts` is the press/release edge for a real key and always 1 for a synthesised one —
+            # the held-key repeat latch is a REAL-key concern and is left exactly where it was.
+            var kdisp = 0;
+            if (k == KEY) { kdisp = 1; }
+            if (synth_u != 0) { kdisp = 1; }
+            if (kdisp == 1) {
+                var u = synth_u;
+                var kacts = 1;
+                if (k == KEY) {
+                    u = dh_event_a(ev);
+                    kacts = crab_key_acts(dh_event_b(ev));
+                    crab_say("crab: key received\n");
+                    # ⛔⛔ PRESS ONLY. crab asks for `SETU_SURF_FULL_KEYS` (see `crab_surface_flags`), so
+                    # every key now arrives TWICE — `mods` 1 on the press, 0 on the release. Acting on
+                    # both edges moves the selection two rows per Down and descends twice on Enter, the
+                    # second descend landing wherever the first left the selection. The compositor hit
+                    # exactly this on its own chrome handlers and measured it on the 2026-08-18 burn.
+                    # ⚠ `crab: key received` stays OUTSIDE the gate deliberately: it is the input-arrival
+                    # oracle the QEMU harnesses read, and it should count every event the wire delivered.
+                    # `crab: key press` below counts what crab ACTED on. The two together are what
+                    # distinguish "releases are arriving" from "releases are being acted on".
+                    # ⚠ TRACK THE EDGE BEFORE ACTING. A release must clear the latch even though it is
+                    # not acted on, or the key repeats forever after the operator lets go — the stuck-key
+                    # failure `SETU_SURF_FULL_KEYS` exists to make avoidable.
+                    if (kacts == 1) {
+                        if (crab_key_repeats(u) == 1) {
+                            held_key = u;
+                            held_since = clock_now_ms();
+                            held_last = held_since;
+                        }
+                        else { held_key = 0; }
                     }
-                    else { held_key = 0; }
+                    else {
+                        if (u == held_key) { held_key = 0; }      # release of the held key
+                    }
                 }
-                else {
-                    if (u == held_key) { held_key = 0; }      # release of the held key
-                }
-                if (crab_key_acts(dh_event_b(ev)) == 1) {
-                    crab_say("crab: key press\n");
+                if (kacts == 1) {
+                    # ⚠ TWO ORACLES, NOT ONE. `crab: key press` counts what the wire's KEY events made
+                    # crab do and a harness ratios it against `crab: key received`; a synthesised
+                    # verb has no `received` line and must not lean on that ratio.
+                    if (k == KEY) { crab_say("crab: key press\n"); }
+                    else { crab_say("crab: verb by pointer\n"); }
                     # ⚠ The pane facts the menu's enable rules need, read once per keypress.
                     var mcnt2 = ln; var mmkp = lmarks; var mbufp = lbuf; var mselp = sel_l;
                     if (active_pane == 1) { mcnt2 = rn; mmkp = rmarks; mbufp = rbuf; mselp = sel_r; }
@@ -1288,19 +1431,13 @@ fn main(): i64 {
                                 edit_open = 2;
                                 edit_label = "New folder name:";
                             }
-                            # ⭐ THE CONTEXT MENU. ⚠ KEYBOARD ONLY — the Menu key below is the
-                            # ONLY thing in the program that sets `menu_open`, which is right for a
-                            # crab that is keyboard-first by construction: a menu only a mouse can
-                            # reach is invisible to an operator who never touches one.
-                            # ⛔ THIS SAID "opened from the KEYBOARD as well as the pointer". THERE
-                            # IS NO POINTER ROUTE, and that is an M6 gap rather than a stance:
-                            # dhancha carries the button code in `POINTER_BTN`'s `a`, and crab's arm
-                            # reads only `b` (press vs release) — so a RIGHT-click is
-                            # indistinguishable from a left one and runs the ordinary path. Nor does
-                            # the OPEN menu take a click: `crab_hit` resolves only the two pane
-                            # LISTs, so there is no pointer selection and no click-away dismiss.
-                            # ⚠ `menu_x`/`menu_y` below only PLACE the keyboard-opened menu at the
-                            # last tracked pointer position; they do not open it.
+                            # ⭐ THE CONTEXT MENU, FROM THE KEYBOARD. The Menu key is one of two
+                            # roads in — a RIGHT press on a pane is the other (0.8.5, the pointer
+                            # arm's `CRAB_PA_MENU`) — and the keyboard road matters on its own: a
+                            # crab is keyboard-first by construction, and on agnos the compositor
+                            # may spawn it with no pointer at all. Both open the same menu with the
+                            # same state; the pointer road selects the row under the point first.
+                            # ⚠ `menu_x`/`menu_y` PLACE it at the last tracked pointer position.
                             if (u == 0x65) {                                       # the Menu key
                                 menu_open = 1;
                                 menu_sel = 0;

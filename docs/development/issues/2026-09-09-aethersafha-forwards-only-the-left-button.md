@@ -4,8 +4,19 @@
 > `docs/development/issues/2026-09-09-forwards-only-the-left-button.md` — an issue about another
 > repository that lives only here is one nobody who could act on it will ever read.
 
-**Status:** 🔴 **OPEN — and BLOCKED BEHIND A SECOND, LARGER PROBLEM.** The fix itself is small and is
-described below. It cannot be made, because **aethersafha does not build on any available toolchain.**
+**Status:** ✅ **FIXED UPSTREAM — aethersafha 0.16.24 (2026-09-12, prepared on operator direction;
+check the remote for the tag before declaring anything on it).** Every kernel button bit is forwarded.
+**The numbering is decided: `wire = kernel_bit + 1` — 1 = left, 2 = right, 3 = middle** — named
+`INPUT_BTN_LEFT` / `INPUT_BTN_RIGHT` / `INPUT_BTN_MIDDLE` in aethersafha's `src/input.cyr`, with the
+X11 divergence pinned by its input suite. Window management stays left-only structurally; ⚠ focus is
+still a left-button gesture there (a right-click reaches an unfocused crab without focusing it), and
+that is a compositor policy decision crab does not own. ⚠ Nothing below aethersafha defines the
+numbers yet — crab mirrors them as its own constants until setu, the right eventual home, names them.
+⚠ Not yet run on QEMU or iron on either side: crab's context-menu route is the first consumer and
+its on-target run is the end-to-end verdict.
+⚠ **Everything below is the filing as written**, kept because the diagnosis and the toolchain
+analysis are the transferable part. The build blocker it describes closed when the stack moved to
+cyrius 6.6.2 (aethersafha 0.16.23).
 **Filed by:** crab, 2026-09-09, while closing the M6 interaction gaps (crab 0.8.3).
 **Severity:** Medium — it does not lose data; it makes one whole class of gesture unreachable for
 every client on the desktop, not just crab.

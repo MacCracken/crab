@@ -380,7 +380,7 @@ no `#else`. Each fix moved its RULE into a pure function the suite can interroga
 untestable is that `main.cyr` still calls it. **The gap is unchanged in shape and smaller in
 surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0.7.7.
 
-### M6 surfaces that shipped without a full interaction story — **2 of 6 closed in 0.8.3**
+### M6 surfaces that shipped without a full interaction story — **4 of 6 closed: 2 in 0.8.3, 2 unreleased**
 
 > ⭐⭐ **AND THE SWEEP FOUND A SHIPPED BUG NONE OF THE SIX NAMED: `Open` WAS DEAD ON BOTH MENU
 > SURFACES.** Both arms rewrite `u` to the chosen entry's key and fall through to the one
@@ -389,9 +389,12 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
 > their line numbers. Both arms are hoisted; the map they each copied is now `crab_menu_accel`.
 > ⛔ **Phase 0 first.** These six share one event loop, and three of them depend on repairs that are
 > defects in their own right. Landed: the hoist, `crab_menu_accel`, `crab_goto`, `crab_path_within`'s
-> bounds read, and two stale contracts. **Still to land: trailing-slash normalisation in the two
-> model builders, and splitting `crab_pointer_blocked` out of `crab_pointer_modal`** — the latter
-> gates the pointer routes.
+> bounds read, two stale contracts, and — `[Unreleased]`, 2026-09-13 — **`crab_pointer_blocked`
+> split out of `crab_pointer_modal`**, which the pointer routes were gated on. **Still to land:
+> trailing-slash normalisation in the two model builders**, which the *you are here* marker needs.
+> ⭐ **4 of 6 closed.** What the pointer work found on the way: the WHEEL had no modal guard at all
+> (a scroll between `d` and `y` moved the selection — 0.8.0's click hole, one input kind over), and
+> the sidebar arm never consumed the double-click pair. Both closed.
 
 - ✅ **The PLACES sidebar answers the keyboard — CLOSED 0.8.3.** `Tab` moves focus, arrows step over
   the inert headers, Enter sends the active pane, Tab/Esc returns. ⛔ **Focus is a MODE, never a
@@ -403,26 +406,31 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
   ⛔⛆ `dh_place_at_point` CLAMPS an overhanging popup, so there is a whole band of widths where the
   bar fits and `Edit`'s menu opens under the word `File`. One threshold would have certified as good
   the exact widths where the symptom survives.
-- **The menu bar and the A/B switcher have no pointer route** — only the sidebar got a hit function.
-  ⛔ **Must land WITH the context-menu route below**: a bar click that opens a drop-down the pointer
-  can neither pick from nor dismiss is a half-wired gesture. ⚠ Design done: ask the popup FIRST
-  (`dh_list_index_at` is z-order blind, and a drop-down flipped above its anchor lands *on* the bar
-  row), then the bar, then sidebar/switcher/panes; **every arm consumes**, including the
-  double-click pair, which the sidebar arm omits today — a latent defect.
-- **There is no pointer route to the CONTEXT menu either.** ⛔⛆ **GATED UPSTREAM, AND THE GATE IS NOW
-  MEASURED — see
-  [`../development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).**
-  The kernel publishes a full button bitmap, bhumi passes it through, setu carries it and dhancha
-  delivers it — **aethersafha is the single point of loss**, masking with `1` and forwarding the
-  button number hardcoded. ⭐ The fix there is small. ⛔ **It could not be made: aethersafha does not
-  build on any available toolchain** — its `6.5.33` pin is uninstallable and flagged critical, and
-  under 6.6.0/6.6.1 it throws 57 errors, *none in its own source*, from `sigil`/`agnostik`/`agnodrm`
-  disagreeing about `result_*` arities and the `: stack` multi-return. All three are already at their
-  highest tag. ⇒ **Three upstream repos need the 6.6.x language before this gap can be touched.**
-  ⚠ Do not guess a button number: no repo in the stack defines one, and X11's ordering is the wrong
-  default here — setu already diverged from X11 deliberately on the wheel.
-  ⚠ The dangerous half of crab's own share is the separator: a pointer path must invert
-  `crab_menu_row`'s mapping correctly or it fires the wrong verb.
+- ✅ **The menu bar and the A/B switcher have a pointer route — CLOSED (`[Unreleased]`, 2026-09-13),
+  together with the context-menu route below**, as the design required. `crab_pointer_action` in
+  `src/ui.cyr` is the design made executable: popup FIRST (`dh_list_index_at` is z-order blind, and
+  a drop-down flipped above its anchor lands *on* the bar row), then the bar, then the strip (which
+  sits inside a header `crab_hit` also records), then sidebar, then panes; **every arm consumes**,
+  and the double-click pair is consumed above every arm rather than inside each — the sidebar's
+  omission was real and is closed by that line. 31 assertions, seven mutations.
+- ✅ **The CONTEXT menu has a pointer route — CLOSED.** The upstream gate closed first: **aethersafha
+  0.16.24** (prepared 2026-09-12 in the sibling, on operator direction — check its remote before
+  relying on the tag) forwards every kernel button bit, with window management left-only
+  structurally, in exactly the numbering crab's filing proposed: **`wire = kernel_bit + 1` — 1 left,
+  2 right, 3 middle, NOT X11**. crab mirrors it as `CRAB_BTN_*` and reads `POINTER_BTN`'s `a`. A right
+  press on a pane focuses it, selects the row under the point and opens the menu there; a left press
+  on a popup row synthesises the entry's accelerator through the one binding table.
+  ⭐ The separator half is done and pinned: `crab_menu_item_at` inverts `crab_menu_row` and the suite
+  round-trips every item, so a press on New folder cannot fire Delete.
+  ⚠ The filing is kept with its resolution:
+  [`issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
+  The build blocker it described (three repos disagreeing under 6.6.x) closed when the whole stack
+  moved to 6.6.2 on 2026-09-10/11. ⚠ **Neither side has run on QEMU or iron**; crab's arm is
+  agnos-only and carries six new `crab: … by pointer` oracle lines for the run that will.
+  ⚠ Not done, and named: the middle button does nothing anywhere (it says so in the table rather
+  than by absence); pointer MOTION does not move a popup's highlight; and focus on the compositor
+  side is still a left-button gesture, so a right-click reaches an unfocused crab without focusing
+  its window — aethersafha's policy, not crab's.
 - **`View` should be filled; `Go` should NOT be built as proposed.** ⚠ `View` is four constant items
   and every target key is now reachable (the hoist above was its prerequisite — `View ▸ Cycle view`
   would have been born dead exactly as `Open` was). ⛔ **`Go` is refused with reasons**: an 11-to-17

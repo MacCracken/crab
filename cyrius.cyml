@@ -29,7 +29,7 @@ stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "ass
 
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
-tag = "0.5.3"
+tag = "0.5.4"
 modules = ["dist/sadish.cyr"]
 
 # rupa (रूप — form) — the shared desktop theme-token core. crab reads its tokens through dhancha's
@@ -39,7 +39,7 @@ modules = ["dist/sadish.cyr"]
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
 path = "../rupa"
-tag = "0.1.6"
+tag = "0.1.7"
 modules = ["dist/rupa.cyr"]
 
 # rekha — scalable TrueType outlines. crab does not draw with it yet (it passes `font = 0`), but
@@ -53,7 +53,7 @@ modules = ["dist/rupa.cyr"]
 # phantom-tag failure.
 [deps.rekha]
 git = "https://github.com/MacCracken/rekha.git"
-tag = "0.3.6"
+tag = "0.3.7"
 modules = ["dist/rekha.cyr"]
 
 # kashi (काशि) — the AGNOS system font. dhancha's `dh_draw_text` blits its CP437 8x16 glyphs for
@@ -64,7 +64,7 @@ modules = ["dist/rekha.cyr"]
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
 path = "../kashi"
-tag = "1.0.6"
+tag = "1.0.7"
 modules = ["src/font_data.cyr"]
 
 # dhancha — the widget toolkit: LIST, GRID, PROGRESS, MENU, SHEET, the theme bindings, and the
@@ -80,7 +80,7 @@ modules = ["src/font_data.cyr"]
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 path = "../dhancha"
-tag    = "0.9.28"
+tag    = "0.9.29"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it
@@ -88,7 +88,7 @@ modules = ["dist/dhancha.cyr"]
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
 path = "../setu"
-tag = "0.8.8"
+tag = "0.8.9"
 modules = ["dist/setu.cyr"]
 
 # chitra (चित्र — image) — CPU raster decode (PNG/JPEG/GIF/BMP) for THUMBNAILS only. The preview's
@@ -103,5 +103,5 @@ modules = ["dist/setu.cyr"]
 # authoritative, and deleting them produced a byte-identical binary.
 [deps.chitra]
 git = "https://github.com/MacCracken/chitra.git"
-tag = "1.0.1"
+tag = "1.0.3"
 modules = ["dist/chitra.cyr"]

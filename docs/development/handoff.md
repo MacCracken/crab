@@ -1,3 +1,56 @@
+# Handoff — **0.8.4 released; `[Unreleased]`: the 6.6.2 stack, and the pointer reaches every surface.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
+> **0.8.4 is the last RELEASE** — `7929ae1`, on the remote (`git ls-remote --tags` works; it did not
+> on 2026-09-09), CI and Release both green. The operator moved the pin to **6.6.2** at that cut and
+> released the **whole stack** to it (every crab dep, and aethersafha's dep stack behind it).
+> **`VERSION` reads 0.8.4; nothing below is committed, tagged or pushed.**
+>
+> ⭐ **What `[Unreleased]` holds — three things, in this order:**
+> 1. **The seven dep tags re-pinned to the 6.6.2 siblings.** 0.8.4 shipped the exact divergence check
+>    four exists for: `lib/` carried dhancha 0.9.29 / rupa 0.1.7 / setu 0.8.9 through `path` while the
+>    manifest declared the previous tags, so CI and local builds compiled different code, both green.
+>    Six of the seven bumps are header-only pin moves; **chitra 1.0.1 → 1.0.3 is real** — a decoder
+>    P-1 sweep, headed by a SIGSEGV on the first PNG a memory-pressured process decodes (crab's
+>    shape). Check four re-run: 7 / 0, lock 3 → 7 commit-pinned, both binaries **byte-identical**
+>    (host `d75c35a9…` 1,045,296 · agnos `9ca89ea3…` 1,085,872). `lib/sankoch.cyr` had been left at
+>    6.6.1's 2.7.14 by the pin bump — the transitive leaf the sync never walks — and is corrected.
+> 2. **aethersafha 0.16.24, PREPARED IN THE SIBLING on operator direction** (`../aethersafha`, not
+>    committed): every kernel button bit forwarded, window management left-only structurally, the
+>    numbering **`wire = kernel_bit + 1` — 1 left, 2 right, 3 middle, NOT X11** — named and pinned.
+>    Its own pre-cut gate `scripts/check-dep-tags.sh` failed on five stale dep tags; moved after
+>    reading each diff. 27 / 27 suites; six assertions that had never run in its input suite (a
+>    `return assert_summary()` above them) run now: 136 → 183. ⛔ Its CHANGELOG's `[Unreleased]`
+>    frametime block predates 0.16.21's tag and is left as found, named in the 0.16.24 section.
+> 3. **crab's pointer routes** (M6 — 4 of 6 gaps closed now): `crab_pointer_action` in `src/ui.cyr`
+>    names ONE arm per press in a pinned z-order — popup, bar, strip, sidebar, panes — and every arm
+>    consumes. Right press on a pane → focus, select the row under the point, open the context menu
+>    there. Left press on a popup row → the entry's accelerator is **synthesised** (`synth_u`) and
+>    falls through the one binding table (the `KEY` gate takes two roads in now). Bar cell → open /
+>    switch / close the drop; A/B strip → focus that pane; anything else while a popup or the bar is
+>    up → dismiss. `crab_menu_item_at` inverts the separator shift (New folder is not Delete);
+>    `crab_pointer_blocked` is split out of `crab_pointer_modal` (Phase 0's last piece).
+>    ⛔⛆ **Two holes closed on the way**: the WHEEL had no modal guard — a scroll between `d` and
+>    `y` moved the selection, 0.8.0's click hole one input kind over — and the sidebar arm never
+>    consumed the double-click pair. A right/middle release can no longer end a left drag.
+>
+> **Suite 1748 / 0** (+53), render_test 53 / 0, fuzz 100k, fmt clean, coverage 88 %, vet/deny 0,
+> deps --verify 50 / 0. Host **1,049,480 B** · agnos **1,090,216 B**.
+> ⛔ **NOT run on QEMU or iron, on either side.** crab's arm is inside the agnos-only `#ifdef`; the
+> decisions were lifted into `ui.cyr` for that reason, and six new oracle lines exist for the run:
+> `crab: context menu opened by pointer` · `menu pick by pointer` · `verb by pointer` (kept separate
+> from `key press` so the harness's received-vs-acted ratio is undisturbed) · `popup dismissed by
+> pointer` · `bar click` · `switcher click`. aethersafha prints `forwarded a non-left button press,
+> wire number:` on the first one. ⚠ **Sequencing that run is the operator's call.**
+>
+> ⭐ **Next, ungated, in the roadmap's own order:** the sidebar's *you are here* marker (design
+> done: containment, deepest wins; needs the trailing-slash normalisation in the two model builders
+> first), `View`'s four items (every target key is reachable since the 0.8.3 hoist), then the absent
+> affordances — a REFRESH key, a flag surface for `--about`, and the overwrite policy (an operator
+> decision). Small and cheap: drop the redundant `net` stdlib declaration (its own change).
+> ⚠ **The 0.8.3 block below is one release stale but its reasoning is current**; the `Open` lesson
+> — check the caller's POSITION, not just its logic — is the one to carry.
+
 # Handoff — **0.8.3 in preparation: the M6 interaction gaps, and a menu verb that was dead.**
 
 > ⭐⭐ **0.8.3, updated 2026-09-09. `Open` WAS DEAD ON BOTH MENU SURFACES, IN EVERY BUILD THAT SHIPPED

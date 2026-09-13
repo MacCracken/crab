@@ -2659,6 +2659,7 @@ fn main() {
     t_overlay_geometry();
     t_menubar();
     t_pointer_modal();
+    t_pointer_routes();
     t_menubar_enabled();
 
     # ================================================================================
@@ -4475,6 +4476,93 @@ fn t_pointer_modal(): i64 {
     # ---- combinations still refuse ---------------------------------------------------------------
     assert_eq(crab_pointer_modal(1, 1, 1, 0), 1, "everything at once still refuses");
     assert_eq(crab_pointer_modal(1, 0, 0, 0 - 1), 1, "...and the confirmation alone is enough");
+    return 0;
+}
+
+fn t_pointer_routes(): i64 {
+    test_group("crab — 0.8.5: the pointer is BLOCKED by a question and CAPTURED by a popup");
+    # ⭐ The split: `crab_pointer_blocked` is the half with nothing to click; `crab_pointer_modal`
+    # is the union and must not have changed its answer for any input the 0.8.0 group pins.
+    assert_eq(crab_pointer_blocked(0, 0), 0, "nothing asked -> not blocked");
+    assert_eq(crab_pointer_blocked(1, 0), 1, "the delete confirmation blocks");
+    assert_eq(crab_pointer_blocked(0, 1), 1, "the rename sheet blocks");
+    assert_eq(crab_pointer_blocked(0, 3), 1, "...the batch sheet too (edit mode 3)");
+    assert_eq(crab_pointer_blocked(0, 0), crab_pointer_modal(0, 0, 0, 0 - 1), "with no popup the two agree: live");
+    assert_eq(crab_pointer_blocked(1, 0), crab_pointer_modal(1, 0, 0, 0 - 1), "...and blocked");
+    # ⛔ A popup is MODAL but not BLOCKED — that is the whole reason for the split.
+    assert_eq(crab_pointer_blocked(0, 0), 0, "an open menu does not BLOCK the pointer...");
+    assert_eq(crab_pointer_modal(0, 0, 1, 0 - 1), 1, "...but it is still MODAL (the wheel asks this)");
+    assert_eq(crab_pointer_modal(0, 0, 0, 0), 1, "a revealed bar is modal too");
+
+    test_group("crab — 0.8.5: the button numbers are aethersafha's, not X11's");
+    assert_eq(CRAB_BTN_LEFT, 1, "left is 1");
+    assert_eq(CRAB_BTN_RIGHT, 2, "right is 2 — kernel bit 1 + 1");
+    assert_eq(CRAB_BTN_MIDDLE, 3, "middle is 3 — kernel bit 2 + 1");
+    assert_neq(CRAB_BTN_RIGHT, 3, "right is NOT X11's 3");
+    assert_neq(CRAB_BTN_MIDDLE, 2, "middle is NOT X11's 2");
+
+    test_group("crab — 0.8.5: the separator inverse — a LIST row back to the item it shows");
+    # ⛔⛔ THE DANGEROUS HALF. Past the separator a list row is one more than its item; feeding the
+    # row to `crab_menu_accel` would fire Delete for a press on New folder.
+    var mi = 0;
+    var rt = 1;
+    while (mi < CRAB_MI_COUNT) {
+        if (crab_menu_item_at(crab_menu_row(mi)) != mi) { rt = 0; }
+        mi = mi + 1;
+    }
+    assert_eq(rt, 1, "item -> row -> item round-trips for EVERY item");
+    assert_eq(crab_menu_item_at(CRAB_MI_RENAME + 1), 0 - 1, "the separator row is no item");
+    assert_eq(crab_menu_item_at(crab_menu_row(CRAB_MI_DELETE)), CRAB_MI_DELETE, "Delete's row is Delete...");
+    assert_eq(crab_menu_item_at(crab_menu_row(CRAB_MI_NEWDIR)), CRAB_MI_NEWDIR, "...and New folder's row is New folder");
+    assert_neq(crab_menu_item_at(crab_menu_row(CRAB_MI_NEWDIR)), CRAB_MI_DELETE, "a press on New folder is NOT Delete — the off-by-one, inverted");
+    assert_eq(crab_menu_item_at(0 - 1), 0 - 1, "no row -> no item");
+    assert_eq(crab_menu_item_at(CRAB_MI_COUNT + 1), 0 - 1, "a row past the last item -> no item");
+    assert_eq(crab_menu_item_at(CRAB_MI_COUNT + 40), 0 - 1, "...however far past");
+
+    test_group("crab — 0.8.5: one press, one answer — the z-order of the pointer routes");
+    var L = CRAB_BTN_LEFT;
+    var R = CRAB_BTN_RIGHT;
+    var M = CRAB_BTN_MIDDLE;
+    # crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row, pane_hit)
+    # ---- blocked beats everything ----------------------------------------------------------------
+    assert_eq(crab_pointer_action(L, 1, 1, 0, 1, 0, 0, 0, 1), CRAB_PA_NONE, "blocked: nothing, even with every surface hit");
+    assert_eq(crab_pointer_action(R, 1, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "blocked: a right-click opens no menu");
+    # ---- a popup captures the pointer ------------------------------------------------------------
+    assert_eq(crab_pointer_action(L, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PICK, "popup row under a left press: PICK — even though the pane under it was hit too");
+    assert_eq(crab_pointer_action(R, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "popup row under a RIGHT press: nothing fires");
+    assert_eq(crab_pointer_action(M, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "...nor under a middle press");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "left press off the popup, on a pane: DISMISS, never the pane");
+    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "right press off the popup: DISMISS, never a second menu");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 3, 0), CRAB_PA_DISMISS, "left press off the popup, on a place: DISMISS, never navigation");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_DISMISS, "left press off the popup, on the strip: DISMISS, never a switch");
+    # ⛔ THE FLIPPED DROP-DOWN: its rows lie ON the bar row, so both answer. The popup wins.
+    assert_eq(crab_pointer_action(L, 0, 1, 1, 1, 0, 0 - 1, 0 - 1, 0), CRAB_PA_PICK, "a drop row that is also a bar cell: PICK, the popup is asked first");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0), CRAB_PA_BAR, "a neighbouring bar cell while a drop is open: BAR (switch menus)");
+    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "...but not with the right button");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "drop open, press on neither: DISMISS");
+    # ---- a revealed bar with no drop -------------------------------------------------------------
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0), CRAB_PA_BAR, "bar revealed, left on a cell: BAR");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "bar revealed, right on a cell: nothing");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "bar revealed, press on a pane: DISMISS — the bar is modal");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 2, 0), CRAB_PA_DISMISS, "bar revealed, press on a place: DISMISS");
+    # ---- nothing open: the ordinary surfaces, in order --------------------------------------------
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_SWITCH, "the strip beats the header it sits in");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_NONE, "a right press on the strip: nothing — not the pane's menu");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0), CRAB_PA_PLACE, "a place: PLACE");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0), CRAB_PA_NONE, "a right press on a place: nothing");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a pane: the click");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_MENU, "a pane, RIGHT: the context menu — the whole point of aethersafha 0.16.24");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "a pane, middle: nothing yet");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "empty space: nothing");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "empty space, right: no menu with nothing to act on");
+    # ⛔ A popup row answer with NO popup open is a stale widget from an earlier frame. It must not
+    # pick: the route reads the open flag, not the widget.
+    assert_eq(crab_pointer_action(L, 0, 0, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a popup ROW with no popup OPEN is ignored — the pane takes it");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a bar CELL with no bar SHOWN is ignored — the pane takes it");
+    # ---- every answer is one of the eight, and NONE is 0 so a forgotten arm is a no-op -----------
+    assert_eq(CRAB_PA_NONE, 0, "NONE is zero");
+    assert_neq(CRAB_PA_PICK, CRAB_PA_DISMISS, "the answers are distinct (spot check)");
+    assert_neq(CRAB_PA_PANE, CRAB_PA_MENU, "...left and right on a pane are different answers");
     return 0;
 }
 

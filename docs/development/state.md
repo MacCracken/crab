@@ -24,13 +24,28 @@
 
 ## Version
 
-**0.8.1** is the last RELEASED version (2026-09-07), tagged on the remote — `git describe` answered
-`0.8.1` exactly before this cycle's work began, so HEAD *was* the tag.
-**0.8.3 IS CUT** — committed and tagged `a2fa067` on 2026-09-09, while this session's work was in
-flight. ⚠ **Whether it is on the remote could not be checked from here** (`git ls-remote` fails with
-`Permission denied (publickey)`), so it is treated as released and its CHANGELOG section is left
-alone — including its now-false *"unreleased"* header. **0.8.4 is open** for the post-tag work.
-⚠ `VERSION` still reads `0.8.3` and stays there until the operator cuts again.
+**0.8.4** is the last RELEASED version (2026-09-11, `7929ae1`), tagged **on the remote** — checked
+with `git ls-remote --tags` this time, which works — with CI and Release both green against the
+declared graph. `git describe` answered `0.8.4` exactly before this cycle's work began. ⚠ Its
+CHANGELOG header still reads *"unreleased"*, as 0.8.3's does; both are records and are left alone.
+**`[Unreleased]` holds the work in flight** (2026-09-12/13): the seven dep tags moved to the 6.6.2
+siblings, and the M6 pointer routes — right-click, popup pick/dismiss, bar and switcher clicks — on
+aethersafha 0.16.24's button numbering. ⚠ `VERSION` reads `0.8.4` and stays there until the
+operator cuts; nothing is committed, tagged or pushed.
+
+**Unreleased contents** (2026-09-13): all seven deps re-pinned to their 6.6.2 releases (chitra
+1.0.1 → **1.0.3** is the one with content — its P-1 sweep closed a SIGSEGV on the first PNG a
+memory-pressured process decodes, which is crab's shape); `lib/sankoch.cyr` brought to the 6.6.2
+snapshot (the 0.8.4 bump had left that transitive leaf at 2.7.14); check four re-run — 7 / 0, lock
+3 → 7 commit-pinned, both binaries byte-identical. Then the pointer routes: `crab_pointer_action`
+decides one arm per press in a pinned z-order (popup, bar, strip, sidebar, panes), a right press on
+a pane opens the context menu over the row, a left press on a popup row synthesises the entry's
+accelerator through the one binding table, `crab_menu_item_at` inverts the separator shift, and
+`crab_pointer_blocked` is split out of `crab_pointer_modal` (Phase 0's last piece). ⛔⛆ **Two holes
+closed on the way**: the wheel had NO modal guard (a scroll between `d` and `y` moved the
+selection — 0.8.0's click hole, one input kind over) and the sidebar arm never consumed the
+double-click pair. **1748 / 0**, all nine gates green. ⚠ **Not run on QEMU or iron** — the arm is
+agnos-only; six new `crab: … by pointer` oracle lines exist for the run that will.
 
 **0.8.3 contents** (2026-09-09): the M6 interaction gaps — **two of six closed**, plus a
 shipped bug none of them named. `VERSION` reads `0.8.3` and the CHANGELOG header agrees.
@@ -60,10 +75,10 @@ that true but their line numbers. ⇒ Both arms hoisted; the map they each copie
 EATEN so `d` cannot delete from a pane the keys have left), and the menu bar's fit rule (plus the
 **second** rule its drop-downs needed — there is a band of widths where the bar fits and `Edit`'s
 menu opens under the word `File`).
-⛔ **Open**: the bar/switcher and context-menu pointer routes (which must land together), the
-sidebar's *you are here* marker, and `View`'s items. ⛔⛆ **crab cannot currently tell a right-click
-from a left one** — `POINTER_BTN` carries the button code in `a`, crab reads only `b`, and
-aethersafha forwards button 1 hardcoded. That one is gated UPSTREAM: file it, do not guess a number.
+✅ **CLOSED in `[Unreleased]`**: the bar/switcher and context-menu pointer routes, together. The
+upstream gate closed first — aethersafha 0.16.24 forwards every button in the numbering crab's
+filing proposed — and crab reads `POINTER_BTN`'s `a` now. ⛔ **Still open**: the sidebar's *you are
+here* marker, and `View`'s items.
 
 **0.8.2** (2026-09-09), on operator direction: the 6.6.1 pin, the
 documentation-currency repair, and **the audit backlog's eight correctness bugs — all closed, each
@@ -127,8 +142,15 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.6.1` (in `cyrius.cyml [package].cyrius`) — moved **2026-09-08 on operator
-  direction**, from `6.6.0`. ⭐ **Not cosmetic, and the reason is on crab's shipping target**:
+- **Cyrius pin**: `6.6.2` (in `cyrius.cyml [package].cyrius`) — moved **2026-09-11 at the 0.8.4
+  cut, by the operator**, from `6.6.1`, together with the whole sibling stack (every dep, and
+  aethersafha's stack behind it, now sits on 6.6.2). 6.6.2 is the repair release for 6.6.0's
+  `: stack` value-form change; crab's `src/` needed no edits. ⚠ The bump re-vendored `boxed`,
+  `hashmap`, `result` and `tagged` and **left `lib/sankoch.cyr` at 6.6.1's 2.7.14** — the
+  transitive leaf the sync never walks — corrected 2026-09-12 by `cyrius deps`, after which the
+  whole vendored tree `cmp`s byte-identical to `~/.cyrius/versions/6.6.2/lib`. ⚠ The wrapper on
+  PATH is already 6.6.3 (`cycc --version`); `cyrius` resolves the manifest pin, bare `cycc` does not.
+- *(history)* `6.6.1` — moved **2026-09-08 on operator direction**, from `6.6.0`. ⭐ **Not cosmetic, and the reason is on crab's shipping target**:
   6.6.1 rebinds `chrono`'s AGNOS monotonic clock from `sys_uptime_ms` (**#40**, `timer_ticks`) to
   `sys_uptime_us` (**#95**, `rdtsc`). ⛔⛔ **A foreground `run` program on AGNOS executes with IF
   CLEARED** — only `/bin/agnsh` gets IF=1 — so the 100 Hz timer ISR never fires, `timer_ticks` never
@@ -390,12 +412,19 @@ per release stops being readable exactly when a cold start needs it most.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-09-08: all SEVEN declared tags equal that repo's
-highest tag on its remote** (fetched, not read from a stale clone), and the declared graph resolves
-with **all four `path` overrides disabled** — 7 deps / 0 errors, `deps --verify` **49 verified / 0
-failed**, host and `--agnos` both build, **1462/0**.
+Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-09-12: all SEVEN declared tags equal that repo's
+highest tag on its remote** (`git ls-remote --tags`, `sort -V`), every sibling tree clean on its tag,
+and the declared graph resolves with **all four `path` overrides disabled** — 7 deps / 0 errors,
+lock **3 → 7 commit-pinned**, `deps --verify` **50 verified / 0 failed**, host and `--agnos` both
+build, **1748/0**.
 ⭐⭐ **AND THE OVERRIDE-DISABLED BUILD IS BYTE-IDENTICAL TO THE OVERRIDE BUILD** — host
-**1,036,944 B**, agnos **1,068,976 B**, both ways. That is the strongest form check 4 can take: it
+**1,045,296 B** `d75c35a9…`, agnos **1,085,872 B** `9ca89ea3…`, both ways (measured at the dep
+bump, before the pointer routes landed on top).
+⛔ **0.8.4 SHIPPED WITH THE DIVERGENCE THIS CHECK EXISTS FOR.** Its `lib/` carried dhancha 0.9.29,
+rupa 0.1.7 and setu 0.8.9 through `path` while the manifest declared 0.9.28 / 0.1.6 / 0.8.8 — so CI
+compiled the old tags and the local build the new ones, green both ways, and nothing said so. All
+seven are re-pinned in `[Unreleased]`; only chitra 1.0.1 → 1.0.3 carries behaviour (a decoder P-1
+sweep), the rest are 6.6.2 pin moves with header-only dist changes. That is the strongest form check 4 can take: it
 says not merely *"the declared graph resolves"* but *"the declared graph is what the local build has
 been compiling all along."* ⚠ It holds only because every sibling working tree sits exactly on its
 tag, clean; re-derive it rather than assuming it, since `path` is what makes it possible to drift.
@@ -403,13 +432,13 @@ tag, clean; re-derive it rather than assuming it, since `path` is what makes it 
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
-| sadish  | 0.5.3  | no      | 2D vector — the surface everything else draws into   |
-| rupa    | 0.1.6  | yes     | shared theme tokens + **`on-accent`** and contrast   |
-| rekha   | 0.3.6  | no      | text; references `sd_*`. ⭐ adds the advance widths   |
-| kashi   | 1.0.6  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.28 | yes     | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`    |
-| chitra  | 1.0.1  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
-| setu    | 0.8.8  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
+| sadish  | 0.5.4  | no      | 2D vector — the surface everything else draws into   |
+| rupa    | 0.1.7  | yes     | shared theme tokens + **`on-accent`** and contrast   |
+| rekha   | 0.3.7  | no      | text; references `sd_*`. ⭐ adds the advance widths   |
+| kashi   | 1.0.7  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
+| dhancha | 0.9.29 | yes     | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`    |
+| chitra  | 1.0.3  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
+| setu    | 0.8.9  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
 
 ⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
 manifest named `rupa 0.1.5` and `dhancha 0.9.20` while **neither existed on any remote** — both were
@@ -472,8 +501,11 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,230 passed / 0 failed**
-  *(0.7.7; 1,138 at 0.7.6, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,748 passed / 0 failed**
+  *(unreleased, 2026-09-13; 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+  ⭐ **+53 unreleased — `t_pointer_routes`**: the blocked/modal split, the button numbers pinned
+  against X11, the separator inverse's round trip for every item, and the z-order of
+  `crab_pointer_action` (31 assertions, seven mutations each caught).
   ⭐ **+92 at 0.7.7, all of them pinning defects that had already shipped**, in five new groups:
   `t_dir_transfer`, `t_queue_refusals`, `t_transfer_plan`, `t_menu_highlight`, `t_tray_height`.
   ⛔ **Each was mutation-proven** — the guard removed and the suite watched to FAIL (9, 4, 5, 3 and
@@ -534,8 +566,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,023,968 B** *(0.7.7; 1,019,784 at 0.7.6, 453,304 at 0.7.5)* |
-| `--agnos`    | ✅ builds, **1,047,832 B** *(0.7.7; 1,047,624 at 0.7.6)* — the real target, and **CI now builds it** |
+| x86_64 linux | ✅ builds, **1,049,480 B** *(unreleased; 1,045,296 at the 6.6.2 dep bump, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* |
+| `--agnos`    | ✅ builds, **1,090,216 B** *(unreleased; 1,085,872 at the dep bump, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -686,9 +718,12 @@ _None — top-level application._
 
 ⭐ **0.8.2 CLOSED THE AUDIT BACKLOG'S CORRECTNESS SECTION — all eight, plus the recursive-walk
 defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinished from earlier
-stages*. What remains open there is the M6 interaction gaps (the PLACES sidebar still has **no
-keyboard route**, and nothing but the sidebar has a pointer route), the absent affordances (no
-REFRESH key, no flag surface, no overwrite policy) and the *Recorded as facts* list.
+stages*. ⭐ **The M6 interaction gaps are down to two** (2026-09-13): 0.8.3 gave the sidebar its
+keyboard route, and `[Unreleased]` gives every surface its pointer route — right-click, popup pick and
+dismiss, bar and switcher clicks — on aethersafha 0.16.24's button numbering. Left: the sidebar's
+*you are here* marker (design done: containment, deepest wins) and `View`'s four items. Still open
+beyond them: the absent affordances (no REFRESH key, no flag surface, no overwrite policy) and the
+*Recorded as facts* list.
 
 **M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
 0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on
