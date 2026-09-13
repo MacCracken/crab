@@ -1,3 +1,52 @@
+# Handoff — **0.8.9 cut: Shift — capital letters in names, and a sheet that can accept its own language.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
+> on the remote). **0.8.7, 0.8.8 and 0.8.9 are all CUT and none is committed** — `VERSION` reads
+> 0.8.9, the CHANGELOG headers agree, and ⛔ the commit, the tag and the push are the operator's.
+>
+> 1. ⭐⭐ **A SHIFT LATCH — names can hold capital letters.** `crab_key_char` has taken the flag since
+>    the rename field was built; its ONE production call site passed a literal `0` under a comment
+>    reading *"there is no shift state on the wire yet."* ⛔ **The wire was never the problem, and half
+>    the written claim was wrong the whole time**: `mods` does carry only the press/release edge, but a
+>    modifier's OWN edge arrives as its own key event, and aethersafha 0.16.25 exempts those edges from
+>    the Ctrl-chord swallow **on purpose** — its source says *"a client that wants Shift state has no
+>    other way to learn it."* crab had been receiving Shift since that release and discarding it.
+> 2. ⛔⛔ **A MASK, NOT A BOOLEAN.** Hold LeftShift, hold RightShift, release LeftShift — still
+>    shifted. A single flag cleared there and the next letters came out lower case mid-word with both
+>    hands on the keyboard. Two keys, two bits. ⛔ And the release-clear is a **guarded** subtraction,
+>    because an unpaired release is **measured** on this stack, not hypothetical: the 2026-09-13 QEMU
+>    investigation recorded that *"a claimed key's release is forwarded while its press is not."*
+>    Unguarded, one stray release turns mask 1 into −1 and every letter is capitalised forever.
+> 3. ⛔⛆ **AND IT CLOSED A SECOND RECORDED GAP THAT LOOKED UNRELATED.** The batch sheet's label reads
+>    `# = number, * = old name` and **neither character could be typed into it** — `#` is Shift+3, `*`
+>    is Shift+8, and the whole shifted number row answered 0 under *"the shifted row is symbols crab
+>    does not need."* A surface describing a language its own input cannot produce. The row is filled,
+>    all ten, and the suite pins those two **against `crab_batch_name` itself** rather than against two
+>    literals, so the keyboard and the language cannot drift apart.
+> 4. ⛔⛔ **THE ORDERING IS INVISIBLE TO THE SUITE, AND THAT IS WHAT THE HARNESS IS FOR.** In
+>    `src/main.cyr` the latch is fed the RAW edge three lines BEFORE `crab_key_is_modifier` zeroes a
+>    modifier's `kacts`. Track first, suppress second. Backwards, every Shift PRESS reaches the latch
+>    looking like a RELEASE, the latch never sets, and **the suite stays completely green** — all of it
+>    is inside the agnos `#ifdef` with no `#else` and nothing includes `main.cyr`.
+>    ⭐ `crab-shift-test.py` — **PASS**: `Shift+A Shift+B Shift+3 Shift+8` committed exactly **`AB#*`**
+>    (latch, ordering and both operators in one line); `Shift+A` then `b c` committed exactly **`Abc`**
+>    (the release clears); ten shift edges arrived and crab acted on **zero**; no faults.
+>    ⚠ **Its first run measured `nnnAB#*` and that was the HARNESS.** The retry pressed `n` until the
+>    sheet opened and could not tell that it had, so every extra press typed a literal `n` into the
+>    name. ⇒ crab now prints **`crab: edit open <label>`** — it was the one interactive surface opened
+>    in silence, on the exact boundary where a keystroke stops being a command and becomes text.
+> 5. ⚠ **The overwrite policy's second reason expired and is corrected, not dropped.** 0.8.7 armed
+>    *all* with `a` partly because `R` was *"unreachable on this stack"*. False now. **The design does
+>    not change** — the surviving reason was the load-bearing one: a capital is an **invisible mode**,
+>    and this is a prompt where the next keystroke can destroy a file.
+>
+> **Suite 2158 / 0** (+54), render_test 53 / 0. Host **1,067,496 B** · agnos **1,112,456 B**. Four
+> mutations, each caught — including `'0'` surviving a range widened from `0x1E..0x26` to `0x1E..0x27`
+> (the planted defect made it come out as `':'`).
+> ⭐ **Next is `0.9.0` — a real face.** See [the ladder to 1.0](roadmap.md); every entry there is a
+> version, not a position.
+> ⚠ **The 0.8.8 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.8 cut: the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
@@ -30,7 +79,7 @@
 >    identically — which is exactly why it was done on its own. ⚠ **What the suite cannot say is said
 >    at the assertions**: at `font = 0` no host test can tell *"asks the font"* from *"divides by the
 >    constant"*; deleting `crab_font = font` leaves the suite green and the test records that rather
->    than implying a gate. **What is left of proportional text is passing a real face** — rung 2.
+>    than implying a gate. **What is left of proportional text is passing a real face** — `0.9.0`.
 > 4. ⭐⭐ **QEMU: `agnos/scripts/harness/crab-columns-test.py` (new), PASS on its first run.** `g` ×4
 >    reaches COLUMNS; the parent of `/bin` is listed and titled `/`; **four redraws re-listed nothing**
 >    (the memo arm — a readdir is not a render-path operation, and without the memo this view would
@@ -40,13 +89,12 @@
 >    `#else`, so on the host it returns 0 entries for **every** path. A first draft of the suite built
 >    a real tree under `build/` and asserted the listing; every assertion failed against an empty
 >    listing and a clean error code, which is what that `#ifdef` looks like from a host test.
-> 5. 🗺 **The roadmap has an order.** [The ladder to 1.0](roadmap.md) — nine rungs plus one ruling,
+> 5. 🗺 **The roadmap has an order.** [The ladder to 1.0](roadmap.md) — every entry a VERSION, plus one ruling,
 >    each named by what an operator can newly do, with what blocks it and what closes it.
 >    ⛔ **The order is the commitment; the number is not** (the milestone→version map has been wrong
 >    four times, and both 0.8.7 and 0.8.8 closed milestones **out of order, after all of M6**).
->    ⭐ **Rung 1 is Shift** — no longer gated: aethersafha 0.16.25 forwards modifier edges and
->    `crab_key_is_modifier` already ignores them as keystrokes, so what is missing is a crab-side
->    latch, not a wire. ⚠ **daimon is deliberately not a rung** — it is a ruling the operator owns.
+>    ⭐ **Next was Shift** — ✅ shipped as **0.8.9**, above. ⚠ **daimon is deliberately not on the
+>    ladder** — it is a ruling the operator owns.
 >
 > **Suite 2104 / 0** (+88 over 0.8.7), render_test 53 / 0. Host **1,067,440 B** · agnos **1,112,400 B**. Fourteen mutations
 > planted; ⚠ **two of them PASSED and both are recorded rather than deleted** — the context column's

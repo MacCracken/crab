@@ -2510,6 +2510,129 @@ fn main() {
     assert_eq(crab_key_char(0x2A, 0), 0, "...nor Backspace");
     assert_eq(crab_key_char(0x50, 0), 0, "...nor an arrow");
     assert_eq(crab_key_char(0, 0), 0, "...nor usage 0");
+
+    # --- 0.8.9: THE SHIFTED NUMBER ROW, AND THE TWO KEYS A SHEET ALREADY ASKED FOR -----------------
+    # ⛔⛆ THIS ROW ANSWERED 0 FOR EVERY KEY, under a comment reading "the shifted row is symbols crab
+    # does not need" — and crab needed two of them BY NAME. The batch-rename sheet advertises a
+    # two-operator language, `#` for the sequence number and `*` for the original name, and neither
+    # could be typed into the sheet's own field. A surface describing a language its input cannot
+    # produce is worse than a missing feature: the operator reads the instruction and cannot follow it.
+    # ⚠ It was invisible while the shift flag was hard-coded to 0 — the row was unreachable either
+    # way — and would have become a live dead key the moment the latch worked.
+    assert_eq(crab_key_char(0x20, 1), 35, "⭐ Shift+3 is '#' — the batch pattern's SEQUENCE operator");
+    assert_eq(crab_key_char(0x25, 1), 42, "⭐ Shift+8 is '*' — the batch pattern's ORIGINAL-NAME operator");
+    # ⛔⛔ AND THEY ARE PINNED TO THE EXPANDER ITSELF, NOT TO TWO LITERALS THAT LOOK RIGHT. `#` and `*`
+    # mean something in `crab_batch_name`; if either operator ever moves, the key that types it must
+    # move with it or the sheet goes back to advertising what it cannot accept. One assertion holds
+    # the keyboard and the language together.
+    var bsd = alloc(CRAB_EDIT_CAP);
+    var bsp = alloc(8);
+    store8(bsp + 0, crab_key_char(0x20, 1));            # the character Shift+3 produces
+    store8(bsp + 1, 0);
+    assert(crab_batch_name(bsd, bsp, 7, "orig.txt") > 0, "the character Shift+3 types expands as a pattern");
+    assert(t_streq(bsd, "7"), "⛔ ...and it IS the sequence operator — it expanded to the index");
+    store8(bsp + 0, crab_key_char(0x25, 1));            # the character Shift+8 produces
+    store8(bsp + 1, 0);
+    assert(crab_batch_name(bsd, bsp, 7, "orig.txt") > 0, "the character Shift+8 types expands as a pattern");
+    assert(t_streq(bsd, "orig.txt"), "⛔ ...and it IS the original-name operator");
+    # ⚠ The rest of the row, filled because half a row is an arbitrary line the operator cannot see
+    # and would have to discover one dead key at a time.
+    assert_eq(crab_key_char(0x1E, 1), 33, "Shift+1 is '!'");
+    assert_eq(crab_key_char(0x1F, 1), 64, "Shift+2 is '@'");
+    assert_eq(crab_key_char(0x21, 1), 36, "Shift+4 is '$'");
+    assert_eq(crab_key_char(0x22, 1), 37, "Shift+5 is '%'");
+    assert_eq(crab_key_char(0x23, 1), 94, "Shift+6 is '^'");
+    assert_eq(crab_key_char(0x24, 1), 38, "Shift+7 is '&'");
+    assert_eq(crab_key_char(0x26, 1), 40, "Shift+9 is '('");
+    assert_eq(crab_key_char(0x27, 1), 41, "Shift+0 is ')' — and 0 is the LAST key of the row");
+    # ⛔ THE UNSHIFTED ROW DID NOT MOVE, and this is the assertion that says so: widening the range
+    # test from `0x1E..0x26` to `0x1E..0x27` put '0' inside the arithmetic branch for the first time,
+    # where `49 + (u - 0x1E)` would make it ':'.
+    assert_eq(crab_key_char(0x27, 0), 48, "'0' unshifted is still '0', not the character after '9'");
+    assert_eq(crab_key_char(0x26, 0), 57, "...and '9' is still '9'");
+    # ⛔ EVERY CHARACTER THIS ROW CAN TYPE MUST BE A LEGAL NAME, or the field would produce something
+    # the guard then refuses — a keystroke that appears to work and fails at commit.
+    var snm = alloc(CRAB_NAME_MAX);
+    var sui = 0x1E;
+    while (sui <= 0x27) {
+        store8(snm + 0, 110);                           # 'n', so the name is never "." or ".."
+        store8(snm + 1, crab_key_char(sui, 1));
+        store8(snm + 2, 0);
+        assert_eq(crab_name_ok(snm), 1, "a name holding a shifted-row character is legal");
+        sui = sui + 1;
+    }
+
+    # --- 0.8.9: THE SHIFT LATCH --------------------------------------------------------------------
+    # ⭐⭐ crab COULD NOT WRITE A NAME CONTAINING A CAPITAL LETTER. `crab_key_char` has taken the flag
+    # since the field was built; its ONE production call site passed a literal 0, under a comment
+    # reading "there is no shift state on the wire yet" — true when written, and false since
+    # aethersafha began forwarding modifier edges. `crab_key_is_modifier` (0.8.7) stopped crab ACTING
+    # on those edges and its own comment named this as the sequel: read the same usage as STATE.
+    crab_shift_clear();
+    assert_eq(crab_shift_held(), 0, "nothing is held to begin with");
+    assert_eq(crab_shift_mask_now(), 0, "...and the mask is empty");
+    assert_eq(crab_shift_bit(CRAB_HID_LSHIFT), CRAB_SHIFT_L, "LeftShift owns bit 0");
+    assert_eq(crab_shift_bit(CRAB_HID_RSHIFT), CRAB_SHIFT_R, "RightShift owns bit 1");
+    assert_eq(crab_shift_bit(0x04), 0, "'a' owns no latch bit");
+    # ⚠ THE OTHER SIX MODIFIERS ARE MODIFIERS AND ARE NOT SHIFT. `crab_key_is_modifier` covers
+    # 0xE0..0xE7 so none of them is a keystroke; only two of them mean upper case.
+    assert_eq(crab_shift_bit(0xE0), 0, "LeftCtrl is a modifier but not a shift");
+    assert_eq(crab_shift_bit(0xE2), 0, "...nor LeftAlt");
+    assert_eq(crab_shift_bit(0xE4), 0, "...nor RightCtrl");
+    assert_eq(crab_key_is_modifier(CRAB_HID_LSHIFT), 1, "...and both shifts ARE modifiers");
+    assert_eq(crab_key_is_modifier(CRAB_HID_RSHIFT), 1, "...both of them");
+
+    crab_shift_track(CRAB_HID_LSHIFT, 1);
+    assert_eq(crab_shift_held(), 1, "a LeftShift press latches");
+    assert_eq(crab_key_char(0x04, crab_shift_held()), 65, "...and 'a' now types 'A'");
+    crab_shift_track(CRAB_HID_LSHIFT, 0);
+    assert_eq(crab_shift_held(), 0, "its release unlatches");
+    assert_eq(crab_key_char(0x04, crab_shift_held()), 97, "...and 'a' types 'a' again");
+    crab_shift_track(CRAB_HID_RSHIFT, 1);
+    assert_eq(crab_shift_held(), 1, "RightShift latches independently");
+    crab_shift_track(CRAB_HID_RSHIFT, 0);
+    assert_eq(crab_shift_held(), 0, "...and releases independently");
+
+    # ⛔⛔ THE SEQUENCE A BOOLEAN GETS WRONG, AND THE ONLY REASON THIS IS A MASK. Hold LeftShift, then
+    # hold RightShift, then release LeftShift: the operator is STILL holding a shift key. A single
+    # flag cleared on that release and the next letters came out lower case mid-word — with both
+    # hands on the keyboard and nothing visibly wrong.
+    crab_shift_clear();
+    crab_shift_track(CRAB_HID_LSHIFT, 1);
+    crab_shift_track(CRAB_HID_RSHIFT, 1);
+    assert_eq(crab_shift_mask_now(), CRAB_SHIFT_L + CRAB_SHIFT_R, "both shifts are down");
+    crab_shift_track(CRAB_HID_LSHIFT, 0);
+    assert_eq(crab_shift_held(), 1,
+      "⛔ RELEASING ONE SHIFT WHILE THE OTHER IS HELD STAYS SHIFTED — a boolean loses this");
+    assert_eq(crab_shift_mask_now(), CRAB_SHIFT_R, "...and only the right bit remains");
+    assert_eq(crab_key_char(0x04, crab_shift_held()), 65, "...so letters are still upper case");
+    crab_shift_track(CRAB_HID_RSHIFT, 0);
+    assert_eq(crab_shift_held(), 0, "...and the second release ends it");
+
+    # ⛔ A RELEASE FOR A BIT THAT IS NOT SET MUST NOT BORROW INTO THE OTHER ONE. The clear is a
+    # subtraction, so an unguarded one would turn mask 1 into mask -1 on a stray RightShift release —
+    # every subsequent letter capitalised and no key held.
+    crab_shift_clear();
+    crab_shift_track(CRAB_HID_LSHIFT, 1);
+    crab_shift_track(CRAB_HID_RSHIFT, 0);                # a release nothing pressed
+    assert_eq(crab_shift_mask_now(), CRAB_SHIFT_L, "⛔ a stray release leaves the held bit exactly as it was");
+    assert_eq(crab_shift_held(), 1, "...and shift is still held");
+    crab_shift_clear();
+    crab_shift_track(CRAB_HID_RSHIFT, 0);                # a release with nothing down at all
+    assert_eq(crab_shift_mask_now(), 0, "...and cannot drive the mask negative");
+    assert_eq(crab_shift_held(), 0, "...nor latch shift on");
+
+    # ⚠ AN ORDINARY KEY'S EDGES CHANGE NOTHING. The loop hands EVERY key edge to the latch — that is
+    # what makes the call site one line — so a letter's press must be inert here.
+    crab_shift_clear();
+    crab_shift_track(CRAB_HID_LSHIFT, 1);
+    crab_shift_track(0x04, 1);
+    crab_shift_track(0x04, 0);
+    assert_eq(crab_shift_held(), 1, "typing a letter while shifted does not disturb the latch");
+    crab_shift_track(0xE0, 0);                           # a Ctrl release
+    assert_eq(crab_shift_held(), 1, "...and neither does another modifier's edge");
+    crab_shift_clear();
+    assert_eq(crab_shift_held(), 0, "the latch clears on request");
     # ⛔ AND A TYPED NAME MUST STILL PASS THE NAME GUARD — the field cannot type a '/' at all, which
     # is the escape `crab_name_ok` refuses, but the guard is what enforces it.
     crab_edit_start("..");

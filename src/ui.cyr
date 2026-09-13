@@ -1852,14 +1852,46 @@ fn crab_key_char(u, shift): i64 {
         if (shift != 0) { return 65 + (u - 0x04); }
         return 97 + (u - 0x04);
     }
-    if ((u >= 0x1E) && (u <= 0x26)) {                  # 1..9
-        if (shift != 0) { return 0; }                  # the shifted row is symbols crab does not need
+    if ((u >= 0x1E) && (u <= 0x27)) {                  # 1..9, then 0
+        if (shift != 0) { return crab_shift_sym(u); }
+        if (u == 0x27) { return 48; }                  # ⛔ '0' is the LAST key of the row, not 49+9
         return 49 + (u - 0x1E);
     }
-    if (u == 0x27) { if (shift != 0) { return 0; } return 48; }   # 0
     if (u == 0x2C) { return 32; }                      # space
     if (u == 0x2D) { if (shift != 0) { return 95; } return 45; }  # - / _
     if (u == 0x37) { return 46; }                      # .
+    return 0;
+}
+
+# The US QWERTY shifted number row. -> the character, or 0.
+#
+# ⛔⛆ THIS ROW ANSWERED 0 FOR EVERY KEY, under a comment reading *"the shifted row is symbols crab
+# does not need"* — and crab needed two of them by name. The batch-rename sheet advertises a
+# two-operator language, `#` for the sequence number and `*` for the original name, and **neither
+# could be typed into the sheet's own field**: `#` is Shift+3 and `*` is Shift+8. The sheet described
+# a language its input could not produce. That was invisible while the shift flag was hard-coded to 0
+# — the row was unreachable either way — and became a live, visible dead key the moment the latch
+# worked. ⇒ The row is filled, all ten, because half a row is an arbitrary line the operator cannot
+# see and would have to discover one key at a time.
+#
+# ⚠ EVERY ONE OF THESE IS A LEGAL NAME. `crab_name_ok` refuses exactly `/`, `.`, `..`, empty and
+# unterminated — nothing on this row. ⛔ And none of them is a shell hazard here, which is worth
+# stating because it usually is: crab never builds a command line. `sys_spawn_path(path, len)` and
+# `sys_open(path, len, ...)` take a pointer and a LENGTH, `sys_system` appears nowhere in `src/`, so
+# `*`, `&` and `$` in a name are bytes rather than syntax.
+# ⚠ US QWERTY, matching the letters above and the tables agnos installs at boot. A layout story is a
+# kernel/compositor arc, and inventing a second answer here would be the thing that makes it worse.
+fn crab_shift_sym(u): i64 {
+    if (u == 0x1E) { return 33; }    # 1 -> !
+    if (u == 0x1F) { return 64; }    # 2 -> @
+    if (u == 0x20) { return 35; }    # 3 -> #   ⭐ the batch-rename sequence operator
+    if (u == 0x21) { return 36; }    # 4 -> $
+    if (u == 0x22) { return 37; }    # 5 -> %
+    if (u == 0x23) { return 94; }    # 6 -> ^
+    if (u == 0x24) { return 38; }    # 7 -> &
+    if (u == 0x25) { return 42; }    # 8 -> *   ⭐ the batch-rename original-name operator
+    if (u == 0x26) { return 40; }    # 9 -> (
+    if (u == 0x27) { return 41; }    # 0 -> )
     return 0;
 }
 

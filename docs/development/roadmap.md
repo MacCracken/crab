@@ -4,8 +4,9 @@
 > **sequencing** — what ships, in what order, against what dependency gates.
 >
 > ⭐ Starting a slot? Read **[The ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order)** — one
-> ordered list of what ships next, each rung named by what an operator can newly do, with what blocks
-> it and what closes it. Everything else in this file is the reasoning behind those rungs.
+> ordered list of what ships next, **each named by the version it will be cut as**, with what an
+> operator can newly do, what blocks it and what closes it. Everything else in this file is the
+> reasoning behind those releases.
 > `handoff.md` has the current state; [`../../CHANGELOG.md`](../../CHANGELOG.md) has what already
 > shipped and why.
 >
@@ -70,7 +71,7 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 ## v1.0 criteria
 
 - [ ] All three canvas directions absorbed — **1a shell is in** (M1–M4) and **1c density is in**
-      (M5–M6; ✅ **columns closed at 0.8.8**, the 🦀 button is rung 3); 1b assisted search is M8.
+      (M5–M6; ✅ **columns closed at 0.8.8**, the 🦀 button is **0.9.1**); 1b assisted search is M8.
       ⭐ The order the rest of this lands in is [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order).
 - [x] Reference coverage ≥ 80 % — **89 %** (2026-09-13; 87 % at 0.7.7). ⚠ It has fallen below the line twice
       mid-milestone and been brought back both times; the roadmap gates it **per release** rather
@@ -133,8 +134,8 @@ M6 spread across `0.8.0 – 0.8.6` — none of them took the `v0.9.x` this file 
 **The milestone→version mapping has now been wrong four times. Re-derive the number at each cut**;
 do not trust a heading. ⛔ **And both closed LATE, out of milestone order** — M4's overwrite policy at
 0.8.7 and M5's columns at 0.8.8, after all of M6 had shipped. ⇒ *A milestone is a grouping of
-features, not a window in time*, which is exactly why the ladder below is ordered by **rung** and not
-by milestone.
+features, not a window in time*, which is exactly why the ladder below is ordered by **release** and
+not by milestone.
 
 #### What is left of the shipped milestones
 
@@ -182,48 +183,52 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 > ⛔⛆ **THIS SECTION EXISTS BECAUSE "WHAT IS NEXT" KEPT BEING A READING EXERCISE.** The remaining work
 > was spread across *What is left of the shipped milestones*, *Absent affordances*, *Recorded as
 > facts*, M7, M8 and the gate table — every item correct, none of them in an order, so each slot
-> began by re-deriving the sequence from six places. ⇒ **One ordered list. Each rung is a release,
-> named by what an operator can newly do.**
+> began by re-deriving the sequence from six places. ⇒ **One ordered list, and every entry is a
+> VERSION** — named by what an operator can newly do when that version is cut.
 >
 > ⛔⛔ **THE ORDER IS THE COMMITMENT. THE NUMBER IS NOT.** This file has mapped milestones onto
 > versions wrong **four times** — M4 rode four patch numbers, M5 landed inside one, M6 spread across
 > seven, and the `v0.9.x` / `v0.10.0` these sections once reserved never happened. The numbers below
 > are the *intended shape*, not a promise: **re-derive the number at the cut** from what the release
-> actually contains. What does not move is the sequence and the reason each rung sits where it does.
+> actually contains. What does not move is the sequence and the reason each release sits where it does.
 >
 > ⚠ **Nothing in [Cross-cutting](#cross-cutting-not-a-milestone--do-these-continuously) appears
 > here**, by the rule at the top of this file: gates, automation, lint policy and doc currency are
-> how crab keeps working, not what crab ships. They ride along with whichever rung is in flight.
+> how crab keeps working, not what crab ships. They ride along with whichever release is in flight.
 
-| # | rung | what an operator can newly do | blocked by | cut it when |
+> ⚠ **CALL THEM BY THEIR VERSION.** The left column is a reading aid for the dependency notes below
+> the table and nothing else — `0.9.0` is the name of the next face, not "rung 2". A number an
+> operator can put against a release is the only identifier worth using in a report.
+
+| | version | what an operator can newly do | blocked by | cut it when |
 |---|---|---|---|---|
-| ✅ | **0.8.8** Columns | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
-| 1 | **0.8.9** Shift | type a capital letter into a name — rename, new folder and the batch sheet all take one | — *(no longer a gate: aethersafha 0.16.25 forwards modifier edges and `crab_key_is_modifier` already ignores them as keystrokes)* | a Shift latch exists and `crab_key_char`'s flag is driven from it at the production call site |
-| 2 | **0.9.0** A real face | read crab in a proportional font | rung 1 only by convenience | `font` is a loaded face, the six character-count constants are **derived** rather than written at 9 px, the caret follows the advance, and the Latin-1 limit is closed or written down |
-| 3 | **0.9.1** The 🦀 button | open the menu row by pressing the crab | rung 2, **or** an icon path that does not need a face | the button draws and `F10` stops being the only door |
-| 4 | **0.9.2** `Go` | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
-| 5 | **0.9.3** Symlinks | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
-| 6 | **0.9.4** A preview that costs nothing | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
-| 7 | **0.9.5** Pointer polish | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
+| ✅ | **0.8.8 · Columns** | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
+| ✅ | **0.8.9 · Shift** | type a **capital letter** into a name — and `#` and `*`, the batch sheet's own two operators, into the field that advertises them | — | **shipped** |
+| → | **0.9.0 · A real face** | read crab in a proportional font | — | `font` is a loaded face, the six character-count constants are **derived** rather than written at 9 px, the caret follows the advance, and the Latin-1 limit is closed or written down |
+| | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | **0.9.0**, or an icon path that needs no face | the button draws and `F10` stops being the only door |
+| | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
+| | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
+| | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
+| | **0.9.5 · Pointer polish** | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
 | ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
-| 8 | **0.10.0** M7 The index | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
-| 9 | **0.11.0** M8 Assisted search | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
+| | **0.10.0 · The index** (M7) | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
+| | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **Rungs 1 and 4–7 are ungated and can be reordered freely** — they are one change each and nothing
-downstream waits on them. **Rungs 2 and 3 are a chain** (the face, then the glyph that needs it), and
-**8 and 9 are one chain behind one ruling**. That is the whole dependency structure.
+⭐ **0.9.2 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing downstream
+waits on them. **0.9.0 → 0.9.1 is a chain** (the face, then the glyph that needs it), and **0.10.0 →
+0.11.0 is one chain behind one ruling**. That is the whole dependency structure.
 
-⛔ **1.0.0 is not a feature rung and must not become one.** Its contents are the unchecked boxes in
+⛔ **1.0.0 is not a feature release and must not become one.** Its contents are the unchecked boxes in
 *v1.0 criteria*, and three of them are not code: **a green iron burn** (the last was 2026-08-30
 against 0.7.0's tree — and ⛔ **sequencing an iron run is the operator's call, not this file's**),
 `docs/benchmarks.md` written from the harness that already measures, and `docs/examples/` populated.
-⇒ **1.0.0 can be blocked with every rung above it shipped.** Nothing here closes those three; they
+⇒ **1.0.0 can be blocked with every version above it shipped.** Nothing here closes those three; they
 close when someone does them.
 
 ### M7 — The index
 
-⚠ **Rung 8 of the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
+⚠ **0.10.0 on the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
 is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the number at the cut.
 
 - **Local index** — `Local · 41,208 files`, `index fresh`, background indexing that
@@ -237,7 +242,7 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 
 ### M8 — Assisted search (the v1.0 surface)
 
-⚠ **Rung 9 of the ladder above**, and the last feature rung before 1.0.
+⚠ **0.11.0 on the ladder above**, and the last feature release before 1.0.
 
 1b, **as a mode over every view**.
 
@@ -270,12 +275,12 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| Proportional text | M5 → rung 2 | ⭐ **UPSTREAM HALF CLOSED 2026-09-02** — rekha 0.3.6 adds `rekha_advance_width` / `rekha_char_advance_px`; dhancha 0.9.27 consumes them in `dh_text_advance`, keeping the hard-coded `advf = (h * 6) / 10` only as the no-metrics fallback. crab declares both floors. ⭐ **0.8.8 closed the plumbing half crab-side** (`crab_char_w` / `crab_text_w`, one reader for the 9). ⛔ **What is left is passing a face** and deriving the six character-count constants from it — gated on nothing. | 2026-09-13 ⭐ re-derived |
-| The 🦀 chrome button | M6 → rung 3 | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from rung 2. | 2026-09-01 |
-| Sidebar — SMART FOLDERS + TAGS | M6→M7 → rung 8 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
-| Local index · tags · smart folders | M7 → rung 8 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
-| Duplicate detection | M7 → rung 8 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
-| Assisted search | M8 → rung 9 | **daimon** local-only embedding | 2026-08-31 |
+| Proportional text | M5 → **0.9.0** | ⭐ **UPSTREAM HALF CLOSED 2026-09-02** — rekha 0.3.6 adds `rekha_advance_width` / `rekha_char_advance_px`; dhancha 0.9.27 consumes them in `dh_text_advance`, keeping the hard-coded `advf = (h * 6) / 10` only as the no-metrics fallback. crab declares both floors. ⭐ **0.8.8 closed the plumbing half crab-side** (`crab_char_w` / `crab_text_w`, one reader for the 9). ⛔ **What is left is passing a face** and deriving the six character-count constants from it — gated on nothing. | 2026-09-13 ⭐ re-derived |
+| The 🦀 chrome button | M6 → **0.9.1** | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from **0.9.0**. | 2026-09-01 |
+| Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
+| Local index · tags · smart folders | M7 → **0.10.0** | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
+| Duplicate detection | M7 → **0.10.0** | **daimon**, or a content hash crab could do alone | 2026-08-31 |
+| Assisted search | M8 → **0.11.0** | **daimon** local-only embedding | 2026-08-31 |
 
 ⭐ **Closed gates are not listed.** GRID (dhancha 0.9.25), the menu bar's strip (0.9.26), thumbnails
 (chitra, an operator ruling on price), sidebar PLACES and VOLUMES (agnos `mountlist`#104, minted
@@ -296,8 +301,9 @@ built.** ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #2
 
 **Ungated and available now**: see [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order),
 which is now the single ordered answer to "what is next". The overwrite policy (0.8.7) and columns
-(0.8.8) closed out of that order; rung 1 is **Shift**. ⚠ **daimon is deliberately NOT in the rung
-order** — it is a ruling the operator owns, and M7/M8 stay gated behind it.
+(0.8.8) closed out of that order, and Shift shipped as **0.8.9**. **Next is `0.9.0` — a real face.**
+⚠ **daimon is deliberately NOT in the version order** — it is a ruling the operator owns, and M7/M8
+stay gated behind it.
 
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
 and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the dependency or stop
@@ -352,25 +358,32 @@ promising the AI arc** — open since the roadmap was written.
   volumes render as two identical rows, and `Go ▸ Parent` would ship enabled-but-dead at `/`.
   ⇒ **The right shape is a thin projection over the sidebar's keyboard route** (`crab_sb_row_of` /
   `crab_sb_path`), capped by `crab_mb_drop_fit`. Recorded with its reason, as `Tags`/`Index` are.
-  ⇒ **Rung 4** — the shape is decided, so what is left is the three conditions in the ladder.
+  ⇒ **0.9.2** — the shape is decided, so what is left is the three conditions in the ladder.
 
 ### Recorded as facts, never as work
 
-- **No name crab writes can contain a capital letter.** `crab_key_char`'s shift flag is hard-coded to
-  0 at its only production call site; the map already takes the flag. ⛔ **NO LONGER GATED — this is
-  crab's own work now.** aethersafha 0.16.25 forwards modifier edges on purpose so a client can learn
-  Shift, and crab already sees them (`crab_key_is_modifier` ignores them as keystrokes). What is
-  missing is a crab-side Shift latch, not a wire. ⇒ **Promoted out of this section: it is rung 1.**
+- ✅ **Names can hold capital letters — CLOSED (0.8.9).** This section carried it as a fact for five
+  releases: *"`crab_key_char`'s shift flag is hard-coded to 0 at its only production call site."*
+  aethersafha 0.16.25 forwards modifier edges on purpose — its own source says *"a client that wants
+  Shift state has no other way to learn it"* — so what was missing was a crab-side latch, not a wire.
+  `crab_shift_track` folds usages 0xE1/0xE5 into a **two-bit mask** (one bit per shift key: releasing
+  one while the other is held must stay shifted, which a boolean loses) and the field reads
+  `crab_shift_held()`. ⭐ Proven on QEMU — the ORDER of the latch against the modifier suppression is
+  invisible to the suite and would have failed green.
 - **`sys_lstat` is vendored and deliberately never called**, so symlinks stay invisible to the write
   layer. The gate closed upstream at cyrius 6.5.37; what remains is a decision about what crab should
-  DO with the answer — refuse, report, or recreate. ⇒ **Rung 5.**
+  DO with the answer — refuse, report, or recreate. ⇒ **0.9.3.**
 - **The preview's dimension + EXIF read is a synchronous 64 KiB open/read/close on the SELECTION
   path**, against crab's own rule that reads belong on the idle tick. Memoised, but arrowing through
-  a directory of large JPEGs pays per entry. ⇒ **Rung 6.**
-- **The batch-rename pattern's two operators, `#` and `*`, cannot be typed** — the sheet advertises a
-  language its own input field cannot produce (`crab_key_char` maps neither).
+  a directory of large JPEGs pays per entry. ⇒ **0.9.4.**
+- ✅ **The batch-rename operators can be typed — CLOSED (0.8.9), and by the Shift work rather than by
+  anything aimed at it.** The sheet advertised a language its own field could not produce: `#` is
+  Shift+3 and `*` is Shift+8, and the whole shifted number row answered 0 under a comment reading
+  *"the shifted row is symbols crab does not need"* — while crab needed two of them by name. The row
+  is filled, all ten, and the suite pins `#` and `*` against `crab_batch_name` itself rather than
+  against two literals, so the keyboard and the language cannot drift apart.
 - **The middle mouse button does nothing**, and pointer MOTION does not move a popup's highlight.
-  ⇒ **Rung 7** — do both, or write both down as deliberate.
+  ⇒ **0.9.5** — do both, or write both down as deliberate.
 - **Compositor-side focus is a left-button gesture**, so a right-click reaches an unfocused crab
   without focusing its window — aethersafha's policy, not crab's.
 
@@ -452,12 +465,18 @@ why, is recorded in `ci.yml` itself.
   edit in the most sensitive file" framing no longer holds; the cost is now mostly in tests.
   **Re-count at the cut, never quote this number.** ⛔ Its own change, suite run before and after.
 - **Bring the agnos/iron harness into this repo.** Both real defects crab has ever shipped were
-  agnos-runtime behaviour no host test can see. ⭐ Two more joined the pair in
+  agnos-runtime behaviour no host test can see. ⭐ Three more joined the pair in
   `agnos/scripts/harness/` on 2026-09-13 — `crab-pointer-test.py` (the pointer routes, the refresh
   key, and the chrome-key contract as a **gate**: bare F10 must open crab's bar, bare Esc must not
-  quit, Ctrl+Q must) and `crab-columns-test.py` (0.8.8: `g` reaches the fourth view, the parent is
+  quit, Ctrl+Q must), `crab-columns-test.py` (0.8.8: `g` reaches the fourth view, the parent is
   listed and named, **and the memo holds** — redraws must not re-list, which is the arm that keeps a
-  readdir off the render path). Still there, still not here. ⚠ Its header carries seven lessons about driving
+  readdir off the render path) and `crab-shift-test.py` (0.8.9: `Shift+A Shift+B Shift+3 Shift+8`
+  must commit exactly `AB#*`, which gates the latch, **the ORDER of the latch against the modifier
+  suppression** — invisible to the suite and green either way — and both batch operators at once).
+  Still there, still not here.
+  ⚠ **The shift harness's first run measured the harness, not crab**: a blind `n` retry typed literal
+  `n`s into the name it was asserting on. That is what earned crab's `crab: edit open <label>` line.
+  ⇒ *A retry with no oracle is a mutation the harness performs on its own subject.* ⚠ Its header carries seven lessons about driving
   crab under QEMU — the Enter burst spawns a second compositor; DOWN bursts wrap; hold keys across
   the per-frame drain; the pin needs its own frame or the cursor folds to (0,0); derive where to
   press to MISS a popup; a pick can open a sheet whose scrim blocks the pointer; report which verb

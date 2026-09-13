@@ -897,9 +897,17 @@ fn main(): i64 {
                 if (k == KEY) {
                     u = dh_event_a(ev);
                     kacts = crab_key_acts(dh_event_b(ev));
+                    # ⭐⭐ THE SHIFT LATCH IS FED THE **RAW** EDGE, AND THIS LINE'S POSITION IS THE
+                    # WHOLE CORRECTNESS OF IT (0.8.9). Three lines down, a modifier's `kacts` is
+                    # zeroed so its press cannot answer a delete prompt — correct, and it would also
+                    # make every Shift PRESS arrive here looking like a RELEASE, so the latch would
+                    # never set. ⇒ Track first, suppress second. See `crab_shift_track`.
+                    crab_shift_track(u, kacts);
                     # ⛔ A MODIFIER'S OWN EDGE IS NOT A KEYSTROKE (0.8.7) — see `crab_key_is_modifier`.
                     # Gated here, before the held-key latch and every dispatch gate, so a Ctrl press
                     # can neither answer the delete prompt nor count as a `crab: key press`.
+                    # ⚠ AND IT IS STILL RIGHT FOR SHIFT. The latch above reads the edge as STATE; this
+                    # stops it being read as a KEYSTROKE. A modifier is both and neither alone.
                     if (crab_key_is_modifier(u) == 1) { kacts = 0; }
                     crab_say("crab: key received\n");
                     # ⛔⛔ PRESS ONLY. crab asks for `SETU_SURF_FULL_KEYS` (see `crab_surface_flags`), so
@@ -989,7 +997,18 @@ fn main(): i64 {
                                     }
                                 }
                                 crab_set_notice(crab_fs_msg(erc));
-                                crab_say("crab: edit commit -> "); crab_say(crab_fs_msg(erc)); crab_say("\n");
+                                # ⭐ THE NAME IS IN THE LINE (0.8.9), and it is what makes Shift gateable.
+                                # Every line of the field, the latch and this commit is inside the agnos
+                                # `#ifdef` — no host test can type a key — so the QEMU harness's only way
+                                # to prove a capital letter was TYPED is to read the name crab wrote.
+                                # `-> ok` alone says a rename happened, not what it was renamed to.
+                                # ⚠ Guarded: `crab_say` walks to a NUL, so a null buffer would fault on a
+                                # diagnostic line. Every other caller trusts `crab_edit_buf`; a log line
+                                # is the wrong place to start.
+                                var ebn = crab_edit_buf();
+                                crab_say("crab: edit commit ");
+                                if (ebn != 0) { crab_say(ebn); }
+                                crab_say(" -> "); crab_say(crab_fs_msg(erc)); crab_say("\n");
                                 edit_open = 0;
                                 ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                 crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
@@ -1003,10 +1022,12 @@ fn main(): i64 {
                             if (u == 0x2A) { crab_edit_backspace(); }           # Backspace
                             if (u == 0x50) { crab_edit_move(0 - 1); }           # Left
                             if (u == 0x4F) { crab_edit_move(1); }               # Right
-                            # ⚠ `mods` carries press/release, not shift — crab asked for FULL_KEYS, so there is no
-                            # shift state on the wire yet. Names type lower-case until the compositor forwards
-                            # modifiers; the map already takes the flag.
-                            var ech = crab_key_char(u, 0);
+                            # ⭐ SHIFT IS READ FROM THE LATCH (0.8.9), not hard-coded to 0. This call site
+                            # passed a literal `0` under a comment reading *"there is no shift state on the
+                            # wire yet"* — true when written, false since aethersafha began forwarding
+                            # modifier edges, and the reason no name crab wrote could hold a capital letter.
+                            # ⇒ `crab_shift_track` above maintains the state; this is its one consumer.
+                            var ech = crab_key_char(u, crab_shift_held());
                             if (ech != 0) { crab_edit_insert(ech); }
                         }
                     } else {
@@ -1497,11 +1518,13 @@ fn main(): i64 {
                                     crab_edit_start("*");
                                     edit_open = 3;
                                     edit_label = "Rename pattern:  # = number, * = old name";
+                                    crab_say_edit_open(edit_label);
                                 } else {
                                     if (rcnt > 0) {
                                         crab_edit_start(rrec);
                                         edit_open = 1;
                                         edit_label = "Rename to:";
+                                        crab_say_edit_open(edit_label);
                                     } else { crab_set_notice("nothing selected to rename"); }
                                 }
                             }
@@ -1510,6 +1533,7 @@ fn main(): i64 {
                                 crab_edit_start(0);
                                 edit_open = 2;
                                 edit_label = "New folder name:";
+                                crab_say_edit_open(edit_label);
                             }
                             # ⭐ THE CONTEXT MENU, FROM THE KEYBOARD. The Menu key is one of two
                             # roads in — a RIGHT press on a pane is the other (0.8.5, the pointer

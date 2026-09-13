@@ -148,6 +148,101 @@ fn crab_key_is_modifier(u): i64 {
     return 1;
 }
 
+# =================================================================================================
+# ⇧ THE SHIFT LATCH (0.8.9) — the other half of a modifier edge
+# =================================================================================================
+#
+# ⭐⭐ crab COULD NOT WRITE A NAME CONTAINING A CAPITAL LETTER. `crab_key_char` has taken a `shift`
+# flag since the field was built and mapped `a..z -> A..Z` for it; its ONE production call site
+# passed a hard-coded `0`, under a comment reading *"there is no shift state on the wire yet"*. That
+# was true when it was written and had stopped being true: `crab_key_is_modifier` was added in 0.8.7
+# to stop crab ACTING on the forwarded edges, and its own comment already named this as the sequel —
+# *"Shift for capital letters is roadmap work and would read this same usage as STATE, not as a
+# keystroke."* This is that reading.
+#
+# ⭐ AND THE COMPOSITOR BUILT THIS DOOR ON PURPOSE. aethersafha 0.16.25 swallows a Ctrl chord whole,
+# but exempts the modifier keys' own edges — `aethersafha/src/input.cyr` says why in as many words:
+# *"These are FORWARDED to the client even while a chord is being swallowed: a client that wants
+# Shift state has no other way to learn it."* ⇒ Shift press and release both reach crab whether or
+# not Ctrl is held, so a chord can never desynchronise this latch.
+#
+# ⭐ AND IT CLOSES A SECOND RECORDED GAP THAT LOOKED UNRELATED. The batch-rename sheet advertises a
+# two-operator language — `#` is the sequence number, `*` is the original name — and **neither
+# character could be typed into its own input field**, because both live on the shifted number row
+# (`#` = Shift+3, `*` = Shift+8) and that row answered 0. A sheet describing a language its field
+# cannot produce is a worse failure than a missing feature, because the operator reads the
+# instruction and then cannot follow it.
+#
+# ⛔⛔ A MASK, NOT A BOOLEAN, AND THE DIFFERENCE IS A REAL SEQUENCE. Hold LeftShift, then hold
+# RightShift, then release LeftShift: a single flag cleared on that release and the operator — still
+# holding a shift key — would start typing lower case mid-word. Two keys, two bits, and the latch is
+# held while EITHER is down. `crab_key_is_modifier` already names all eight usages; these are the two
+# that mean upper case.
+#
+# ⚠ A LOST RELEASE STICKS, AND IT IS SELF-CORRECTING. The wire can drop an edge (the QEMU harnesses
+# learned this the hard way: a press and its release landing between two per-frame drains leave only
+# the release to be seen). A dropped RELEASE leaves the latch set and the next letters capitalised —
+# recovered by pressing and releasing a shift key once more. That is stated rather than defended
+# against with a timeout, because a timeout would be a second answer to "is shift down" and free to
+# disagree with the wire; see `crab_sb_focus_eff`'s lesson one file over.
+enum CrabShift {
+    CRAB_HID_LSHIFT = 0xE1;
+    CRAB_HID_RSHIFT = 0xE5;
+    CRAB_SHIFT_L    = 1;      # bit 0
+    CRAB_SHIFT_R    = 2;      # bit 1
+}
+
+var crab_shift_mask = 0;
+
+# @public — which latch bit usage `u` owns, or 0 if it is not a shift key.
+fn crab_shift_bit(u): i64 {
+    if (u == CRAB_HID_LSHIFT) { return CRAB_SHIFT_L; }
+    if (u == CRAB_HID_RSHIFT) { return CRAB_SHIFT_R; }
+    return 0;
+}
+
+# @public — fold one key edge into the latch. `edge` is 1 for a press, 0 for a release.
+# -> the mask after folding. A key that is not a shift key changes nothing.
+#
+# ⛔ IT IS HANDED THE **RAW** EDGE, NOT THE ONE `crab_key_is_modifier` HAS ALREADY SUPPRESSED. The
+# event loop zeroes a modifier's `kacts` so the press cannot answer a delete prompt — which is
+# correct, and which would also make every shift press look like a release to this function. ⇒ The
+# loop tracks the latch BEFORE the suppression, and that ordering is the whole correctness of it.
+fn crab_shift_track(u, edge): i64 {
+    var b = crab_shift_bit(u);
+    if (b == 0) { return crab_shift_mask; }
+    if (edge == 1) { crab_shift_mask = crab_shift_mask | b; }
+    else {
+        # ⛔⛔ AN UNPAIRED RELEASE IS NOT HYPOTHETICAL ON THIS STACK — IT IS MEASURED. The 2026-09-13
+        # QEMU run recorded in `docs/development/issues/2026-09-13-aethersafha-claims-esc-tab-f10.md`
+        # found that *"a claimed key's release is forwarded while its press is not"* — the compositor
+        # swallows a press it acts on and `input_map` returns `IA_NONE` for the release, so the
+        # release goes through alone. A client counting arrivals concludes the key arrived.
+        # ⇒ The clear is a subtraction and it is GUARDED. Unguarded, one stray release turns mask 1
+        # into mask -1: `crab_shift_held` then answers 1 forever, every letter comes out capitalised,
+        # and no key is being held. Cleared this way it is simply a no-op, which is the only honest
+        # response to being told a key went up that was never down.
+        # ⚠ Subtraction rather than `& ~b` because Cyrius is known to have `&` and `|` here and the
+        # guard makes the two forms identical anyway.
+        if ((crab_shift_mask & b) != 0) { crab_shift_mask = crab_shift_mask - b; }
+    }
+    return crab_shift_mask;
+}
+
+# @public — is a shift key down right now? 1 = yes, and `crab_key_char` should answer upper case.
+fn crab_shift_held(): i64 {
+    if (crab_shift_mask != 0) { return 1; }
+    return 0;
+}
+
+# @public — the raw latch bits, for the suite: it is the two-key sequence that a boolean gets wrong.
+fn crab_shift_mask_now(): i64 { return crab_shift_mask; }
+
+# @public — drop the latch. ⚠ Not called from the event loop: there is no moment where crab knows
+# better than the wire does whether a key is held. It exists so the SUITE can start from a known
+# state, and so a future surface that genuinely owns the keyboard can reset it deliberately.
+fn crab_shift_clear(): i64 { crab_shift_mask = 0; return 0; }
+
 # ⭐⭐ HELD-KEY REPEAT (M2, *deferral #06* second half), AND IT NEEDED NO KERNEL CHANGE.
 # ⛔ AN EARLIER NOTE HERE CLAIMED IT WAS BLOCKED ON agnos FOR WANT OF A BOUNDED WAIT. THAT WAS WRONG,
 # and it was wrong because it read syscall SIGNATURES and stopped there: `#14 pause` takes no timeout
@@ -260,12 +355,17 @@ enum CrabPointer {
 # skip · keep both · cancel** — and an **all** that applies the next answer to every remaining
 # collision in this operation.
 #
-# ⛔⛔ "ALL" IS ARMED BEFORE THE VERB, NOT SPELLED BY A CAPITAL, because **shift is not on the wire**
-# (`mods` carries the press/release edge; `crab_key_char`'s shift flag is hard-coded to 0 at its only
-# call site). `R` for replace-all is the obvious design and it is unreachable on this stack. ⇒ `a`
-# TOGGLES the all-flag, the prompt shows `[all]` while it is armed, and the next `r`/`s`/`k` applies
-# to every remaining collision. Two keystrokes, both lowercase, and the armed state is visible before
-# it is acted on — which a capital letter would not be.
+# ⛔⛔ "ALL" IS ARMED BEFORE THE VERB, NOT SPELLED BY A CAPITAL. `a` TOGGLES the all-flag, the prompt
+# shows `[all]` while it is armed, and the next `r`/`s`/`k` applies to every remaining collision. Two
+# keystrokes, both lowercase, and **the armed state is visible before it is acted on** — which a
+# capital letter would not be. On a prompt where the next keystroke can destroy a file, seeing that
+# you are about to answer for everything is the whole point.
+# ⚠ THIS PARAGRAPH GAVE A SECOND REASON THAT HAS SINCE EXPIRED, and it is corrected rather than
+# quietly dropped: it said `R` was *"unreachable on this stack"* because **shift is not on the wire**.
+# That was true at 0.8.7 and is false at 0.8.9 — `crab_shift_track` latches the forwarded Shift edges
+# and `R` is perfectly typeable now. ⇒ **The design does not change, because the reason that survives
+# is the one that was load-bearing anyway.** A capital is an invisible mode: `R` and `r` differ by a
+# key the operator is holding and the prompt cannot show. See `crab_shift_track`.
 #
 # ⛔ CANCEL IS Esc AND ONLY Esc, and it means what Esc already means on a running transfer: stop, and
 # for a copy-tree, clean up what was written. A collision prompt that also answered `c` would put
@@ -1716,6 +1816,26 @@ fn crab_index_of(buf, count, name): i64 {
         i = i + 1;
     }
     return 0 - 1;
+}
+
+# @public — announce that the rename / new-folder / batch sheet has OPENED, naming which one.
+#
+# ⛔⛆ IT WAS THE ONE INTERACTIVE SURFACE crab OPENED IN SILENCE. Every other one says so — `crab: cd`,
+# `crab: view columns`, `crab: context menu opened by pointer`, `crab: columns <parent>` — and the
+# sheet printed nothing until it COMMITTED. That is a diagnostic gap on the surface where a keystroke
+# stops being a command and becomes text, which is the single most confusing state transition crab
+# has: a lost `n` leaves the operator typing a name into the binding table, where `b` toggles the
+# sidebar and `d` asks to delete something.
+# ⚠ It is also what makes the Shift harness deterministic. Without it the harness could only retry
+# `n` blindly, and a retry that lands while the sheet is ALREADY open types a literal `n` into the
+# name — which is exactly what the first run measured (`nnnAB#*`).
+# ⚠ The LABEL is the payload because it is what distinguishes the three: "Rename to:", "New folder
+# name:", and the batch pattern's own line.
+fn crab_say_edit_open(label): i64 {
+    crab_say("crab: edit open ");
+    if (label != 0) { crab_say(label); }
+    crab_say("\n");
+    return 0;
 }
 
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").

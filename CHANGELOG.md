@@ -2,6 +2,107 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.9] — 2026-09-13 — Shift: capital letters in names, and a sheet that can finally accept its own language
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Added — ⭐⭐ a Shift latch, so a name crab writes can hold a capital letter
+
+`crab_key_char` has taken a `shift` flag since the rename field was built, and mapped `a..z → A..Z`
+for it. Its **one** production call site passed a hard-coded `0`, under a comment reading *"there is
+no shift state on the wire yet."* That was true when written and had quietly stopped being true.
+
+⛔ **The wire was never the problem, and half the written claim was wrong the whole time.** `mods`
+really does carry only the press/release edge and nothing else — but a modifier's **own** edge
+arrives as its own key event, and aethersafha 0.16.25 exempts those edges from the Ctrl-chord
+swallow **on purpose**, saying so in its own source: *"a client that wants Shift state has no other
+way to learn it."* crab has been receiving Shift since that release and throwing it away. 0.8.7's
+`crab_key_is_modifier` — added to stop crab *acting* on those edges — already named this as the
+sequel in its comment: *"Shift for capital letters would read this same usage as STATE, not as a
+keystroke."* This is that reading.
+
+⛔⛔ **A MASK, NOT A BOOLEAN, AND THE DIFFERENCE IS A SEQUENCE A TOUCH-TYPIST MAKES.** Hold
+LeftShift, then hold RightShift, then release LeftShift: the operator is still holding a shift key.
+A single flag cleared on that release and the next letters came out lower case mid-word, with both
+hands on the keyboard and nothing visibly wrong. Two keys, two bits, held while either is down.
+
+⛔ **The release-clear is a guarded subtraction, and an unpaired release is measured on this stack,
+not hypothetical.** The 2026-09-13 QEMU investigation recorded that *"a claimed key's release is
+forwarded while its press is not"* — the compositor swallows a press it acts on while `input_map`
+returns `IA_NONE` for the release, so the release travels alone. Unguarded, one stray release turns
+mask 1 into mask −1: `crab_shift_held` then answers yes forever, every letter is capitalised, and no
+key is down.
+
+⚠ **A lost release sticks, and that is stated rather than defended against.** The wire can drop an
+edge; recovery is one more press-and-release of a shift key. A timeout would be a second answer to
+*"is shift down"*, free to disagree with the wire — the lesson `crab_sb_focus_eff` already carries.
+
+### Fixed — ⛔⛆ the batch-rename sheet could not accept the language it advertises
+
+The sheet's label reads `Rename pattern:  # = number, * = old name`. **Neither character could be
+typed into it.** `#` is Shift+3 and `*` is Shift+8, and `crab_key_char`'s entire shifted number row
+returned 0 under a comment reading *"the shifted row is symbols crab does not need"* — while crab
+needed two of them by name, in a label it puts on screen.
+
+A surface that describes a language its own input cannot produce is worse than a missing feature:
+the operator reads the instruction and then cannot follow it. It was invisible while the shift flag
+was hard-coded to 0 — the row was unreachable either way — and would have become a live dead key the
+moment the latch worked.
+
+⇒ The row is filled, **all ten**, because half a row is an arbitrary line the operator cannot see and
+would have to discover one dead key at a time. ⛔ **The suite pins `#` and `*` against
+`crab_batch_name` itself**, not against two literals that look right: the assertion types the
+character Shift+3 produces, runs it through the expander, and checks it expanded to the index. If
+either operator ever moves, the key that types it must move with it or the test fails.
+
+⚠ **Every character the row can type is a legal name** — `crab_name_ok` refuses exactly `/`, `.`,
+`..`, empty and unterminated — and none is a shell hazard here, which is worth stating because it
+usually is: crab never builds a command line. `sys_spawn_path(path, len)` and `sys_open(path, len,
+…)` take a pointer and a length, and `sys_system` appears nowhere in `src/`.
+
+### Added — the sheet says when it opens
+
+`crab: edit open <label>`. It was the one interactive surface crab opened in silence — every other
+one announces itself (`crab: cd`, `crab: view columns`, `crab: context menu opened by pointer`) and
+this one printed nothing until it **committed**. That is a diagnostic gap on the exact surface where
+a keystroke stops being a command and becomes text: a lost `n` leaves the operator typing a name into
+the binding table, where `b` toggles the sidebar and `d` asks to delete something.
+
+`crab: edit commit` now names what was written, too — `-> done` says a rename happened, not what it
+was renamed to.
+
+### Changed — the overwrite policy's second reason expired, and is corrected rather than dropped
+
+0.8.7 justified arming *all* with `a` partly because **shift was not on the wire**, making `R` for
+replace-all *"unreachable on this stack."* That reason is now false. ⇒ **The design does not change,
+because the reason that survives is the one that was load-bearing anyway**: a capital is an
+**invisible mode**. `R` and `r` differ by a key the operator is holding and the prompt cannot show,
+and this is a prompt where the next keystroke can destroy a file. `a` toggles, `[all]` is visible,
+and the answer after it applies to everything.
+
+### Tests — ⭐ QEMU, because the ordering is invisible to the suite
+
+**2,158 assertions** (2,104 → 2,158), every claim mutation-proven — including the two-key sequence, a
+stray release that must not borrow, both batch operators against the expander, and `'0'` surviving a
+range widened from `0x1E..0x26` to `0x1E..0x27` (the planted defect made it come out as `':'`).
+
+⛔⛔ **What the suite cannot see, and what the harness is for.** In `src/main.cyr` the latch is fed
+the **raw** edge three lines *before* `crab_key_is_modifier` zeroes a modifier's `kacts`. Track
+first, suppress second. Get that backwards and every Shift **press** reaches the latch looking like a
+**release**, the latch never sets — and **the suite stays completely green**, because all of it lives
+inside `#ifdef CYRIUS_TARGET_AGNOS` with no `#else` and nothing includes `main.cyr`.
+
+⭐ `agnos/scripts/harness/crab-shift-test.py` — **PASS**. `Shift+A Shift+B Shift+3 Shift+8` into New
+folder committed exactly **`AB#*`**: the latch, the ordering, and both batch operators in one line.
+`Shift+A` then `b c` committed exactly **`Abc`** — the press latched and the release cleared. Ten
+shift edges arrived and crab acted on **zero** of them, so a modifier is still state and never a
+keystroke. No faults.
+
+⚠ **Its first run measured `nnnAB#*` and that was the harness, not crab.** The retry loop pressed `n`
+until the sheet opened, could not tell that it had, and every extra press typed a literal `n` **into
+the name**. That is what produced `crab: edit open` — the retry now reads crab's own line. A correct
+latch reported as a failure by a broken harness is the same cost as the reverse.
+
 ## [0.8.8] — 2026-09-13 — the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
@@ -106,20 +207,20 @@ over-reports, the cut goes unmarked, and the operator selects, descends and **ac
 its own.** ⚠ And what the suite CANNOT say is said at the assertions: at `font = 0` no host test can
 tell *"asks the font"* from *"divides by the constant"*, because they are the same number; deleting
 `crab_font = font` from `crab_render` leaves the suite green, and the test records that rather than
-implying a gate. **What is left of proportional text is passing a real face** — rung 2.
+implying a gate. **What is left of proportional text is passing a real face** — `0.9.0`.
 
 ### Changed — 🗺 the roadmap has an order
 
-Added **[the ladder to 1.0](docs/development/roadmap.md)**: one table, nine rungs plus a ruling, each
+Added **[the ladder to 1.0](docs/development/roadmap.md)**: one table, every entry a VERSION plus one ruling, each
 named by what an operator can newly do, with what blocks it and what closes it. The remaining work
 was spread across six correct-but-unordered sections, so every slot began by re-deriving the sequence.
 
 ⛔ **The order is the commitment; the number is not.** This file has mapped milestones onto versions
 wrong four times — M4 rode four patch numbers, M5 landed inside one, M6 spread across seven, and both
 of the milestones closed in 0.8.7 and 0.8.8 did so *out of milestone order, after all of M6*. ⇒ *A
-milestone is a grouping of features, not a window in time.* ⛔ **1.0.0 is not a feature rung**: three
+milestone is a grouping of features, not a window in time.* ⛔ **1.0.0 is not a feature release**: three
 of its criteria are not code (a green iron burn, `docs/benchmarks.md`, `docs/examples/`), so it can be
-blocked with every rung above it shipped.
+blocked with every version above it shipped.
 
 ### Tests
 

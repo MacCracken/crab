@@ -24,11 +24,34 @@
 
 ## Version
 
-**0.8.8 IS CUT** — `VERSION` reads `0.8.8` and the CHANGELOG header agrees, on operator direction,
+**0.8.9 IS CUT** — `VERSION` reads `0.8.9` and the CHANGELOG header agrees, on operator direction,
 2026-09-13. ⛔ **The commit, the tag and the push are the operator's**; until `git ls-remote --tags`
-shows it, **0.8.6** (2026-09-13, `249279f`) is the last RELEASED version on the remote — **0.8.7 and
-0.8.8 are both cut and neither is committed.** ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still read
-*"unreleased"*; both are records and are left alone.
+shows it, **0.8.6** (2026-09-13, `249279f`) is the last RELEASED version on the remote — **0.8.7,
+0.8.8 and 0.8.9 are all cut and none is committed.** ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still
+read *"unreleased"*; both are records and are left alone.
+
+**0.8.9 contents**: a **Shift latch** — names can hold capital letters. `crab_key_char` has taken the
+flag since the field was built; its one production call site passed a literal `0` under *"there is no
+shift state on the wire yet."* ⛔ **The wire was never the problem and half that claim was wrong**:
+`mods` carries only the press/release edge, but a modifier's OWN edge arrives as its own key event
+and aethersafha 0.16.25 exempts those from the chord swallow deliberately — *"a client that wants
+Shift state has no other way to learn it."* ⛔⛔ **A MASK, not a boolean**: hold LeftShift, hold
+RightShift, release LeftShift — still shifted, which a flag loses mid-word. The release-clear is a
+**guarded** subtraction because an unpaired release is measured here (*"a claimed key's release is
+forwarded while its press is not"*); unguarded it drives the mask to −1 and capitalises everything
+forever. ⛔⛆ **It closed a second recorded gap**: the batch sheet advertises `# = number, * = old
+name` and **neither could be typed** — both live on the shifted number row, which answered 0. The row
+is filled, all ten, and the suite pins `#`/`*` against `crab_batch_name` itself so the keyboard and
+the language cannot drift. ⚠ The overwrite policy's *"`R` is unreachable"* second reason expired and
+is corrected, not dropped — the design stands on the reason that was load-bearing anyway (a capital
+is an **invisible mode** on a prompt where the next key destroys a file). ⭐ `crab: edit open <label>`
+is new: the sheet was the one interactive surface crab opened in silence. **2158 / 0.**
+⭐⭐ **QEMU, 2026-09-13** — `crab-shift-test.py`, PASS. `Shift+A Shift+B Shift+3 Shift+8` committed
+exactly `AB#*`; `Shift+A` then `b c` committed exactly `Abc`; ten shift edges arrived and crab acted
+on zero; no faults. ⛔ **The ORDER is what only QEMU can see**: the latch is fed the raw edge BEFORE
+`crab_key_is_modifier` zeroes it — backwards, every Shift press looks like a release, the latch never
+sets, and the suite stays green. ⚠ The first run measured `nnnAB#*` and that was the **harness** — its
+blind `n` retry typed literal `n`s into the name, which is what earned `crab: edit open`.
 
 **0.8.8 contents**: the **COLUMNS view** — `g` cycles a fourth time and the active pane grows a
 narrow **context column** naming the parent with the current directory marked. ⛔⛔ **It is a view
@@ -43,8 +66,8 @@ in 0.8.2 claiming to be asked "in all three places", was asked only in `main.cyr
 **rendered and scrolled as a GRID with LIST arrows**. *A negation is not a predicate.*
 ⭐ **The 9 px advance now has one reader** (`crab_char_w` / `crab_text_w`): crab still passes
 `font = 0` so it renders identically, which is why it was done on its own — what is left of
-proportional text is passing a real face. 🗺 **The roadmap has an order**: a nine-rung ladder to
-1.0.0, each rung named by what an operator can newly do. **2104 / 0.**
+proportional text is passing a real face. 🗺 **The roadmap has an order**: a ladder to 1.0.0 whose
+every entry is a VERSION, named by what an operator can newly do when it is cut. **2104 / 0.**
 ⭐⭐ **QEMU, 2026-09-13** — `crab-columns-test.py`, PASS on its first run: `g` reaches the fourth
 view, the parent is listed and titled `/`, redraws **do not** re-list (the memo arm — a readdir is
 not a render-path operation), the root's refusal is memoised, leaving the view stops the listing, no
@@ -645,8 +668,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,067,440 B** *(0.8.8; 1,059,064 at 0.8.7, 1,049,568 at 0.8.6, 1,049,480 at 0.8.5)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,112,400 B** *(0.8.8; 1,104,000 at 0.8.7, 1,090,304 at 0.8.6)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, twice** (the pointer harness and the columns harness — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,067,496 B** *(0.8.9; 1,067,440 at 0.8.8, 1,059,064 at 0.8.7, 1,049,568 at 0.8.6)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,112,456 B** *(0.8.9; 1,112,400 at 0.8.8, 1,104,000 at 0.8.7)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -718,8 +741,13 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 - ⚠ **The idle-tick wiring is untested and structurally untestable on the host.** The walk, the copy
   stepper and the queue are all driven by hand in the suite; that they are *called* from the tick is
   agnos-only event-loop code. Same irreducible gap `main.cyr` has always had.
-- ⚠ **Shift is not on the wire.** `mods` carries press/release, so typed names are lower-case until
-  the compositor forwards modifiers. `crab_key_char` already takes the flag.
+- ✅ **Shift — CLOSED (0.8.9).** ⚠ The line here said *"Shift is not on the wire"*, and only half of
+  that was ever true: `mods` does carry press/release and nothing else — but the modifier's OWN edge
+  arrives as its own key event, and aethersafha exempts those edges from the chord swallow on purpose
+  (*"a client that wants Shift state has no other way to learn it"*). ⇒ `crab_shift_track` folds
+  usages 0xE1/0xE5 into a two-bit mask and the field reads `crab_shift_held()`. **Names can hold
+  capital letters**, and the shifted number row is filled — which also makes `#` and `*`, the batch
+  sheet's own two operators, typeable into the field that advertises them.
 - ⚠ **crab cannot recreate a symlink** — but the GATE on it is gone. A recursive copy copies whatever
   `open`+`read` yields through one. ⭐ **`lstat`#102 GOT its cyrius peer**: 6.5.37 shipped `sys_lstat`
   and crab vendors it as of the 0.7.7 pin — 3-arg on agnos, 2-arg on the host, the same `#ifdef`
@@ -781,8 +809,9 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   the filing at [`issues/2026-09-13-aethersafha-claims-esc-tab-f10.md`](issues/2026-09-13-aethersafha-claims-esc-tab-f10.md),
   closed the same day. Measured again with 0.16.25: F10 opens the bar, `View` drives from the keyboard,
   bare Esc/Tab reach crab, Ctrl+Q quits. ⚠ crab's required half: a modifier's own edge is ignored
-  (`crab_key_is_modifier`). ⚠ Still: F2/F3 stay bare (not in the ruling); Shift for capital letters
-  would read the forwarded modifier edges as STATE — a road, not a feature yet.
+  (`crab_key_is_modifier`). ⚠ Still: F2/F3 stay bare (not in the ruling). ✅ **Shift for capital
+  letters was "a road, not a feature yet" here; 0.8.9 walked it** — the forwarded modifier edges are
+  read as STATE by `crab_shift_track`, exactly as this line predicted.
 
 ### Hazards that are permanent, not gaps
 
