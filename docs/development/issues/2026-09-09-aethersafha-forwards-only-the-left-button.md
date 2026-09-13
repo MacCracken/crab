@@ -4,8 +4,8 @@
 > `docs/development/issues/2026-09-09-forwards-only-the-left-button.md` — an issue about another
 > repository that lives only here is one nobody who could act on it will ever read.
 
-**Status:** ✅ **FIXED UPSTREAM — aethersafha 0.16.24 (2026-09-12, prepared on operator direction;
-check the remote for the tag before declaring anything on it).** Every kernel button bit is forwarded.
+**Status:** ✅ **FIXED UPSTREAM AND RELEASED — aethersafha 0.16.24 (`041ac85`, 2026-09-13, on the
+remote, CI and Release green); consumed by crab 0.8.5.** Every kernel button bit is forwarded.
 **The numbering is decided: `wire = kernel_bit + 1` — 1 = left, 2 = right, 3 = middle** — named
 `INPUT_BTN_LEFT` / `INPUT_BTN_RIGHT` / `INPUT_BTN_MIDDLE` in aethersafha's `src/input.cyr`, with the
 X11 divergence pinned by its input suite. Window management stays left-only structurally; ⚠ focus is

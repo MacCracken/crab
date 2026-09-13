@@ -24,16 +24,14 @@
 
 ## Version
 
-**0.8.4** is the last RELEASED version (2026-09-11, `7929ae1`), tagged **on the remote** — checked
-with `git ls-remote --tags` this time, which works — with CI and Release both green against the
-declared graph. `git describe` answered `0.8.4` exactly before this cycle's work began. ⚠ Its
-CHANGELOG header still reads *"unreleased"*, as 0.8.3's does; both are records and are left alone.
-**`[Unreleased]` holds the work in flight** (2026-09-12/13): the seven dep tags moved to the 6.6.2
-siblings, and the M6 pointer routes — right-click, popup pick/dismiss, bar and switcher clicks — on
-aethersafha 0.16.24's button numbering. ⚠ `VERSION` reads `0.8.4` and stays there until the
-operator cuts; nothing is committed, tagged or pushed.
+**0.8.5 IS CUT** — `VERSION` reads `0.8.5` and the CHANGELOG header agrees, on operator direction,
+2026-09-13. ⛔ **The tag, the commit and the push are the operator's**; until `git ls-remote --tags`
+shows `0.8.5`, **0.8.4** (2026-09-11, `7929ae1`) is the last RELEASED version — on the remote, CI and
+Release both green. ⚠ 0.8.4's CHANGELOG header still reads *"unreleased"*, as 0.8.3's does; both are
+records and are left alone. ⚠ The first half of 0.8.5 was committed as `8bdcbfe` with `VERSION`
+still 0.8.4; `git describe` answered `0.8.4-1-g8bdcbfe` when the cut was written.
 
-**Unreleased contents** (2026-09-13): all seven deps re-pinned to their 6.6.2 releases (chitra
+**0.8.5 contents** (2026-09-12/13): all seven deps re-pinned to their 6.6.2 releases (chitra
 1.0.1 → **1.0.3** is the one with content — its P-1 sweep closed a SIGSEGV on the first PNG a
 memory-pressured process decodes, which is crab's shape); `lib/sankoch.cyr` brought to the 6.6.2
 snapshot (the 0.8.4 bump had left that transitive leaf at 2.7.14); check four re-run — 7 / 0, lock
@@ -44,8 +42,15 @@ accelerator through the one binding table, `crab_menu_item_at` inverts the separ
 `crab_pointer_blocked` is split out of `crab_pointer_modal` (Phase 0's last piece). ⛔⛆ **Two holes
 closed on the way**: the wheel had NO modal guard (a scroll between `d` and `y` moved the
 selection — 0.8.0's click hole, one input kind over) and the sidebar arm never consumed the
-double-click pair. **1748 / 0**, all nine gates green. ⚠ **Not run on QEMU or iron** — the arm is
-agnos-only; six new `crab: … by pointer` oracle lines exist for the run that will.
+double-click pair. Then the **sidebar's *you are here* marker** — `crab_sb_here`, containment with
+the deepest containing row winning and ties to the lowest row, painted muted when unfocused and
+never when focused without a cursor — with Phase 0's last piece under it (both model builders strip
+trailing slashes as they store; `crab_path_within` moved down to `path.cyr` so the render path could
+share it) and a latent layout fix beside it (a 64-byte volume prefix lost its terminator to `BSIZE`;
+the record is 112 bytes now). **1790 / 0**, all nine gates green, check four byte-identical.
+⚠ **Not run on QEMU or iron** — the pointer arm and the `mountlist` path are agnos-only; six new
+`crab: … by pointer` oracle lines exist for the run that will. ⭐ **aethersafha 0.16.24 is on the
+remote, CI green** — the compositor half of right-click is released.
 
 **0.8.3 contents** (2026-09-09): the M6 interaction gaps — **two of six closed**, plus a
 shipped bug none of them named. `VERSION` reads `0.8.3` and the CHANGELOG header agrees.
@@ -75,10 +80,10 @@ that true but their line numbers. ⇒ Both arms hoisted; the map they each copie
 EATEN so `d` cannot delete from a pane the keys have left), and the menu bar's fit rule (plus the
 **second** rule its drop-downs needed — there is a band of widths where the bar fits and `Edit`'s
 menu opens under the word `File`).
-✅ **CLOSED in `[Unreleased]`**: the bar/switcher and context-menu pointer routes, together. The
-upstream gate closed first — aethersafha 0.16.24 forwards every button in the numbering crab's
-filing proposed — and crab reads `POINTER_BTN`'s `a` now. ⛔ **Still open**: the sidebar's *you are
-here* marker, and `View`'s items.
+✅ **CLOSED in 0.8.5**: the bar/switcher and context-menu pointer routes, together (the upstream
+gate closed first — aethersafha 0.16.24, on the remote, forwards every button in the numbering
+crab's filing proposed — and crab reads `POINTER_BTN`'s `a` now), and the sidebar's *you are here*
+marker. ⛔ **Still open**: `View`'s items — the last of the six M6 interaction gaps.
 
 **0.8.2** (2026-09-09), on operator direction: the 6.6.1 pin, the
 documentation-currency repair, and **the audit backlog's eight correctness bugs — all closed, each
@@ -501,11 +506,13 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,748 passed / 0 failed**
-  *(unreleased, 2026-09-13; 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
-  ⭐ **+53 unreleased — `t_pointer_routes`**: the blocked/modal split, the button numbers pinned
-  against X11, the separator inverse's round trip for every item, and the z-order of
-  `crab_pointer_action` (31 assertions, seven mutations each caught).
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,790 passed / 0 failed**
+  *(0.8.5; 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+  ⭐ **+95 at 0.8.5** — `t_pointer_routes` (+53: the blocked/modal split, the button numbers pinned
+  against X11, the separator inverse's round trip for every item, the z-order of
+  `crab_pointer_action` — 31 assertions, seven mutations each caught) and `t_sb_here` (+42: the
+  trailing-slash trim, containment-deepest-wins with the tie pinned, the 64-byte prefix layout —
+  six mutations plus one on the layout, each caught, one of them through the render wiring).
   ⭐ **+92 at 0.7.7, all of them pinning defects that had already shipped**, in five new groups:
   `t_dir_transfer`, `t_queue_refusals`, `t_transfer_plan`, `t_menu_highlight`, `t_tray_height`.
   ⛔ **Each was mutation-proven** — the guard removed and the suite watched to FAIL (9, 4, 5, 3 and
@@ -566,8 +573,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,049,480 B** *(unreleased; 1,045,296 at the 6.6.2 dep bump, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* |
-| `--agnos`    | ✅ builds, **1,090,216 B** *(unreleased; 1,085,872 at the dep bump, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
+| x86_64 linux | ✅ builds, **1,049,480 B · `fa588e69…`** *(0.8.5; 1,045,296 at the 6.6.2 dep bump, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* ⚠ the size did not move across the marker while the hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,090,216 B · `3438489f…`** *(0.8.5; 1,085,872 at the dep bump, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -718,12 +725,12 @@ _None — top-level application._
 
 ⭐ **0.8.2 CLOSED THE AUDIT BACKLOG'S CORRECTNESS SECTION — all eight, plus the recursive-walk
 defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinished from earlier
-stages*. ⭐ **The M6 interaction gaps are down to two** (2026-09-13): 0.8.3 gave the sidebar its
-keyboard route, and `[Unreleased]` gives every surface its pointer route — right-click, popup pick and
-dismiss, bar and switcher clicks — on aethersafha 0.16.24's button numbering. Left: the sidebar's
-*you are here* marker (design done: containment, deepest wins) and `View`'s four items. Still open
-beyond them: the absent affordances (no REFRESH key, no flag surface, no overwrite policy) and the
-*Recorded as facts* list.
+stages*. ⭐ **The M6 interaction gaps are down to ONE** (2026-09-13): 0.8.3 gave the sidebar its
+keyboard route; 0.8.5 gives every surface its pointer route — right-click, popup pick and dismiss,
+bar and switcher clicks — on aethersafha 0.16.24's button numbering, and lights the sidebar row the
+active pane is in. Left: `View`'s four items (every target key is reachable since the 0.8.3 hoist).
+Still open beyond them: the absent affordances (no REFRESH key, no flag surface, no overwrite policy)
+and the *Recorded as facts* list.
 
 **M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
 0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on

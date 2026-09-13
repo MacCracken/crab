@@ -2,12 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — the pointer reaches every surface, on the 6.6.2 stack
+## [0.8.5] — 2026-09-13 — the pointer reaches every surface, and the sidebar knows where you are
 
 > ⛔ **`[0.8.4]` BELOW IS RELEASED — tagged `7929ae1`, on the remote, CI and Release both green —
 > and its header still reads *"unreleased"*, as `[0.8.3]`'s does.** Both are records now and are left
-> alone; that is the 0.7.2 rule. This section is `[Unreleased]` rather than a pre-named number so it
-> cannot make the same false claim: the operator names it at the cut. ⚠ `VERSION` reads `0.8.4`.
+> alone; that is the 0.7.2 rule. ⚠ `git describe --tags` answered `0.8.4-1-g8bdcbfe` when this
+> heading was written: the first half of this section had already been committed as `8bdcbfe` with
+> `VERSION` still 0.8.4, and the cut to **0.8.5** was made on operator direction on 2026-09-13.
+> Nothing here is tagged or pushed by anyone but the operator.
 
 ### Changed — the whole dependency graph moved to the cyrius 6.6.2 siblings
 
@@ -114,6 +116,45 @@ for exactly that reason, and the wiring is what an on-target run is for. New ora
 (a synthesised verb, kept separate from `crab: key press` so the harness's received-vs-acted ratio
 is not disturbed) · `crab: popup dismissed by pointer` · `crab: bar click` · `crab: switcher click`.
 
+### Added — ⭐ the sidebar shows where the active pane IS (the *you are here* marker, M6)
+
+Since 0.8.0 the PLACES sidebar was a list of destinations that never said which one the operator was
+in. `crab_sb_here` lights the row whose path CONTAINS the active pane's — **containment, deepest
+wins, never equality**: a pane is almost never *at* a place, it is *under* one. `/` contains
+everything, a volume prefix contains its own subtree, Home contains Documents, and the row that says
+the most is the longest containing path. Equality would light Root only at `/`, the one place nobody
+stays. Painted under the muted line colour when the sidebar has no focus (*you are here*), and
+**never** when it is focused with no cursor — `crab_sb_shown_row` has ruled that since 0.8.3, because
+a location under `accent` reads as "Enter acts on this row" while Enter would send the pane to an
+ancestor. The keyboard cursor and the location are two different facts and stay two.
+⚠ **Ties go to the lowest row.** Root the place and `/` the volume both contain everything at
+length 1; PLACES come first, so the place lights. On a desktop whose root is a mounted volume that is
+the normal state, not a corner case. Pinned.
+⭐ **One containment test, not two.** `crab_path_within` — the copy-into-itself guard — is the same
+rule, and it lived in `src/app.cyr`, which the render path may not reach up into. Moved to
+`src/path.cyr` with its ⛔ header intact; its only other caller resolves unchanged.
+⚠ Derived per frame and never stored; one bounded compare per row over at most a dozen rows.
+
+### Fixed — a place or volume stored with a trailing slash could never be *here*
+
+`crab_path_within` matches the root as a prefix and then requires a separator, so a root that already
+ends in one never contains the bare directory it names: `/home/macro/` does not contain
+`/home/macro`. `$HOME` is spelled by whoever set it and the kernel's mount prefixes by the kernel —
+both outside crab's control — so **both model builders now normalise what they store**
+(`crab_path_trim_slash`, keeping `/` itself; the volume's `PLEN` follows the stored bytes so `statfs`
+is asked about the string the sidebar shows). The roadmap had this as Phase 0's last open piece.
+
+### Fixed — a 64-byte volume prefix lost its terminator when `statfs` landed
+
+The ABI allows `prefixlen` 1..64 and crab terminates its own copy — so a 64-byte prefix needed a
+65th byte, and the field was 64: the NUL sat at offset 80, `CRAB_VOL_BSIZE`'s first byte, and the
+block size overwrote it. Every read of the prefix is bounded, so this was a wrong path rather than an
+overrun — `crab_sb_path` handing `crab_goto` a mount point with the block size's bytes spliced on —
+and a wrong path is what Enter acts on. The prefix field is 72 bytes now (BSIZE 88, BLOCKS 96,
+BFREE 104, record 112); the mutation that restores the old offsets fails with **`got 80`**, the
+string running sixteen bytes into the capacity fields. agnos spells nothing longer than `/mnt/exfat`
+today; the field is sized to the ABI, not to today.
+
 ### Fixed — ⛔⛆ the wheel was not gated by a modal question, and it was the same hole 0.8.0 closed
 
 `POINTER_SCROLL` moved `sel_l` / `sel_r` with no guard at all. A scroll between `d` and `y` moved the
@@ -133,22 +174,30 @@ arm, so a route added later cannot omit it.
 Before 0.16.24 every release was left; now a right release arriving mid-drag would have dropped or
 disarmed it. The release arm acts on `CRAB_BTN_LEFT` only.
 
-### Upstream — aethersafha 0.16.24, prepared in the sibling on operator direction
+### Upstream — aethersafha 0.16.24 is RELEASED
 
-The fix crab filed on 2026-09-09 is made: every kernel button bit is forwarded, window management
-stays left-only structurally, the numbering is decided and pinned, and six assertions that had never
-run in its input suite run now. Its own pre-cut gate (`scripts/check-dep-tags.sh`) failed on five
-stale dep tags and they were moved after reading each diff. **27 / 27 suites, `input` 136 → 183.**
-⚠ Nothing there is committed, tagged or pushed; `git ls-remote` says what is released, not this
-line. crab's copy of the issue records the resolution:
+The fix crab filed on 2026-09-09 is made and shipped: every kernel button bit is forwarded, window
+management stays left-only structurally, the numbering is decided and pinned, and six assertions
+that had never run in its input suite run now. Its own pre-cut gate (`scripts/check-dep-tags.sh`)
+failed on five stale dep tags and they were moved after reading each diff. **27 / 27 suites, `input`
+136 → 183.** ⭐ **Tagged `041ac85`, on the remote, CI and Release both green (2026-09-13)** — checked
+with `git ls-remote --tags` and the Actions API, not read from a clone. crab's copy of the issue
+records the resolution:
 [`docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md`](docs/development/issues/2026-09-09-aethersafha-forwards-only-the-left-button.md).
 
-### Verified
+### Verified — the cut checks
 
-`cyrius test` **1695 → 1748 / 0** (+53) · render_test **53 / 0** · fuzz 100,000 rounds · `fmt --check`
-clean across `src/` and `tests/` · coverage **88 %** (262/296) · `vet` + `deny` 0 · `deps --verify`
-50 / 0 · host **1,049,480 B** · `--agnos` **1,090,216 B** (+4,184 / +4,344 over the bumped graph:
-the decision layer and the routes). Every gate `ci.yml` runs, run here, at the 6.6.2 pin.
+`cyrius test` **1695 → 1790 / 0** (+53 pointer routes, +42 marker/trim/layout) · render_test
+**53 / 0** · fuzz 100,000 rounds · `fmt --check` clean across `src/` and `tests/` · coverage **88 %**
+(265/298) · `vet` + `deny` 0 · `deps --verify` 50 / 0 · host **1,049,480 B** `fa588e69…` · `--agnos`
+**1,090,216 B** `3438489f…`. ⚠ Both sizes are UNCHANGED from the pointer-route build while every
+hash moved — the marker, the trim and the layout fit inside the padding. `cmp`, never `ls -l`.
+⭐ **Check four re-run at the cut**, all four `path` overrides disabled: 7 deps / 0 errors, lock
+**3 → 7 commit-pinned**, both binaries **byte-identical** to the path-resolved build, 1790 / 0 in the
+scratch copy. Every gate `ci.yml` runs, run here, at the 6.6.2 pin. Thirteen mutations across the
+release (seven on the pointer routes, six on the marker) plus one on the layout, each caught.
+⛔ **Not run on QEMU or iron** — the pointer arm and the sidebar's agnos `mountlist` path are both
+invisible to the host suite by construction.
 
 ## [0.8.4] — unreleased — the aethersafha button blocker, measured and filed rather than guessed
 

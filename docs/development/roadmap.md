@@ -380,7 +380,7 @@ no `#else`. Each fix moved its RULE into a pure function the suite can interroga
 untestable is that `main.cyr` still calls it. **The gap is unchanged in shape and smaller in
 surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0.7.7.
 
-### M6 surfaces that shipped without a full interaction story — **4 of 6 closed: 2 in 0.8.3, 2 unreleased**
+### M6 surfaces that shipped without a full interaction story — **5 of 6 closed: 2 in 0.8.3, 3 in 0.8.5**
 
 > ⭐⭐ **AND THE SWEEP FOUND A SHIPPED BUG NONE OF THE SIX NAMED: `Open` WAS DEAD ON BOTH MENU
 > SURFACES.** Both arms rewrite `u` to the chosen entry's key and fall through to the one
@@ -390,11 +390,12 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
 > ⛔ **Phase 0 first.** These six share one event loop, and three of them depend on repairs that are
 > defects in their own right. Landed: the hoist, `crab_menu_accel`, `crab_goto`, `crab_path_within`'s
 > bounds read, two stale contracts, and — `[Unreleased]`, 2026-09-13 — **`crab_pointer_blocked`
-> split out of `crab_pointer_modal`**, which the pointer routes were gated on. **Still to land:
-> trailing-slash normalisation in the two model builders**, which the *you are here* marker needs.
-> ⭐ **4 of 6 closed.** What the pointer work found on the way: the WHEEL had no modal guard at all
-> (a scroll between `d` and `y` moved the selection — 0.8.0's click hole, one input kind over), and
-> the sidebar arm never consumed the double-click pair. Both closed.
+> split out of `crab_pointer_modal`**, which the pointer routes were gated on, and **trailing-slash
+> normalisation in the two model builders**, which the *you are here* marker needed. **Phase 0 is
+> complete.** ⭐ **5 of 6 closed.** What the pointer work found on the way: the WHEEL had no modal
+> guard at all (a scroll between `d` and `y` moved the selection — 0.8.0's click hole, one input
+> kind over), and the sidebar arm never consumed the double-click pair. Both closed. What the marker
+> found: a 64-byte volume prefix lost its terminator to `BSIZE`. Closed.
 
 - ✅ **The PLACES sidebar answers the keyboard — CLOSED 0.8.3.** `Tab` moves focus, arrows step over
   the inert headers, Enter sends the active pane, Tab/Esc returns. ⛔ **Focus is a MODE, never a
@@ -406,16 +407,16 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
   ⛔⛆ `dh_place_at_point` CLAMPS an overhanging popup, so there is a whole band of widths where the
   bar fits and `Edit`'s menu opens under the word `File`. One threshold would have certified as good
   the exact widths where the symptom survives.
-- ✅ **The menu bar and the A/B switcher have a pointer route — CLOSED (`[Unreleased]`, 2026-09-13),
-  together with the context-menu route below**, as the design required. `crab_pointer_action` in
+- ✅ **The menu bar and the A/B switcher have a pointer route — CLOSED (0.8.5), together with the
+  context-menu route below**, as the design required. `crab_pointer_action` in
   `src/ui.cyr` is the design made executable: popup FIRST (`dh_list_index_at` is z-order blind, and
   a drop-down flipped above its anchor lands *on* the bar row), then the bar, then the strip (which
   sits inside a header `crab_hit` also records), then sidebar, then panes; **every arm consumes**,
   and the double-click pair is consumed above every arm rather than inside each — the sidebar's
   omission was real and is closed by that line. 31 assertions, seven mutations.
-- ✅ **The CONTEXT menu has a pointer route — CLOSED.** The upstream gate closed first: **aethersafha
-  0.16.24** (prepared 2026-09-12 in the sibling, on operator direction — check its remote before
-  relying on the tag) forwards every kernel button bit, with window management left-only
+- ✅ **The CONTEXT menu has a pointer route — CLOSED (0.8.5).** The upstream gate closed first:
+  **aethersafha 0.16.24** (2026-09-13, `041ac85`, on the remote, CI and Release green) forwards every
+  kernel button bit, with window management left-only
   structurally, in exactly the numbering crab's filing proposed: **`wire = kernel_bit + 1` — 1 left,
   2 right, 3 middle, NOT X11**. crab mirrors it as `CRAB_BTN_*` and reads `POINTER_BTN`'s `a`. A right
   press on a pane focuses it, selects the row under the point and opens the menu there; a left press
@@ -441,11 +442,13 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
   ⇒ **The right shape for `Go` is the sidebar's keyboard route, which now exists** — reconsider it as
   a thin projection over `crab_sb_row_of` / `crab_sb_path`, capped by `crab_mb_drop_fit`. Recorded
   with its reason, exactly as `Tags`/`Index` already are.
-- **The sidebar never shows which place the active pane is in.** ⚠ Design done and it is subtler than
-  it looks: the matching rule is **containment, deepest wins**, not path equality — `/` contains
-  everything and a volume prefix contains its own subtree. ⛔ It must NOT be conflated with the
-  keyboard cursor: `crab_sb_shown_row` already takes both and rules that a focused sidebar with no
-  cursor paints **nothing**, because a location under `accent` would read as "Enter acts on this".
+- ✅ **The sidebar shows which place the active pane is in — CLOSED (0.8.5).** `crab_sb_here`, on
+  the rule as designed: **containment, deepest wins**, not equality — `/` contains everything, a
+  volume prefix contains its own subtree, Documents beats Home beats Root. ⚠ Ties go to the lowest
+  row (Root the place over `/` the volume), pinned. ⛔ Not conflated with the keyboard cursor:
+  `crab_sb_shown_row` still rules that a focused sidebar with no cursor paints **nothing**. The
+  containment test is `crab_path_within` — the copy-into-itself guard, moved to `path.cyr` so the
+  render path could share it rather than copy it.
 
 ### Absent affordances
 

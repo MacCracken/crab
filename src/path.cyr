@@ -129,3 +129,66 @@ fn crab_join_n(dst, cap, path, name): i64 {
     if (c2 != 0) { return -1; }
     return w;
 }
+
+# @public — is `path` inside the tree rooted at `root`? 1 = yes.
+#
+# ⛔⛔ THE GUARD AGAINST COPYING A FOLDER INTO ITSELF. `/a` copied into `/a/b` produces
+# `/a/b/a/b/a/b/…` until the path bound stops it — a walk that never terminates on its own and
+# leaves a deep partial tree behind. Refused BEFORE anything is created.
+# ⚠ BOUNDARY-AWARE: `/ab` is NOT inside `/a`. A plain prefix compare says it is, and that would
+# refuse a perfectly legal copy — the kind of false refusal an operator cannot argue with.
+# ⚠ A path IS inside itself, which the caller wants: the exact-same-path case is refused too, and
+# `crab_streq_n` catches it first with the clearer `CRAB_FS_ESAME`.
+fn crab_path_within(root, path, cap): i64 {
+    var rl = crab_cstr_len(root, cap);
+    var pl = crab_cstr_len(path, cap);
+    if (rl < 0) { return 0; }
+    if (pl < 0) { return 0; }
+    if (pl < rl) { return 0; }
+    var i = 0;
+    while (i < rl) {
+        if (load8(root + i) != load8(path + i)) { return 0; }
+        i = i + 1;
+    }
+    if (pl == rl) { return 1; }
+    # ⚠ The next byte must be a separator, or this is a SIBLING whose name merely starts the same.
+    # ⚠ Unless the root already ends in one, which is only true of "/" itself.
+    # ⛔ THE `rl > 0` GUARD IS FOR THE READ, NOT FOR THE ANSWER (0.8.3). At `rl == 0` — an empty root
+    # — `root + rl - 1` is one byte BEFORE the buffer, an out-of-bounds read inside the guard that
+    # stands between the operator and a copy that never terminates.
+    # ⛔⛔ AND IT DELIBERATELY DOES NOT CHANGE WHAT THIS FUNCTION ANSWERS. An empty root falls through
+    # to the `load8(path + rl)` test below and reports 1 for any absolute path, exactly as before.
+    # Adding `if (rl <= 0) { return 0; }` instead would read as tidier and would FLIP A DESTRUCTIVE
+    # GUARD'S FAIL-SAFE DIRECTION: this function's only production caller is the copy-into-itself
+    # refusal in `crab_walk_begin`, where 1 means *refuse* and is the safe answer. Never make a
+    # bounds fix change a safety answer in the same edit.
+    if (rl > 0) {
+        if (load8(root + rl - 1) == 47) { return 1; }
+    }
+    if (load8(path + rl) == 47) { return 1; }
+    return 0;
+}
+
+# @public — strip trailing separators from `p` IN PLACE, keeping "/" itself. -> the new length, or
+# -1 if `p` is not NUL-terminated within `cap`.
+#
+# ⛔ FOR THE SIDEBAR'S MODEL BUILDERS (0.8.5). `crab_path_within` answers "is `path` inside `root`"
+# by matching `root` as a prefix and then requiring a separator — so a ROOT that already ends in
+# one never matches the bare directory it names: `/home/macro/` does not contain `/home/macro`,
+# and a Home row built from a `$HOME` that carries a slash would never light up. The environment
+# and the kernel's mount table are both outside crab's control, so the builders normalise what
+# they store rather than trusting how it was spelled.
+# ⚠ "/" IS KEPT. Stripping it to "" would turn Root into an empty root — which `crab_path_within`
+# deliberately treats as containing every absolute path, in the copy guard's fail-safe direction.
+# ⚠ Idempotent, and a no-op on a path with no trailing slash — which is every path crab makes.
+fn crab_path_trim_slash(p, cap): i64 {
+    var l = crab_cstr_len(p, cap);
+    if (l < 0) { return -1; }
+    while (l > 1) {
+        if (load8(p + l - 1) != 47) { return l; }
+        l = l - 1;
+        store8(p + l, 0);
+    }
+    return l;
+}
+

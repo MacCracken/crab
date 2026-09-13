@@ -1,55 +1,59 @@
-# Handoff — **0.8.4 released; `[Unreleased]`: the 6.6.2 stack, and the pointer reaches every surface.**
+# Handoff — **0.8.5 cut: the 6.6.2 stack, the pointer reaches every surface, the sidebar knows where you are.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
-> **0.8.4 is the last RELEASE** — `7929ae1`, on the remote (`git ls-remote --tags` works; it did not
-> on 2026-09-09), CI and Release both green. The operator moved the pin to **6.6.2** at that cut and
-> released the **whole stack** to it (every crab dep, and aethersafha's dep stack behind it).
-> **`VERSION` reads 0.8.4; nothing below is committed, tagged or pushed.**
+> **0.8.5 IS CUT on operator direction** — `VERSION` = 0.8.5, CHANGELOG `[0.8.5]`, every gate and
+> check four green — **and the commit, the tag and the push are the operator's.** Until
+> `git ls-remote --tags` shows `0.8.5`, **0.8.4** (`7929ae1`, on the remote, CI green) is the last
+> release. ⚠ The first half of 0.8.5 is already in as `8bdcbfe` ("left button work") with `VERSION`
+> still 0.8.4; `git describe` answered `0.8.4-1-g8bdcbfe` when the cut was written. The pin is
+> **6.6.2**, and the whole sibling stack sits on it.
 >
-> ⭐ **What `[Unreleased]` holds — three things, in this order:**
+> ⭐ **What 0.8.5 holds:**
 > 1. **The seven dep tags re-pinned to the 6.6.2 siblings.** 0.8.4 shipped the exact divergence check
->    four exists for: `lib/` carried dhancha 0.9.29 / rupa 0.1.7 / setu 0.8.9 through `path` while the
->    manifest declared the previous tags, so CI and local builds compiled different code, both green.
->    Six of the seven bumps are header-only pin moves; **chitra 1.0.1 → 1.0.3 is real** — a decoder
->    P-1 sweep, headed by a SIGSEGV on the first PNG a memory-pressured process decodes (crab's
->    shape). Check four re-run: 7 / 0, lock 3 → 7 commit-pinned, both binaries **byte-identical**
->    (host `d75c35a9…` 1,045,296 · agnos `9ca89ea3…` 1,085,872). `lib/sankoch.cyr` had been left at
->    6.6.1's 2.7.14 by the pin bump — the transitive leaf the sync never walks — and is corrected.
-> 2. **aethersafha 0.16.24, PREPARED IN THE SIBLING on operator direction** (`../aethersafha`, not
->    committed): every kernel button bit forwarded, window management left-only structurally, the
->    numbering **`wire = kernel_bit + 1` — 1 left, 2 right, 3 middle, NOT X11** — named and pinned.
->    Its own pre-cut gate `scripts/check-dep-tags.sh` failed on five stale dep tags; moved after
->    reading each diff. 27 / 27 suites; six assertions that had never run in its input suite (a
->    `return assert_summary()` above them) run now: 136 → 183. ⛔ Its CHANGELOG's `[Unreleased]`
->    frametime block predates 0.16.21's tag and is left as found, named in the 0.16.24 section.
-> 3. **crab's pointer routes** (M6 — 4 of 6 gaps closed now): `crab_pointer_action` in `src/ui.cyr`
->    names ONE arm per press in a pinned z-order — popup, bar, strip, sidebar, panes — and every arm
->    consumes. Right press on a pane → focus, select the row under the point, open the context menu
->    there. Left press on a popup row → the entry's accelerator is **synthesised** (`synth_u`) and
->    falls through the one binding table (the `KEY` gate takes two roads in now). Bar cell → open /
->    switch / close the drop; A/B strip → focus that pane; anything else while a popup or the bar is
->    up → dismiss. `crab_menu_item_at` inverts the separator shift (New folder is not Delete);
->    `crab_pointer_blocked` is split out of `crab_pointer_modal` (Phase 0's last piece).
->    ⛔⛆ **Two holes closed on the way**: the WHEEL had no modal guard — a scroll between `d` and
->    `y` moved the selection, 0.8.0's click hole one input kind over — and the sidebar arm never
->    consumed the double-click pair. A right/middle release can no longer end a left drag.
+>    four exists for (`lib/` at dhancha 0.9.29 / rupa 0.1.7 / setu 0.8.9 through `path`, manifest at
+>    the previous tags). Six bumps are header-only; **chitra 1.0.1 → 1.0.3 is real** — a decoder P-1
+>    sweep headed by a SIGSEGV on the first PNG a memory-pressured process decodes (crab's shape).
+>    `lib/sankoch.cyr` was at 6.6.1's leaf and is corrected. Check four at the cut: 7 / 0, lock 3 → 7
+>    commit-pinned, both binaries **byte-identical** (host `fa588e69…` 1,049,480 · agnos
+>    `3438489f…` 1,090,216).
+> 2. **The pointer routes** (M6): `crab_pointer_action` in `src/ui.cyr` names ONE arm per press in a
+>    pinned z-order — popup, bar, strip, sidebar, panes — and every arm consumes. Right press on a
+>    pane → focus, select the row under the point, open the context menu there. Left press on a popup
+>    row → the entry's accelerator is **synthesised** (`synth_u`) through the one binding table (the
+>    `KEY` gate takes two roads in). Bar cell → open / switch / close the drop; A/B strip → focus
+>    that pane; anything else while a popup or the bar is up → dismiss. `crab_menu_item_at` inverts
+>    the separator shift; `crab_pointer_blocked` is split out of `crab_pointer_modal`. Buttons are
+>    **aethersafha 0.16.24's numbering, `wire = kernel_bit + 1` — 1 left, 2 right, 3 middle, NOT
+>    X11** — and 0.16.24 is **on the remote, CI green** (`041ac85`); crab's filing is closed.
+>    ⛔⛆ **Two holes closed on the way**: the WHEEL had no modal guard (a scroll between `d` and `y`
+>    moved the selection — 0.8.0's click hole one input kind over) and the sidebar arm never consumed
+>    the double-click pair. A right/middle release can no longer end a left drag.
+> 3. **The sidebar's *you are here* marker.** `crab_sb_here`: containment, deepest wins, ties to the
+>    lowest row (Root the place over `/` the volume); painted muted when unfocused, never when
+>    focused without a cursor (`crab_sb_shown_row`'s 0.8.3 rule, unchanged). Under it, Phase 0's last
+>    piece — **both model builders strip trailing slashes as they store** (`$HOME=/home/macro/` never
+>    contained `/home/macro`) — and `crab_path_within` moved from `app.cyr` to `path.cyr` so the
+>    render path could share the copy guard's containment rather than copy it. Beside it, a latent
+>    layout fix: a 64-byte volume prefix's NUL sat at offset 80 = `BSIZE`, and `statfs` overwrote
+>    it; the prefix field is 72 bytes, the record 112.
 >
-> **Suite 1748 / 0** (+53), render_test 53 / 0, fuzz 100k, fmt clean, coverage 88 %, vet/deny 0,
-> deps --verify 50 / 0. Host **1,049,480 B** · agnos **1,090,216 B**.
-> ⛔ **NOT run on QEMU or iron, on either side.** crab's arm is inside the agnos-only `#ifdef`; the
-> decisions were lifted into `ui.cyr` for that reason, and six new oracle lines exist for the run:
-> `crab: context menu opened by pointer` · `menu pick by pointer` · `verb by pointer` (kept separate
-> from `key press` so the harness's received-vs-acted ratio is undisturbed) · `popup dismissed by
-> pointer` · `bar click` · `switcher click`. aethersafha prints `forwarded a non-left button press,
-> wire number:` on the first one. ⚠ **Sequencing that run is the operator's call.**
+> **Suite 1790 / 0** (+95 over 0.8.4), render_test 53 / 0, fuzz 100k, fmt clean, coverage 88 %
+> (265/298), vet/deny 0, deps --verify 50 / 0. Fourteen mutations across the release, each caught —
+> one of them (the render passing -1 for `here`) through the 0.8.3 render assertion, which was
+> updated to the marker's rule rather than deleted.
+> ⛔ **NOT run on QEMU or iron, on either side.** crab's pointer arm and its `mountlist` path are
+> agnos-only; six new oracle lines exist for the run: `crab: context menu opened by pointer` ·
+> `menu pick by pointer` · `verb by pointer` (kept separate from `key press` so the harness's
+> received-vs-acted ratio is undisturbed) · `popup dismissed by pointer` · `bar click` · `switcher
+> click`; aethersafha prints `forwarded a non-left button press, wire number:` on the first one.
+> ⚠ **Sequencing that run is the operator's call.**
 >
-> ⭐ **Next, ungated, in the roadmap's own order:** the sidebar's *you are here* marker (design
-> done: containment, deepest wins; needs the trailing-slash normalisation in the two model builders
-> first), `View`'s four items (every target key is reachable since the 0.8.3 hoist), then the absent
-> affordances — a REFRESH key, a flag surface for `--about`, and the overwrite policy (an operator
-> decision). Small and cheap: drop the redundant `net` stdlib declaration (its own change).
-> ⚠ **The 0.8.3 block below is one release stale but its reasoning is current**; the `Open` lesson
-> — check the caller's POSITION, not just its logic — is the one to carry.
+> ⭐ **Next, ungated:** `View`'s items — the last of the six M6 interaction gaps (every target key is
+> reachable since the 0.8.3 hoist; `Go` is refused as a drop-down with its reasons in the roadmap) —
+> then the absent affordances: a REFRESH key, a flag surface for `--about`, the overwrite policy
+> (an operator decision). Small and cheap: drop the redundant `net` stdlib declaration (its own
+> change). ⚠ **The 0.8.3 block below is two releases stale but its reasoning is current**; the
+> `Open` lesson — check the caller's POSITION, not just its logic — is the one to carry.
 
 # Handoff — **0.8.3 in preparation: the M6 interaction gaps, and a menu verb that was dead.**
 

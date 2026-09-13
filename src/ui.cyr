@@ -708,11 +708,18 @@ fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell,
 # ⚠ crab's own record carries both, because a volume row needs the mount AND its capacity:
 var CRAB_VOL_BACKEND = 0;      # u64, FsBackend id
 var CRAB_VOL_PLEN    = 8;      # u64, 1..64
-var CRAB_VOL_PREFIX  = 16;     # 64 bytes, NUL-padded
-var CRAB_VOL_BSIZE   = 80;     # u64, from statfs
-var CRAB_VOL_BLOCKS  = 88;     # u64
-var CRAB_VOL_BFREE   = 96;     # u64
-var CRAB_VOL_SZ      = 104;
+var CRAB_VOL_PREFIX  = 16;     # 72 bytes: up to 64 of prefix, then crab's OWN NUL, then slack
+var CRAB_VOL_BSIZE   = 88;     # u64, from statfs
+var CRAB_VOL_BLOCKS  = 96;     # u64
+var CRAB_VOL_BFREE   = 104;    # u64
+var CRAB_VOL_SZ      = 112;
+# ⛔ THE PREFIX FIELD IS WIDER THAN THE KERNEL'S, AND THAT IS THE POINT (0.8.5). The ABI's prefix is
+# 64 NUL-PADDED bytes, and crab terminates its copy itself — so a 64-byte prefix, legal at the top
+# of `1..64`, needs a 65th byte. With a 64-byte field that byte was `CRAB_VOL_BSIZE`'s first, and
+# `statfs` writing a block size there un-terminated the string: `crab_sb_path` would then have
+# handed `crab_goto` a prefix with the block size's bytes spliced onto its end. Every read of it is
+# bounded, so it was a wrong path rather than an overrun — and a wrong path is what `Enter` acts on.
+# agnos spells nothing longer than `/mnt/exfat` today; the field is sized to the ABI, not to today.
 var CRAB_VOLS_MAX    = 8;      # = agnos's own table capacity (`vfs_mnt_backend[8]`)
 
 fn crab_vol_backend(v, n, i): i64 {
@@ -1106,13 +1113,53 @@ fn crab_sb_focus_toggle(want, sbon, placen, voln): i64 {
 # accent, which reads as "Enter acts on this" while Enter would in fact send the pane to an
 # ancestor. ⇒ Focused with no cursor paints nothing.
 # ⚠ The location is DERIVED per frame and never stored; storing it would be a second copy of the
-# pane path to keep in step. `here` is -1 until the locator lands.
+# pane path to keep in step. `crab_sb_here` below is the locator (0.8.5).
 fn crab_sb_shown_row(focused, cursor, here): i64 {
     if (focused == 1) {
         if (cursor >= 0) { return cursor; }
         return 0 - 1;
     }
     return here;
+}
+
+# @public — which sidebar ROW the active pane is IN: the deepest place or volume whose path contains
+# `path`, or -1 when none does. The *you are here* marker (M6, 0.8.5).
+#
+# ⛔⛔ CONTAINMENT, DEEPEST WINS — NOT EQUALITY. A pane is almost never AT a place; it is somewhere
+# under one. `/` contains everything, a volume prefix contains its own subtree, and Home contains
+# Documents, which contains whatever the operator is looking at — so the row to light is the one
+# that says the most: the longest containing path. Equality would light Root only when the pane
+# was exactly at `/`, which is the one place nobody stays.
+# ⛔ NEVER CONFLATED WITH THE KEYBOARD CURSOR. `crab_sb_shown_row` takes both and rules that a
+# focused sidebar with no cursor paints NOTHING — because a location painted under `accent` reads
+# as "Enter acts on this row" while Enter would send the pane to an ancestor. This function only
+# ever answers `here`; what the sidebar paints is that function's decision.
+# ⚠ TIES GO TO THE LOWEST ROW. Root the place and `/` the volume both contain everything at the
+# same length; PLACES come first in the row map, so the place lights. A tie is a real state on a
+# desktop whose root is a mounted volume, not a corner case.
+# ⚠ `crab_path_within` is the SAME containment the copy-into-itself guard uses — one rule, two
+# callers, moved to `path.cyr` so this render-path caller could reach it. The model builders strip
+# trailing slashes as they store, which is what makes a bare `/home/macro` match its Home row.
+# ⚠ Derived per frame, never stored: storing it would be a second copy of the pane path to keep in
+# step. It costs one bounded compare per row, over at most a dozen rows.
+fn crab_sb_here(path, places, placen, vols, voln): i64 {
+    if (path == 0) { return 0 - 1; }
+    if (load8(path) == 0) { return 0 - 1; }
+    var best = 0 - 1;
+    var bestl = 0 - 1;
+    var rows = crab_sb_rows(placen, voln);
+    var row = 0;
+    while (row < rows) {
+        var p = crab_sb_path(row, places, placen, vols, voln);
+        if (p != 0) {
+            if (crab_path_within(p, path, CRAB_PATH_MAX) == 1) {
+                var l = crab_cstr_len(p, CRAB_PATH_MAX);
+                if (l > bestl) { best = row; bestl = l; }
+            }
+        }
+        row = row + 1;
+    }
+    return best;
 }
 
 # @public — which sidebar LIST ROW is at (x, y)? -> the raw row, or -1 for none.
@@ -4185,9 +4232,15 @@ fn crab_render(surf, font, rs): i64 {
     var sbfocus = crab_sb_focus_eff(load64(rs + CRAB_RS_SBFOCUS), sbon,
       load64(rs + CRAB_RS_PLACEN), load64(rs + CRAB_RS_VOLN));
     if (sbon == 1) {
+        # ⭐ `here` IS THE ACTIVE PANE'S LOCATION, DERIVED HERE (0.8.5). The sidebar is a destination
+        # list and the active pane is the one Enter would send, so it is the one the marker is about.
+        var hpath = lpath;
+        if (active_pane == 1) { hpath = rpath; }
+        var here = crab_sb_here(hpath, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN),
+          load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN));
         crab_sblst = crab_sidebar(panes, load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN),
           load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN),
-          crab_sb_shown_row(sbfocus, load64(rs + CRAB_RS_SBROW), 0 - 1));
+          crab_sb_shown_row(sbfocus, load64(rs + CRAB_RS_SBROW), here));
     }
     var twopanes = crab_two_panes_fit(availw);
     var panew = availw - CRAB_PANE_GAP;

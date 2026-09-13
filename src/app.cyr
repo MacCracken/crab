@@ -962,6 +962,10 @@ fn crab_place_add(dst, n, label, path, statbuf): i64 {
     var rec = dst + n * CRAB_PLACE_SZ;
     crab_strcpy_n(rec + CRAB_PLACE_LABEL, label, CRAB_NAME_MAX);
     crab_strcpy_n(rec + CRAB_PLACE_PATH, path, CRAB_PATH_MAX);
+    # ⛔ NORMALISED AS STORED (0.8.5). `$HOME` is spelled by whoever set it — `/home/macro/` is
+    # legal — and a place kept with its slash never CONTAINS the bare directory it names, so the
+    # Home row would never light. Stripped here, once, rather than at every reader.
+    crab_path_trim_slash(rec + CRAB_PLACE_PATH, CRAB_PATH_MAX);
     return n + 1;
 }
 
@@ -1034,6 +1038,14 @@ fn crab_volumes_build(dst, statbuf): i64 {
         var k = 0;
         while (k < pl) { store8(rec + CRAB_VOL_PREFIX + k, load8(src + 16 + k)); k = k + 1; }
         store8(rec + CRAB_VOL_PREFIX + pl, 0);
+        # ⛔ NORMALISED AS STORED (0.8.5), like a place. The kernel spells its prefixes bare today
+        # (`/`, `/mnt/fat`, `/mnt/exfat`) and the ABI does not promise it; the *you are here* rule
+        # is containment, and a prefix carrying its slash would contain its subtree but never its
+        # own mount point. `PLEN` follows the stored bytes so `statfs` is asked about the same
+        # string the sidebar shows.
+        pl = crab_path_trim_slash(rec + CRAB_VOL_PREFIX, 65);
+        if (pl < 0) { pl = 0; }
+        store64(rec + CRAB_VOL_PLEN, pl);
         store64(rec + CRAB_VOL_BSIZE, 0);
         store64(rec + CRAB_VOL_BLOCKS, 0);
         store64(rec + CRAB_VOL_BFREE, 0);
@@ -2852,44 +2864,10 @@ fn crab_copy_step(): i64 {
 # M4 — THE RECURSIVE WALK. Copying and deleting a tree, a bounded slice at a time.
 # =================================================================================================
 
-# @public — is `path` inside the tree rooted at `root`? 1 = yes.
-#
-# ⛔⛔ THE GUARD AGAINST COPYING A FOLDER INTO ITSELF. `/a` copied into `/a/b` produces
-# `/a/b/a/b/a/b/…` until the path bound stops it — a walk that never terminates on its own and
-# leaves a deep partial tree behind. Refused BEFORE anything is created.
-# ⚠ BOUNDARY-AWARE: `/ab` is NOT inside `/a`. A plain prefix compare says it is, and that would
-# refuse a perfectly legal copy — the kind of false refusal an operator cannot argue with.
-# ⚠ A path IS inside itself, which the caller wants: the exact-same-path case is refused too, and
-# `crab_streq_n` catches it first with the clearer `CRAB_FS_ESAME`.
-fn crab_path_within(root, path, cap): i64 {
-    var rl = crab_cstr_len(root, cap);
-    var pl = crab_cstr_len(path, cap);
-    if (rl < 0) { return 0; }
-    if (pl < 0) { return 0; }
-    if (pl < rl) { return 0; }
-    var i = 0;
-    while (i < rl) {
-        if (load8(root + i) != load8(path + i)) { return 0; }
-        i = i + 1;
-    }
-    if (pl == rl) { return 1; }
-    # ⚠ The next byte must be a separator, or this is a SIBLING whose name merely starts the same.
-    # ⚠ Unless the root already ends in one, which is only true of "/" itself.
-    # ⛔ THE `rl > 0` GUARD IS FOR THE READ, NOT FOR THE ANSWER (0.8.3). At `rl == 0` — an empty root
-    # — `root + rl - 1` is one byte BEFORE the buffer, an out-of-bounds read inside the guard that
-    # stands between the operator and a copy that never terminates.
-    # ⛔⛔ AND IT DELIBERATELY DOES NOT CHANGE WHAT THIS FUNCTION ANSWERS. An empty root falls through
-    # to the `load8(path + rl)` test below and reports 1 for any absolute path, exactly as before.
-    # Adding `if (rl <= 0) { return 0; }` instead would read as tidier and would FLIP A DESTRUCTIVE
-    # GUARD'S FAIL-SAFE DIRECTION: this function's only production caller is the copy-into-itself
-    # refusal in `crab_walk_begin`, where 1 means *refuse* and is the safe answer. Never make a
-    # bounds fix change a safety answer in the same edit.
-    if (rl > 0) {
-        if (load8(root + rl - 1) == 47) { return 1; }
-    }
-    if (load8(path + rl) == 47) { return 1; }
-    return 0;
-}
+# ⚠ `crab_path_within` — the copy-into-itself guard — LIVES IN `src/path.cyr` as of 0.8.5. The
+# sidebar's *you are here* locator needs the same containment test and the render path may not
+# reach up into this file; one function, two callers, moved down rather than copied. Its ⛔ header
+# went with it, unchanged.
 
 # @public — the cursor a walk of `kind` may resume a directory read from.
 # -> 0 for a delete (always restart), `saved` for a copy.

@@ -169,14 +169,15 @@ happened rather than showing a blank square.
   agnos **`mountlist`#104** (0.8.1) for enumeration and `statfs`#103 for capacity. Grid and gallery
   ship too — see `g` above. ⇒ Under-claiming is the same failure as over-claiming, and this section's
   own header says so.
-- **The PLACES sidebar does not show which place the active pane is in.** It has both routes now —
-  `Tab`/arrows/Enter since 0.8.3, a click since 0.8.0 — but no *you are here* marker yet, and the
-  matching rule (containment, deepest wins) is designed and not built. (Roadmap M6.) ⚠ This line
-  said *"no keyboard route… `Tab` is unbound"* through two releases after 0.8.3 bound it.
 - **The middle mouse button does nothing.** Right-click opens the context menu over the row under
-  the pointer (unreleased; needs aethersafha ≥ 0.16.24 to arrive as a right-click at all), left
-  picks and dismisses, and a press with the middle button is consumed and ignored — stated rather
-  than left to be discovered.
+  the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors
+  forward every button as left), left picks and dismisses, and a press with the middle button is
+  consumed and ignored — stated rather than left to be discovered.
+- **`View` on the menu bar is empty.** The bar ships File · Edit · Go · View; `View`'s items — the
+  view switches the keyboard already has — are the last M6 interaction gap, and `Go` is deliberately
+  not built as a drop-down: the sidebar's keyboard route is its shape. (Roadmap M6.) ⚠ A line here said
+  *"the sidebar has no keyboard route… `Tab` is unbound"* through two releases after 0.8.3 bound it,
+  and *"no you-are-here marker"* until 0.8.5 lit one; re-read this list at every cut.
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —

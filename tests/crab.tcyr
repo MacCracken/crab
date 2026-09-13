@@ -2660,6 +2660,7 @@ fn main() {
     t_menubar();
     t_pointer_modal();
     t_pointer_routes();
+    t_sb_here();
     t_menubar_enabled();
 
     # ================================================================================
@@ -4479,6 +4480,119 @@ fn t_pointer_modal(): i64 {
     return 0;
 }
 
+fn t_sb_here(): i64 {
+    test_group("crab — 0.8.5: trailing slashes are stripped as a place or volume is STORED");
+    var tb = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(tb, "/home/macro/", CRAB_PATH_MAX);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 11, "one trailing slash goes, length follows");
+    assert_eq(t_streq(tb, "/home/macro"), 1, "  ...and the bytes say so");
+    crab_strcpy_n(tb, "/mnt/fat///", CRAB_PATH_MAX);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 8, "a run of slashes goes too");
+    assert_eq(t_streq(tb, "/mnt/fat"), 1, "  ...leaving the bare mount point");
+    crab_strcpy_n(tb, "/", CRAB_PATH_MAX);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 1, "\"/\" is KEPT — Root must not become an empty root");
+    assert_eq(t_streq(tb, "/"), 1, "  ...byte for byte");
+    crab_strcpy_n(tb, "///", CRAB_PATH_MAX);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 1, "\"///\" collapses to \"/\", never past it");
+    crab_strcpy_n(tb, "/home/macro", CRAB_PATH_MAX);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 11, "no trailing slash: a no-op");
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 11, "  ...and idempotent");
+    store8(tb, 0);
+    assert_eq(crab_path_trim_slash(tb, CRAB_PATH_MAX), 0, "an empty string stays empty");
+    var ti = 0;
+    while (ti < 8) { store8(tb + ti, 47); ti = ti + 1; }
+    assert_eq(crab_path_trim_slash(tb, 8), 0 - 1, "unterminated within cap: -1, nothing written");
+    # ⛔ THE REASON IT EXISTS: `crab_path_within` cannot match a root that carries its own slash.
+    assert_eq(crab_path_within("/home/macro/", "/home/macro", CRAB_PATH_MAX), 0, "a slashed root does NOT contain the bare dir it names");
+    assert_eq(crab_path_within("/home/macro", "/home/macro", CRAB_PATH_MAX), 1, "  ...stripped, it does");
+    # ⭐ And the builder applies it: a place added from a slashed path is stored bare.
+    var sc = alloc(CRAB_PATH_MAX);
+    var st = alloc(STAT_BUFSZ);
+    var pb = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
+    var pn = crab_place_add(pb, 0, "Slashed", "/tmp/", st);
+    assert_eq(pn, 1, "a place built from \"/tmp/\" is accepted");
+    assert_eq(t_streq(crab_place_path(pb, pn, 0), "/tmp"), 1, "  ...and stored as \"/tmp\"");
+    pn = crab_place_add(pb, pn, "Root", "/", st);
+    assert_eq(t_streq(crab_place_path(pb, pn, 1), "/"), 1, "Root stays \"/\"");
+
+    test_group("crab — 0.8.5: the sidebar knows where the active pane IS (containment, deepest wins)");
+    # PLACES: Home /home/macro · Documents /home/macro/Documents · Root /
+    var pl = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
+    var pi = 0;
+    while (pi < (CRAB_PLACES_MAX * CRAB_PLACE_SZ)) { store8(pl + pi, 0); pi = pi + 1; }
+    crab_strcpy_n(pl + 0 * CRAB_PLACE_SZ + CRAB_PLACE_LABEL, "Home", CRAB_NAME_MAX);
+    crab_strcpy_n(pl + 0 * CRAB_PLACE_SZ + CRAB_PLACE_PATH, "/home/macro", CRAB_PATH_MAX);
+    crab_strcpy_n(pl + 1 * CRAB_PLACE_SZ + CRAB_PLACE_LABEL, "Documents", CRAB_NAME_MAX);
+    crab_strcpy_n(pl + 1 * CRAB_PLACE_SZ + CRAB_PLACE_PATH, "/home/macro/Documents", CRAB_PATH_MAX);
+    crab_strcpy_n(pl + 2 * CRAB_PLACE_SZ + CRAB_PLACE_LABEL, "Root", CRAB_NAME_MAX);
+    crab_strcpy_n(pl + 2 * CRAB_PLACE_SZ + CRAB_PLACE_PATH, "/", CRAB_PATH_MAX);
+    var placen = 3;
+    # VOLUMES: ext2 at / · FAT at /mnt/fat
+    var vb = alloc(CRAB_VOLS_MAX * CRAB_VOL_SZ);
+    var vi = 0;
+    while (vi < (CRAB_VOLS_MAX * CRAB_VOL_SZ)) { store8(vb + vi, 0); vi = vi + 1; }
+    store64(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_BACKEND, 1);
+    store64(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_PLEN, 1);
+    crab_strcpy_n(vb + 0 * CRAB_VOL_SZ + CRAB_VOL_PREFIX, "/", 64);
+    store64(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_BACKEND, 2);
+    store64(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_PLEN, 8);
+    crab_strcpy_n(vb + 1 * CRAB_VOL_SZ + CRAB_VOL_PREFIX, "/mnt/fat", 64);
+    var voln = 2;
+    var r_home = crab_sb_row_of(CRAB_SB_PLACE, 0, placen, voln);
+    var r_docs = crab_sb_row_of(CRAB_SB_PLACE, 1, placen, voln);
+    var r_root = crab_sb_row_of(CRAB_SB_PLACE, 2, placen, voln);
+    var r_vroot = crab_sb_row_of(CRAB_SB_VOLUME, 0, placen, voln);
+    var r_fat = crab_sb_row_of(CRAB_SB_VOLUME, 1, placen, voln);
+    assert(r_home >= 0, "fixture: Home has a row");
+    assert(r_fat > r_root, "fixture: volumes come after places in the row map");
+    # ---- containment, not equality ---------------------------------------------------------------
+    assert_eq(crab_sb_here("/home/macro/Repos/crab", pl, placen, vb, voln), r_home, "deep under Home: HOME lights — the pane is not AT a place, it is UNDER one");
+    assert_eq(crab_sb_here("/home/macro", pl, placen, vb, voln), r_home, "exactly at Home: Home");
+    assert_eq(crab_sb_here("/home/macro/Documents/tax", pl, placen, vb, voln), r_docs, "under Documents: DOCUMENTS, not Home — the deepest containing place wins");
+    assert_eq(crab_sb_here("/home/macro/Documents", pl, placen, vb, voln), r_docs, "exactly at Documents: Documents");
+    assert_eq(crab_sb_here("/home/macroni", pl, placen, vb, voln), r_root, "a SIBLING whose name merely starts the same is not inside Home — Root");
+    assert_eq(crab_sb_here("/etc", pl, placen, vb, voln), r_root, "somewhere under nothing but /: Root");
+    # ---- volumes are places too, and a prefix contains its subtree -------------------------------
+    assert_eq(crab_sb_here("/mnt/fat/photos", pl, placen, vb, voln), r_fat, "under a mount: the VOLUME lights, deeper than Root");
+    assert_eq(crab_sb_here("/mnt/fat", pl, placen, vb, voln), r_fat, "at the mount point itself: the volume");
+    assert_eq(crab_sb_here("/mnt/fatter", pl, placen, vb, voln), r_root, "/mnt/fatter is not under /mnt/fat");
+    # ---- the tie: Root the place and / the volume both contain everything at length 1 -------------
+    assert_eq(crab_sb_here("/", pl, placen, vb, voln), r_root, "at /: the PLACE lights, not the volume — ties go to the lowest row");
+    assert_neq(r_root, r_vroot, "  ...and those are different rows");
+    # ---- nothing, and bad input -------------------------------------------------------------------
+    assert_eq(crab_sb_here("/etc", pl, 0, vb, 0), 0 - 1, "no places and no volumes: nowhere to be");
+    assert_eq(crab_sb_here(0, pl, placen, vb, voln), 0 - 1, "a null path is nowhere");
+    assert_eq(crab_sb_here("", pl, placen, vb, voln), 0 - 1, "an empty path is nowhere");
+    assert_eq(crab_sb_here("relative/path", pl, placen, vb, voln), 0 - 1, "a relative path is under no absolute place");
+    # ⛔ The row it answers is a SIDEBAR row: it must never be mistaken for a pane index. Every
+    # answer above is >= 1 (row 0 is the PLACES header) or -1.
+    assert(crab_sb_here("/etc", pl, placen, vb, voln) >= 1, "an answer is never row 0 — the inert header");
+    # ---- and what the sidebar PAINTS is still `crab_sb_shown_row`'s decision ---------------------
+    var here = crab_sb_here("/home/macro/Documents/tax", pl, placen, vb, voln);
+    assert_eq(crab_sb_shown_row(0, 0 - 1, here), r_docs, "unfocused: the location is painted (muted = you are here)");
+    assert_eq(crab_sb_shown_row(1, 0 - 1, here), 0 - 1, "focused with no cursor: NOTHING — a location under accent would lie");
+    assert_eq(crab_sb_shown_row(1, r_home, here), r_home, "focused with a cursor: the cursor, wherever the pane is");
+    test_group("crab — 0.8.5: a 64-byte volume prefix keeps its terminator when statfs lands");
+    # ⛔ The ABI allows prefixlen 1..64 and crab terminates its own copy. A 64-byte prefix's NUL used
+    # to sit at offset 80 — the first byte of BSIZE — so the block size overwrote it.
+    var vr = alloc(CRAB_VOL_SZ);
+    var vz = 0;
+    while (vz < CRAB_VOL_SZ) { store8(vr + vz, 0); vz = vz + 1; }
+    var vk = 0;
+    store8(vr + CRAB_VOL_PREFIX, 47);
+    vk = 1;
+    while (vk < 64) { store8(vr + CRAB_VOL_PREFIX + vk, 97); vk = vk + 1; }      # "/aaa…" x 64
+    store8(vr + CRAB_VOL_PREFIX + 64, 0);
+    store64(vr + CRAB_VOL_PLEN, 64);
+    assert_eq(crab_cstr_len(crab_vol_prefix(vr, 1, 0), CRAB_PATH_MAX), 64, "a 64-byte prefix reads back as 64 bytes");
+    store64(vr + CRAB_VOL_BSIZE, 0x4141414141414141);                         # statfs lands: 'AAAAAAAA'
+    store64(vr + CRAB_VOL_BLOCKS, 0x4242424242424242);
+    assert_eq(crab_cstr_len(crab_vol_prefix(vr, 1, 0), CRAB_PATH_MAX), 64, "  ...and STILL 64 after the capacity fields are written");
+    assert(CRAB_VOL_BSIZE >= (CRAB_VOL_PREFIX + 65), "the terminator's byte is inside the prefix field, not BSIZE's");
+    assert_eq(CRAB_VOL_SZ % 8, 0, "the record stays 8-byte aligned");
+    return 0;
+}
+
 fn t_pointer_routes(): i64 {
     test_group("crab — 0.8.5: the pointer is BLOCKED by a question and CAPTURED by a popup");
     # ⭐ The split: `crab_pointer_blocked` is the half with nothing to click; `crab_pointer_modal`
@@ -5052,9 +5166,13 @@ fn t_sidebar(): i64 {
     assert_eq(dh_list_count(sb), pn + 1, "...with a PLACES header plus one row per place");
     assert_eq(dh_widget_inert(dh_list_row_at(sb, 0)), 1, "...and row 0 is INERT, so it cannot be selected");
     assert_eq(dh_widget_inert(dh_list_row_at(sb, 1)), 0, "...while the first real place is not");
-    # ⚠ 0.8.3: with no cursor and no focus, nothing is selected — a -1 selects nothing rather than
-    # falling back to row 0, which is the inert header `dh_list_select` would silently refuse.
-    assert_eq(dh_list_selected(sb), 0 - 1, "an unfocused sidebar with no cursor paints no row");
+    # ⭐ 0.8.5: with no cursor and no focus the sidebar paints WHERE THE ACTIVE PANE IS — the
+    # deepest place containing `/etc`, which among the real places is Root — under the muted
+    # colour, because the list has no focus. (0.8.3 painted nothing here; the locator had not
+    # landed. It still paints nothing when FOCUSED with no cursor — asserted in `t_sb_here`.)
+    var here_etc = crab_sb_here("/etc", pl, pn, 0, 0);
+    assert(here_etc >= 1, "/etc is under some real place (Root at least) — never the inert header");
+    assert_eq(dh_list_selected(sb), here_etc, "an unfocused sidebar paints the row the active pane is IN");
 
 
     # ---- ⛔ ITS OWN HIT FUNCTION, RETURNING A PLACE INDEX — NEVER A PANE INDEX ------------------
