@@ -172,7 +172,24 @@ fn crab_mtime_str(dst, epoch): i64 {
 # narrower than ~10 characters cannot distinguish the files in a real directory, which is the same
 # argument that retired the 13-character column.
 enum CrabCol {
+    # ⛔⛆ NINE IS KASHI'S NUMBER, NOT A LAYOUT CHOICE, AND IT IS ONLY TRUE OF KASHI. It is the CP437
+    # 8x16 cell's advance — 8 px of glyph and 1 px of gap — exact for `font = 0` and wrong for every
+    # proportional face. ⇒ **Nothing may divide by this constant directly.** `crab_char_w()` is the
+    # one reader; it answers 9 for the bitmap font and the FONT's own advance for anything else, so
+    # the day crab stops passing `font = 0` every width derived from it follows without being found.
+    # ⚠ The remaining half of the proportional-text item is exactly that day — see the roadmap.
     CRAB_COL_CHARW    = 9;      # kashi CP437 8x16 advance: 8 px glyph + 1 px gap
+    # ⚠ THE EM HEIGHT THE ADVANCE IS ASKED AT. `rekha_char_advance_px` scales by the pixel em, and
+    # kashi's cell is 8x16 — so 16 is the height the 9 above is the advance FOR, and asking a
+    # scalable face at any other height would return advances that do not match the text drawn.
+    CRAB_TEXT_EM      = 16;
+    # ⛔ THE SCAN BOUND FOR MEASURING TEXT, AND IT IS A SAFETY NET RATHER THAN A MEANING. The longest
+    # string crab ever draws is a path, so a NUL missing from any of them costs a wrong width and
+    # never a walk past the buffer. ⚠ It is NOT the name bound: a readdir record's name region ends
+    # at `CRAB_REC_TYPE`, one byte before the record, and measuring that byte would price a record's
+    # TYPE as a character. Where names are handled, `crab_name_cell` applies that tighter bound —
+    # this cap exists so that a caller measuring something else is still bounded.
+    CRAB_TEXT_SCAN_MAX = 256;   # = CRAB_PATH_MAX
     CRAB_COL_SIZE_W   = 54;     # 6 chars — "1023K" plus its gap
     CRAB_COL_MTIME_W  = 153;    # 17 chars — "2026-08-28 11:04" plus its gap
     CRAB_COL_NAME_MIN = 90;     # 10 chars — below this a name column cannot tell files apart
@@ -204,6 +221,19 @@ enum CrabCol {
     # ⛔ THE CELL IS TALLER, NOT WIDER: `CRAB_THUMB_H` for the picture plus a list row for the name.
     # Widening it would cost columns for a thumbnail that is 64 px regardless.
     CRAB_VIEW_GALLERY = 2;
+    # ⭐⭐ THE COLUMNS VIEW (0.8.8) — the active pane grows a narrow CONTEXT column to its left
+    # showing the parent directory with the current one marked. See `crab_cols_list` in `src/app.cyr`
+    # for what this view IS and why it is K=2 with one driven column rather than N miller panes.
+    # ⛔ IT IS NOT GRID-LIKE, and `crab_view_is_grid` is what says so — at every site that branches on
+    # a view, which is a property that function had to be *made* to have before this id could exist.
+    CRAB_VIEW_COLUMNS = 3;
+    # ⛔ THE CONTEXT COLUMN IS EXACTLY THE NAME FLOOR WIDE, DERIVED AND NOT CHOSEN. It shows names and
+    # nothing else, so `CRAB_COL_NAME_MIN` — the width below which a name column cannot tell the files
+    # in a real directory apart — is precisely what it needs and precisely what it gets. Everything
+    # else goes to the column the operator is actually driving. It does NOT grow with the window:
+    # it is CONTEXT, and a 400 px parent listing next to the listing you are reading is a second pane
+    # that nobody asked for.
+    CRAB_COL_CTX_W    = 90;      # = CRAB_COL_NAME_MIN
     CRAB_GAL_CELL_W   = 90;      # = CRAB_COL_NAME_MIN, so the name stays as legible as a grid cell's
     CRAB_GAL_CELL_H   = 90;      # = CRAB_THUMB_H (64) + CRAB_GRID_CELL_H (26)
     # ⛔ THE CELL SIZE IS DERIVED FROM THE COLUMN RULE, NOT CHOSEN — the same discipline that
@@ -245,6 +275,33 @@ fn crab_two_panes_fit(w): i64 {
     return 0;
 }
 
+# @public — is the COLUMNS view's context column worth its width at `panew`? 1 = draw it.
+#
+# ⛔ THE SAME DERIVATION AS EVERY OTHER FIT RULE IN THIS FILE, and the same shape as
+# `crab_two_panes_fit`: a split is worth it only when BOTH sides can honestly show what they are for.
+# The context column shows names, so its floor is `CRAB_COL_NAME_MIN`; the driven column must remain
+# a usable listing, so its floor is the same. ⇒ `panew >= 186`. Below that the view falls back to a
+# plain list — the operator keeps the listing and loses only the context, which is the right thing to
+# lose, because the alternative is two columns too narrow to read.
+# ⚠ A FALLBACK, NOT A REFUSAL. `g` may still land on COLUMNS in a narrow window; it simply draws what
+# a LIST draws. A view that refused to render would be a mode the operator can enter and not leave.
+# @public — does `mode` require the SOLO layout (one pane, whatever the window can afford)? 1 = yes.
+#
+# ⛔ THE COLUMNS VIEW IS SOLO BY CONSTRUCTION, NOT BY WIDTH. It is a view mode of ONE pane — the
+# active pane plus the context it sits in — so two of them side by side would be two context columns
+# and two listings in a window that `crab_two_panes_fit` only just agreed could hold two listings.
+# ⚠ AND THE SWITCHER STILL WORKS: solo mode draws the A/B strip and Left/Right still change which
+# pane is drawn, so nothing about the columns view costs the operator access to pane B.
+fn crab_view_solo(mode): i64 {
+    if (mode == CRAB_VIEW_COLUMNS) { return 1; }
+    return 0;
+}
+
+fn crab_cols_fit(panew): i64 {
+    if (panew >= (CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN)) { return 1; }
+    return 0;
+}
+
 # How many columns a pane `panew` px wide can honestly show: 1 = NAME, 2 = +SIZE, 3 = +MODIFIED.
 fn crab_cols_for_width(panew): i64 {
     if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W)) { return 3; }
@@ -252,11 +309,84 @@ fn crab_cols_for_width(panew): i64 {
     return 1;
 }
 
+# =================================================================================================
+# 🔤 HOW WIDE IS TEXT — the one derivation (0.8.8)
+# =================================================================================================
+#
+# ⛔⛆ crab SIZED EVERY COLUMN BY DIVIDING PIXELS BY NINE, IN MORE THAN ONE PLACE, AND NINE IS A
+# PROPERTY OF ONE FONT. It is exact for `font = 0` (kashi's CP437 8x16 cell) and wrong for any
+# proportional face — and the harm is not cosmetic. `crab_col_chars` decides how many characters a
+# NAME column holds, which drives `crab_name_cell`'s `~` marker, which exists **so that two
+# different files never render as one identical row**: `agnos-kernel-build.log` and
+# `agnos-kernel-build.tmp` did exactly that before 0.5.0. Under a proportional face `px / 9`
+# over-reports, the cut goes unmarked, and the operator selects, descends and ACTS on that row.
+# ⇒ The 9 now has ONE reader. Everything that used to divide by it asks `crab_char_w()`.
+#
+# ⚠ WHAT THIS DOES **NOT** DO, STATED PLAINLY SO NOBODY READS MORE INTO IT. crab still passes
+# `font = 0`, so every number below is bit-for-bit what it was — this change renders identically by
+# construction, which is the point of making it now rather than alongside a font switch. The
+# remaining half of the item is passing a real face, and with it: the six constants that encode
+# CHARACTER COUNTS at 9 px (`CRAB_COL_NAME_MIN`, `CRAB_COL_SIZE_W`, `CRAB_COL_MTIME_W`, `CRAB_PV_W`,
+# `CRAB_GRID_CELL_W`, `CRAB_GAL_CELL_W`), dhancha's fixed 9 px caret advance, and the Latin-1 limit
+# of the scalable path. Those are pinned in the roadmap, not done here.
+
+# ⚠ THE FRAME'S FONT, RECORDED ON THE SAME DISCIPLINE AS `crab_root` AND `crab_llst`: `crab_render`
+# is handed it, every width derivation needs it, and threading a `font` parameter through
+# `crab_pane` -> `crab_row` -> `crab_name_cell` would be four signatures carrying one fact.
+# ⛔ SET AT THE TOP OF `crab_render`, BEFORE ANYTHING MEASURES. It is NOT cleared afterwards, and
+# that is deliberate: `crab_menubar_fit` is asked from the event loop, OUTSIDE a frame, and must
+# size the bar by the same font the last frame drew it with. A cleared value would make the bar fit
+# rule disagree with the bar.
+var crab_font = 0;
+
+# @public — the font the frame just rendered with, or 0 for kashi's bitmap face.
+fn crab_frame_font(): i64 { return crab_font; }
+
+# @public — the advance crab sizes text by, in px. Exactly `CRAB_COL_CHARW` for the bitmap font.
+#
+# ⚠ FOR A PROPORTIONAL FACE THIS IS AN ESTIMATE AND IS LABELLED ONE. A single advance cannot
+# describe a face whose glyphs differ, so this answers for a representative glyph and is only ever
+# used where a COUNT is wanted (how many columns fit). Anything deciding whether a specific STRING
+# fits must ask `crab_text_w`, which measures.
+# ⛔ A FONT THAT REPORTS NOTHING FALLS BACK TO THE BITMAP ADVANCE RATHER THAN TO ZERO. `crab_col_chars`
+# divides by this, and a zero would either trap or report a column that holds every name uncut.
+fn crab_char_w(): i64 {
+    if (crab_font == 0) { return CRAB_COL_CHARW; }
+    var a = dh_text_advance(crab_font, 110, CRAB_TEXT_EM);    # 'n' — a representative lowercase glyph
+    if (a <= 0) { return CRAB_COL_CHARW; }
+    return a;
+}
+
+# @public — the MEASURED pixel width of the cstring `s` under the frame's font.
+#
+# ⛔ MEASURED, NOT `length * advance`, WHICH IS THE WHOLE DIFFERENCE. For the bitmap font the two
+# agree exactly and this costs one multiply; for a proportional face they do not, and every place
+# that asks "does this string fit" has to be the second one.
+# ⛔ THE SCAN IS BOUNDED, because some of the strings it will be asked about are readdir names —
+# kernel data, untrusted by crab's own rule, and the exact shape that caused the 0.5.0 P-1 that made
+# `src/path.cyr` a file. A missing NUL must cost a wrong width, never a walk off the buffer.
+# ⚠ THE BOUND IS `CRAB_TEXT_SCAN_MAX`, NOT `CRAB_REC_TYPE`, AND THE DIFFERENCE IS DELIBERATE: this
+# function measures menu labels and column headers as well as names, and a name-sized cap would
+# silently under-measure anything longer. The tighter, *semantic* bound on a name belongs where names
+# are handled — `crab_name_cell` — because there the extra byte is a record's TYPE, not a character.
+fn crab_text_w(s): i64 {
+    if (s == 0) { return 0; }
+    var n = 0;
+    while ((n < CRAB_TEXT_SCAN_MAX) && (load8(s + n) != 0)) { n = n + 1; }
+    if (crab_font == 0) { return n * CRAB_COL_CHARW; }
+    var w = 0;
+    var i = 0;
+    while (i < n) { w = w + dh_text_advance(crab_font, load8(s + i), CRAB_TEXT_EM); i = i + 1; }
+    return w;
+}
+
 # Characters that fit in a `px`-wide column. ⚠ Floor, never rounded up — a column that reports one
 # more character than it can draw is how text gets clipped with no truncation marker.
 fn crab_col_chars(px): i64 {
     if (px <= 0) { return 0; }
-    return px / CRAB_COL_CHARW;
+    var cw = crab_char_w();
+    if (cw <= 0) { return 0; }
+    return px / cw;
 }
 
 # Copy `name` into `dst` truncated to `chars`, marking the cut with '~'. -> bytes written.
@@ -1290,9 +1420,13 @@ fn crab_mb_label(i): i64 {
 # lands, which is the same constant the truncation rule rests on.
 var CRAB_MB_PAD = 8;                       # breathing room either side of the label
 fn crab_mb_cell_w(i): i64 {
-    var n = crab_cstr_len(crab_mb_label(i), CRAB_NAME_MAX);
+    var t = crab_mb_label(i);
+    # ⚠ THE LENGTH CHECK STAYS, AND IT IS NOT REDUNDANT WITH THE MEASURE. `crab_cstr_len` returns -1
+    # for a label with no NUL inside the cap; `crab_text_w` would answer a width for the bytes it
+    # scanned. A label crab cannot read the end of gets no cell, not a plausible one.
+    var n = crab_cstr_len(t, CRAB_NAME_MAX);
     if (n < 0) { return CRAB_MB_PAD + CRAB_MB_PAD; }
-    return n * CRAB_COL_CHARW + CRAB_MB_PAD + CRAB_MB_PAD;
+    return crab_text_w(t) + CRAB_MB_PAD + CRAB_MB_PAD;
 }
 
 # @public — how many items menu `i` holds, and the item at slot `j` as a context-menu id.
@@ -2010,6 +2144,75 @@ fn crab_menu_target(marked, name): i64 {
     return name;
 }
 
+# @public — the COLUMNS view's CONTEXT column: the parent directory's NAMES, with the row the
+# operator is standing in marked. -> the LIST widget, or 0 when nothing was built.
+#
+# ⛔⛔ IT IS A DISPLAY, AND EVERY DECISION HERE FOLLOWS FROM THAT. It never calls `dh_focus_set`, so
+# dhancha paints its marked row MUTED rather than accented — which is the toolkit's own vocabulary
+# for "you are here, but your keys drive something else", and is precisely the distinction a second
+# accented list would destroy. It is not in `crab_hit`'s walk, so a click on it lands nowhere, for
+# the reason the A/B strip is not either: a pointer path means an answer to "which pane is this",
+# and `active_pane` is a 0/1 the WRITE layer trusts. See `crab_cols_list` in `src/app.cyr`.
+# ⛔ `sel < 0` IS ORDINARY AND LEAVES THE COLUMN UNMARKED. `crab_cols_here` answers -1 whenever the
+# parent genuinely does not contain us — a mount point, a bind mount, a path reached by symlink —
+# and marking row 0 there would put the you-are-here highlight on a SIBLING.
+# ⚠ THE 18 px BAND IS NOT DECORATION. The pane below its own header carries a 28 px header and an
+# 18 px NAME/SIZE/MODIFIED row; without both bands here the two listings' first rows would sit at
+# different heights and the column would read as scrolled. There is no column HEADER because there
+# are no columns to name — a header saying NAME over a list of names says nothing.
+fn crab_col_ctx(parent, title, buf, count, sel): i64 {
+    if (parent == 0) { return 0; }
+    if (buf == 0) { return 0; }
+    if (count <= 0) { return 0; }
+    var col = dh_widget_new(BOX);
+    dh_widget_set_layout(col, BOX_V);
+    dh_widget_set_pref(col, CRAB_COL_CTX_W, 0);
+    dh_widget_set_flex(col, 0);                # ⛔ fixed: it is context, and must not eat the listing
+    dh_widget_set_bg(col, dh_theme_panel());
+    var hdr = dh_widget_new(LABEL);
+    # ⛔ PANEL, NEVER ACCENT. The accent header means "this pane has your keys", and this one never
+    # does — an accented context header is the same lie as an accented context row.
+    dh_widget_set_bg(hdr, dh_theme_panel());
+    dh_widget_set_pref(hdr, 0, 28);
+    dh_widget_set_flex(hdr, 0);
+    var ttl = title;
+    if (ttl == 0) { ttl = "/"; }
+    dh_widget_set_text(hdr, ttl);
+    dh_widget_add_child(col, hdr);
+    var band = dh_widget_new(BOX);
+    dh_widget_set_bg(band, dh_theme_panel());
+    dh_widget_set_pref(band, 0, 18);
+    dh_widget_set_flex(band, 0);
+    dh_widget_add_child(col, band);
+    var lst = dh_list_new(26);
+    dh_widget_set_flex(lst, 1);
+    # ⚠ THE SAME NAME FORMATTER AND THE SAME DIRECTORY MARKER THE GRID USES. A context column that
+    # truncated differently, or dropped the trailing `/`, would describe the parent in a vocabulary
+    # the operator has to learn twice.
+    var chars = crab_col_chars(CRAB_COL_CTX_W);
+    var i = 0;
+    while (i < count) {
+        var rec = buf + i * CRAB_REC_SZ;
+        var isd = load8(rec + CRAB_REC_TYPE);
+        var row = dh_widget_new(LABEL);
+        dh_widget_set_pref(row, 0, 26);
+        # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so the
+        # string must live exactly as long as the widget — one frame. See `crab_grid_cell`.
+        var disp = dh_falloc(CRAB_NAME_MAX + 4);
+        var dn = crab_name_cell(disp, rec, chars);
+        if (isd == 1) {
+            if (dn < chars) { store8(disp + dn, 47); store8(disp + dn + 1, 0); }
+        }
+        dh_widget_set_text(row, disp);
+        dh_list_add(lst, row);
+        i = i + 1;
+    }
+    if (sel >= 0) { dh_list_select(lst, sel); }
+    dh_widget_add_child(col, lst);
+    dh_widget_add_child(parent, col);
+    return lst;
+}
+
 # ⚠ `dh_list_add` pins each row's flex to 0 for us; flex rows would share the viewport instead of
 # overflowing it, and a list whose content exactly fills the viewport never scrolls.
 fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, state, solo, marks, view): i64 {
@@ -2085,7 +2288,7 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     # A header that lies about the content below it is worse than no header. (dhancha has no
     # `remove_child` — which is the right shape for an immediate-mode tree, and forced the honest
     # structure here rather than a build-then-undo.)
-    if (view != CRAB_VIEW_LIST) {
+    if (crab_view_is_grid(view) == 1) {
         # ⭐ THE GALLERY IS THE GRID WITH A TALLER CELL AND A DIFFERENT CELL BUILDER. Everything else
         # — wrap, selection, arrows, keep-visible, hit-test — is dhancha's GRID and is shared, which
         # is the whole reason the kind was worth building.
@@ -2536,8 +2739,25 @@ fn crab_spec_init(): i64 {
 # comment claiming the behaviour for the grid — but the GALLERY is the same `dh_grid` with a taller
 # cell, and in it Left/Right still switched panes while Up/Down stepped by ONE entry rather than by a
 # row. A 2-D arrangement the operator can see was answering arrows as if it were a list.
-# ⇒ One predicate, asked in all three places, so a fourth view cannot be added and half-wired. The
-# arrow dispatch itself sits inside the agnos `#ifdef` and no host test can reach it; this can.
+# ⇒ One predicate, asked EVERYWHERE a view is branched on, so a fourth view cannot be added and
+# half-wired. The arrow dispatch itself sits inside the agnos `#ifdef` and no host test can reach it;
+# this can.
+#
+# ⛔⛆ AND FOR THREE CUTS THAT LAST SENTENCE WAS A WISH. 0.8.2 installed the predicate at `main.cyr`'s
+# three ARROW sites and nowhere else: `crab_pane` and `crab_render`'s scroll round-trip each still
+# asked `view != CRAB_VIEW_LIST`. A fourth id would have compiled and **rendered as a GRID, scrolled
+# as a GRID, and taken LIST arrow semantics** — precisely the half-wiring this function exists to make
+# impossible, in the file that introduced it. Found in 0.8.8 by asking what a new id would actually
+# do BEFORE adding one, which is the only time that question is cheap to answer.
+# ⇒ **A negation is not a predicate.** `!= LIST` answers a question about one id and silently decides
+# for every id that comes after it; this answers the question that was meant.
+# ⚠ The two sites are not equally load-bearing, and the suite says which is which. `crab_pane` is:
+# revert it and the pin fails. The scroll round-trip is a COUPLING fix — on a vertical LIST the grid
+# branch reduces exactly to the list branch (`dh_grid_cols` clamps to 1, and `dh_grid_cell_h` reads
+# the same `DH_W_CELL_H` slot `dh_list_new` writes `row_h` into), so reverting it alone changes no
+# behaviour today and no test can catch it. It is still the right call: depending on that coincidence
+# is depending on dhancha's internals, and a horizontal list would break it (`dh_list_scroll_to`
+# writes `DH_W_SCROLL_X`; the grid branch writes `DH_W_SCROLL_Y`).
 fn crab_view_is_grid(mode): i64 {
     if (mode == CRAB_VIEW_GRID) { return 1; }
     if (mode == CRAB_VIEW_GALLERY) { return 1; }
@@ -2586,6 +2806,13 @@ fn crab_pane_widget(which): i64 {
 
 # @public — the A/B strip for the frame just rendered, or 0 if none was built.
 fn crab_switcher_widget(): i64 { return crab_swlst; }
+
+# @public — the COLUMNS view's context column for the frame just rendered, or 0 if none was built.
+# ⛔ Cleared in `crab_render` before the panes, on the same discipline as `crab_swlst` and `crab_mlst`:
+# a pointer from a frame that HAD a context column must not survive into one that does not, because
+# `dh_frame_begin` has already rewound the arena it pointed into.
+fn crab_ctx_widget(): i64 { return crab_ctxlst; }
+var crab_ctxlst = 0;
 
 # @public — pane `which`'s HEADER widget for the frame just rendered, or 0 if that pane was not
 # drawn. ⛔ THE ZERO MATTERS AS MUCH AS THE POINTER, exactly as it does for `crab_pane_widget`:
@@ -3993,7 +4220,17 @@ enum CrabRs {
     # `crab_sb_focus_eff`, so the renderer never re-derives it from the raw want.
     CRAB_RS_SBROW    = 368;
     CRAB_RS_SBFOCUS  = 376;
-    CRAB_RS_SZ       = 384;
+    # ⭐ THE COLUMNS VIEW'S CONTEXT LISTING (0.8.8) — the PARENT of the active pane's path, listed by
+    # `crab_cols_list`, plus the row that is the current directory (`crab_cols_here`, -1 = none).
+    # ⚠ CARRIED ON THE RECORD RATHER THAN DERIVED HERE, for the reason every other listing is: a
+    # readdir is not a render-path operation. The renderer draws what it is handed.
+    CRAB_RS_CBUF     = 384;
+    CRAB_RS_CN       = 392;
+    CRAB_RS_CSEL     = 400;
+    # ⚠ THE COLUMN'S TITLE ARRIVES READY-MADE, because deriving it means `crab_leaf_name`, which
+    # lives in `src/app.cyr` — and `ui.cyr` is BELOW `app.cyr`; the render path may never call up.
+    CRAB_RS_CNAME    = 408;
+    CRAB_RS_SZ       = 416;
 }
 
 var crab_rs_rec = 0;
@@ -4030,6 +4267,11 @@ fn crab_rs_reset(rs): i64 {
     # is 23 chances to spell it 0.
     store64(rs + CRAB_RS_MBSEL, 0 - 1);
     store64(rs + CRAB_RS_MBDROP, 0 - 1);
+    # ⛔ -1 = NO YOU-ARE-HERE ROW, AND THE SAME TRAP AS THE TWO ABOVE. A zeroed `CSEL` would mark row
+    # 0 of the parent listing as the directory the operator is standing in — a plausible highlight on
+    # a SIBLING, which is the one thing the context column exists to get right. `crab_cols_here`
+    # answers -1 whenever the parent genuinely does not contain us, and that answer has to survive.
+    store64(rs + CRAB_RS_CSEL, 0 - 1);
     # ⛔⛆ -1 = NO SIDEBAR ROW, and a zeroed record must not mean "row 0". Row 0 is the inert PLACES
     # header: `dh_list_select` REFUSES it, silently, so a 0 default leaves the app believing in a
     # highlight the toolkit declined to paint — the exact shape of the bug where `mb_item` pointed at
@@ -4067,6 +4309,20 @@ fn crab_rs_pane(rs, which, buf, n, path, sizes, mtimes, state, marks, sel, scrol
 # @public — the transfer tray's state. `name == 0` or `""` means nothing is running, and the tray
 # then costs no pixels and no widgets at all.
 # ⚠ `total` / `rate` / `eta` are **-1 when they cannot be said yet**, never 0. See `crab_op_rate`.
+# @public — the COLUMNS view's context listing: the PARENT of the active pane's path, and which of
+# its rows is that pane's own directory (-1 = none, which is ordinary — see `crab_cols_here`).
+# ⚠ `n <= 0` is a listing with nothing in it, and the renderer draws no context column at all rather
+# than an empty one: at the root there is no parent, and an empty strip where context should be reads
+# as "this directory has no siblings", which is a different and false statement.
+fn crab_rs_cols(rs, name, buf, n, sel): i64 {
+    if (rs == 0) { return 0; }
+    store64(rs + CRAB_RS_CNAME, name);
+    store64(rs + CRAB_RS_CBUF, buf);
+    store64(rs + CRAB_RS_CN, n);
+    store64(rs + CRAB_RS_CSEL, sel);
+    return 1;
+}
+
 fn crab_rs_op(rs, name, done, total, rate, eta): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_OPNAME, name);
@@ -4174,6 +4430,9 @@ fn crab_rs_chrome(rs, active, menuopen, menux, menuy, menusel, editopen, editlab
 fn crab_render(surf, font, rs): i64 {
     if (surf == 0) { return 0; }
     if (rs == 0) { return 0; }
+    # ⛔ FIRST, BEFORE ANYTHING MEASURES. Every column width, every character count and every
+    # truncation below derives from this through `crab_char_w` / `crab_text_w`. See `crab_font`.
+    crab_font = font;
     var lp0 = rs;
     var rp0 = rs + CRAB_RSP_SZ;
     var lbuf     = load64(lp0 + CRAB_RSP_BUF);
@@ -4339,8 +4598,33 @@ fn crab_render(surf, font, rs): i64 {
           crab_sb_shown_row(sbfocus, load64(rs + CRAB_RS_SBROW), here));
     }
     var twopanes = crab_two_panes_fit(availw);
+    # ⛔ THE COLUMNS VIEW OVERRIDES THE FIT RATHER THAN NEGOTIATING WITH IT. `crab_two_panes_fit`
+    # answers "can this window afford two listings"; the columns view is not asking. See
+    # `crab_view_solo`.
+    if (crab_view_solo(pvview) == 1) { twopanes = 0; }
     var panew = availw - CRAB_PANE_GAP;
     if (twopanes == 1) { panew = (availw - CRAB_PANE_GAP) / 2; }
+    # ⭐ THE CONTEXT COLUMN TAKES ITS WIDTH OFF THE PANE, AND IT IS SETTLED HERE — before the pane is
+    # built, like the sidebar above it — so `crab_pane` is handed a width that is already the truth
+    # and `crab_cols_for_width` decides NAME/SIZE/MODIFIED against what the listing really gets.
+    # ⛔ THREE CONDITIONS, ALL REQUIRED: the view asks for it, the width can honestly hold both
+    # columns (`crab_cols_fit`), and there is a parent listing to show (`CN > 0` — at `/` there is
+    # none, and `crab_cols_list` says so with -1).
+    crab_ctxlst = 0;
+    var ctxon = 0;
+    if (pvview == CRAB_VIEW_COLUMNS) {
+        if (crab_cols_fit(panew) == 1) {
+            # ⛔ BOTH HALVES OF WHAT `crab_col_ctx` WOULD REFUSE, ASKED HERE — because the width is
+            # committed on this line and the column is built forty lines later. A record carrying a
+            # count with no buffer would take the width off the listing and then build nothing, and
+            # the operator would lose 96 px to a column that is not on screen. Two predicates that
+            # can disagree about whether something exists is the shape this whole file avoids.
+            if (load64(rs + CRAB_RS_CBUF) != 0) {
+                if (load64(rs + CRAB_RS_CN) > 0) { ctxon = 1; }
+            }
+        }
+    }
+    if (ctxon == 1) { panew = panew - CRAB_COL_CTX_W - CRAB_PANE_GAP; }
     # ⚠ HOISTED ABOVE THE PANE BUILD (M5) so the preview column can read the same four arrays the
     # status line does. They describe the ACTIVE pane, which is the one whose selection both surfaces
     # are about — two surfaces answering "what is selected" from different sources is how they drift.
@@ -4350,6 +4634,13 @@ fn crab_render(surf, font, rs): i64 {
     var ra = 0; if (active_pane == 1) { ra = 1; }
     var llst = 0;
     var rlst = 0;
+    # ⛔ BUILT AFTER THE SIDEBAR AND BEFORE THE PANE, because sibling order IS left-to-right here:
+    # sidebar, context column, the listing, the preview. Each of the four is added by exactly one
+    # block and none of them knows the others exist.
+    if (ctxon == 1) {
+        crab_ctxlst = crab_col_ctx(panes, load64(rs + CRAB_RS_CNAME), load64(rs + CRAB_RS_CBUF),
+          load64(rs + CRAB_RS_CN), load64(rs + CRAB_RS_CSEL));
+    }
     if (twopanes == 1) {
         llst = crab_pane(panes, 0, panew, lpath, lbuf, ln, lsizes, lmtimes, sel_l, la, lstate, 0, lmarks, pvview);
         rlst = crab_pane(panes, 1, panew, rpath, rbuf, rn, rsizes, rmtimes, sel_r, ra, rstate, 0, rmarks, pvview);
@@ -4466,7 +4757,7 @@ fn crab_render(surf, font, rs): i64 {
     # ⚠ THE GRID HAS ITS OWN SCROLL ARITHMETIC and it is not the list's: a list's keep-visible works
     # in rows, a grid's in rows of CELLS, and `dh_list_scroll_to_sel` on a grid would compute the
     # offset from a row height the grid does not have. Same round-trip, different function.
-    if (pvview != CRAB_VIEW_LIST) {
+    if (crab_view_is_grid(pvview) == 1) {
         dh_grid_scroll_to(llst, load64(scroll_l));
         dh_grid_scroll_to(rlst, load64(scroll_r));
         dh_grid_scroll_to_sel(llst);
@@ -4477,6 +4768,11 @@ fn crab_render(surf, font, rs): i64 {
         dh_list_scroll_to_sel(llst);
         dh_list_scroll_to_sel(rlst);
     }
+    # ⭐ THE CONTEXT COLUMN FOLLOWS ITS MARKED ROW AND HAS NO SCROLL STATE OF ITS OWN — deliberately.
+    # It is not driven, so there is no offset the operator chose that a round-trip would preserve;
+    # the only offset it can honestly have is the one that shows where they are standing. Rebuilt at
+    # 0 each frame and re-followed, which is what makes it need no app state at all.
+    if (crab_ctxlst != 0) { dh_list_scroll_to_sel(crab_ctxlst); }
     store64(scroll_l, dh_widget_scroll_y(llst));
     store64(scroll_r, dh_widget_scroll_y(rlst));
     dh_layout_apply(root, w, h);

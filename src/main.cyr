@@ -270,6 +270,13 @@ fn main(): i64 {
     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
     crab_rs_preview(rs, pv_open);
     crab_rs_view(rs, view_mode);
+    # ⭐ THE COLUMNS VIEW'S CONTEXT LISTING, REFRESHED HERE BECAUSE IT DEPENDS ON THE VIEW AND ON
+    # WHICH PANE IS ACTIVE — the two facts the line above and `crab_rs_chrome` carry. It is memoised
+    # on the path, so a frame that has not navigated costs no syscalls, and it allocates nothing
+    # until the operator first enters the view. ⛔ It runs on EVERY path that fills the record,
+    # including the ones that are not in columns view: it must CLEAR the fields as well as set
+    # them, or a stale listing survives the view being left. See `crab_cols_sync`.
+    crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
@@ -1411,15 +1418,19 @@ fn main(): i64 {
                                 }
                             }
                             if (u == 0x0A) {                                       # g — cycle the view
-                                # ⚠ A CYCLE, NOT A TOGGLE, and one key rather than three. Three views
+                                # ⚠ A CYCLE, NOT A TOGGLE, and one key rather than four. Four views
                                 # is still few enough that stepping through them is faster than
                                 # remembering which key is which — the same argument the sort key
                                 # makes for its four modes.
+                                # ⛔ THE CEILING IS THE LAST VIEW ID, AND IT MOVES WHEN ONE IS ADDED.
+                                # 0.8.8 added COLUMNS; a wrap left at GALLERY would have made the new
+                                # view unreachable by the only key that selects one.
                                 view_mode = view_mode + 1;
-                                if (view_mode > CRAB_VIEW_GALLERY) { view_mode = CRAB_VIEW_LIST; }
+                                if (view_mode > CRAB_VIEW_COLUMNS) { view_mode = CRAB_VIEW_LIST; }
                                 if (view_mode == CRAB_VIEW_LIST) { crab_say("crab: view list\n"); }
                                 if (view_mode == CRAB_VIEW_GRID) { crab_say("crab: view grid\n"); }
                                 if (view_mode == CRAB_VIEW_GALLERY) { crab_say("crab: view gallery\n"); }
+                                if (view_mode == CRAB_VIEW_COLUMNS) { crab_say("crab: view columns\n"); }
                                 # ⛔ THE SCROLL OFFSETS ARE RESET. A list offset is a pixel count in
                                 # rows of 26; a grid's is in rows of 32 holding three entries each.
                                 # Carrying one across means landing somewhere unrelated to what was
@@ -1877,6 +1888,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
@@ -1981,6 +1993,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
+                    crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
@@ -2087,6 +2100,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
@@ -2184,6 +2198,7 @@ fn main(): i64 {
                     crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                     crab_rs_preview(rs, pv_open);
                     crab_rs_view(rs, view_mode);
+                    crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
@@ -2236,6 +2251,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 var sm = crab_render(surf, 0, rs);
@@ -2260,6 +2276,7 @@ fn main(): i64 {
                         crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                         crab_rs_preview(rs, pv_open);
                         crab_rs_view(rs, view_mode);
+                        crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                         crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                         crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
@@ -2297,6 +2314,7 @@ fn main(): i64 {
                 crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
                 crab_rs_preview(rs, pv_open);
                 crab_rs_view(rs, view_mode);
+                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
                 # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and

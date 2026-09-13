@@ -2,6 +2,131 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.8] — 2026-09-13 — the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Fixed — ⛔⛆ the guard against half-wiring a fourth view was itself half-installed
+
+`crab_view_is_grid` was added in 0.8.2 under a comment reading *"one predicate, asked in all three
+places, so a fourth view cannot be added and half-wired."* It was asked in `src/main.cyr`'s three
+ARROW sites and **nowhere else**: `crab_pane` and `crab_render`'s scroll round-trip each still tested
+`view != CRAB_VIEW_LIST`. A fourth view id would have compiled and **rendered as a GRID, scrolled as
+a GRID, and taken LIST arrow semantics** — precisely the half-wiring that function exists to make
+impossible, in the file that introduced it, and the same defect 0.8.2 fixed, inverted.
+
+⇒ **A negation is not a predicate.** `!= LIST` answers a question about one id and silently decides
+for every id that comes after it. Found by asking what a new id would actually do **before** adding
+one, which is the only time that question is cheap to answer.
+
+⚠ **The two sites are not equally load-bearing, and the suite says which is which.** Reverting
+`crab_pane` fails the pin. Reverting the scroll round-trip alone **changes nothing today** — on a
+vertical LIST the grid branch reduces exactly to the list branch (`dh_grid_cols` clamps to 1, and
+`dh_grid_cell_h` reads the same `DH_W_CELL_H` slot `dh_list_new` writes `row_h` into), so no test can
+catch it. It is fixed anyway: depending on that coincidence is depending on dhancha's internals, and
+a horizontal list would break it. **The mutation is how we know which claim we could make**, and the
+test says so at the assertion rather than implying a proof it has not got.
+
+### Added — ⭐⭐ COLUMNS: a fourth view, and the design question M5 left open
+
+`g` now cycles a fourth time. The active pane grows a narrow **context column** to its left showing
+the parent directory with the directory you are standing in marked.
+
+⛔⛔ **IT IS A VIEW MODE OF ONE PANE, AND THAT IS A SAFETY DECISION RATHER THAN A LAYOUT ONE.** The
+roadmap carried columns as *"gated on crab's own two-pane model — a design question, not a
+dependency"* since M5. The question, stated properly: miller columns as N independently navigable
+panes make `active_pane` something other than a 0/1 — and `active_pane` is a 0/1 that the **entire
+M4 write layer** resolves every copy, move and delete against. A drag from column k into column k+1
+would plan a `crab_fs_move` of a directory **into its own subtree**. That is a data-loss question
+wearing a layout question's clothes, and no amount of renderer cleverness answers it. **K = 2 with
+one driven column answers it by construction**, and the canvas agrees — it draws pane A as columns
+with pane B as the preview. ⇒ *If miller ever goes N-deep, the gate is the write layer, not the
+renderer.*
+
+What follows from that, and is asserted:
+
+- **The driven listing is unchanged** — the same LIST, the same selection, the same hit-test, the
+  same verbs. The view adds a column; it does not add a mode to anything else.
+- ⛔ **The context column never holds focus.** dhancha paints a selected row ACCENTED when its list
+  has focus and MUTED when it does not, and that difference is the entire answer to *"which listing
+  do my arrow keys drive"*. ⚠ Two assertions pinned the outcome and a mutation showed they were being
+  carried by CALL ORDER — `crab_pane` runs afterwards and sets focus itself — so the test now asks
+  `crab_col_ctx` directly, with focus parked somewhere known. **An order is not a contract.**
+- ⛔ **A click on it lands nowhere.** It is not in `crab_hit`'s walk, for the reason the A/B switcher
+  strip is not: a pointer path means an answer to *"which pane is this"*, and that is the 0/1 again.
+- ⛔ **It is dropped, not squeezed.** `crab_cols_fit` derives its threshold the way every other fit
+  rule here does — both sides must be honest, so both floors are `CRAB_COL_NAME_MIN` ⇒ 186 px. Below
+  that the operator keeps the listing and loses only the context. A view that refused to render would
+  be a mode you can enter and not leave.
+- ⛔ **The view is solo by construction**, not by width: two context columns and two listings is three
+  columns of names in a window `crab_two_panes_fit` only just agreed could hold two.
+- ⛔ **`-1` is a real answer and survives.** The parent can genuinely not contain us — a mount point, a
+  bind mount, a path reached through a symlink — and marking row 0 there puts *you are here* on a
+  **sibling**. `crab_rs_reset` seeds the field to -1 for the same reason `MBDROP` and `SBROW` are
+  seeded to -1: a zeroed record must not mean "row 0".
+- ⚠ **At `/` there is no context column at all**, rather than an empty one. An empty strip where
+  context should be reads as *"this directory has no siblings"* — a different, false statement.
+
+⭐ **`crab_ascend` now truncates at `crab_parent_len` and nowhere else**, so the context column lists
+exactly the directory Backspace lands in. Two derivations of one fact are how a UI starts lying.
+
+⛔ **A readdir is not a render-path operation, and this view would have made it one.** `crab_cols_sync`
+memoises the listing on the path it is for, so a frame that has not navigated costs no syscalls — and
+the refusal at `/` is memoised too, or standing at the root would retry the listing on every keypress,
+pointer move and idle tick forever. The memo is dropped in `crab_relist_keep_thumbs`, the one function
+every write and every refresh passes through — the siting `crab_thumb_forget` earned.
+⚠ **The 80 KiB of listing buffers is allocated on first use**, not at startup: `alloc` is a bump
+allocator with no `free()`, and an operator who never opens this view must not pay for it.
+
+⭐ **Proven on QEMU** — `agnos/scripts/harness/crab-columns-test.py`, PASS on its first run.
+`crab_readdir_into`'s entire body is inside `#ifdef CYRIUS_TARGET_AGNOS` with no `#else`, so on the
+host it returns 0 entries for **every** path, `/tmp` included. A first draft of the suite built a
+real tree under `build/` and asserted the listing; every assertion failed against an empty listing
+and a clean error code. ⇒ **The suite gates the render half and says so; the harness gates the
+listing, the naming, and the memo** (redraws must not re-list — the arm that keeps a readdir off the
+render path).
+
+### Changed — ⭐ the 9 px advance now has exactly one reader
+
+crab sized every column by dividing pixels by nine, in more than one place, and **nine is a property
+of one font** — kashi's CP437 8×16 cell. This is not cosmetic: `crab_col_chars` decides how many
+characters a NAME column holds, which drives `crab_name_cell`'s `~` marker, which exists so that two
+different files never render as one identical row (`agnos-kernel-build.log` and
+`agnos-kernel-build.tmp` did exactly that before 0.5.0). Under a proportional face `px / 9`
+over-reports, the cut goes unmarked, and the operator selects, descends and **acts** on that row.
+
+- `crab_char_w()` answers `CRAB_COL_CHARW` for the bitmap font and the **font's own** advance for
+  anything else; every divide goes through it.
+- `crab_text_w(s)` **measures** a string rather than pricing it at `length × advance` — for the bitmap
+  font the two agree exactly, and for a proportional face they do not. ⛔ Its scan is bounded by
+  `CRAB_REC_TYPE` because the strings it is asked about are readdir names: kernel data, untrusted by
+  crab's own rule, and the exact shape that caused the 0.5.0 P-1 that made `src/path.cyr` a file.
+
+⚠ **crab still passes `font = 0`, so this renders identically — which is exactly why it was done on
+its own.** ⚠ And what the suite CANNOT say is said at the assertions: at `font = 0` no host test can
+tell *"asks the font"* from *"divides by the constant"*, because they are the same number; deleting
+`crab_font = font` from `crab_render` leaves the suite green, and the test records that rather than
+implying a gate. **What is left of proportional text is passing a real face** — rung 2.
+
+### Changed — 🗺 the roadmap has an order
+
+Added **[the ladder to 1.0](docs/development/roadmap.md)**: one table, nine rungs plus a ruling, each
+named by what an operator can newly do, with what blocks it and what closes it. The remaining work
+was spread across six correct-but-unordered sections, so every slot began by re-deriving the sequence.
+
+⛔ **The order is the commitment; the number is not.** This file has mapped milestones onto versions
+wrong four times — M4 rode four patch numbers, M5 landed inside one, M6 spread across seven, and both
+of the milestones closed in 0.8.7 and 0.8.8 did so *out of milestone order, after all of M6*. ⇒ *A
+milestone is a grouping of features, not a window in time.* ⛔ **1.0.0 is not a feature rung**: three
+of its criteria are not code (a green iron burn, `docs/benchmarks.md`, `docs/examples/`), so it can be
+blocked with every rung above it shipped.
+
+### Tests
+
+2,104 assertions (2,016 → 2,104), every new claim mutation-proven — including one mutation that
+**passed** and rewrote its own assertion (the focus grab carried by call order) and one that passed
+and was left documented rather than deleted (the scroll round-trip, behaviour-identical today).
+
 ## [0.8.7] — 2026-09-13 — the REFRESH key, crab on a real kernel again, chrome keys on Ctrl, a flag surface, and a collision you can answer
 
 > `git describe --tags` answered `0.8.6` exactly before a word of this was written — 0.8.6 is tagged

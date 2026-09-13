@@ -3,7 +3,9 @@
 > Milestone plan through v1.0. State lives in [`state.md`](state.md); this file is the
 > **sequencing** — what ships, in what order, against what dependency gates.
 >
-> ⭐ Starting a slot? Read **[Milestones](#milestones)** — that is the release sequencing.
+> ⭐ Starting a slot? Read **[The ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order)** — one
+> ordered list of what ships next, each rung named by what an operator can newly do, with what blocks
+> it and what closes it. Everything else in this file is the reasoning behind those rungs.
 > `handoff.md` has the current state; [`../../CHANGELOG.md`](../../CHANGELOG.md) has what already
 > shipped and why.
 >
@@ -68,7 +70,8 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 ## v1.0 criteria
 
 - [ ] All three canvas directions absorbed — **1a shell is in** (M1–M4) and **1c density is in**
-      (M5–M6, but for columns and the 🦀 button); 1b assisted search is M8
+      (M5–M6; ✅ **columns closed at 0.8.8**, the 🦀 button is rung 3); 1b assisted search is M8.
+      ⭐ The order the rest of this lands in is [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order).
 - [x] Reference coverage ≥ 80 % — **89 %** (2026-09-13; 87 % at 0.7.7). ⚠ It has fallen below the line twice
       mid-milestone and been brought back both times; the roadmap gates it **per release** rather
       than at v1.0, because a criterion checked once gets further away at every cut.
@@ -106,7 +109,7 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 
 ## Milestones
 
-### Shipped — M1 through M6 (v0.5.0 … v0.8.6)
+### Shipped — M1 through M6 (v0.5.0 … v0.8.8)
 
 > ⚠ **COLLAPSED TWICE, FOR THE SAME REASON.** M1–M4 were once 516 of this file's 763 lines, and
 > M5–M6 were 140 of its 631 — shipped-feature narrative, some of it still carrying `(unreleased)`
@@ -121,29 +124,43 @@ at the repo root — a design canvas with three directions, each drawn full-scre
 | **M1.5** The allocation gate | 0.6.0 | **a rendered frame costs the global heap ZERO bytes** (746,440 → 0, across dhancha 0.9.13–0.9.15); `src/app.cyr` extracted from `main.cyr`, which ends in `_entry()` and so could never be tested |
 | **M2** The window is real | 0.6.1 | resize, pointer (click, click-to-focus, double-click), the wheel, held-key repeat, `SETU_SURF_FULL_KEYS` |
 | **M3** A browser you would use | 0.7.0 – 0.7.1 | sorting, selection memory, argv start paths, deferred statting, real columns, directories past the cap (`#101 readdir_at`), the readable selection (`on-accent`) — ⚠ four items at 0.7.0; real columns, the cap and `on-accent` closed their upstream gates at **0.7.1** |
-| **M4** File operations | 0.7.1 – 0.7.5 | copy · move · delete · open · **mkdir · rename**; empty-pane states; the small-window ratification; drag between panes; the transfer tray with rate and ETA; multi-select; **recursive copy and delete**; the context menu; the batch-rename sheet |
-| **M5** Views | 0.7.6 | the preview column with real metadata · header-only image dimensions (no decoder) · **thumbnails** (chitra) · EXIF camera + shot · the **GRID** and **GALLERY** views · the `crab_render` parameter cleanup — and every finding of the first security audit closed |
+| **M4** File operations | 0.7.1 – 0.7.5, **0.8.7** | copy · move · delete · open · **mkdir · rename**; empty-pane states; the small-window ratification; drag between panes; the transfer tray with rate and ETA; multi-select; **recursive copy and delete**; the context menu; the batch-rename sheet — and at **0.8.7** the **overwrite policy** (ask per collision, with an `all` arm) that the write layer had shipped without |
+| **M5** Views | 0.7.6, **0.8.8** | the preview column with real metadata · header-only image dimensions (no decoder) · **thumbnails** (chitra) · EXIF camera + shot · the **GRID** and **GALLERY** views · the `crab_render` parameter cleanup — and every finding of the first security audit closed. At **0.8.8** the **COLUMNS** view (a view mode of one pane, not N miller panes — the write layer's 0/1 is why) and the **one reader for the 9 px advance** that proportional text will need |
 | **M6** Sidebar, volumes, density | 0.8.0 – 0.8.6 | the PLACES sidebar (`b`) and its keyboard route · sidebar **VOLUMES** with capacity bars (agnos `mountlist`#104) · the **menu bar** (`F10`) with `File · Edit · Go · View` and its fit rules · the A/B view switcher · 🦀 Bueller's idle line · pane-header focus · the **pointer routes** (right-click menu, popup pick/dismiss, bar and switcher clicks) · the sidebar's *you are here* marker |
 
 ⚠ **M4 rode four PATCH numbers by operator ruling** (0.7.1 – 0.7.5), M5 landed inside `[0.7.6]`, and
-M6 spread across `0.8.0 – 0.8.6` — none of them took the `v0.9.x` the ladder below once reserved.
+M6 spread across `0.8.0 – 0.8.6` — none of them took the `v0.9.x` this file once reserved.
 **The milestone→version mapping has now been wrong four times. Re-derive the number at each cut**;
-do not trust a heading.
+do not trust a heading. ⛔ **And both closed LATE, out of milestone order** — M4's overwrite policy at
+0.8.7 and M5's columns at 0.8.8, after all of M6 had shipped. ⇒ *A milestone is a grouping of
+features, not a window in time*, which is exactly why the ladder below is ordered by **rung** and not
+by milestone.
 
 #### What is left of the shipped milestones
 
 Everything else in M1–M6 is done. These are the survivors, each with its reason:
 
-- **Columns (miller) view** — M5's last view. ⛔ **Never a dhancha gate** (it is a `BOX_H` of
-  `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight): it is
-  gated on **crab's own two-pane model**, the source/destination pairing the whole M4 write layer
-  rests on. A design question, and the only one of these that is real design work.
-- **Proportional text** — M5's other. ⭐ The upstream half closed 2026-09-02 (rekha 0.3.6's
-  `rekha_advance_width`, dhancha 0.9.27's `dh_text_advance`). ⛔ **What is left is crab's**: it still
-  passes `font = 0`, and `CRAB_COL_CHARW = 9` plus the constants derived from it are **load-bearing
-  correctness, not cosmetics** — `crab_col_chars` decides how many characters a NAME column holds,
-  which drives the `~` truncation rule that exists so two different files never render as one
-  identical row. Under a proportional face `px / 9` over-reports and the marker stops being honest.
+- ✅ **Columns (miller) view — CLOSED (0.8.8).** ⛔ **Never a dhancha gate**; it was gated on
+  **crab's own two-pane model**, and the answer was to stop trying to make it a pane arrangement:
+  COLUMNS is a **view mode of ONE pane** — the active listing plus a narrow CONTEXT column showing
+  the parent with the current directory marked. ⛔⛔ **That is a safety decision, not a layout one.**
+  N independently navigable miller panes make `active_pane` something other than a 0/1, and
+  `active_pane` is a 0/1 that the entire M4 **write layer** resolves every copy, move and delete
+  against: a drag from column k into column k+1 would plan a `crab_fs_move` of a directory **into its
+  own subtree**. K = 2 with one driven column answers that by construction. ⇒ If miller ever goes
+  N-deep, **the gate is the write layer, not the renderer**.
+  ⭐ Proven on QEMU (`crab-columns-test.py`) — the listing itself is inside the agnos `#ifdef` and no
+  host test can reach it.
+- **Proportional text** — M5's other, and **half of the crab side closed in 0.8.8**. ⭐ The upstream
+  half closed 2026-09-02 (rekha 0.3.6's `rekha_advance_width`, dhancha 0.9.27's `dh_text_advance`).
+  ⭐ **0.8.8 gave the 9 ONE reader**: `crab_char_w()` answers `CRAB_COL_CHARW` for the bitmap font and
+  the FONT's own advance for anything else, `crab_text_w()` **measures** a string rather than pricing
+  it at `length × advance`, and every divide now goes through them. crab still passes `font = 0`, so
+  it renders identically — which is exactly why that change was made on its own.
+  ⛔ **What is left is the face itself**, and it is load-bearing correctness rather than cosmetics:
+  `crab_col_chars` decides how many characters a NAME column holds, which drives the `~` truncation
+  rule that exists so two different files never render as one identical row. Under a proportional
+  face `px / advance` over-reports and the marker stops being honest.
   ⚠ `CRAB_COL_NAME_MIN`, `CRAB_COL_SIZE_W`, `CRAB_COL_MTIME_W`, `CRAB_PV_W`, `CRAB_GRID_CELL_W` and
   `CRAB_GAL_CELL_W` all encode character counts at 9 px, and they pick the **wrong layout** rather
   than failing honestly. ⚠ It also invalidates the caret arithmetic (`dh_draw_widget_ink` advances a
@@ -160,10 +177,54 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
   starts to would inherit the mismatch. ⇒ **Fix it in one place or document it in three.**
   ⚠ This bullet said "dhancha's constants are evdev" for four releases; they never were.
 
+### The ladder to 1.0 — what ships next, in order
+
+> ⛔⛆ **THIS SECTION EXISTS BECAUSE "WHAT IS NEXT" KEPT BEING A READING EXERCISE.** The remaining work
+> was spread across *What is left of the shipped milestones*, *Absent affordances*, *Recorded as
+> facts*, M7, M8 and the gate table — every item correct, none of them in an order, so each slot
+> began by re-deriving the sequence from six places. ⇒ **One ordered list. Each rung is a release,
+> named by what an operator can newly do.**
+>
+> ⛔⛔ **THE ORDER IS THE COMMITMENT. THE NUMBER IS NOT.** This file has mapped milestones onto
+> versions wrong **four times** — M4 rode four patch numbers, M5 landed inside one, M6 spread across
+> seven, and the `v0.9.x` / `v0.10.0` these sections once reserved never happened. The numbers below
+> are the *intended shape*, not a promise: **re-derive the number at the cut** from what the release
+> actually contains. What does not move is the sequence and the reason each rung sits where it does.
+>
+> ⚠ **Nothing in [Cross-cutting](#cross-cutting-not-a-milestone--do-these-continuously) appears
+> here**, by the rule at the top of this file: gates, automation, lint policy and doc currency are
+> how crab keeps working, not what crab ships. They ride along with whichever rung is in flight.
+
+| # | rung | what an operator can newly do | blocked by | cut it when |
+|---|---|---|---|---|
+| ✅ | **0.8.8** Columns | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
+| 1 | **0.8.9** Shift | type a capital letter into a name — rename, new folder and the batch sheet all take one | — *(no longer a gate: aethersafha 0.16.25 forwards modifier edges and `crab_key_is_modifier` already ignores them as keystrokes)* | a Shift latch exists and `crab_key_char`'s flag is driven from it at the production call site |
+| 2 | **0.9.0** A real face | read crab in a proportional font | rung 1 only by convenience | `font` is a loaded face, the six character-count constants are **derived** rather than written at 9 px, the caret follows the advance, and the Latin-1 limit is closed or written down |
+| 3 | **0.9.1** The 🦀 button | open the menu row by pressing the crab | rung 2, **or** an icon path that does not need a face | the button draws and `F10` stops being the only door |
+| 4 | **0.9.2** `Go` | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
+| 5 | **0.9.3** Symlinks | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
+| 6 | **0.9.4** A preview that costs nothing | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
+| 7 | **0.9.5** Pointer polish | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
+| ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
+| 8 | **0.10.0** M7 The index | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
+| 9 | **0.11.0** M8 Assisted search | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
+| 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
+
+⭐ **Rungs 1 and 4–7 are ungated and can be reordered freely** — they are one change each and nothing
+downstream waits on them. **Rungs 2 and 3 are a chain** (the face, then the glyph that needs it), and
+**8 and 9 are one chain behind one ruling**. That is the whole dependency structure.
+
+⛔ **1.0.0 is not a feature rung and must not become one.** Its contents are the unchecked boxes in
+*v1.0 criteria*, and three of them are not code: **a green iron burn** (the last was 2026-08-30
+against 0.7.0's tree — and ⛔ **sequencing an iron run is the operator's call, not this file's**),
+`docs/benchmarks.md` written from the harness that already measures, and `docs/examples/` populated.
+⇒ **1.0.0 can be blocked with every rung above it shipped.** Nothing here closes those three; they
+close when someone does them.
+
 ### M7 — The index
 
-⚠ **The `v0.10.0` this section once reserved is not a promise** — M5 landed inside a patch and M6
-across seven. Re-derive the number at the cut.
+⚠ **Rung 8 of the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
+is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the number at the cut.
 
 - **Local index** — `Local · 41,208 files`, `index fresh`, background indexing that
   `pauses on battery`. **Gate: daimon.**
@@ -175,6 +236,8 @@ across seven. Re-derive the number at the cut.
   2.1.2 exists locally** with vector/RAG stores. ⚠ This is the oldest open item in the file.
 
 ### M8 — Assisted search (the v1.0 surface)
+
+⚠ **Rung 9 of the ladder above**, and the last feature rung before 1.0.
 
 1b, **as a mode over every view**.
 
@@ -207,13 +270,12 @@ across seven. Re-derive the number at the cut.
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| Columns (miller) view | M5 | ⛔ **NOT dhancha** — it is a `BOX_H` of `LIST`s, each already carrying its own selection, scroll and toolkit-painted highlight. **Gated on crab's own two-pane model**: a design question, not a dependency. | 2026-08-31 ⭐ re-derived |
-| Proportional text | M5 | ⭐ **UPSTREAM HALF CLOSED 2026-09-02** — rekha 0.3.6 adds `rekha_advance_width` / `rekha_char_advance_px`; dhancha 0.9.27 consumes them in `dh_text_advance`, keeping the hard-coded `advf = (h * 6) / 10` only as the no-metrics fallback. crab declares both floors. ⛔ **What is left is crab-side**: `font = 0` and the 9 px constants — see *What is left of the shipped milestones*. | 2026-09-02 ⭐ done upstream |
-| The 🦀 chrome button | M6 | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or proportional text. | 2026-09-01 |
-| Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
-| Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
-| Duplicate detection | M7 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
-| Assisted search | M8 | **daimon** local-only embedding | 2026-08-31 |
+| Proportional text | M5 → rung 2 | ⭐ **UPSTREAM HALF CLOSED 2026-09-02** — rekha 0.3.6 adds `rekha_advance_width` / `rekha_char_advance_px`; dhancha 0.9.27 consumes them in `dh_text_advance`, keeping the hard-coded `advf = (h * 6) / 10` only as the no-metrics fallback. crab declares both floors. ⭐ **0.8.8 closed the plumbing half crab-side** (`crab_char_w` / `crab_text_w`, one reader for the 9). ⛔ **What is left is passing a face** and deriving the six character-count constants from it — gated on nothing. | 2026-09-13 ⭐ re-derived |
+| The 🦀 chrome button | M6 → rung 3 | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from rung 2. | 2026-09-01 |
+| Sidebar — SMART FOLDERS + TAGS | M6→M7 → rung 8 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
+| Local index · tags · smart folders | M7 → rung 8 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
+| Duplicate detection | M7 → rung 8 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
+| Assisted search | M8 → rung 9 | **daimon** local-only embedding | 2026-08-31 |
 
 ⭐ **Closed gates are not listed.** GRID (dhancha 0.9.25), the menu bar's strip (0.9.26), thumbnails
 (chitra, an operator ruling on price), sidebar PLACES and VOLUMES (agnos `mountlist`#104, minted
@@ -232,10 +294,10 @@ answer should **mint `mountlist`#104 rather than widen `mount`#11**, whose unuse
 carry stale values rather than 0. ⇒ **Declining to approximate is what got the right primitive
 built.** ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #23.*
 
-**Ungated and available now**, and the operator's order as of 2026-09-13: **the overwrite policy**
-(decided — ask per collision), then **columns** (M5's design question), **proportional text** (M5's
-crab-side half) and the *Small, cheap, unblocked* list. ⚠ **daimon is deliberately NOT in that
-order** — it stays open, and M7/M8 stay gated on it.
+**Ungated and available now**: see [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order),
+which is now the single ordered answer to "what is next". The overwrite policy (0.8.7) and columns
+(0.8.8) closed out of that order; rung 1 is **Shift**. ⚠ **daimon is deliberately NOT in the rung
+order** — it is a ruling the operator owns, and M7/M8 stay gated behind it.
 
 ⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
 and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the dependency or stop
@@ -290,6 +352,7 @@ promising the AI arc** — open since the roadmap was written.
   volumes render as two identical rows, and `Go ▸ Parent` would ship enabled-but-dead at `/`.
   ⇒ **The right shape is a thin projection over the sidebar's keyboard route** (`crab_sb_row_of` /
   `crab_sb_path`), capped by `crab_mb_drop_fit`. Recorded with its reason, as `Tags`/`Index` are.
+  ⇒ **Rung 4** — the shape is decided, so what is left is the three conditions in the ladder.
 
 ### Recorded as facts, never as work
 
@@ -297,16 +360,17 @@ promising the AI arc** — open since the roadmap was written.
   0 at its only production call site; the map already takes the flag. ⛔ **NO LONGER GATED — this is
   crab's own work now.** aethersafha 0.16.25 forwards modifier edges on purpose so a client can learn
   Shift, and crab already sees them (`crab_key_is_modifier` ignores them as keystrokes). What is
-  missing is a crab-side Shift latch, not a wire.
+  missing is a crab-side Shift latch, not a wire. ⇒ **Promoted out of this section: it is rung 1.**
 - **`sys_lstat` is vendored and deliberately never called**, so symlinks stay invisible to the write
   layer. The gate closed upstream at cyrius 6.5.37; what remains is a decision about what crab should
-  DO with the answer — refuse, report, or recreate.
+  DO with the answer — refuse, report, or recreate. ⇒ **Rung 5.**
 - **The preview's dimension + EXIF read is a synchronous 64 KiB open/read/close on the SELECTION
   path**, against crab's own rule that reads belong on the idle tick. Memoised, but arrowing through
-  a directory of large JPEGs pays per entry.
+  a directory of large JPEGs pays per entry. ⇒ **Rung 6.**
 - **The batch-rename pattern's two operators, `#` and `*`, cannot be typed** — the sheet advertises a
   language its own input field cannot produce (`crab_key_char` maps neither).
 - **The middle mouse button does nothing**, and pointer MOTION does not move a popup's highlight.
+  ⇒ **Rung 7** — do both, or write both down as deliberate.
 - **Compositor-side focus is a left-button gesture**, so a right-click reaches an unfocused crab
   without focusing its window — aethersafha's policy, not crab's.
 
@@ -388,10 +452,12 @@ why, is recorded in `ci.yml` itself.
   edit in the most sensitive file" framing no longer holds; the cost is now mostly in tests.
   **Re-count at the cut, never quote this number.** ⛔ Its own change, suite run before and after.
 - **Bring the agnos/iron harness into this repo.** Both real defects crab has ever shipped were
-  agnos-runtime behaviour no host test can see. ⭐ A third harness joined the two in
-  `agnos/scripts/harness/` on 2026-09-13 — `crab-pointer-test.py`: the pointer routes, the refresh
-  key, and the chrome-key contract as a **gate** (bare F10 must open crab's bar, bare Esc must not
-  quit, Ctrl+Q must). Still there, still not here. ⚠ Its header carries seven lessons about driving
+  agnos-runtime behaviour no host test can see. ⭐ Two more joined the pair in
+  `agnos/scripts/harness/` on 2026-09-13 — `crab-pointer-test.py` (the pointer routes, the refresh
+  key, and the chrome-key contract as a **gate**: bare F10 must open crab's bar, bare Esc must not
+  quit, Ctrl+Q must) and `crab-columns-test.py` (0.8.8: `g` reaches the fourth view, the parent is
+  listed and named, **and the memo holds** — redraws must not re-list, which is the arm that keeps a
+  readdir off the render path). Still there, still not here. ⚠ Its header carries seven lessons about driving
   crab under QEMU — the Enter burst spawns a second compositor; DOWN bursts wrap; hold keys across
   the per-frame drain; the pin needs its own frame or the cursor folds to (0,0); derive where to
   press to MISS a popup; a pick can open a sheet whose scrim blocks the pointer; report which verb

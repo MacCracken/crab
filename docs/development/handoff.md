@@ -1,3 +1,61 @@
+# Handoff — **0.8.8 cut: the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
+> on the remote). **0.8.7 and 0.8.8 are both CUT and neither is committed** — `VERSION` reads 0.8.8,
+> the CHANGELOG headers agree, and ⛔ the commit, the tag and the push are the operator's.
+>
+> 1. ⭐⭐ **COLUMNS — M5's last view, and its design question answered.** `g` cycles a fourth time and
+>    the active pane grows a narrow **context column** showing the parent with the current directory
+>    marked. ⛔⛔ **It is a view mode of ONE pane, and that is a SAFETY decision, not a layout one.**
+>    N independently navigable miller panes make `active_pane` something other than a 0/1 — and
+>    `active_pane` is a 0/1 that the **entire M4 write layer** resolves every copy, move and delete
+>    against. A drag from column k into column k+1 would plan a `crab_fs_move` of a directory **into
+>    its own subtree**. K = 2 with one driven column answers it by construction, and the canvas agrees
+>    (pane A as columns, pane B as the preview). ⇒ **If miller ever goes N-deep, the gate is the write
+>    layer, not the renderer.** The context column holds no focus (dhancha's MUTED-vs-ACCENTED
+>    selection is the whole answer to *which listing do my arrows drive*), is not in `crab_hit`'s walk
+>    (a pointer path means an answer to *which pane is this* — the 0/1 again), is **dropped rather
+>    than squeezed** below 186 px, and at `/` is not drawn at all.
+> 2. ⛔⛆ **AND LOOKING FOR THE FOURTH VIEW'S SEAT FOUND THE GUARD THAT WAS MEANT TO PROTECT IT.**
+>    `crab_view_is_grid` was added in 0.8.2 under a comment reading *"one predicate, asked in all
+>    three places, so a fourth view cannot be added and half-wired."* It was asked in `main.cyr`'s
+>    three ARROW sites and **nowhere else** — `crab_pane` and `crab_render`'s scroll round-trip each
+>    still tested `view != CRAB_VIEW_LIST`. A fourth id would have **rendered as a GRID, scrolled as a
+>    GRID, and taken LIST arrow semantics**: the same defect 0.8.2 fixed, inverted, in the file that
+>    introduced the fix. ⇒ ***A negation is not a predicate.*** Ask what a new id would actually do
+>    **before** adding one; it is the only time that question is cheap.
+> 3. ⭐ **The 9 px advance has ONE reader now.** `crab_char_w()` answers `CRAB_COL_CHARW` for the
+>    bitmap font and the **font's own** advance for anything else; `crab_text_w(s)` **measures** a
+>    string rather than pricing it at `length × advance`. crab still passes `font = 0`, so it renders
+>    identically — which is exactly why it was done on its own. ⚠ **What the suite cannot say is said
+>    at the assertions**: at `font = 0` no host test can tell *"asks the font"* from *"divides by the
+>    constant"*; deleting `crab_font = font` leaves the suite green and the test records that rather
+>    than implying a gate. **What is left of proportional text is passing a real face** — rung 2.
+> 4. ⭐⭐ **QEMU: `agnos/scripts/harness/crab-columns-test.py` (new), PASS on its first run.** `g` ×4
+>    reaches COLUMNS; the parent of `/bin` is listed and titled `/`; **four redraws re-listed nothing**
+>    (the memo arm — a readdir is not a render-path operation, and without the memo this view would
+>    readdir plus stat-every-entry on every keypress, pointer move and idle tick); the root's refusal
+>    is memoised; leaving the view stops the listing; no faults. ⛔ **The listing could not be gated
+>    any other way**: `crab_readdir_into`'s body is inside `#ifdef CYRIUS_TARGET_AGNOS` with no
+>    `#else`, so on the host it returns 0 entries for **every** path. A first draft of the suite built
+>    a real tree under `build/` and asserted the listing; every assertion failed against an empty
+>    listing and a clean error code, which is what that `#ifdef` looks like from a host test.
+> 5. 🗺 **The roadmap has an order.** [The ladder to 1.0](roadmap.md) — nine rungs plus one ruling,
+>    each named by what an operator can newly do, with what blocks it and what closes it.
+>    ⛔ **The order is the commitment; the number is not** (the milestone→version map has been wrong
+>    four times, and both 0.8.7 and 0.8.8 closed milestones **out of order, after all of M6**).
+>    ⭐ **Rung 1 is Shift** — no longer gated: aethersafha 0.16.25 forwards modifier edges and
+>    `crab_key_is_modifier` already ignores them as keystrokes, so what is missing is a crab-side
+>    latch, not a wire. ⚠ **daimon is deliberately not a rung** — it is a ruling the operator owns.
+>
+> **Suite 2104 / 0** (+88 over 0.8.7), render_test 53 / 0. Host **1,067,440 B** · agnos **1,112,400 B**. Fourteen mutations
+> planted; ⚠ **two of them PASSED and both are recorded rather than deleted** — the context column's
+> focus grab (the assertions were being carried by CALL ORDER, so the test now asks `crab_col_ctx`
+> directly: *an order is not a contract*) and the scroll round-trip (behaviour-identical today because
+> `dh_grid_*` on a vertical LIST reduces exactly to `dh_list_*`; fixed anyway, and the test says which
+> claim it can make).
+> ⚠ **The 0.8.7 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.7 cut: a collision you can answer, a flag surface, `u` refreshes, chrome keys on Ctrl, and crab proven on a real kernel.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
@@ -45,13 +103,11 @@
 >
 > ⭐ **0.8.7 IS CUT** (operator direction) — the overwrite policy, the flag surface, the REFRESH key,
 > the chord contract and the QEMU runs. ⛔ Commit, tag and push are the operator's.
-> ⭐ **Next, in the operator's order (2026-09-13):** **columns** (M5's design question on the two-pane
-> model — never a dhancha gate), **proportional text** (crab-side: `font = 0` and the 9 px constants,
-> which are load-bearing for the truncation rule, not cosmetics), and the ***Small, cheap,
-> unblocked*** list (drop the redundant `net` declaration; park `--win`; give the stat trace an arm
-> that works on agnos; correct the CHANGELOG's harvested-deferral count).
-> ⚠ **daimon is deliberately NOT in that order** — M7/M8 stay gated on it and it stays open. ⛔ **The keys gate is the one to settle first**: until
-> aethersafha decides, every keyboard-only surface crab builds is built for a key that cannot arrive.
+> ⚠ **Superseded by 0.8.8 above**: columns and the crab-side plumbing half of proportional text both
+> closed there, and "what is next" is now [the ladder to 1.0](roadmap.md) rather than a sentence in
+> this block. The ***Small, cheap, unblocked*** list is still open and still rides along (drop the
+> redundant `net` declaration; park `--win`; give the stat trace an arm that works on agnos; correct
+> the CHANGELOG's harvested-deferral count).
 > ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
 
 # Handoff — **0.8.6 cut: `View` is filled, and M6's six interaction gaps are all closed.**
@@ -326,7 +382,7 @@ Full accounting in [`../../CHANGELOG.md`](../../CHANGELOG.md).
 | `crab_render` | **32 positional parameters → one record.** Filled by `crab_rs_pane` (11 params, indexed by pane), `_op`, `_chrome`, `_preview`, `_dims`. ⛔ The point is not brevity: at 32 `i64` arguments across 23 call sites, a miscounted comma shifted everything after it and still compiled. And `crab_rs_reset` now owns the three **`-1` = cannot be said yet** defaults that every one of those sites used to spell by hand — `0` there would make the tray render a real `0 B/s`. |
 | Preview column | `p` toggles it. NAME · KIND · SIZE · MODIFIED · DIMENSIONS. ⛔ Width rule **derived** from crab's own column rule (*it may not cost a pane its SIZE column* → 303 px), not lifted from the canvas. Refuses out loud below that, via `crab_set_notice`. |
 | Security audit | [`docs/audit/2026-08-31-audit.md`](../audit/2026-08-31-audit.md), crab's first — a v1.0 criterion. **All four findings closed in 0.7.6.** ⛔ F1 was a TRUST-MODEL change: gallery view decoded every image in a folder merely opened (measured 8 decodes vs 1 for a selection), running ~22,500 lines of `chitra`+`sankoch` on attacker-chosen bytes. Now it parses only what is on screen. ⛔ F2's fix is the ORDER: spawn first, read the magic only to explain a failure — there is no check left to race, and agnos has no fd-spawn to close it any other way. ⛔⛔ **F3's first draft was a FALSE finding and is kept with its correction** — an audit reporting a bug that is not there spends the reader's trust. |
-| Gallery view | `g` cycles list → grid → gallery. ⛔ **The view never triggers a decode — the idle tick does, one per tick**, so opening a gallery of a thousand files costs one frame. Stops three ways: the walk ends, refusals are cached, the budget refuses once spent. Backed by a 64-slot ~1.07 MB allocate-once cache holding results AND refusals. ⛔ The cache lives in `ui.cyr` because the render path looks one up per cell — **fifth time that rule decided a placement**. |
+| Gallery view | `g` cycles list → grid → gallery → columns (0.8.8). ⛔ **The view never triggers a decode — the idle tick does, one per tick**, so opening a gallery of a thousand files costs one frame. Stops three ways: the walk ends, refusals are cached, the budget refuses once spent. Backed by a 64-slot ~1.07 MB allocate-once cache holding results AND refusals. ⛔ The cache lives in `ui.cyr` because the render path looks one up per cell — **fifth time that rule decided a placement**. |
 | Grid view | `g` toggles both panes onto dhancha 0.9.25's `GRID`. ⛔ Cell size DERIVED from the NAME column's floor, so the view changes only how many entries fit. No column header (a grid shows only names). ⛔ **Arrows navigate in grid mode; `h`/`l` still switch panes** — list mode unchanged. ⚠ **Not a gallery**: 40 thumbnail cells is ~28 MB of permanent decode against a 32 MB ceiling. |
 | EXIF | CAMERA and SHOT, both byte orders, verified against an independent parser. ⛔⛔ **The most attacker-controlled parser crab has** — byte order, entry count and value offsets are ALL chosen by the file. Sub-IFD followed exactly once, never recursively. ⚠ Its fuzz round was **vacuous at first**: an out-of-bounds read does not crash on a bump allocator over a large mapped heap, so four planted bounds bugs survived. A printable poison tail fixed it — and the mutator had to be stopped from writing the poison byte itself. |
 | Thumbnails | 64x64, PNG/JPEG/GIF/BMP, **decoded off the idle tick** — at most one per tick, because chitra's entry point is a single call that cannot be resumed the way `crab_copy_step` can. Memoised on the full path **including a remembered refusal**; a closed preview decodes nothing. ⛔ Four differently-named nothings, because "too large" is a property of the FILE, "budget spent" of the SESSION, and "cannot decode" of this BUILD. |

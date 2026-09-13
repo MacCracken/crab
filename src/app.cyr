@@ -1653,6 +1653,46 @@ fn crab_leaf_name(path, out, cap): i64 {
     return crab_strcpy_n(out, path + last + 1, cap);
 }
 
+# @public — the LENGTH of `path`'s parent prefix, or -1 when `path` has no parent.
+#
+# ⛔⛆ THIS IS `crab_ascend`'S OWN ARITHMETIC, LIFTED OUT SO THERE IS ONE OF IT (0.8.8). The COLUMNS
+# view must show the directory Backspace would land in — if it derived that separately, the context
+# column and the ascend key would be free to disagree, and the operator would be reading one parent
+# while the key took them to another. Two derivations of one fact are how a UI starts lying; the
+# sidebar's `crab_sb_focus_eff` and the pane's `crab_sidebar_shown` are the same lesson.
+# ⚠ THE ROOT HAS NO PARENT, and -1 is a real answer rather than an error — exactly as
+# `crab_leaf_name` reports no leaf for `/`. Ascending stops there and the columns view shows no
+# context column, because there is honestly none to show.
+# ⚠ A LENGTH, NOT A STRING, because `crab_ascend` truncates IN PLACE and a string-returning helper
+# would force it through a scratch buffer it does not need. `crab_parent_path` is the copying form.
+fn crab_parent_len(path): i64 {
+    if (path == 0) { return 0 - 1; }
+    var n = strlen(path);
+    if (n <= 1) { return 0 - 1; }                 # "" or "/" — no parent
+    var last = 0;
+    var j = 0;
+    while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
+    # ⚠ A TOP-LEVEL DIRECTORY'S PARENT IS "/", WHICH IS ONE CHARACTER LONG, NOT ZERO. Truncating
+    # `/usr` at the slash's index would produce the empty string, and `readdir("")` is not `/`.
+    if (last == 0) { return 1; }
+    return last;
+}
+
+# @public — copy `path`'s parent directory into `dst` (bounded by `cap`). -> its length, or -1.
+# ⚠ The non-mutating form of `crab_parent_len`, for callers that must keep `path` intact — the
+# COLUMNS view lists the parent while still standing in the child.
+fn crab_parent_path(dst, cap, path): i64 {
+    if (dst == 0) { return 0 - 1; }
+    if (cap <= 0) { return 0 - 1; }
+    var len = crab_parent_len(path);
+    if (len < 0) { return 0 - 1; }
+    if (len >= cap) { return 0 - 1; }             # ⚠ refuse rather than truncate: a shortened path is a DIFFERENT directory
+    var i = 0;
+    while (i < len) { store8(dst + i, load8(path + i)); i = i + 1; }
+    store8(dst + len, 0);
+    return len;
+}
+
 # Index of the entry named `name`, or -1 when it is not in the listing.
 #
 # ⚠ -1 IS THE HONEST ANSWER AND THE CALLER MUST HANDLE IT. The directory can genuinely be gone —
@@ -2129,6 +2169,11 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
 # is deferred, and a refresh is exactly when it is pending.
 fn crab_relist_keep_thumbs(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     crab_pv_forget();
+    # ⛔ AND THE COLUMNS VIEW'S CONTEXT LISTING GOES WITH IT (0.8.8) — sited here for exactly the
+    # reason `crab_pv_forget` is: every write crab makes and every refresh the operator asks for
+    # passes through this one function, and invalidating at each of those call sites instead would be
+    # six chances to forget. See `crab_cols_forget`.
+    crab_cols_forget();
     var cnt = crab_readdir_into(path, buf);
     crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
@@ -3815,14 +3860,193 @@ fn crab_fs_msg(rc): i64 {
 }
 
 fn crab_ascend(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
-    var n = strlen(path);
-    if (n <= 1) { return -1; }                       # already at "/"
-    var last = 0;
-    var j = 0;
-    while (j < n) { if (load8(path + j) == 47) { last = j; } j = j + 1; }
-    if (last == 0) { store8(path + 1, 0); } else { store8(path + last, 0); }
+    # ⚠ THE TRUNCATION POINT COMES FROM `crab_parent_len` AND NOWHERE ELSE (0.8.8), so the COLUMNS
+    # view's context column lists exactly the directory this key lands in. See that function.
+    var plen = crab_parent_len(path);
+    if (plen < 0) { return -1; }                     # already at "/"
+    store8(path + plen, 0);
     var cnt = crab_readdir_into(path, buf);
     crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
+    return cnt;
+}
+
+# =================================================================================================
+# 🗂 THE COLUMNS VIEW'S CONTEXT LISTING (0.8.8)
+# =================================================================================================
+#
+# ⭐⭐ WHAT THE COLUMNS VIEW IS, STATED BEFORE THE CODE, BECAUSE THE SHAPE WAS THE WHOLE DESIGN
+# QUESTION. It is a **view mode of ONE pane**, not a second pane arrangement: the active pane grows
+# a narrow CONTEXT column to its left showing the parent directory, with the directory you are
+# standing in marked. The listing you drive is unchanged — same LIST, same selection, same hit-test,
+# same verbs.
+#
+# ⛔⛔ AND THAT IS A SAFETY DECISION, NOT A LAYOUT ONE. The obvious alternative — miller columns as
+# N independently navigable panes — makes `active_pane` something other than a 0/1, and `active_pane`
+# is a 0/1 that crab's WRITE layer trusts: every copy/move/delete resolves its source and destination
+# from it. A drag from column k into column k+1 would plan a `crab_fs_move` of a directory INTO ITS
+# OWN SUBTREE. That is a data-loss question wearing a layout question's clothes, and it is not
+# answered by making the renderer cleverer. K = 2 and one driven column answers it by construction.
+# ⇒ If miller columns ever become N-deep, the gate is the write layer, not this file.
+#
+# ⚠ THE CONTEXT COLUMN IS A DISPLAY. It is not in `crab_hit`'s walk and holds no focus, exactly like
+# the A/B switcher strip: giving it a pointer path means giving it its own hit function and its own
+# answer to "which pane is this", and that is the 0/1 again.
+
+# @public — list the PARENT of `path` into `buf`, the way an ascend would. -> the entry count, or -1
+# at the root (where there is no parent and the view shows no context column).
+#
+# ⛔ THE SAME PIPELINE AS `crab_ascend`, DELIBERATELY: readdir, stat-for-listing, sort by the live
+# `crab_sort_mode`. A context column built by a cheaper path — unsorted, or sorted by name while the
+# pane sorts by size — would show the operator a parent whose ORDER changes the moment they press
+# Backspace into it. The column exists to say "here is where you are"; an order the key does not
+# agree with says it wrong.
+# ⚠ `ppath` IS THE CALLER'S, AND IS NOT `pathscr`. `crab_stat_for_listing` uses `pathscr` as its own
+# join scratch and would overwrite the parent path mid-listing.
+fn crab_cols_list(path, ppath, buf, sizes, mtimes, pathscr, statbuf): i64 {
+    if (crab_parent_path(ppath, CRAB_PATH_MAX, path) < 0) { return 0 - 1; }
+    var cnt = crab_readdir_into(ppath, buf);
+    crab_stat_for_listing(ppath, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
+    crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);
+    return cnt;
+}
+
+# @public — which row of a context listing is the directory `path` itself? -> the index, or -1.
+#
+# ⚠ -1 IS ORDINARY, NOT AN ERROR, and the renderer must draw the column with NO row marked. The
+# parent can legitimately not contain us: a mount point, a bind mount, a directory renamed under us
+# between the two readdirs, or a path reached through a symlink. Guessing row 0 there would put the
+# you-are-here marker on a SIBLING — the one thing this column exists to get right.
+fn crab_cols_here(buf, n, path, namescr): i64 {
+    if (buf == 0) { return 0 - 1; }
+    if (n <= 0) { return 0 - 1; }
+    if (crab_leaf_name(path, namescr, CRAB_NAME_MAX) < 0) { return 0 - 1; }
+    return crab_index_of(buf, n, namescr);
+}
+
+# --- the context listing's memo ------------------------------------------------------------------
+#
+# ⛔⛔ A READDIR IS NOT A RENDER-PATH OPERATION, AND THE COLUMNS VIEW WOULD MAKE IT ONE. Without this
+# memo `crab_cols_sync` would readdir the parent AND stat every entry in it on EVERY FRAME — and
+# frames are produced on every keypress, every pointer move and every idle tick. The pane listings
+# themselves are taken once per navigation for exactly this reason; a context column that re-listed
+# continuously would be the most expensive thing in the app and would be so for a strip of names
+# that changes only when the operator moves.
+# ⇒ The listing is keyed on the PATH it is for. Same path, same answer, no syscalls.
+# ⚠ MODULE STATE, not parameters threaded through ten call sites — the same judgement `crab_sort_mode`
+# makes one file over. The scratch is allocated once and reused; `alloc` is a bump allocator with no
+# `free()`, so a per-call allocation here would leak 384 B per frame.
+var crab_cols_ppath = 0;         # the PARENT path, listed
+var crab_cols_namescr = 0;       # scratch for the child's own name (the you-are-here lookup)
+var crab_cols_title = 0;         # the parent's own name — the column's header text
+var crab_cols_cur = 0;           # the path the memo is FOR
+var crab_cols_n = 0 - 1;         # -1 = no listing memoised
+var crab_cols_sel = 0 - 1;
+# ⭐ THE LISTING ITSELF — a third set of pane buffers, and the reason they live here rather than
+# beside `lbuf`/`rbuf` in `src/main.cyr`.
+# ⛔ 80 KiB IS NOT NOTHING, AND AN OPERATOR WHO NEVER OPENS THE COLUMNS VIEW MUST NOT PAY IT. Sited
+# in `main.cyr` this would be allocated at startup, unconditionally, on a bump allocator with no
+# `free()` — a permanent cost for a view most sessions never enter. Allocated on first use it is
+# paid by the operator who asked for it, once, and then reused for the life of the process.
+var crab_cols_buf = 0;
+var crab_cols_sizes = 0;
+var crab_cols_mtimes = 0;
+
+# ⚠ CALLED ONLY FROM THE COLUMNS BRANCH OF `crab_cols_sync`, which is what makes the allocation lazy.
+# Moving this call above that branch would quietly restore the unconditional cost.
+fn crab_cols_scratch(): i64 {
+    if (crab_cols_ppath == 0) { crab_cols_ppath = alloc(CRAB_PATH_MAX); }
+    if (crab_cols_namescr == 0) { crab_cols_namescr = alloc(CRAB_NAME_MAX); }
+    if (crab_cols_title == 0) { crab_cols_title = alloc(CRAB_NAME_MAX); }
+    if (crab_cols_cur == 0) { crab_cols_cur = alloc(CRAB_PATH_MAX); store8(crab_cols_cur, 0); }
+    if (crab_cols_buf == 0) { crab_cols_buf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ); }
+    if (crab_cols_sizes == 0) { crab_cols_sizes = alloc(CRAB_MAX_ENTRIES * 8); }
+    if (crab_cols_mtimes == 0) { crab_cols_mtimes = alloc(CRAB_MAX_ENTRIES * 8); }
+    return 0;
+}
+
+# @public — the memo's own state, for the suite: the path it is FOR and the entry count it holds.
+#
+# ⚠ THE DIFFERENCE BETWEEN -1 AND 0 IS THE WHOLE POINT. A memoised **0** is "I looked, and there is
+# no context column here" — the answer at the root — and it is a HIT. **-1** is "I have not looked",
+# and it is a miss. Collapsing them would make standing at `/` retry the listing on every frame.
+# ⛔ THIS ALLOCATES NOTHING, AND THAT IS DELIBERATE. A first draft called `crab_cols_scratch()` here
+# so the path pointer would never be null — which would have made a read-only accessor allocate the
+# view's 80 KiB of listing buffers, defeating the laziness the allocation site exists to provide.
+# ⇒ **0 means "nothing memoised and nothing allocated yet"**, and a caller must handle it.
+fn crab_cols_memo_path(): i64 { return crab_cols_cur; }
+fn crab_cols_memo_n(): i64 { return crab_cols_n; }
+
+# @public — drop the memoised context listing.
+#
+# ⛔ CALLED FROM `crab_relist_keep_thumbs`, WHICH IS THE ONE PLACE EVERY WRITE AND EVERY REFRESH
+# PASSES THROUGH — the same siting `crab_thumb_forget` earned, and for the same reason: invalidating
+# at each call site is six chances to forget and no gate that would notice. The cost of being wrong
+# in this direction is one readdir; the cost of the other is a context column naming a directory that
+# was renamed out from under it.
+fn crab_cols_forget(): i64 {
+    crab_cols_n = 0 - 1;
+    crab_cols_sel = 0 - 1;
+    if (crab_cols_cur != 0) { store8(crab_cols_cur, 0); }
+    return 0;
+}
+
+# @public — refresh the COLUMNS view's context listing if it is stale, and publish it on `rs`.
+# -> the context entry count (0 = no column: not in the view, at the root, or an empty parent).
+#
+# ⛔ IT PUBLISHES AN EMPTY LISTING WHEN THE VIEW IS NOT COLUMNS, rather than leaving whatever the
+# record held. `crab_rs_reset` is not called between frames — the record is a carrier that is
+# refilled — so a stale `CBUF` from a frame that WAS in columns view would point at a listing for a
+# directory the operator has since left, and `crab_render` would draw it as context for where they
+# are now. Every field this function owns, it writes on every path.
+fn crab_cols_sync(rs, view, active, lpath, rpath, pathscr, statbuf): i64 {
+    if (view != CRAB_VIEW_COLUMNS) {
+        crab_rs_cols(rs, 0, 0, 0, 0 - 1);
+        return 0;
+    }
+    crab_cols_scratch();
+    var buf = crab_cols_buf;
+    var sizes = crab_cols_sizes;
+    var mtimes = crab_cols_mtimes;
+    var path = lpath;
+    if (active == 1) { path = rpath; }
+    # ⚠ THE MEMO HIT STILL REPUBLISHES. The record does not remember across frames and the renderer
+    # reads only what it is handed, so a hit skips the SYSCALLS, not the handoff.
+    if (crab_cols_n >= 0) {
+        if (crab_streq_n(crab_cols_cur, path, CRAB_PATH_MAX) == 1) {
+            crab_rs_cols(rs, crab_cols_title, buf, crab_cols_n, crab_cols_sel);
+            return crab_cols_n;
+        }
+    }
+    var cnt = crab_cols_list(path, crab_cols_ppath, buf, sizes, mtimes, pathscr, statbuf);
+    if (cnt < 0) {
+        # ⚠ AT THE ROOT THERE IS NO PARENT, and that is memoised too — otherwise standing at `/` in
+        # the columns view would attempt a listing on every frame forever.
+        crab_cols_n = 0;
+        crab_cols_sel = 0 - 1;
+        crab_strcpy_n(crab_cols_cur, path, CRAB_PATH_MAX);
+        crab_rs_cols(rs, 0, 0, 0, 0 - 1);
+        crab_say("crab: columns none\n");
+        return 0;
+    }
+    crab_cols_n = cnt;
+    crab_cols_sel = crab_cols_here(buf, cnt, path, crab_cols_namescr);
+    # ⭐ THE ONE SERIAL LINE THIS VIEW EMITS, AND IT IS ON THE **MISS** PATH DELIBERATELY. Everything
+    # below `crab_cols_list` is inside `#ifdef CYRIUS_TARGET_AGNOS` by the time it reaches a readdir,
+    # so no host test can say the listing happened at all — this is the QEMU harness's dispositive
+    # oracle, the same role `crab: cd` plays for navigation. ⛔ On the MISS, not every frame: a hit
+    # costs no syscalls and printing there would say "crab listed the parent" once per idle tick.
+    crab_say("crab: columns ");
+    # ⚠ THE HEADER IS THE PARENT'S OWN NAME, NOT ITS PATH: the column is 90 px — ten characters — and
+    # a truncated `/home/macro/Repos` says less than `Repos` does. ⛔ The parent of a top-level
+    # directory IS `/`, which `crab_leaf_name` correctly reports as having no leaf; that is the one
+    # case where the path and the name are the same string.
+    if (crab_leaf_name(crab_cols_ppath, crab_cols_title, CRAB_NAME_MAX) < 0) {
+        crab_strcpy_n(crab_cols_title, "/", CRAB_NAME_MAX);
+    }
+    crab_say(crab_cols_title);
+    crab_say("\n");
+    crab_strcpy_n(crab_cols_cur, path, CRAB_PATH_MAX);
+    crab_rs_cols(rs, crab_cols_title, buf, cnt, crab_cols_sel);
     return cnt;
 }

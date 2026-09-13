@@ -135,9 +135,14 @@ than a second set of verbs — every entry maps to a key binding that already ex
 tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
 Esc cancels them**, so a recursive copy never freezes the window.
 
-**Three views** (M5): `g` cycles **list → grid → gallery**. The grid is names, three columns instead
-of one; the **gallery** adds a thumbnail above each name. ⚠ In grid and gallery modes the arrow keys
-navigate and `h`/`l` switch panes; in list mode nothing changes.
+**Four views** (M5): `g` cycles **list → grid → gallery → columns**. The grid is names, three columns
+instead of one; the **gallery** adds a thumbnail above each name. ⚠ In grid and gallery modes the
+arrow keys navigate and `h`/`l` switch panes; in list mode nothing changes.
+**Columns** shows the listing with a narrow **context column** beside it naming the parent directory,
+with the folder you are standing in marked — so you can see where you are without leaving. ⚠ It is a
+view of **one** pane (the A/B switcher still moves between them) and it shows nothing at `/`, where
+there is honestly no parent. ⚠ In a window too narrow to hold both honestly the context column is
+**dropped, not squeezed** — you keep the listing.
 ⛔ **A gallery never blocks on decoding.** Pictures are decoded one per idle tick and cached, so
 opening a folder of a thousand files costs one frame and the thumbnails fill in as you look at them —
 and stop on their own when the session's decode budget is spent.
@@ -166,8 +171,8 @@ happened rather than showing a blank square.
   ⚠ **THE SIDEBAR AND VOLUMES BOTH SHIP NOW — this bullet said "and no sidebar" and named the
   `mount`/`umount` stubs as "the one genuine block left", and it is the THIRD time this section has
   been wrong.** `b` opens PLACES; **VOLUMES** lists each mounted filesystem over a capacity bar, on
-  agnos **`mountlist`#104** (0.8.1) for enumeration and `statfs`#103 for capacity. Grid and gallery
-  ship too — see `g` above. ⇒ Under-claiming is the same failure as over-claiming, and this section's
+  agnos **`mountlist`#104** (0.8.1) for enumeration and `statfs`#103 for capacity. Grid, gallery and
+  columns all ship — see `g` above. ⇒ Under-claiming is the same failure as over-claiming, and this section's
   own header says so.
 - **The middle mouse button does nothing.** Right-click opens the context menu over the row under
   the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors

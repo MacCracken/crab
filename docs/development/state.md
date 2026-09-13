@@ -24,14 +24,32 @@
 
 ## Version
 
-**0.8.7 IS CUT** — `VERSION` reads `0.8.7` and the CHANGELOG header agrees, on operator direction,
+**0.8.8 IS CUT** — `VERSION` reads `0.8.8` and the CHANGELOG header agrees, on operator direction,
 2026-09-13. ⛔ **The commit, the tag and the push are the operator's**; until `git ls-remote --tags`
-shows `0.8.7`, **0.8.6** (2026-09-13, `249279f`) is the last RELEASED version, on the remote, and
-`git describe` answered `0.8.6-1-gdbf04f9` when the cut was written. ⚠ 0.8.4's and 0.8.3's CHANGELOG headers
-still read *"unreleased"*; both are records and are left alone. **`[Unreleased]` holds the work in
-flight** (2026-09-13): the **REFRESH key** (`u`), and **crab's first on-target run since 0.7.0** —
-`agnos/scripts/harness/crab-pointer-test.py`, PASS on run 4. ⚠ `VERSION` reads `0.8.6`; no cut was
-asked for; nothing is committed, tagged or pushed.
+shows it, **0.8.6** (2026-09-13, `249279f`) is the last RELEASED version on the remote — **0.8.7 and
+0.8.8 are both cut and neither is committed.** ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still read
+*"unreleased"*; both are records and are left alone.
+
+**0.8.8 contents**: the **COLUMNS view** — `g` cycles a fourth time and the active pane grows a
+narrow **context column** naming the parent with the current directory marked. ⛔⛔ **It is a view
+mode of ONE pane, and that is a safety decision**: N navigable miller panes make `active_pane`
+something other than a 0/1, and `active_pane` is a 0/1 the **write layer** resolves every copy, move
+and delete against — a drag from column k to k+1 would plan a move of a directory into its own
+subtree. K=2 with one driven column answers it by construction. The context column holds no focus,
+is not in `crab_hit`'s walk, is dropped rather than squeezed below 186 px, and shows nothing at all
+at `/`. ⛔ **And it first found the guard meant to prevent exactly this**: `crab_view_is_grid`, added
+in 0.8.2 claiming to be asked "in all three places", was asked only in `main.cyr`'s arrow sites —
+`crab_pane` and the scroll round-trip still tested `view != CRAB_VIEW_LIST`, so a fourth id would have
+**rendered and scrolled as a GRID with LIST arrows**. *A negation is not a predicate.*
+⭐ **The 9 px advance now has one reader** (`crab_char_w` / `crab_text_w`): crab still passes
+`font = 0` so it renders identically, which is why it was done on its own — what is left of
+proportional text is passing a real face. 🗺 **The roadmap has an order**: a nine-rung ladder to
+1.0.0, each rung named by what an operator can newly do. **2104 / 0.**
+⭐⭐ **QEMU, 2026-09-13** — `crab-columns-test.py`, PASS on its first run: `g` reaches the fourth
+view, the parent is listed and titled `/`, redraws **do not** re-list (the memo arm — a readdir is
+not a render-path operation), the root's refusal is memoised, leaving the view stops the listing, no
+faults. ⛔ The listing could not be gated any other way: `crab_readdir_into`'s body is inside
+`#ifdef CYRIUS_TARGET_AGNOS` with no `#else`, so on the host it returns 0 entries for every path.
 
 **0.8.7 contents**: the **overwrite policy** — a collision stops the walk and asks per file
 (`r` replace · `s` skip · `k` keep both · `Esc` stop, with `a` arming an *all*); directories MERGE and
@@ -627,8 +645,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,059,064 B** *(0.8.7; 1,049,568 at 0.8.6, 1,049,480 at 0.8.5, 1,045,288 at 0.8.4)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,104,000 B** *(0.8.7; 1,090,304 at 0.8.6, 1,081,768 at 0.8.3)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13** (see *Proven*) |
+| x86_64 linux | ✅ builds, **1,067,440 B** *(0.8.8; 1,059,064 at 0.8.7, 1,049,568 at 0.8.6, 1,049,480 at 0.8.5)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,112,400 B** *(0.8.8; 1,104,000 at 0.8.7, 1,090,304 at 0.8.6)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, twice** (the pointer harness and the columns harness — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -821,7 +839,10 @@ crab work to unblock:**
 ⇒ **Both had been written as OPEN for four cyrius releases.** Same failure as the idle-poll buffer, carried OPEN for
 nine. ⛔ **Re-derive a gate before believing it — including the ones in this file.**
 
-⛔ **What remains in M5**: **columns/miller**, gated on crab's own two-pane model — a design
+✅ **M5's columns closed at 0.8.8** — as a view mode of one pane, not N miller panes; the gate was
+never dhancha and was only half the truth about crab, too. The rest of this paragraph is the record
+of how it was carried before it closed, kept because the *reason* still governs anything N-deep:
+⛔ **What remained in M5 until 0.8.8**: **columns/miller**, gated on crab's own two-pane model — a design
 question, not a dependency (`dh_columns_new` is absent from dhancha, but columns was never a dhancha
 gate: it is a `BOX_H` of `LIST`s). And **proportional text**, whose gate is MIS-STATED in the
 roadmap as "rekha + dhancha font plumbing": the plumbing exists and crab already forwards `font`.
@@ -847,7 +868,7 @@ horizontal strip is not.
 - **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
   agnos has no `AO_EXCL`. Filed (⚠ at `0x2000`; the first filing proposed `0x400`, which is
   `AO_APPEND`). See *Known gaps*.
-- ✅ **The Gallery view is IN.** `g` cycles list → grid → gallery. ⛔ **The view never triggers a
+- ✅ **The Gallery view is IN.** `g` cycles list → grid → gallery → columns (0.8.8). ⛔ **The view never triggers a
   decode — the idle tick does, one per tick** — so opening a gallery of a thousand files costs one
   frame and the pictures land progressively. Backed by a 64-slot (~1.07 MB, allocate-once) cache
   that stores results **and refusals**. ⚠ Measured: 8 real PNGs for 1,075,160 B of permanent spend,

@@ -3633,6 +3633,397 @@ fn t_gridview(): i64 {
     crab_rs_reset(rs);
     assert_eq(load64(rs + CRAB_RS_VIEW), CRAB_VIEW_LIST, "reset leaves the view as LIST");
 
+    # --- 0.8.8: AND THE PREDICATE IS ASKED AT EVERY SITE THAT BRANCHES ON A VIEW -------------------
+    # ⛔⛆ `crab_view_is_grid` arrived in 0.8.2 under a comment claiming "one predicate, asked in all
+    # three places, so a fourth view cannot be added and half-wired". It was asked in `src/main.cyr`'s
+    # three ARROW sites and NOWHERE ELSE: `crab_pane` and `crab_render`'s scroll round-trip each still
+    # tested `view != CRAB_VIEW_LIST`. So a fourth id would have RENDERED as a grid, SCROLLED as a
+    # grid, and taken LIST arrow semantics — the exact half-wiring the predicate exists to prevent, in
+    # the file that introduced it. Found by asking what a new id would actually do before adding
+    # COLUMNS. ⇒ **A NEGATION IS NOT A PREDICATE**: `!= LIST` answers a question about one id.
+    # ⚠ View 99 is unreachable through `g`, which cycles and clamps — that is the point. It stands in
+    # for the NEXT view id, and these assertions are what that id gets for free from now on.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 1, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_rs_view(rs, 99);
+    assert(crab_render(gsurf, 0, rs) != 0, "an unknown view renders");
+    assert_eq(dh_widget_kind(crab_pane_widget(0)), LIST,
+      "⛔ AN ID THAT IS NOT GRID-LIKE BUILDS A LIST — `view != CRAB_VIEW_LIST` built it a GRID");
+
+    # ⭐ AND IT SCROLLS AS A LIST. The measurement is the offset needed to bring a selection below the
+    # fold into view, and it fails the moment the pane is built as a GRID — so this is the second
+    # assertion that catches `crab_pane` regressing.
+    # ⚠ WHAT IT DOES **NOT** CATCH, STATED RATHER THAN IMPLIED: reverting the SCROLL round-trip alone
+    # to `pvview != CRAB_VIEW_LIST` leaves this green, and the mutation was run to find that out. On a
+    # vertical LIST the grid branch REDUCES to the list branch — `dh_grid_cols` clamps to 1, so
+    # `row = sel / cols` is `sel`, and `dh_grid_cell_h` reads the same `DH_W_CELL_H` slot `dh_list_new`
+    # writes `row_h` into. The two arithmetics coincide exactly. ⇒ The scroll site is a COUPLING fix,
+    # not a behaviour fix: it stops crab depending on an accessor named for one kind happening to work
+    # for another — the same reason `dh_list_row_at` was dropped from the GRID hit path below. This
+    # assertion still earns its place as the offset's pin: if either branch's arithmetic ever
+    # diverges, or a future view builds a HORIZONTAL list (where `dh_list_scroll_to` writes
+    # `DH_W_SCROLL_X` and the grid branch would write `DH_W_SCROLL_Y`), this is what notices.
+    var lgb = alloc(40 * CRAB_REC_SZ);
+    var lgz = alloc(40 * 8);
+    var lgm = alloc(40 * 8);
+    var lgi = 0;
+    while (lgi < 40) {
+        t_entry(lgb, lgi, "entry.txt", 0);
+        store64(lgz + lgi * 8, 4096);
+        store64(lgm + lgi * 8, 1788136000);
+        lgi = lgi + 1;
+    }
+    var lgs = alloc(8);
+    var lgs2 = alloc(8);
+    store64(lgs, 0); store64(lgs2, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lgb, 40, "/r", lgz, lgm, CRAB_PANE_OK, 0, 30, lgs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, lgs2);
+    crab_rs_view(rs, CRAB_VIEW_LIST);
+    crab_render(gsurf, 0, rs);
+    var lgref = load64(lgs);
+    assert(lgref > 0, "a selection below the fold scrolls the LIST view — the reference offset");
+    store64(lgs, 0); store64(lgs2, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, lgb, 40, "/r", lgz, lgm, CRAB_PANE_OK, 0, 30, lgs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, lgs2);
+    crab_rs_view(rs, 99);
+    crab_render(gsurf, 0, rs);
+    assert_eq(load64(lgs), lgref,
+      "⛔ ...AND AN UNKNOWN ID SCROLLS IDENTICALLY — the grid branch would answer from a cell it lacks");
+
+    # =============================================================================================
+    test_group("crab — 0.8.8: the COLUMNS view");
+    # =============================================================================================
+    # ⭐⭐ THE COLUMNS VIEW IS A VIEW MODE OF **ONE** PANE — the active listing plus a narrow context
+    # column showing the parent directory with the current one marked. It is NOT N miller panes, and
+    # that is a safety decision: `active_pane` is a 0/1 the WRITE layer resolves every copy, move and
+    # delete against, so a drag from column k to column k+1 would plan a `crab_fs_move` of a directory
+    # INTO ITS OWN SUBTREE. See `crab_cols_list` in `src/app.cyr`.
+
+    # ---- the parent, derived ONCE ----------------------------------------------------------------
+    # ⛔ `crab_ascend` TRUNCATES AT `crab_parent_len` AND NOWHERE ELSE (0.8.8), so the context column
+    # lists exactly the directory Backspace lands in. Two derivations of one fact are how a UI starts
+    # lying: the column would name one parent while the key took the operator to another.
+    assert_eq(crab_parent_len("/"), 0 - 1, "the root has no parent");
+    assert_eq(crab_parent_len(""), 0 - 1, "...nor does the empty string");
+    assert_eq(crab_parent_len(0), 0 - 1, "...nor a null pointer");
+    # ⛔ A TOP-LEVEL DIRECTORY'S PARENT IS "/", WHICH IS ONE CHARACTER, NOT ZERO. Truncating `/usr` at
+    # the slash's own index would produce "", and `readdir("")` is not `readdir("/")` — it is an error
+    # the context column would render as an empty parent.
+    assert_eq(crab_parent_len("/usr"), 1, "the parent of a top-level directory is / — length 1, not 0");
+    assert_eq(crab_parent_len("/usr/local"), 4, "...and of a deeper one, the prefix before the last slash");
+    assert_eq(crab_parent_len("/usr/local/bin"), 10, "...at any depth");
+
+    var cpp = alloc(CRAB_PATH_MAX);
+    assert_eq(crab_parent_path(cpp, CRAB_PATH_MAX, "/usr/local/bin"), 10, "the copying form reports the same length");
+    assert(t_streq(cpp, "/usr/local"), "...and writes the parent, NUL-terminated");
+    assert_eq(crab_parent_path(cpp, CRAB_PATH_MAX, "/usr"), 1, "a top-level directory's parent copies as one byte");
+    assert(t_streq(cpp, "/"), "...and that byte is the root");
+    assert_eq(crab_parent_path(cpp, CRAB_PATH_MAX, "/"), 0 - 1, "the root copies nothing");
+    # ⛔ REFUSED, NOT TRUNCATED. A shortened path is a DIFFERENT directory, and listing it would show
+    # the operator a parent that is not theirs.
+    assert_eq(crab_parent_path(cpp, 4, "/usr/local/bin"), 0 - 1, "a parent that does not fit is refused, never truncated");
+    assert_eq(crab_parent_path(0, CRAB_PATH_MAX, "/usr/local"), 0 - 1, "no destination, no answer");
+
+    # ---- the view is not grid-like, and it is solo ------------------------------------------------
+    assert_eq(crab_view_is_grid(CRAB_VIEW_COLUMNS), 0,
+      "⛔ COLUMNS IS NOT A CELL VIEW — its listing is a LIST and Left/Right must still switch panes");
+    assert_eq(crab_view_solo(CRAB_VIEW_COLUMNS), 1, "the columns view requires the solo layout");
+    assert_eq(crab_view_solo(CRAB_VIEW_LIST), 0, "the list view does not");
+    assert_eq(crab_view_solo(CRAB_VIEW_GRID), 0, "...nor the grid");
+    assert_eq(crab_view_solo(CRAB_VIEW_GALLERY), 0, "...nor the gallery");
+    # ⚠ THE CYCLE REACHES IT. `g` steps 0,1,2,3 and wraps — a ceiling left at GALLERY would make the
+    # view unreachable by the only key that selects one. The cycle itself is inside the agnos
+    # `#ifdef` and no host test can press the key; the ORDERING it depends on is asserted here.
+    assert_eq(CRAB_VIEW_COLUMNS, CRAB_VIEW_GALLERY + 1, "COLUMNS is the id after GALLERY, which is where `g` wraps");
+
+    # ---- the fit rule, derived like every other one in the file -----------------------------------
+    # ⛔ BOTH SIDES MUST BE HONEST, which is `crab_two_panes_fit`'s own shape. The context column shows
+    # names, so its floor is the name floor; the driven listing's floor is the same. Below that the
+    # view falls back to a plain list — the operator keeps the listing and loses only the context.
+    assert_eq(CRAB_COL_CTX_W, CRAB_COL_NAME_MIN, "the context column is exactly the NAME column's floor wide");
+    assert_eq(crab_cols_fit(CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN), 1, "both columns fit at 186");
+    assert_eq(crab_cols_fit(CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN - 1), 0, "...and not at 185");
+    assert_eq(crab_cols_fit(0), 0, "a zero-width pane shows no context column");
+
+    # ---- the record's own default -----------------------------------------------------------------
+    # ⛔ -1 = NO YOU-ARE-HERE ROW. A zeroed `CSEL` would mark row 0 of the parent listing — a plausible
+    # highlight on a SIBLING, which is the one thing this column exists to get right.
+    crab_rs_reset(rs);
+    assert_eq(load64(rs + CRAB_RS_CSEL), 0 - 1, "reset leaves the you-are-here row UNSET, not row 0");
+    assert_eq(load64(rs + CRAB_RS_CBUF), 0, "...and no context listing");
+    assert_eq(load64(rs + CRAB_RS_CN), 0, "...of no entries");
+
+    # ---- the context column renders ----------------------------------------------------------------
+    var ccb = alloc(8 * CRAB_REC_SZ);
+    t_entry(ccb, 0, "alpha", 1);
+    t_entry(ccb, 1, "here", 1);
+    t_entry(ccb, 2, "omega", 1);
+    var ccz = alloc(8 * 8); var ccm = alloc(8 * 8);
+    var cci = 0;
+    while (cci < 8) { store64(ccz + cci * 8, 4096); store64(ccm + cci * 8, 1788136000); cci = cci + 1; }
+    var ccs = alloc(8); store64(ccs, 0);
+    var ccs2 = alloc(8); store64(ccs2, 0);
+    var ccsurf = dh_surface_new(760, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, "r", ccb, 3, 1);
+    assert(crab_render(ccsurf, 0, rs) != 0, "the columns view renders");
+    var ctx = crab_ctx_widget();
+    assert(ctx != 0, "the context column was built");
+    assert_eq(dh_widget_kind(ctx), LIST, "...as a LIST — it is a listing, not a grid of cells");
+    assert_eq(dh_list_count(ctx), 3, "...holding one row per parent entry");
+    assert_eq(dh_list_selected(ctx), 1, "...with the you-are-here row marked");
+    # ⛔⛆ AND IT MUST NOT HOLD FOCUS. dhancha paints the selected row ACCENTED when its list has focus
+    # and MUTED when it does not — that difference is the entire answer to "which listing do my arrow
+    # keys drive". A context column that claimed focus would give the operator two accented rows and
+    # no way to tell which one Enter acts on, and the pane it stole focus from is the one the WRITE
+    # verbs resolve against.
+    assert_eq(dh_focus_within(ctx), 0, "⛔ THE CONTEXT COLUMN NEVER HOLDS FOCUS — it is a display");
+    assert_eq(dh_focus_within(crab_pane_widget(0)), 1, "...the driven pane does");
+    # ⛔⛆ AND THE TWO ASSERTIONS ABOVE ARE NOT ENOUGH ON THEIR OWN, WHICH A MUTATION IS HOW WE KNOW.
+    # `crab_pane` runs AFTER `crab_col_ctx` and calls `dh_focus_set` itself, so a focus grab inside
+    # the context column is overwritten three lines later and those assertions stay green. They pin
+    # the OUTCOME; the call order is doing the work, and an order is not a contract. ⇒ Ask the
+    # function directly, with focus parked somewhere known.
+    var fprobe = dh_widget_new(BOX);
+    dh_focus_set(fprobe);
+    var fhost = dh_widget_new(BOX);
+    dh_widget_set_layout(fhost, BOX_H);
+    crab_col_ctx(fhost, "r", ccb, 3, 1);
+    assert_eq(dh_focus_get(), fprobe,
+      "⛔ `crab_col_ctx` DOES NOT TOUCH FOCUS — not merely 'loses it to whoever runs next'");
+    # ⚠ The driven listing is unchanged by the view: same LIST, same selection, same verbs.
+    assert_eq(dh_widget_kind(crab_pane_widget(0)), LIST, "the pane is still an ordinary LIST");
+    # ⛔ AND THE PANE IS NARROWER BY EXACTLY WHAT THE COLUMN TOOK. The width is settled BEFORE the pane
+    # is built, so `crab_cols_for_width` decides NAME/SIZE/MODIFIED against the width the listing
+    # really gets — not one the context column is about to spend.
+    var ctxw = dh_widget_w(dh_widget_parent(ctx));
+    assert_eq(ctxw, CRAB_COL_CTX_W, "the context column is laid out at its declared width");
+    # ⛔ AND EXACTLY ONE PANE IS BUILT, whatever the window could afford. 760 px clears
+    # `crab_two_panes_fit` comfortably — without `crab_view_solo` this frame would hold TWO listings
+    # AND a context column, which is three columns of names in a window that only just agreed to two.
+    assert(crab_pane_widget(0) != 0, "the active pane is built");
+    assert_eq(crab_pane_widget(1), 0,
+      "⛔ ...AND THE OTHER IS NOT — the columns view is solo by construction, not by width");
+    # ⛔ THE LISTING IS NARROWER BY EXACTLY WHAT THE COLUMN TOOK, and the width is settled BEFORE the
+    # pane is built — so `crab_cols_for_width` decides NAME/SIZE/MODIFIED against the width the
+    # listing really gets, not one the context column is about to spend out from under it.
+    # ---- a click on the context column lands nowhere ------------------------------------------------
+    # ⛔ IT IS NOT IN `crab_hit`'s WALK, for the reason the A/B strip is not: a pointer path means an
+    # answer to "which pane is this", and `active_pane` is the 0/1 the write layer trusts.
+    # ⛔⛆ AND THIS BLOCK MUST STAY AHEAD OF ANY FURTHER `crab_render`. `ctx` names arena memory from
+    # the frame above, and `dh_frame_begin` rewinds that arena — reading it after another render
+    # SIGSEGVs rather than failing, which is a verdict nobody gets to see. Written the other way
+    # round first, and that is exactly what happened.
+    var cchb = alloc(16);
+    var crow = dh_list_row_at(ctx, 1);
+    assert_eq(crab_hit(dh_widget_x(crow) + 2, dh_widget_y(crow) + 2, cchb), 0,
+      "⛔ A CLICK ON THE CONTEXT COLUMN RESOLVES TO NO PANE");
+
+    # ⚠ MEASURED AT 400 px, WHERE THE LIST VIEW IS ALREADY SOLO. At 760 the comparison would be a
+    # one-pane columns frame against a TWO-pane list frame and would say nothing about this rule.
+    var solo = dh_surface_new(400, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, "r", ccb, 3, 1);
+    crab_render(solo, 0, rs);
+    assert(crab_ctx_widget() != 0, "400 px still affords the context column");
+    var colspw = dh_widget_w(dh_widget_parent(crab_pane_widget(0)));
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_LIST);
+    crab_render(solo, 0, rs);
+    assert_eq(crab_pane_widget(1), 0, "the list view is solo at 400 px too — the same one pane");
+    var listpw = dh_widget_w(dh_widget_parent(crab_pane_widget(0)));
+    assert_eq(listpw - colspw, CRAB_COL_CTX_W + CRAB_PANE_GAP,
+      "⛔ the listing gives up exactly the context column's width plus the seam — no more, no less");
+
+    # ---- no parent listing, no column ----------------------------------------------------------------
+    # ⚠ At `/` there is no parent. An empty strip where context should be reads as "this directory has
+    # no siblings", which is a different and false statement — so the column is not built at all.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, 0, 0, 0, 0 - 1);
+    assert(crab_render(ccsurf, 0, rs) != 0, "the columns view renders at the root too");
+    assert_eq(crab_ctx_widget(), 0, "...with NO context column, rather than an empty one");
+    assert_eq(dh_widget_kind(crab_pane_widget(0)), LIST, "...and the listing is untouched");
+    # ⛔ AND THE LISTING KEEPS THE FULL WIDTH, which is a second thing and not the same thing. The
+    # pane's width is committed forty lines before the column is built, so a record carrying a COUNT
+    # with no BUFFER would take 96 px off the listing and then build nothing — the operator losing
+    # a column's width to a column that is not on screen. Both halves are asked at the width site.
+    var cnw = dh_widget_w(dh_widget_parent(crab_pane_widget(0)));
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, "r", 0, 3, 1);                 # a count with no buffer — nothing can be built
+    crab_render(ccsurf, 0, rs);
+    assert_eq(crab_ctx_widget(), 0, "a count with no buffer builds no column");
+    assert_eq(dh_widget_w(dh_widget_parent(crab_pane_widget(0))), cnw,
+      "⛔ ...AND COSTS THE LISTING NOTHING — the width site asks the same question the builder does");
+
+    # ---- too narrow: the context is what is lost, not the listing --------------------------------------
+    # ⚠ A FALLBACK, NOT A REFUSAL. `g` may still land on COLUMNS in a narrow window; it draws what a
+    # LIST draws. A view the operator can enter and not leave would be worse than one that shows less.
+    var narrow = dh_surface_new(160, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, "r", ccb, 3, 1);
+    assert(crab_render(narrow, 0, rs) != 0, "a narrow window still renders the columns view");
+    assert_eq(crab_ctx_widget(), 0, "⛔ THE CONTEXT COLUMN IS DROPPED, NOT SQUEEZED");
+    assert(crab_pane_widget(0) != 0, "...and the LISTING survives, which is the point");
+
+    # ---- the you-are-here row, and what a host test can honestly reach ------------------------------
+    # ⛔⛆ `crab_readdir_into`'s ENTIRE BODY IS INSIDE `#ifdef CYRIUS_TARGET_AGNOS` WITH NO `#else`, so
+    # on the host it returns 0 for every path — `/tmp` included. A first draft of this block built a
+    # real directory tree under `build/` and asserted the listing; every assertion failed with an
+    # empty listing and a clean error code, which is what that `#ifdef` looks like from here. ⇒ The
+    # LISTING is gated by the QEMU harness, on a real agnos kernel, and is not claimed to be gated
+    # here. What IS reachable is the pure lookup the listing feeds, and the record discipline around
+    # it — so that is what this block asserts, and it does not pretend to more.
+    var chb = alloc(8 * CRAB_REC_SZ);
+    t_entry(chb, 0, "alpha", 1);
+    t_entry(chb, 1, "here", 1);
+    t_entry(chb, 2, "omega", 1);
+    var chn = alloc(CRAB_NAME_MAX);
+    assert_eq(crab_cols_here(chb, 3, "/r/here", chn), 1,
+      "the you-are-here row is the one NAMED for the directory we stand in");
+    assert_eq(crab_cols_here(chb, 3, "/r/alpha", chn), 0, "...at any index");
+    assert_eq(crab_cols_here(chb, 3, "/r/omega", chn), 2, "...including the last");
+    # ⛔ -1 IS ORDINARY AND MUST SURVIVE. The parent can genuinely not contain us — a mount point, a
+    # bind mount, a directory renamed under us between the two readdirs, a path reached by symlink.
+    # Falling back to row 0 there marks a SIBLING as "you are here", which is the one thing this
+    # column exists to get right.
+    assert_eq(crab_cols_here(chb, 3, "/r/absent", chn), 0 - 1,
+      "⛔ A DIRECTORY THAT IS NOT IN ITS PARENT'S LISTING MARKS NO ROW — never row 0");
+    assert_eq(crab_cols_here(chb, 3, "/", chn), 0 - 1, "the root has no leaf to look up");
+    assert_eq(crab_cols_here(chb, 0, "/r/here", chn), 0 - 1, "an empty listing marks nothing");
+    assert_eq(crab_cols_here(0, 3, "/r/here", chn), 0 - 1, "...and neither does a null one");
+
+    # ---- the record discipline `crab_cols_sync` owns -------------------------------------------------
+    var cosc = alloc(CRAB_PATH_MAX);
+    var costat = alloc(STAT_BUFSZ);
+    # ⛔⛆ A VIEW THAT IS NOT COLUMNS MUST **CLEAR** THESE FIELDS, NOT LEAVE THEM. `crab_rs_reset` is
+    # not called between frames — the record is a carrier that gets refilled — so a stale `CBUF` from
+    # a columns frame would be handed to `crab_render` as context for a directory the operator has
+    # since left, and drawn. Every field this function owns, it writes on every path.
+    crab_cols_forget();
+    crab_rs_reset(rs);
+    crab_rs_cols(rs, "stale", chb, 3, 1);
+    assert_eq(crab_cols_sync(rs, CRAB_VIEW_LIST, 0, "/r/here", "/", cosc, costat), 0,
+      "a non-columns view lists nothing");
+    assert_eq(load64(rs + CRAB_RS_CBUF), 0, "⛔ ...AND CLEARS THE BUFFER A PREVIOUS FRAME LEFT");
+    assert_eq(load64(rs + CRAB_RS_CN), 0, "...and the count");
+    assert_eq(load64(rs + CRAB_RS_CSEL), 0 - 1, "...and the you-are-here row, back to UNSET");
+    assert_eq(load64(rs + CRAB_RS_CNAME), 0, "...and the title");
+    crab_rs_cols(rs, "stale", chb, 3, 1);
+    assert_eq(crab_cols_sync(rs, CRAB_VIEW_GALLERY, 0, "/r/here", "/", cosc, costat), 0,
+      "...and so does every other view");
+    assert_eq(load64(rs + CRAB_RS_CBUF), 0, "...clearing it too");
+
+    # ⚠ THE ROOT HAS NO PARENT, and that is a real answer rather than an error — the one branch of the
+    # columns path a host test CAN reach, because `crab_parent_path` refuses before any readdir.
+    crab_cols_forget();
+    crab_rs_reset(rs);
+    crab_rs_cols(rs, "stale", chb, 3, 1);
+    assert_eq(crab_cols_sync(rs, CRAB_VIEW_COLUMNS, 0, "/", "/", cosc, costat), 0,
+      "standing at the root there is no context column");
+    assert_eq(load64(rs + CRAB_RS_CN), 0, "...and none is published");
+    assert_eq(load64(rs + CRAB_RS_CSEL), 0 - 1, "...with no row marked");
+    # ⛔ AND THE REFUSAL IS MEMOISED. Without this, standing at `/` in the columns view would attempt
+    # a listing on every frame — every keypress, every pointer move, every idle tick — forever.
+    var cmp1 = crab_cols_memo_path();
+    assert(cmp1 != 0, "a sync has run, so the memo has a path buffer");
+    assert(t_streq(cmp1, "/"), "the refusal is memoised UNDER THE PATH it is about");
+    assert_eq(crab_cols_memo_n(), 0,
+      "⛔ ...as a listing of ZERO, which is a HIT — `-1` would mean `I have not looked` and re-list forever");
+    crab_cols_forget();
+    assert_eq(crab_cols_memo_n(), 0 - 1, "⛔ AND `crab_cols_forget` PUTS IT BACK TO -1 — no memo at all");
+
+    # ---- 0.8.8: HOW WIDE IS TEXT — the one derivation -----------------------------------------------
+    # ⛔⛆ crab SIZED EVERY COLUMN BY DIVIDING PIXELS BY NINE, IN MORE THAN ONE PLACE, and nine is a
+    # property of ONE font — kashi's CP437 8x16 cell. `crab_col_chars` decides how many characters a
+    # NAME column holds, which drives `crab_name_cell`'s `~`, which exists so two different files
+    # never render as one identical row. Under a proportional face `px / 9` over-reports and the cut
+    # goes unmarked. ⇒ the 9 now has ONE reader, `crab_char_w`.
+    #
+    # ⚠ AND HERE IS WHAT THESE ASSERTIONS CANNOT DO, SAID OUTRIGHT RATHER THAN LEFT TO BE ASSUMED.
+    # crab passes `font = 0` everywhere, so `crab_char_w()` IS 9 and no host test can tell "asks the
+    # font" from "divides by the constant" — they are the same number. Constructing a RekhaFont needs
+    # a real TTF. What IS pinned here: the font-0 contract exactly (so the routing change is proved
+    # to render identically), the guards that make a divide safe, and the read bound on untrusted
+    # names. The proportional half is gated by the day crab passes a face — see the roadmap.
+    # ⚠ THIS ONE IS A STATEMENT OF FACT, NOT A PIN, AND A MUTATION IS HOW WE KNOW. Deleting
+    # `crab_font = font` from `crab_render` leaves it green — the variable starts at 0 and crab only
+    # ever passes 0, so the assignment is a no-op until a real face arrives. It is asserted anyway
+    # because it is the premise every number below rests on: if this ever stops being 0 without the
+    # constants moving with it, the rest of this block is describing a font crab is not using.
+    assert_eq(crab_frame_font(), 0, "crab renders with the bitmap font today (a premise, not a gate)");
+    assert_eq(crab_char_w(), CRAB_COL_CHARW, "...so the advance is kashi's 9 px, exactly");
+    assert_eq(CRAB_TEXT_EM, 16, "...asked at the em height that 9 is the advance FOR");
+    # ⛔ THE ROUTING IS BEHAVIOUR-PRESERVING BY CONSTRUCTION, and this is the statement of it: the
+    # count is the floor of px over the advance, whatever the advance turns out to be.
+    assert_eq(crab_col_chars(90), 90 / crab_char_w(), "a column's character count is px / the advance");
+    assert_eq(crab_col_chars(90), 10, "...which is 10 at the NAME floor, as it has always been");
+    assert_eq(crab_col_chars(89), 9, "...floored, never rounded up — a rounded count clips with no marker");
+    assert_eq(crab_col_chars(0), 0, "a zero-width column holds nothing");
+    assert_eq(crab_col_chars(0 - 40), 0, "...and so does a negative one");
+
+    # ⛔ MEASURED, NOT `length * advance`. For the bitmap font the two agree exactly; for a
+    # proportional face they do not, and every place asking "does this string fit" has to be the
+    # second one. This is the function that makes that possible.
+    assert_eq(crab_text_w("abc"), 3 * CRAB_COL_CHARW, "three glyphs measure three advances");
+    assert_eq(crab_text_w(""), 0, "the empty string has no width");
+    assert_eq(crab_text_w(0), 0, "...and neither does a null pointer");
+    assert_eq(crab_text_w("MODIFIED"), 8 * CRAB_COL_CHARW, "a column header measures its own length");
+    # ⛔⛆ AND THE SCAN IS BOUNDED, BECAUSE SOME OF THE STRINGS IT WILL BE ASKED ABOUT ARE READDIR
+    # NAMES — kernel data, untrusted by crab's own rule, and the exact shape that caused the 0.5.0
+    # P-1 that made `src/path.cyr` a file. A string the kernel failed to terminate must cost a WRONG
+    # WIDTH, never a walk off the end of the buffer.
+    var twb = alloc(1024);
+    var twi = 0;
+    while (twi < 1024) { store8(twb + twi, 97); twi = twi + 1; }      # 1 KiB of 'a', no NUL anywhere
+    assert_eq(crab_text_w(twb), CRAB_TEXT_SCAN_MAX * CRAB_COL_CHARW,
+      "⛔ AN UNTERMINATED STRING MEASURES TO THE SCAN CAP AND STOPS — never past the buffer");
+    # ⚠ AND THE CAP IS NOT THE NAME BOUND, WHICH IS THE DISTINCTION A FIRST DRAFT GOT WRONG. This
+    # function measures menu labels and column headers too, and a name-sized cap would silently
+    # under-measure anything longer. The tighter, SEMANTIC bound lives where names are handled:
+    # `crab_name_cell` scans to `CRAB_REC_TYPE`, one byte before the record ends, because byte 63 is
+    # the record's TYPE and measuring it would price a type byte as a character.
+    assert_eq(CRAB_TEXT_SCAN_MAX, CRAB_PATH_MAX, "the cap is the longest string crab ever draws — a path");
+    assert_eq(CRAB_REC_TYPE, CRAB_NAME_MAX - 1, "the name region ends one byte before the record does");
+
+    # ---- a stale pointer must not outlive its frame -------------------------------------------------
+    # ⛔⛆ `dh_frame_begin` REWINDS THE ARENA, so a `crab_ctxlst` from a frame that HAD a column names
+    # memory the next frame has already reused. This is the same discipline `crab_swlst` and
+    # `crab_mlst` follow, and the bug it prevents is a hit-test or a scroll against a widget that is
+    # not on screen. The assertion is the ORDER: a frame with a column, then one without.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_COLUMNS);
+    crab_rs_cols(rs, "r", ccb, 3, 1);
+    crab_render(ccsurf, 0, rs);
+    assert(crab_ctx_widget() != 0, "a frame WITH a context column");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r/here", gz, gm, CRAB_PANE_OK, 0, 1, ccs);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, ccs2);
+    crab_rs_view(rs, CRAB_VIEW_LIST);
+    crab_render(ccsurf, 0, rs);
+    assert_eq(crab_ctx_widget(), 0, "⛔ ...AND THE NEXT FRAME WITHOUT ONE CLEARS THE POINTER");
+
     # ---- crab_hit through a GRID pane -------------------------------------------------------------
     # ⚠ WHAT THIS PINS, STATED ACCURATELY: that a click in a grid pane resolves to the right ENTRY
     # INDEX. ⛔ It does **not** pin a regression — `dh_list_row_at` is a plain nth-child walk with no
