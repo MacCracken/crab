@@ -204,7 +204,8 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 |---|---|---|---|---|
 | ✅ | **0.8.8 · Columns** | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
 | ✅ | **0.8.9 · Shift** | type a **capital letter** into a name — and `#` and `*`, the batch sheet's own two operators, into the field that advertises them | — | **shipped** |
-| → | **0.9.0 · A real face** | read crab in a proportional font | — | `font` is a loaded face, the six character-count constants are **derived** rather than written at 9 px, the caret follows the advance, and the Latin-1 limit is closed or written down |
+| ✅ | **0.8.10 · Ready for a face** | *(nothing visible — it is the half of 0.9.0 that is not blocked)* every width crab computes is **derived from the font** instead of from kashi's 9 px, and the suite proves it against a synthetic **proportional** face | — | **shipped** |
+| ⛔ | **0.9.0 · A real face** | read crab in a proportional font | ⛔⛔ **TWO BLOCKERS, BOTH OUTSIDE crab** — see below. This cell read "—" until 0.8.10 went looking, which is how a session would have discovered them while writing the code instead of while planning. | `font` is a loaded face on the TARGET (not just the host), and a rendered frame still costs the global heap zero bytes |
 | | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | **0.9.0**, or an icon path that needs no face | the button draws and `F10` stops being the only door |
 | | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
 | | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
@@ -218,6 +219,45 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 ⭐ **0.9.2 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing downstream
 waits on them. **0.9.0 → 0.9.1 is a chain** (the face, then the glyph that needs it), and **0.10.0 →
 0.11.0 is one chain behind one ruling**. That is the whole dependency structure.
+
+### ⛔⛔ What actually blocks `0.9.0 · A real face`
+
+Found by 0.8.10 asking where a face would come from **before** writing the code that loads one. Both
+are real, both were verified against source across nineteen repos, and **neither is crab's**.
+
+1. ⛔ **THERE IS NO TRUETYPE FACE IN THE STACK, AND NOTHING STAGES ONE ONTO THE TARGET.** A search
+   for `*.ttf` / `*.otf` / `*.ttc` / `*.woff*` across every first-party repo returns **zero**. The
+   whole `agnos` repo contains **no occurrence of "ttf", "truetype" or "sfnt"** in any script,
+   manifest or doc, and `agnos/build/rootfs` has no `/usr`, no `/share` and no font directory —
+   `grep -i font agnos/scripts/burn/` is empty, so the path that builds the shipped filesystem has
+   no font concept at all. ⚠ **kashi is not the escape hatch**: it owns AGNOS's *bitmap console*
+   fonts by design (PSF/BDF/PCF, CP437), has no scalable face, and
+   [ADR 0003](../adr/0003-kashi-freestanding-core-over-the-library-face.md)'s written expiry is about
+   runtime BITMAP loading — it has not fired.
+   ⛔⛆ **AND THE OBVIOUS TEMPLATE IS A TRAP.** The one caller in the stack that feeds
+   `rekha_font_open` real file bytes is `dhancha/programs/setu_demo_client.cyr`, and it reads
+   `/usr/share/fonts/liberation/LiberationSans-Regular.ttf` — a **host Arch path that does not exist
+   on AGNOS**. Copied into crab it would work on the host build, fall back silently to the bitmap
+   face on the target, and look finished.
+   ⇒ **Owner: `agnos`** (the rootfs staging, which already places the CA bundle by exactly the
+   pattern a font needs) **plus an operator ruling on which face, under what licence.**
+   ⚠ And rekha 0.3.7 constrains the choice: `glyf` outlines only (CFF/OpenType is rejected outright)
+   and a format-4 BMP `cmap`.
+2. ⛔ **dhancha's SCALABLE PATH ALLOCATES PER CALL, OUTSIDE THE FRAME ARENA — it would destroy crab's
+   headline guarantee.** `dh_draw_text_ink`'s `font != 0` branch opens with
+   `sd_canvas_new(sd_surface_width(sds), sd_surface_height(sds))` — a **full-surface canvas per
+   label, per frame** — plus a sadish path per glyph, all from the global bump allocator that has no
+   `free()`. crab's M1.5 headline is *"a rendered frame costs the global heap ZERO bytes"*, and it
+   would become false on the first frame drawn with a face.
+   ⛔⛆ **The gate would not have noticed**: every render in that test passes `font = 0`, so it
+   measures the branch that is not running — *"a gate that covers one state proves one state"*,
+   exactly as this file warns. ⭐ 0.8.10 added the arm that measures the other branch, so the cost is
+   now a **failing-if-wrong number in crab's suite** rather than a surprise. ⇒ **Owner: `dhancha`** —
+   route that canvas through the per-frame arena, the way every other draw already does.
+
+⇒ **What 0.9.0 still needs from crab once both clear: almost nothing.** 0.8.10 derived every width
+from the font and proved it against a proportional face; the caret and the Latin-1 limit are
+dhancha's and are written down below.
 
 ⛔ **1.0.0 is not a feature release and must not become one.** Its contents are the unchecked boxes in
 *v1.0 criteria*, and three of them are not code: **a green iron burn** (the last was 2026-08-30
@@ -275,7 +315,7 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| Proportional text | M5 → **0.9.0** | ⭐ **UPSTREAM HALF CLOSED 2026-09-02** — rekha 0.3.6 adds `rekha_advance_width` / `rekha_char_advance_px`; dhancha 0.9.27 consumes them in `dh_text_advance`, keeping the hard-coded `advf = (h * 6) / 10` only as the no-metrics fallback. crab declares both floors. ⭐ **0.8.8 closed the plumbing half crab-side** (`crab_char_w` / `crab_text_w`, one reader for the 9). ⛔ **What is left is passing a face** and deriving the six character-count constants from it — gated on nothing. | 2026-09-13 ⭐ re-derived |
+| Proportional text | M5 → **0.9.0** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
 | The 🦀 chrome button | M6 → **0.9.1** | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from **0.9.0**. | 2026-09-01 |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Local index · tags · smart folders | M7 → **0.10.0** | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |

@@ -1,3 +1,55 @@
+# Handoff — **0.8.10 cut: every width derived from the font, proved against a proportional face — and the two things that actually block a real one.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** ⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED**
+> by the operator (`22f7f53` / `60cc05b` / `eeb6a8b`) — the three-releases-uncommitted backlog that
+> every block below this one warns about is **cleared**. **0.8.10 is CUT in the working tree and is
+> not committed**; `VERSION` reads 0.8.10 and ⛔ the commit, the tag and the push are the operator's.
+> ⚠ `git ls-remote --tags` answered empty when this was written, so whether those three tags have
+> been PUSHED is unknown from here — said rather than assumed, because every block below asserts a
+> remote state and this one will not.
+>
+> ⚠ **THIS IS THE UNBLOCKED HALF OF `0.9.0 · A real face`, NUMBERED HONESTLY.** An operator cannot
+> newly read crab in a proportional font; crab is now *correct under one* and the suite proves it.
+>
+> 1. ⭐⭐ **THE CHARACTER COUNT IS THE CONSTANT; THE PIXEL WIDTH IS DERIVED.** Seven widths read
+>    `CRAB_COL_NAME_MIN = 90;  # 10 chars` — the governing fact in the comment, the face-specific
+>    number in the code. ⛔ And none failed loudly under another face; they picked a **wrong layout**:
+>    a NAME column under ten characters cannot tell `…build.log` from `…build.tmp`, which is the exact
+>    confusion `crab_name_cell`'s `~` exists to prevent. Now `crab_col_name_min()` and six siblings.
+>    ⚠ Functions, not constants — a Cyrius `enum` member must be a literal.
+> 2. ⭐⭐ **A SYNTHETIC PROPORTIONAL FACE IN THE SUITE, WHICH RETIRES 0.8.8'S OWN ADMISSION.** 0.8.8
+>    had to write that no host test could tell *"asks the font"* from *"divides by the constant"*.
+>    There is still no TTF in the stack — so the suite **builds** one (head/maxp/hhea/hmtx/cmap, the
+>    shape rekha's and dhancha's tests use; no `glyf`, and none is needed for a width question).
+>    ⛔ Its advances are deliberately **unequal**, so `"nn"` and `"nm"` have equal length and different
+>    width — which a `length × advance` implementation cannot tell apart, and every truncation rests
+>    on telling apart. Three mutations, each caught.
+> 3. ⛔⛆ **THE ZERO-ALLOCATION GATE WAS MEASURING THE BRANCH THAT WAS NOT RUNNING.** Every render in
+>    it passes `font = 0` (the bitmap path). The scalable path opens with
+>    `sd_canvas_new(surface_w, surface_h)` — a full-surface canvas **per label, per frame** — plus a
+>    path per glyph, from the bump allocator with no `free()`. crab's M1.5 headline would have become
+>    false on the first frame with a face **and nothing would have noticed.** The fixture makes that
+>    branch reachable; the cost is now a measured number. ⚠ **The assertion carries its own expiry** —
+>    when dhancha fixes it, that test FAILS and must be inverted.
+> 4. ⛔⛔ **AND `0.9.0` IS BLOCKED ON TWO THINGS, NEITHER OF THEM crab's.** Its "blocked by" cell read
+>    "—" until this release went looking.
+>    **(a) There is no TrueType face in the stack and nothing stages one onto the target** — zero
+>    `*.ttf`/`*.otf` across every first-party repo, and the `agnos` repo contains no occurrence of
+>    "ttf", "truetype" or "sfnt" anywhere; `build/rootfs` has no `/usr`, no `/share`, no font dir.
+>    ⛔⛆ **The obvious template is a trap**: the one caller feeding `rekha_font_open` real bytes reads
+>    a **host Arch path that does not exist on AGNOS** — copied into crab it works on the host, falls
+>    back silently on the target, and looks finished. ⇒ **agnos** owns the staging; **the operator**
+>    owns which face under what licence (rekha 0.3.7 takes `glyf` outlines and a format-4 BMP `cmap`
+>    only). ⚠ kashi is not the escape hatch and ADR 0003's expiry has not fired — it is about bitmap
+>    loading.
+>    **(b) dhancha's scalable draw allocates outside the frame arena** — item 3. ⇒ **dhancha** owns it.
+>
+> **Suite 2196 / 0** (+38), render_test **53 / 0 unchanged** — which is the proof that what ships
+> still draws exactly as it did. Host **1,071,560 B** · agnos **1,112,424 B**.
+> ⚠ **No QEMU arm, stated rather than skipped**: nothing agnos-only changed and no code entered the
+> `#ifdef`.
+> ⚠ **The 0.8.9 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.9 cut: Shift — capital letters in names, and a sheet that can accept its own language.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
@@ -43,8 +95,8 @@
 > **Suite 2158 / 0** (+54), render_test 53 / 0. Host **1,067,496 B** · agnos **1,112,456 B**. Four
 > mutations, each caught — including `'0'` surviving a range widened from `0x1E..0x26` to `0x1E..0x27`
 > (the planted defect made it come out as `':'`).
-> ⭐ **Next is `0.9.0` — a real face.** See [the ladder to 1.0](roadmap.md); every entry there is a
-> version, not a position.
+> ⭐ **Next was `0.9.0` — a real face.** Its crab-side half shipped as **0.8.10** (above); `0.9.0`
+> itself is now **blocked on agnos and dhancha**. See [the ladder to 1.0](roadmap.md).
 > ⚠ **The 0.8.8 block below is one release stale but its reasoning is current.**
 
 # Handoff — **0.8.8 cut: the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order.**

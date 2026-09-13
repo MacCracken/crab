@@ -24,10 +24,35 @@
 
 ## Version
 
-**0.8.9 IS CUT** — `VERSION` reads `0.8.9` and the CHANGELOG header agrees, on operator direction,
-2026-09-13. ⛔ **The commit, the tag and the push are the operator's**; until `git ls-remote --tags`
-shows it, **0.8.6** (2026-09-13, `249279f`) is the last RELEASED version on the remote — **0.8.7,
-0.8.8 and 0.8.9 are all cut and none is committed.** ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still
+**0.8.10 IS CUT** — `VERSION` reads `0.8.10` and the CHANGELOG header agrees, on operator direction,
+2026-09-13. ⛔ **The commit, the tag and the push are the operator's.**
+⭐ **0.8.7, 0.8.8 and 0.8.9 are now COMMITTED AND TAGGED locally** (`22f7f53` · `60cc05b` · `eeb6a8b`)
+— the backlog earlier entries here describe is cleared; **0.8.10 alone is uncommitted.**
+⚠ `git ls-remote --tags` answered empty when this was written, so whether those tags are PUSHED is
+unknown from here. Stated rather than assumed: this file has asserted a remote state before and the
+rule it learned was to say which half it actually checked.
+
+**0.8.10 contents**: the unblocked half of `0.9.0 · A real face`. Seven widths read
+`CRAB_COL_NAME_MIN = 90;  # 10 chars` — the governing fact in the comment and the face-specific
+number in the code; ⇒ the **counts** are now the constants and the widths are derived
+(`crab_col_name_min()` and six siblings; functions, because a Cyrius enum member must be a literal).
+At `font = 0` each returns the literal it replaced and **render_test's 53 pixel checks pass
+unchanged**. ⭐⭐ **The suite builds a synthetic PROPORTIONAL face** (head/maxp/hhea/hmtx/cmap, no
+`glyf` — a width question never rasterises), which retires 0.8.8's own admission that no host test
+could tell *"asks the font"* from *"divides by the constant"*. Its advances are deliberately unequal,
+so `"nn"` and `"nm"` differ in width at equal length — the thing `length × advance` cannot see.
+⛔⛆ **And it found that the zero-allocation gate measures the branch that is not running**: every
+render in it passes `font = 0`; the scalable path opens `sd_canvas_new(surface_w, surface_h)` per
+label per frame from the bump allocator, so crab's M1.5 headline would have gone false on the first
+frame with a face **with nothing noticing**. That cost is now measured, with an assertion that must be
+INVERTED when dhancha fixes it. ⚠ The Latin-1 limit is written down: one **byte** per glyph, a display
+limit owned by dhancha/rekha — crab cannot type such a byte (`crab_key_char` tops at `'z'`) but can
+display one from a readdir record. **2196 / 0.** ⚠ No QEMU arm: nothing agnos-only changed.
+⛔⛔ **`0.9.0` is BLOCKED on two things, neither crab's** — (a) there is no TrueType face anywhere in
+the stack and nothing stages one onto the target (**agnos** + an operator licence ruling; the obvious
+template reads a **host** Arch path that does not exist on AGNOS and would look finished while
+falling back silently), and (b) dhancha's scalable draw allocates outside the frame arena
+(**dhancha**). Its roadmap "blocked by" cell read "—" until this release went looking. ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still
 read *"unreleased"*; both are records and are left alone.
 
 **0.8.9 contents**: a **Shift latch** — names can hold capital letters. `crab_key_char` has taken the
@@ -668,8 +693,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,067,496 B** *(0.8.9; 1,067,440 at 0.8.8, 1,059,064 at 0.8.7, 1,049,568 at 0.8.6)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,112,456 B** *(0.8.9; 1,112,400 at 0.8.8, 1,104,000 at 0.8.7)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,071,560 B** *(0.8.10; 1,067,496 at 0.8.9, 1,067,440 at 0.8.8, 1,059,064 at 0.8.7)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,112,424 B** *(0.8.10; 1,112,456 at 0.8.9, 1,112,400 at 0.8.8)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

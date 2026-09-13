@@ -35,6 +35,90 @@ include "src/app.cyr"
 
 # --- a mock readdir buffer, mirroring src/render_test.cyr's fixture shape ------------------------
 # One 64-byte record per entry: NUL-terminated name at +0, type byte at +63.
+# =================================================================================================
+# 🔤 A SYNTHETIC PROPORTIONAL FACE — the fixture that makes 0.9.0 provable
+# =================================================================================================
+#
+# ⛔⛆ 0.8.8 HAD TO ADMIT, IN ITS OWN TEST COMMENTS, THAT IT COULD NOT PROVE ITS CENTRAL CLAIM. crab
+# passes `font = 0`, so `crab_char_w()` IS 9 and no assertion could tell *"asks the font"* from
+# *"divides by the constant"*. That admission is retired here. There is no TrueType face anywhere in
+# the AGNOS stack to load — so the suite BUILDS one, the way `rekha/programs/hmtx_test.cyr` and
+# `dhancha/programs/text_test.cyr` each build theirs.
+#
+# ⚠ NO `glyf` TABLE, AND NONE IS NEEDED. crab asks rekha for ADVANCES (`head` for the em, `hhea` for
+# the metric count, `hmtx` for the widths, `cmap` for codepoint -> glyph). A width question never
+# rasterises a glyph, so a fixture that carries outlines would be carrying them to be ignored.
+#
+# ⭐ THE ADVANCES ARE DELIBERATELY UNEQUAL, because equal ones would prove only half of it. `m` is
+# wider than `n`, so `crab_text_w` MEASURING a string and `crab_text_w` pricing it at
+# `length x advance` give different answers — and only the first is right under a real face.
+#   upem 1000, asked at CRAB_TEXT_EM (16):
+#     gid 0 (.notdef, and every unmapped codepoint)  adv  500  ->  8 px
+#     gid 1  'm' (0x6D)                              adv 1000  -> 16 px
+#     gid 2  'n' (0x6E)                              adv  750  -> 12 px
+# ⛔ `n` IS THE GLYPH `crab_char_w` ASKS ABOUT, so this face's representative advance is **12**, not
+# 9 — every derived width below must move by exactly that ratio or the derivation is not real.
+fn t_put_u16(buf, off, v): i64 {
+    store8(buf + off, (v >> 8) & 255);
+    store8(buf + off + 1, v & 255);
+    return 0;
+}
+
+fn t_put_u32(buf, off, v): i64 {
+    t_put_u16(buf, off, (v >> 16) & 65535);
+    t_put_u16(buf, off + 2, v & 65535);
+    return 0;
+}
+
+# Build the face into `buf` (which must be at least 512 bytes). -> the opened RekhaFont, or 0.
+fn t_prop_face(buf, len): i64 {
+    memset(buf, 0, len);
+    # offset table: 5 tables, directory at 12 (16 bytes each) -> tables start at 92
+    t_put_u32(buf, 0, 0x00010000);
+    t_put_u16(buf, 4, 5);
+    t_put_u32(buf, 12, 0x68656164); t_put_u32(buf, 12 + 8, 92);  t_put_u32(buf, 12 + 12, 54);   # head
+    t_put_u32(buf, 28, 0x6D617870); t_put_u32(buf, 28 + 8, 148); t_put_u32(buf, 28 + 12, 32);   # maxp
+    t_put_u32(buf, 44, 0x68686561); t_put_u32(buf, 44 + 8, 180); t_put_u32(buf, 44 + 12, 36);   # hhea
+    t_put_u32(buf, 60, 0x686D7478); t_put_u32(buf, 60 + 8, 216); t_put_u32(buf, 60 + 12, 16);   # hmtx
+    t_put_u32(buf, 76, 0x636D6170); t_put_u32(buf, 76 + 8, 232); t_put_u32(buf, 76 + 12, 44);   # cmap
+    t_put_u16(buf, 92 + 18, 1000);          # head.unitsPerEm — a round em, so the px maths is checkable by hand
+    t_put_u16(buf, 148 + 4, 3);             # maxp.numGlyphs
+    t_put_u16(buf, 180 + 4, 800);           # hhea.ascender
+    t_put_u16(buf, 180 + 6, 65536 - 200);   # hhea.descender (signed, two's complement)
+    t_put_u16(buf, 180 + 8, 100);           # hhea.lineGap
+    t_put_u16(buf, 180 + 34, 3);            # hhea.numberOfHMetrics
+    t_put_u16(buf, 216 + 0, 500);  t_put_u16(buf, 216 + 2, 10);    # gid 0 .notdef  adv 500
+    t_put_u16(buf, 216 + 4, 1000); t_put_u16(buf, 216 + 6, 20);    # gid 1 'm'      adv 1000
+    t_put_u16(buf, 216 + 8, 750);  t_put_u16(buf, 216 + 10, 30);   # gid 2 'n'      adv 750
+    # cmap: format 4, one segment 0x6D..0x6E ('m'..'n') plus the mandatory terminator.
+    # ⚠ A format-4 segment maps CONSECUTIVE codes to CONSECUTIVE gids, so 'm' takes gid 1 and 'n'
+    # gid 2 — which is why the advances above are ordered the way they are rather than by size.
+    var cm = 232;
+    t_put_u16(buf, cm + 0, 0);              # version
+    t_put_u16(buf, cm + 2, 1);              # numTables
+    t_put_u16(buf, cm + 4, 3);              # platformID 3 (Windows)
+    t_put_u16(buf, cm + 6, 1);              # encodingID 1 (BMP)
+    t_put_u32(buf, cm + 8, 12);             # offset from the cmap table to the subtable
+    var sub = cm + 12;
+    t_put_u16(buf, sub + 0, 4);             # format
+    t_put_u16(buf, sub + 2, 28);            # length
+    t_put_u16(buf, sub + 4, 0);             # language
+    t_put_u16(buf, sub + 6, 4);             # segCountX2 -> segCount 2
+    t_put_u16(buf, sub + 8, 4);             # searchRange
+    t_put_u16(buf, sub + 10, 1);            # entrySelector
+    t_put_u16(buf, sub + 12, 0);            # rangeShift
+    t_put_u16(buf, sub + 14, 0x6E);         # endCode[0]   = 'n'
+    t_put_u16(buf, sub + 16, 65535);        # endCode[1]   = terminator
+    t_put_u16(buf, sub + 18, 0);            # reservedPad
+    t_put_u16(buf, sub + 20, 0x6D);         # startCode[0] = 'm'
+    t_put_u16(buf, sub + 22, 65535);        # startCode[1]
+    t_put_u16(buf, sub + 24, 65536 - 108);  # idDelta[0] = -108 -> 'm'(109) = gid 1, 'n'(110) = gid 2
+    t_put_u16(buf, sub + 26, 1);            # idDelta[1]
+    t_put_u16(buf, sub + 28, 0);            # idRangeOffset[0]
+    t_put_u16(buf, sub + 30, 0);            # idRangeOffset[1]
+    return rekha_font_open(buf, len);
+}
+
 fn t_entry(buf, i, name, is_dir): i64 {
     var rec = buf + i * 64;
     var k = 0;
@@ -218,7 +302,7 @@ fn main() {
     # text at all now. The width is the COLUMN's, not the retired hardcoded 13.
     var tspec = dh_cols_new(2);
     dh_cols_set_width(tspec, 0, 0);
-    dh_cols_set_width(tspec, 1, CRAB_COL_SIZE_W);
+    dh_cols_set_width(tspec, 1, crab_col_size_w());
     var lst = dh_list_new(26);
     crab_row(lst, tspec, 2, 13, nm, 0, 1234, 0, 0);
     var roww = dh_widget_first_child(lst);
@@ -247,10 +331,10 @@ fn main() {
     assert_eq(crab_cols_for_width(100), 1, "a narrow pane keeps NAME alone");
     # ⚠ Both sides of each threshold, because an off-by-one here silently drops a column or squeezes
     # the name column below the floor that retired the 13-character one.
-    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W), 2, "exactly at the SIZE threshold");
-    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W - 1), 1, "...one px below it");
-    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W), 3, "exactly at the MODIFIED threshold");
-    assert_eq(crab_cols_for_width(CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W - 1), 2, "...one px below it");
+    assert_eq(crab_cols_for_width(crab_col_name_min() + crab_col_size_w()), 2, "exactly at the SIZE threshold");
+    assert_eq(crab_cols_for_width(crab_col_name_min() + crab_col_size_w() - 1), 1, "...one px below it");
+    assert_eq(crab_cols_for_width(crab_col_name_min() + crab_col_size_w() + crab_col_mtime_w()), 3, "exactly at the MODIFIED threshold");
+    assert_eq(crab_cols_for_width(crab_col_name_min() + crab_col_size_w() + crab_col_mtime_w() - 1), 2, "...one px below it");
     assert_eq(crab_cols_for_width(0), 1, "a zero-width pane still names one column");
 
     # ⚠ FLOOR, NEVER ROUNDED UP. A column that reports one more character than it can draw is how
@@ -636,6 +720,45 @@ fn main() {
     # ⭐ THE HEADLINE. `arena_reset` on a GROW arena rewinds to the first chunk and KEEPS the chain,
     # so twenty frames re-walk the same memory and the global bump pointer never moves.
     assert_eq(alloc_used() - a0, 0, "TWENTY rendered frames cost the global heap exactly 0 bytes");
+
+    # ⛔⛆ AND THE HEADLINE IS TRUE OF **ONE BRANCH** — WHICH IS THE SHAPE THIS FILE ALREADY WARNS
+    # ABOUT: *"a gate that covers one state proves one state."* Every render above passes `font = 0`,
+    # which takes dhancha's BITMAP path. The SCALABLE path is a different function body, and it
+    # allocates: `dh_draw_text_ink` opens with `sd_canvas_new(sd_surface_width(sds),
+    # sd_surface_height(sds))` — a **full-surface canvas per call, per label, per frame** — plus a
+    # sadish path per glyph, all from the global bump allocator with no `free()` and NOT through
+    # dhancha's per-frame arena. ⇒ **The moment crab passes a real face, "twenty frames cost zero
+    # bytes" stops being true and this gate does not notice**, because it is measuring the branch
+    # that is not running.
+    # ⭐ MEASURED HERE RATHER THAN LEFT AS A HAZARD, and this is the arm that will catch the fix:
+    # the fixture face makes the scalable branch reachable from a host test for the first time.
+    # ⚠ ASSERTING A DEFECT, DELIBERATELY AND WITH ITS OWN EXPIRY. This assertion says the scalable
+    # path COSTS heap. It is written this way so the number cannot quietly change and so that the day
+    # dhancha routes that canvas through the frame arena, **this test FAILS and must be inverted** —
+    # which is the only way a blocker in a sibling repo gets a gate in this one.
+    var sfbuf = alloc(512);
+    var sfont = t_prop_face(sfbuf, 512);
+    assert(sfont != 0, "the fixture face opens for the allocation arm");
+    store64(asl, 0); store64(asr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    var sa0 = alloc_used();
+    crab_render(asurf, sfont, rs);
+    var scost = alloc_used() - sa0;
+    assert(scost > 0,
+      "⛔ ONE FRAME UNDER A REAL FACE COSTS THE GLOBAL HEAP — dhancha's scalable path allocates per call");
+    # ⚠ Restored immediately: the font is module state, and a later render measuring in a face crab
+    # does not use would make every assertion after this one describe a different program.
+    crab_set_frame_font(0);
+    store64(asl, 0); store64(asr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    var ba0 = alloc_used();
+    crab_render(asurf, 0, rs);
+    assert_eq(alloc_used() - ba0, 0,
+      "⛔ ...WHILE THE BITMAP FACE STILL COSTS EXACTLY ZERO — the two branches are not the same program");
 
     # ⚠ THE DIRECT FORM OF THE SAME CLAIM, and the one that does not depend on the arena's capacity
     # at all: after twenty identical frames the arena holds exactly ONE frame's worth. The sizes
@@ -3081,14 +3204,14 @@ fn t_preview(): i64 {
     # ⚠ DEGENERATE WIDTHS REFUSE RATHER THAN GOING NEGATIVE. A window narrower than the column
     # itself would compute a negative pane width, and `crab_cols_for_width` would answer 1 for it —
     # correct by accident. The explicit guard is what makes it correct on purpose.
-    assert_eq(crab_preview_fit(CRAB_PV_W, 1), 0, "a window exactly as wide as the column refuses");
+    assert_eq(crab_preview_fit(crab_pv_w(), 1), 0, "a window exactly as wide as the column refuses");
     assert_eq(crab_preview_fit(0, 1), 0, "...and a zero-width window refuses");
     # ⭐ THE PREVIEW CAN COLLAPSE TWO PANES INTO ONE, and that is the ratified small-window rule
     # answering a narrower pane area rather than a second behaviour. At 640 crab shows two panes;
     # taking 153 px for the preview leaves 487, which `crab_two_panes_fit` refuses.
     assert_eq(crab_two_panes_fit(640), 1, "at 640 px crab shows two panes");
-    assert_eq(crab_two_panes_fit(640 - CRAB_PV_W), 0, "...and with the preview open it shows one");
-    assert_eq(crab_two_panes_fit(753 - CRAB_PV_W), 1, "at 753 px there is room for two panes AND the preview");
+    assert_eq(crab_two_panes_fit(640 - crab_pv_w()), 0, "...and with the preview open it shows one");
+    assert_eq(crab_two_panes_fit(753 - crab_pv_w()), 1, "at 753 px there is room for two panes AND the preview");
 
     # ⛔ THE IMAGE SET IS chitra's FOUR FORMATS, and naming a fifth here would promise a preview the
     # stack cannot produce. `chitra_image_decode` sniffs PNG, JPEG, BMP and GIF and REJECTS anything
@@ -3713,7 +3836,7 @@ fn t_gridview(): i64 {
     # ⛔ THE CELL SIZE IS DERIVED, NOT CHOSEN — a cell is exactly the NAME column's own floor wide
     # (below which a name cannot tell real files apart) and exactly a list row tall. So the view
     # changes only HOW MANY entries fit, which is the honest description of what it is for.
-    assert_eq(CRAB_GRID_CELL_W, CRAB_COL_NAME_MIN, "a grid cell is as wide as the NAME column's floor");
+    assert_eq(crab_grid_cell_w(), crab_col_name_min(), "a grid cell is as wide as the NAME column's floor");
     assert_eq(CRAB_GRID_CELL_H, 26, "...and as tall as a list row");
 
     var gb = alloc(16 * CRAB_REC_SZ);
@@ -3866,9 +3989,9 @@ fn t_gridview(): i64 {
     # ⛔ BOTH SIDES MUST BE HONEST, which is `crab_two_panes_fit`'s own shape. The context column shows
     # names, so its floor is the name floor; the driven listing's floor is the same. Below that the
     # view falls back to a plain list — the operator keeps the listing and loses only the context.
-    assert_eq(CRAB_COL_CTX_W, CRAB_COL_NAME_MIN, "the context column is exactly the NAME column's floor wide");
-    assert_eq(crab_cols_fit(CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN), 1, "both columns fit at 186");
-    assert_eq(crab_cols_fit(CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN - 1), 0, "...and not at 185");
+    assert_eq(crab_col_ctx_w(), crab_col_name_min(), "the context column is exactly the NAME column's floor wide");
+    assert_eq(crab_cols_fit(crab_col_ctx_w() + CRAB_PANE_GAP + crab_col_name_min()), 1, "both columns fit at 186");
+    assert_eq(crab_cols_fit(crab_col_ctx_w() + CRAB_PANE_GAP + crab_col_name_min() - 1), 0, "...and not at 185");
     assert_eq(crab_cols_fit(0), 0, "a zero-width pane shows no context column");
 
     # ---- the record's own default -----------------------------------------------------------------
@@ -3926,7 +4049,7 @@ fn t_gridview(): i64 {
     # is built, so `crab_cols_for_width` decides NAME/SIZE/MODIFIED against the width the listing
     # really gets — not one the context column is about to spend.
     var ctxw = dh_widget_w(dh_widget_parent(ctx));
-    assert_eq(ctxw, CRAB_COL_CTX_W, "the context column is laid out at its declared width");
+    assert_eq(ctxw, crab_col_ctx_w(), "the context column is laid out at its declared width");
     # ⛔ AND EXACTLY ONE PANE IS BUILT, whatever the window could afford. 760 px clears
     # `crab_two_panes_fit` comfortably — without `crab_view_solo` this frame would hold TWO listings
     # AND a context column, which is three columns of names in a window that only just agreed to two.
@@ -3966,7 +4089,7 @@ fn t_gridview(): i64 {
     crab_render(solo, 0, rs);
     assert_eq(crab_pane_widget(1), 0, "the list view is solo at 400 px too — the same one pane");
     var listpw = dh_widget_w(dh_widget_parent(crab_pane_widget(0)));
-    assert_eq(listpw - colspw, CRAB_COL_CTX_W + CRAB_PANE_GAP,
+    assert_eq(listpw - colspw, crab_col_ctx_w() + CRAB_PANE_GAP,
       "⛔ the listing gives up exactly the context column's width plus the seam — no more, no less");
 
     # ---- no parent listing, no column ----------------------------------------------------------------
@@ -4082,12 +4205,12 @@ fn t_gridview(): i64 {
     # never render as one identical row. Under a proportional face `px / 9` over-reports and the cut
     # goes unmarked. ⇒ the 9 now has ONE reader, `crab_char_w`.
     #
-    # ⚠ AND HERE IS WHAT THESE ASSERTIONS CANNOT DO, SAID OUTRIGHT RATHER THAN LEFT TO BE ASSUMED.
-    # crab passes `font = 0` everywhere, so `crab_char_w()` IS 9 and no host test can tell "asks the
-    # font" from "divides by the constant" — they are the same number. Constructing a RekhaFont needs
-    # a real TTF. What IS pinned here: the font-0 contract exactly (so the routing change is proved
-    # to render identically), the guards that make a divide safe, and the read bound on untrusted
-    # names. The proportional half is gated by the day crab passes a face — see the roadmap.
+    # ⚠ THIS BLOCK ONCE ADMITTED IT COULD NOT PROVE ITS OWN CLAIM, AND THAT ADMISSION IS RETIRED.
+    # It read: *"crab passes `font = 0` everywhere, so `crab_char_w()` IS 9 and no host test can tell
+    # 'asks the font' from 'divides by the constant'... Constructing a RekhaFont needs a real TTF."*
+    # True when written, and answered in 0.9.0 by building one — see `t_prop_face` and the
+    # proportional-face block further down, where every derived width is watched to MOVE. What
+    # follows is still the font-0 contract, which is what the shipped binary actually draws with.
     # ⚠ THIS ONE IS A STATEMENT OF FACT, NOT A PIN, AND A MUTATION IS HOW WE KNOW. Deleting
     # `crab_font = font` from `crab_render` leaves it green — the variable starts at 0 and crab only
     # ever passes 0, so the assignment is a no-op until a real face arrives. It is asserted anyway
@@ -4127,6 +4250,109 @@ fn t_gridview(): i64 {
     # the record's TYPE and measuring it would price a type byte as a character.
     assert_eq(CRAB_TEXT_SCAN_MAX, CRAB_PATH_MAX, "the cap is the longest string crab ever draws — a path");
     assert_eq(CRAB_REC_TYPE, CRAB_NAME_MAX - 1, "the name region ends one byte before the record does");
+
+    # --- 0.9.0: UNDER A PROPORTIONAL FACE, AND THIS IS THE CLAIM 0.8.8 COULD NOT MAKE --------------
+    # ⛔⛆ 0.8.8 ROUTED EVERY WIDTH THROUGH `crab_char_w()` AND THEN ADMITTED, HERE, THAT NO HOST TEST
+    # COULD TELL THAT FROM DIVIDING BY NINE — at `font = 0` they are the same number, and building a
+    # face meant a TTF crab has no way to reach. There is still no TrueType face anywhere in the
+    # AGNOS stack. ⇒ The suite builds one (`t_prop_face`), which is what rekha's and dhancha's own
+    # tests do, and every derived width is watched to MOVE.
+    var pfbuf = alloc(512);
+    var pf = t_prop_face(pfbuf, 512);
+    assert(pf != 0, "the synthetic proportional face opens");
+    # ⚠ The face itself first, so a later failure is crab's and not the fixture's. upem 1000 at 16 px.
+    assert_eq(rekha_char_advance_px(pf, 110, CRAB_TEXT_EM), 12, "'n' advances 12 px in this face");
+    assert_eq(rekha_char_advance_px(pf, 109, CRAB_TEXT_EM), 16, "...and 'm' advances 16 — they DIFFER");
+    assert_eq(rekha_char_advance_px(pf, 97, CRAB_TEXT_EM), 8, "...and an unmapped 'a' falls to .notdef's 8");
+
+    crab_set_frame_font(pf);
+    assert_eq(crab_frame_font(), pf, "the face is installed for the frame");
+    # ⛔ THE ADVANCE IS THE FONT'S NOW, NOT KASHI'S NINE. `crab_char_w` asks about 'n'.
+    assert_eq(crab_char_w(), 12, "⛔ THE ADVANCE COMES FROM THE FACE — 12, not CRAB_COL_CHARW's 9");
+    assert(crab_char_w() != CRAB_COL_CHARW, "...and it is demonstrably not the bitmap constant");
+
+    # ⛔⛔ AND `crab_text_w` MEASURES RATHER THAN MULTIPLYING, which is the half that only an UNEQUAL
+    # face can show. "nn" and "nm" are the same LENGTH and different WIDTHS; a `length x advance`
+    # implementation cannot tell them apart, and every truncation decision rests on telling them apart.
+    assert_eq(crab_text_w("nn"), 24, "two 'n's measure 24");
+    assert_eq(crab_text_w("nm"), 28, "⛔ ...but 'n' plus 'm' measures 28 — MEASURED, not length x advance");
+    assert(crab_text_w("nm") != crab_text_w("nn"),
+      "⛔ TWO STRINGS OF EQUAL LENGTH HAVE DIFFERENT WIDTHS — the whole reason to measure");
+    assert_eq(crab_text_w("mm"), 32, "...and two 'm's measure 32");
+    assert_eq(crab_text_w(""), 0, "the empty string still measures nothing");
+
+    # ⛔⛆ THE SEVEN DERIVED WIDTHS MOVE TOGETHER. Each was a pixel literal with its real constant in
+    # the comment beside it — `= 90;  # 10 chars`. Under this face ten characters is 120 px, and a
+    # crab still using 90 would give the NAME column eight characters while believing it had ten:
+    # the exact width at which two long names render as one identical row.
+    assert_eq(crab_col_name_min(), CRAB_COL_NAME_CHARS * 12, "the NAME floor is ten of THIS face's characters");
+    assert_eq(crab_col_name_min(), 120, "...which is 120 px, not 90");
+    assert_eq(crab_col_size_w(), 72, "the SIZE column is six of them");
+    assert_eq(crab_col_mtime_w(), 204, "the MODIFIED column is seventeen");
+    assert_eq(crab_pv_w(), crab_col_mtime_w(), "the preview column is still the MODIFIED column's width");
+    assert_eq(crab_col_ctx_w(), crab_col_name_min(), "the context column is still the NAME floor");
+    assert_eq(crab_grid_cell_w(), crab_col_name_min(), "a grid cell is still the NAME floor");
+    assert_eq(crab_gal_cell_w(), crab_col_name_min(), "...and so is a gallery cell");
+
+    # ⛔ AND THE THRESHOLDS BUILT ON THEM MOVE, which is where a stale width picks a WRONG LAYOUT
+    # rather than failing. Two panes need each to show NAME+SIZE+MODIFIED honestly: 396 px here
+    # against 297 for the bitmap face, so a window crab used to split it must now keep whole.
+    assert_eq(crab_two_panes_fit((396 * 2) + CRAB_PANE_GAP), 1, "two panes fit when each gets 396");
+    assert_eq(crab_two_panes_fit((395 * 2) + CRAB_PANE_GAP), 0, "⛔ ...and NOT one px below it");
+    assert_eq(crab_cols_for_width(396), 3, "396 px holds all three columns in this face");
+    assert_eq(crab_cols_for_width(297), 2,
+      "⛔ 297 — THE BITMAP FACE'S THREE-COLUMN WIDTH — LOSES THE MODIFIED COLUMN HERE");
+    assert_eq(crab_cols_for_width(192), 2, "the SIZE threshold moved to 192 (was 144)");
+    assert_eq(crab_cols_for_width(191), 1, "...and one px below it only the NAME survives");
+    assert_eq(crab_col_chars(120), 10, "a 120 px column holds ten of this face's characters");
+
+    # --- 0.9.0: THE LATIN-1 LIMIT, WRITTEN DOWN BECAUSE IT CANNOT HONESTLY BE CLOSED HERE ---------
+    # ⛔⛆ THE SCALABLE PATH WALKS ONE **BYTE** PER GLYPH. dhancha's `dh_draw_text_ink` reads
+    # `load8(text + i)` and hands that byte to rekha as a CODEPOINT, so byte 0xC3 is drawn as U+00C3
+    # rather than as the first half of a two-byte sequence. There is no UTF-8 decode anywhere in
+    # dhancha or rekha. `crab_text_w` matches it byte-for-byte, deliberately: a measurer that decoded
+    # UTF-8 while the drawer did not would put the caret and the truncation in places the ink is not.
+    # ⚠ crab CANNOT TYPE SUCH A BYTE — `crab_key_char` maps US QWERTY and tops out at '~' (126), as
+    # the assertions below hold it to. ⛔ BUT crab CAN DISPLAY ONE: a name comes from a readdir
+    # record the kernel filled, and a UTF-8 filename on an ext2 volume is an ordinary thing to find.
+    # ⇒ **The limit is a DISPLAY limit, not an input limit**, it belongs to dhancha and rekha rather
+    # than to crab, and it is recorded rather than papered over. Under the bitmap face the same byte
+    # indexes CP437 and draws a different wrong glyph — so this is not a regression the face
+    # introduces, it is a limit the face makes legible.
+    var l1i = 0;
+    var l1max = 0;
+    while (l1i < 256) {
+        var l1c = crab_key_char(l1i, 0);
+        if (l1c > l1max) { l1max = l1c; }
+        var l1s = crab_key_char(l1i, 1);
+        if (l1s > l1max) { l1max = l1s; }
+        l1i = l1i + 1;
+    }
+    assert(l1max < 128, "⛔ NO KEY crab MAPS PRODUCES A BYTE >= 128 — the limit is display, not input");
+    assert_eq(l1max, 122, "...and the highest is 'z' — ASCII, with room to spare");
+    # ⚠ `~` (126) IS HIGHER STILL AND crab WRITES IT, but no key types it: it is `crab_name_cell`'s
+    # truncation marker, chosen in 0.5.0 precisely because the CP437 bitmap face has no ellipsis.
+    assert_eq(crab_key_char(0x35, 1), 0, "no key on the map produces '~' — crab writes it, you cannot type it");
+    # ⚠ AND A HIGH BYTE MEASURES AS ONE GLYPH, which is the honest statement of the limit: crab
+    # prices it exactly as dhancha will draw it, so the width is wrong in the same direction as the
+    # ink rather than in a different one.
+    var l1b = alloc(8);
+    store8(l1b + 0, 0xC3); store8(l1b + 1, 0xA9); store8(l1b + 2, 0);   # "é" in UTF-8, two bytes
+    # ⭐ AND THE ANSWER IS **16, NOT 24**, WHICH IS MEASUREMENT WORKING RATHER THAN A DISCREPANCY.
+    # Both bytes are unmapped in this face, so each falls to `.notdef` and advances 8 — not the 12
+    # of the representative glyph `crab_char_w()` reports. A `length x advance` implementation would
+    # answer 24 and be wrong by half a character; measuring answers what will actually be drawn.
+    assert_eq(crab_text_w(l1b), 16,
+      "a two-byte UTF-8 character measures as TWO .notdef glyphs — exactly the two dhancha would draw");
+    assert(crab_text_w(l1b) != 2 * crab_char_w(),
+      "⛔ ...and NOT two representative advances — which is the difference measuring makes");
+
+    # ⚠ AND EVERYTHING GOES BACK. The face is module state; a test that left it installed would hand
+    # every later assertion a crab measuring in a font it does not use.
+    crab_set_frame_font(0);
+    assert_eq(crab_char_w(), CRAB_COL_CHARW, "the bitmap advance is restored");
+    assert_eq(crab_col_name_min(), 90, "...and the NAME floor is 90 again");
+    assert_eq(crab_two_panes_fit(600), 1, "...and 600 px splits into two panes once more");
 
     # ---- a stale pointer must not outlive its frame -------------------------------------------------
     # ⛔⛆ `dh_frame_begin` REWINDS THE ARENA, so a `crab_ctxlst` from a frame that HAD a column names
@@ -4177,7 +4403,7 @@ fn t_gridview(): i64 {
     assert(lc != 0, "the long-name cell exists");
     var lt = dh_widget_text(lc);
     assert(lt != 0, "...and carries text");
-    assert(crab_cstr_len(lt, CRAB_NAME_MAX) <= crab_col_chars(CRAB_GRID_CELL_W) + 1,
+    assert(crab_cstr_len(lt, CRAB_NAME_MAX) <= crab_col_chars(crab_grid_cell_w()) + 1,
       "a long name is truncated to the cell");
     var dc = dh_grid_cell_at(g2, 0);
     var dt = dh_widget_text(dc);
@@ -4414,11 +4640,11 @@ fn t_gallery(): i64 {
       "...and 'too large' and 'no decode'");
     # ⚠ EVERY NOTE MUST FIT A CELL WHOLE. A clipped "too large to prev" reads as a rendering fault,
     # so these are chosen to fit rather than truncated — asserted against the cell's real width.
-    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_TOO_BIG), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_TOO_BIG), 64) <= crab_col_chars(crab_gal_cell_w()),
       "'too large' fits a cell whole");
-    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_SPENT), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_SPENT), 64) <= crab_col_chars(crab_gal_cell_w()),
       "...'budget' fits");
-    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_BAD), 64) <= crab_col_chars(CRAB_GAL_CELL_W),
+    assert(crab_cstr_len(crab_thumb_note_cell(CRAB_TH_BAD), 64) <= crab_col_chars(crab_gal_cell_w()),
       "...and 'no decode' fits");
     # ⚠ The preview's own sentences are UNCHANGED — the cell is a second phrasing of the same four
     # states, not a replacement for the first.
@@ -4613,7 +4839,7 @@ fn t_gallery(): i64 {
     var gp = crab_pane_widget(0);
     assert_eq(dh_widget_kind(gp), GRID, "a gallery pane is a GRID — the same kind the grid view uses");
     assert_eq(dh_grid_cell_h(gp), CRAB_GAL_CELL_H, "...with the TALLER gallery cell");
-    assert_eq(dh_grid_cell_w(gp), CRAB_GAL_CELL_W, "...and the gallery cell width");
+    assert_eq(dh_grid_cell_w(gp), crab_gal_cell_w(), "...and the gallery cell width");
     assert_eq(dh_grid_count(gp), 3, "one cell per entry");
     # ⛔ A CACHED IMAGE GETS A CANVAS; A NON-IMAGE GETS THE RESERVED BAND. The band is reserved either
     # way so a cell does not change height when its thumbnail lands and the grid does not reflow
@@ -4646,7 +4872,7 @@ fn t_gallery(): i64 {
       "⛔ ...and NAMES the refusal instead of drawing an anonymous blank");
     # ⛔ THE CELL SIZE IS DERIVED: the picture plus one list row.
     assert_eq(CRAB_GAL_CELL_H, CRAB_THUMB_H + CRAB_GRID_CELL_H, "a gallery cell is a thumbnail plus a name row");
-    assert_eq(CRAB_GAL_CELL_W, CRAB_COL_NAME_MIN, "...and as wide as the NAME column's floor");
+    assert_eq(crab_gal_cell_w(), crab_col_name_min(), "...and as wide as the NAME column's floor");
     # ⚠ AN UNCACHED IMAGE ALSO GETS THE RESERVED BAND, not a canvas — the view never triggers a
     # decode, it only shows work the idle tick has already done.
     crab_tc_clear();
@@ -4966,7 +5192,7 @@ fn t_menubar_enabled(): i64 {
     assert_eq(crab_sidebar_shown(900, 0, 1), crab_sidebar_fit(900, 1),
       "with no preview, the two questions agree");
     # A window that fits the sidebar alone but not alongside the preview is the failing case.
-    var wboth = CRAB_PV_W + CRAB_SB_W + CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_PANE_GAP;
+    var wboth = crab_pv_w() + CRAB_SB_W + crab_col_name_min() + crab_col_size_w() + CRAB_PANE_GAP;
     if (crab_preview_fit(wboth - 40, 1) == 1) {
         if (crab_sidebar_fit(wboth - 40, 1) == 1) {
             assert_eq(crab_sidebar_shown(wboth - 40, 1, 1), 0,
@@ -6309,8 +6535,8 @@ fn t_switcher(): i64 {
 
     # ---- the fit rule, derived not picked -------------------------------------------------------
     # 40 px of strip + CRAB_COL_NAME_MIN (90 px = 10 characters) of path = 130.
-    assert_eq(crab_switcher_fit(CRAB_SW_W + CRAB_COL_NAME_MIN), 1, "exactly at the floor, the strip fits");
-    assert_eq(crab_switcher_fit(CRAB_SW_W + CRAB_COL_NAME_MIN - 1), 0, "...and one pixel under, it does not");
+    assert_eq(crab_switcher_fit(CRAB_SW_W + crab_col_name_min()), 1, "exactly at the floor, the strip fits");
+    assert_eq(crab_switcher_fit(CRAB_SW_W + crab_col_name_min() - 1), 0, "...and one pixel under, it does not");
     assert_eq(crab_switcher_fit(372), 1, "a solo pane at the shipped 380x220 default has room");
     assert_eq(crab_switcher_fit(0), 0, "a zero-width pane refuses");
     # ⚠ The strip is exactly two cells wide — if that ever drifts, the fit rule is reasoning about

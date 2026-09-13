@@ -190,16 +190,18 @@ enum CrabCol {
     # TYPE as a character. Where names are handled, `crab_name_cell` applies that tighter bound —
     # this cap exists so that a caller measuring something else is still bounded.
     CRAB_TEXT_SCAN_MAX = 256;   # = CRAB_PATH_MAX
-    CRAB_COL_SIZE_W   = 54;     # 6 chars — "1023K" plus its gap
-    CRAB_COL_MTIME_W  = 153;    # 17 chars — "2026-08-28 11:04" plus its gap
-    CRAB_COL_NAME_MIN = 90;     # 10 chars — below this a name column cannot tell files apart
+    # ⛔⛆ THESE WERE PIXEL WIDTHS WITH THE REAL CONSTANT IN THE COMMENT (0.9.0). Every one of them read
+    # `= 90;  # 10 chars` — storing the DERIVED number in the code and the number that actually
+    # governs in prose beside it. Nine pixels per character is a property of kashi's CP437 8x16 cell
+    # and of nothing else, so under any other face all seven were silently wrong and would have
+    # picked a WRONG LAYOUT rather than failing: a NAME column too narrow to tell files apart,
+    # `crab_two_panes_fit` splitting a window that cannot hold two listings, a grid cell clipping the
+    # name it exists to show. ⇒ **The character count IS the constant. The pixel width is derived.**
+    # The comments below are now the code, and `crab_char_w()` supplies the multiplier.
+    CRAB_COL_SIZE_CHARS  = 6;    # "1023K" plus its gap
+    CRAB_COL_MTIME_CHARS = 17;   # "2026-08-28 11:04" plus its gap
+    CRAB_COL_NAME_CHARS  = 10;   # below this a name column cannot tell the files in a real directory apart
     CRAB_PANE_GAP     = 6;      # the seam between the two panes, and the window's own edge padding
-    # ⛔ THE PREVIEW COLUMN'S WIDTH IS `CRAB_COL_MTIME_W`, AND THAT IS A DERIVATION, NOT A COINCIDENCE.
-    # The widest line the preview draws is a modified timestamp — `2026-08-28 11:04`, seventeen
-    # characters with its gap — which is the same string the MODIFIED column exists to hold and was
-    # measured for. Giving the column its own literal would be a second number meaning the same
-    # thing, free to drift when the font or the date format moves. ⇒ One constant, one derivation.
-    CRAB_PV_W         = 153;
     # ⭐ THE THUMBNAIL'S SIZE AND STATES LIVE HERE, WITH THE REST OF THE COLUMN GEOMETRY, because the
     # RENDER PATH reads them and this file is the lowest layer that path may touch. The decode that
     # fills the buffer is in `app.cyr`; only these numbers and the state names come down.
@@ -233,8 +235,6 @@ enum CrabCol {
     # else goes to the column the operator is actually driving. It does NOT grow with the window:
     # it is CONTEXT, and a 400 px parent listing next to the listing you are reading is a second pane
     # that nobody asked for.
-    CRAB_COL_CTX_W    = 90;      # = CRAB_COL_NAME_MIN
-    CRAB_GAL_CELL_W   = 90;      # = CRAB_COL_NAME_MIN, so the name stays as legible as a grid cell's
     CRAB_GAL_CELL_H   = 90;      # = CRAB_THUMB_H (64) + CRAB_GRID_CELL_H (26)
     # ⛔ THE CELL SIZE IS DERIVED FROM THE COLUMN RULE, NOT CHOSEN — the same discipline that
     # produced `crab_two_panes_fit`'s 600 and the preview's 303. A cell is exactly as wide as the
@@ -244,7 +244,6 @@ enum CrabCol {
     # of them fit. That is the honest description of what this view is for.
     # ⚠ A pane 374 px wide gets 3 columns; at 187 (two panes at the shipped 380) it gets 2. Against
     # ~7 visible list rows that is 3x the entries on screen, which is the whole point.
-    CRAB_GRID_CELL_W  = 90;
     CRAB_GRID_CELL_H  = 26;
     CRAB_GRID_GAP     = 6;
     CRAB_PV_ROW_H     = 18;     # a preview line, matching the column header's row height
@@ -271,7 +270,7 @@ enum CrabCol {
 # columns. The disclosure that used to be a ⚠ in the handoff is now just fixed.
 fn crab_two_panes_fit(w): i64 {
     var panew = (w - CRAB_PANE_GAP) / 2;
-    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W)) { return 1; }
+    if (panew >= (crab_col_name_min() + crab_col_size_w() + crab_col_mtime_w())) { return 1; }
     return 0;
 }
 
@@ -298,14 +297,14 @@ fn crab_view_solo(mode): i64 {
 }
 
 fn crab_cols_fit(panew): i64 {
-    if (panew >= (CRAB_COL_CTX_W + CRAB_PANE_GAP + CRAB_COL_NAME_MIN)) { return 1; }
+    if (panew >= (crab_col_ctx_w() + CRAB_PANE_GAP + crab_col_name_min())) { return 1; }
     return 0;
 }
 
 # How many columns a pane `panew` px wide can honestly show: 1 = NAME, 2 = +SIZE, 3 = +MODIFIED.
 fn crab_cols_for_width(panew): i64 {
-    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W + CRAB_COL_MTIME_W)) { return 3; }
-    if (panew >= (CRAB_COL_NAME_MIN + CRAB_COL_SIZE_W)) { return 2; }
+    if (panew >= (crab_col_name_min() + crab_col_size_w() + crab_col_mtime_w())) { return 3; }
+    if (panew >= (crab_col_name_min() + crab_col_size_w())) { return 2; }
     return 1;
 }
 
@@ -341,6 +340,18 @@ var crab_font = 0;
 
 # @public — the font the frame just rendered with, or 0 for kashi's bitmap face.
 fn crab_frame_font(): i64 { return crab_font; }
+
+# @public — install the frame's font. ⛔ THE ONE ASSIGNMENT SITE, and `crab_render` calls it rather
+# than storing the field itself, on the same discipline as every other "one derivation" rule here.
+#
+# ⭐⭐ AND IT IS WHAT MAKES 0.9.0 PROVABLE. 0.8.8 had to admit in its own tests that at `font = 0` no
+# host test could tell *"asks the font"* from *"divides by the constant"* — they are the same number —
+# because constructing a face meant a TTF crab has no way to reach. That admission is retired: the
+# suite builds a **synthetic proportional face** in memory (head/maxp/hhea/hmtx/cmap, the shape
+# `rekha/programs/hmtx_test.cyr` uses) and installs it here, so every derived width can be watched
+# to move. ⚠ The fixture carries no `glyf` and none is needed — crab asks `rekha` for ADVANCES, and
+# a width question never rasterises a glyph.
+fn crab_set_frame_font(f): i64 { crab_font = f; return f; }
 
 # @public — the advance crab sizes text by, in px. Exactly `CRAB_COL_CHARW` for the bitmap font.
 #
@@ -379,6 +390,56 @@ fn crab_text_w(s): i64 {
     while (i < n) { w = w + dh_text_advance(crab_font, load8(s + i), CRAB_TEXT_EM); i = i + 1; }
     return w;
 }
+
+# =================================================================================================
+# 📏 THE SEVEN DERIVED WIDTHS (0.9.0)
+# =================================================================================================
+#
+# ⛔⛆ EACH OF THESE WAS A PIXEL LITERAL WITH ITS REAL CONSTANT SITTING IN THE COMMENT BESIDE IT.
+# `CRAB_COL_NAME_MIN = 90;  # 10 chars` is the whole bug in one line: the thing that governs is *ten
+# characters*, and 90 is what ten characters happen to measure in the ONE face crab draws with. Under
+# any other face every threshold built on them moves, and none of them fails loudly — they pick a
+# **wrong layout**. A NAME column narrower than ten characters cannot tell `agnos-kernel-build.log`
+# from `agnos-kernel-build.tmp`, which is the exact confusion `crab_name_cell`'s `~` exists to
+# prevent; `crab_two_panes_fit` splits a window that can no longer hold two honest listings; a grid
+# cell clips the name it exists to show.
+# ⇒ **The count is written down; the width is computed.** At `font = 0` every function below returns
+# precisely the literal it replaced (10x9 = 90, 6x9 = 54, 17x9 = 153), so this renders identically —
+# and the suite now proves that by building a PROPORTIONAL face and watching them all move together.
+#
+# ⚠ WHY FUNCTIONS AND NOT CONSTANTS: a Cyrius `enum` member must be a literal, and a width that
+# depends on the frame's font is not one. The enum keeps what is genuinely constant — the counts.
+
+# @public — the NAME column's floor: ten characters, below which a name column cannot tell the files
+# in a real directory apart. Every other width here is derived from this one or from a sibling count.
+fn crab_col_name_min(): i64 { return CRAB_COL_NAME_CHARS * crab_char_w(); }
+
+# @public — the SIZE column: six characters, "1023K" plus its gap.
+fn crab_col_size_w(): i64 { return CRAB_COL_SIZE_CHARS * crab_char_w(); }
+
+# @public — the MODIFIED column: seventeen characters, "2026-08-28 11:04" plus its gap.
+fn crab_col_mtime_w(): i64 { return CRAB_COL_MTIME_CHARS * crab_char_w(); }
+
+# @public — the PREVIEW column's width.
+# ⛔ IT IS THE MODIFIED COLUMN'S WIDTH, AND THAT IS A DERIVATION RATHER THAN A COINCIDENCE. The widest
+# line the preview draws is a modified timestamp — the same string the MODIFIED column exists to hold
+# and was measured for. Giving the column its own number would be a second value meaning one thing,
+# free to drift when the font or the date format moves. ⇒ One count, one derivation, two readers.
+fn crab_pv_w(): i64 { return crab_col_mtime_w(); }
+
+# @public — the COLUMNS view's context column: exactly the NAME floor, because it shows names and
+# nothing else. It does NOT grow with the window — it is context, and a 400 px parent listing beside
+# the listing you are reading is a second pane nobody asked for.
+fn crab_col_ctx_w(): i64 { return crab_col_name_min(); }
+
+# @public — a GRID cell's width, and a GALLERY cell's.
+# ⛔ THE CELL SIZE IS DERIVED FROM THE COLUMN RULE, NOT CHOSEN — the same discipline that produced
+# `crab_two_panes_fit`'s threshold and the preview's width. A cell is exactly as wide as the NAME
+# column's own floor and exactly as tall as a list row, so a grid cell shows precisely what a list
+# row's NAME column shows and the ONLY thing the view changes is how many of them fit. That is the
+# honest description of what the view is for.
+fn crab_grid_cell_w(): i64 { return crab_col_name_min(); }
+fn crab_gal_cell_w(): i64 { return crab_col_name_min(); }
 
 # Characters that fit in a `px`-wide column. ⚠ Floor, never rounded up — a column that reports one
 # more character than it can draw is how text gets clipped with no truncation marker.
@@ -535,7 +596,7 @@ enum CrabPaneState {
 fn crab_grid_cell(g, rec, is_dir, marked): i64 {
     var cell = dh_widget_new(LABEL);
     if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
-    var chars = crab_col_chars(CRAB_GRID_CELL_W);
+    var chars = crab_col_chars(crab_grid_cell_w());
     var disp = dh_falloc(CRAB_NAME_MAX + 4);
     var n = crab_name_cell(disp, rec, chars);
     # ⚠ The trailing `/` marks a directory, as in the list. It is appended only when there is room,
@@ -601,7 +662,7 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     var lab = dh_widget_new(LABEL);
     dh_widget_set_pref(lab, 0, CRAB_GRID_CELL_H);
     dh_widget_set_flex(lab, 0);
-    var chars = crab_col_chars(CRAB_GAL_CELL_W);
+    var chars = crab_col_chars(crab_gal_cell_w());
     var disp = dh_falloc(CRAB_NAME_MAX + 4);
     var n = crab_name_cell(disp, rec, chars);
     if (is_dir == 1) {
@@ -958,7 +1019,7 @@ fn crab_vol_dedup(v, n): i64 {
 # claims. ⇒ One function, asked by both, so the answer cannot differ.
 fn crab_sidebar_shown(w, pvwant, sbwant): i64 {
     var availw = w;
-    if (crab_preview_fit(w, pvwant) == 1) { availw = w - CRAB_PV_W; }
+    if (crab_preview_fit(w, pvwant) == 1) { availw = w - crab_pv_w(); }
     return crab_sidebar_fit(availw, sbwant);
 }
 
@@ -1645,7 +1706,7 @@ var CRAB_SW_W      = 40;                                  # the whole strip: two
 # `CRAB_COL_NAME_MIN`, 10 characters. Below that the strip is refused and the header falls back to
 # `crab_pane_label`'s `A `/`B ` text prefix, which costs 3 characters instead of 40 px.
 fn crab_switcher_fit(panew): i64 {
-    if (panew >= (CRAB_SW_W + CRAB_COL_NAME_MIN)) { return 1; }
+    if (panew >= (CRAB_SW_W + crab_col_name_min())) { return 1; }
     return 0;
 }
 
@@ -2198,7 +2259,7 @@ fn crab_col_ctx(parent, title, buf, count, sel): i64 {
     if (count <= 0) { return 0; }
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
-    dh_widget_set_pref(col, CRAB_COL_CTX_W, 0);
+    dh_widget_set_pref(col, crab_col_ctx_w(), 0);
     dh_widget_set_flex(col, 0);                # ⛔ fixed: it is context, and must not eat the listing
     dh_widget_set_bg(col, dh_theme_panel());
     var hdr = dh_widget_new(LABEL);
@@ -2221,7 +2282,7 @@ fn crab_col_ctx(parent, title, buf, count, sel): i64 {
     # ⚠ THE SAME NAME FORMATTER AND THE SAME DIRECTORY MARKER THE GRID USES. A context column that
     # truncated differently, or dropped the trailing `/`, would describe the parent in a vocabulary
     # the operator has to learn twice.
-    var chars = crab_col_chars(CRAB_COL_CTX_W);
+    var chars = crab_col_chars(crab_col_ctx_w());
     var i = 0;
     while (i < count) {
         var rec = buf + i * CRAB_REC_SZ;
@@ -2310,8 +2371,8 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
     if (which == 1) { spec = crab_rspec; }
     dh_cols_reset(spec, ncols);
     dh_cols_set_width(spec, 0, 0);                                    # NAME — the remainder
-    if (ncols >= 2) { dh_cols_set_width(spec, 1, CRAB_COL_SIZE_W); }
-    if (ncols >= 3) { dh_cols_set_width(spec, 2, CRAB_COL_MTIME_W); }
+    if (ncols >= 2) { dh_cols_set_width(spec, 1, crab_col_size_w()); }
+    if (ncols >= 3) { dh_cols_set_width(spec, 2, crab_col_mtime_w()); }
     var namechars = crab_col_chars(panew - dh_cols_fixed_total(spec));
 
     # ⭐⭐ THE GRID VIEW (M5, dhancha 0.9.25).
@@ -2324,9 +2385,9 @@ fn crab_pane(root, which, panew, path, buf, count, sizes, mtimes, sel, active, s
         # ⭐ THE GALLERY IS THE GRID WITH A TALLER CELL AND A DIFFERENT CELL BUILDER. Everything else
         # — wrap, selection, arrows, keep-visible, hit-test — is dhancha's GRID and is shared, which
         # is the whole reason the kind was worth building.
-        var cellw = CRAB_GRID_CELL_W;
+        var cellw = crab_grid_cell_w();
         var cellh = CRAB_GRID_CELL_H;
-        if (view == CRAB_VIEW_GALLERY) { cellw = CRAB_GAL_CELL_W; cellh = CRAB_GAL_CELL_H; }
+        if (view == CRAB_VIEW_GALLERY) { cellw = crab_gal_cell_w(); cellh = CRAB_GAL_CELL_H; }
         var grd = dh_grid_new(cellw, cellh, CRAB_GRID_GAP);
         dh_widget_set_flex(grd, 1);
         var gi = 0;
@@ -3819,7 +3880,7 @@ fn crab_kind_str(name, is_dir): i64 {
 # indistinguishable from a broken key.
 fn crab_preview_fit(w, want): i64 {
     if (want == 0) { return 0; }
-    var rest = w - CRAB_PV_W;
+    var rest = w - crab_pv_w();
     if (rest <= CRAB_PANE_GAP) { return 0; }
     var panew = rest - CRAB_PANE_GAP;
     if (crab_two_panes_fit(rest) == 1) { panew = (rest - CRAB_PANE_GAP) / 2; }
@@ -3953,7 +4014,7 @@ fn crab_pv_field(col, label, value): i64 {
 fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, tstate, cam, shot): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
-    dh_widget_set_pref(col, CRAB_PV_W, h);
+    dh_widget_set_pref(col, crab_pv_w(), h);
     dh_widget_set_flex(col, 0);
     dh_widget_set_bg(col, dh_theme_panel());
     var hdr = dh_widget_new(LABEL);
@@ -3973,7 +4034,7 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, ts
     # ⚠ TRUNCATED TO THE COLUMN, with the same "~" marker the pane rows use — a name clipped without
     # a marker is a name the operator will retype wrongly.
     var nb = dh_falloc(CRAB_NAME_MAX + 4);
-    crab_name_cell(nb, rec, crab_col_chars(CRAB_PV_W));
+    crab_name_cell(nb, rec, crab_col_chars(crab_pv_w()));
     crab_pv_field(col, "NAME", nb);
     crab_pv_field(col, "KIND", crab_kind_str(rec, isdir));
     if (isdir == 1) {
@@ -4464,7 +4525,7 @@ fn crab_render(surf, font, rs): i64 {
     if (rs == 0) { return 0; }
     # ⛔ FIRST, BEFORE ANYTHING MEASURES. Every column width, every character count and every
     # truncation below derives from this through `crab_char_w` / `crab_text_w`. See `crab_font`.
-    crab_font = font;
+    crab_set_frame_font(font);
     var lp0 = rs;
     var rp0 = rs + CRAB_RSP_SZ;
     var lbuf     = load64(lp0 + CRAB_RSP_BUF);
@@ -4595,7 +4656,7 @@ fn crab_render(surf, font, rs): i64 {
     # one, which is the same ratified rule answering a narrower window — not a second behaviour.
     var pvon = crab_preview_fit(w, pvwant);
     var availw = w;
-    if (pvon == 1) { availw = w - CRAB_PV_W; }
+    if (pvon == 1) { availw = w - crab_pv_w(); }
     # ⛔ THE SIDEBAR IS SUBTRACTED HERE, BEFORE THE TWO-PANE DECISION, for exactly the reason the
     # preview is: every rule below is then asked about the width the PANES actually get, so none of
     # them needs an "unless the sidebar is open" clause. ⚠ It is asked against `availw`, not `w`,
@@ -4656,7 +4717,7 @@ fn crab_render(surf, font, rs): i64 {
             }
         }
     }
-    if (ctxon == 1) { panew = panew - CRAB_COL_CTX_W - CRAB_PANE_GAP; }
+    if (ctxon == 1) { panew = panew - crab_col_ctx_w() - CRAB_PANE_GAP; }
     # ⚠ HOISTED ABOVE THE PANE BUILD (M5) so the preview column can read the same four arrays the
     # status line does. They describe the ACTIVE pane, which is the one whose selection both surfaces
     # are about — two surfaces answering "what is selected" from different sources is how they drift.

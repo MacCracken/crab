@@ -2,6 +2,106 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.10] — 2026-09-13 — every width is derived from the font, proved against a proportional face — and the two things that actually block a real one
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⚠ **THIS IS THE HALF OF `0.9.0 · A real face` THAT IS NOT BLOCKED, AND IT IS NUMBERED HONESTLY.**
+> An operator cannot newly read crab in a proportional font — that needs a face crab has no way to
+> obtain (below). What changed is that **crab is now correct under one, and the suite proves it.**
+> Call it 0.9.0 if you would rather; the work is the same and the blockers are unaffected.
+
+### Changed — ⭐⭐ the character count is the constant; the pixel width is derived
+
+Seven widths read like this: `CRAB_COL_NAME_MIN = 90;  # 10 chars`. That is the whole defect in one
+line — **the thing that governs is ten characters**, and 90 is what ten characters happen to measure
+in the one face crab draws with. Nine pixels per character is a property of kashi's CP437 8×16 cell
+and of nothing else.
+
+⛔ **And none of them fails loudly under another face — they pick a WRONG LAYOUT.** A NAME column
+narrower than ten characters cannot tell `agnos-kernel-build.log` from `agnos-kernel-build.tmp`,
+which is the exact confusion `crab_name_cell`'s `~` was written in 0.5.0 to prevent.
+`crab_two_panes_fit` splits a window that can no longer hold two honest listings. A grid cell clips
+the name it exists to show.
+
+⇒ The counts are written down (`CRAB_COL_NAME_CHARS = 10`) and the widths are computed —
+`crab_col_name_min()`, `crab_col_size_w()`, `crab_col_mtime_w()`, `crab_pv_w()`, `crab_col_ctx_w()`,
+`crab_grid_cell_w()`, `crab_gal_cell_w()`. ⚠ **Functions, not constants**: a Cyrius `enum` member must
+be a literal, and a width that depends on the frame's font is not one. At `font = 0` each returns
+precisely the literal it replaced (10×9 = 90, 6×9 = 54, 17×9 = 153) — `render_test`'s 53 pixel checks
+pass unchanged, which is what "renders identically" means here.
+
+### Added — ⭐⭐ a synthetic proportional face, which retires an admission 0.8.8 had to make
+
+0.8.8 routed every width through `crab_char_w()` and then admitted, in its own test comments, that it
+could not prove the central claim: at `font = 0` no host test can tell *"asks the font"* from
+*"divides by the constant"*, because they are the same number, and building a face meant a TTF crab
+has no way to reach.
+
+There is still no TrueType face anywhere in the AGNOS stack. **So the suite builds one** — the way
+`rekha/programs/hmtx_test.cyr` and `dhancha/programs/text_test.cyr` each build theirs: head, maxp,
+hhea, hmtx and cmap, assembled byte by byte. ⚠ No `glyf`, and none is needed — a width question asks
+rekha for **advances** and never rasterises a glyph.
+
+⛔ **The advances are deliberately unequal**, because equal ones would prove only half of it. `m`
+advances 16 px and `n` 12, so `"nn"` and `"nm"` are the same **length** and different **widths** — a
+`length × advance` implementation cannot tell them apart, and every truncation decision rests on
+telling them apart. Under that face the whole chain is watched to move: the advance becomes 12 rather
+than 9, the NAME floor 120 rather than 90, the MODIFIED column 204, and `crab_cols_for_width(297)` —
+the bitmap face's three-column width — drops to two columns.
+
+### Fixed — ⛔⛆ the zero-allocation gate was measuring the branch that was not running
+
+crab's M1.5 headline is *"a rendered frame costs the global heap ZERO bytes."* Every render in that
+test passes `font = 0`, which takes dhancha's **bitmap** path. The **scalable** path is a different
+function body and it allocates: `dh_draw_text_ink`'s `font != 0` branch opens with
+`sd_canvas_new(sd_surface_width(sds), sd_surface_height(sds))` — a full-surface canvas per label, per
+frame — plus a sadish path per glyph, all from the global bump allocator that has no `free()`.
+
+⇒ The moment crab passed a real face the headline would have become false **and the gate would not
+have noticed** — *"a gate that covers one state proves one state"*, exactly as the roadmap warns. The
+fixture face makes that branch reachable from a host test for the first time, so the cost is now a
+measured number in crab's own suite. ⚠ **The assertion says the scalable path COSTS heap, and it
+carries its own expiry**: the day dhancha routes that canvas through the per-frame arena, this test
+FAILS and must be inverted. That is how a blocker in a sibling repo gets a gate in this one.
+
+### Documented — the Latin-1 limit, which is a DISPLAY limit and not crab's
+
+The scalable path walks one **byte** per glyph: `load8(text + i)` is handed to rekha as a codepoint,
+so byte 0xC3 draws as U+00C3 rather than as half of a two-byte sequence. There is no UTF-8 decode in
+dhancha or rekha. `crab_text_w` matches it byte-for-byte **deliberately** — a measurer that decoded
+UTF-8 while the drawer did not would put the caret and the truncation where the ink is not.
+
+⚠ **crab cannot type such a byte** — `crab_key_char` tops out at `'z'` (122), asserted. ⛔ **But crab
+can display one**: a name comes from a readdir record, and a UTF-8 filename on an ext2 volume is an
+ordinary thing to find. Under the bitmap face the same byte indexes CP437 and draws a different wrong
+glyph, so the face does not introduce this — it makes it legible.
+
+### ⛔⛔ And what actually blocks `0.9.0 · A real face` — neither of them crab's
+
+Found by asking where a face would come from **before** writing the code that loads one.
+
+1. **There is no TrueType face in the stack, and nothing stages one onto the target.** Zero `*.ttf` /
+   `*.otf` / `*.ttc` across every first-party repo; the `agnos` repo contains no occurrence of "ttf",
+   "truetype" or "sfnt" in any script, manifest or doc; `agnos/build/rootfs` has no `/usr`, no
+   `/share`, no font directory. ⚠ kashi is not the escape hatch — it owns AGNOS's *bitmap console*
+   fonts by design and ADR 0003's written expiry is about bitmap loading, which has not fired.
+   ⛔⛆ **The obvious template is a trap**: the one caller that feeds `rekha_font_open` real file bytes
+   reads `/usr/share/fonts/liberation/LiberationSans-Regular.ttf` — a **host path that does not exist
+   on AGNOS**. Copied into crab it would work on the host build, fall back silently on the target,
+   and look finished. ⇒ **agnos** owns the staging; **the operator** owns which face, under what
+   licence. ⚠ rekha 0.3.7 constrains the choice: `glyf` outlines only, format-4 BMP `cmap`.
+2. **dhancha's scalable draw allocates per call, outside the frame arena** — the defect above.
+   ⇒ **dhancha** owns it.
+
+### Tests
+
+**2,196 assertions** (2,158 → 2,196), three mutations planted and each caught: the NAME floor reverted
+to a pixel literal, the preview column minting its own literal again, and `crab_text_w` pricing at
+`length × advance` instead of measuring. ⚠ **No QEMU arm, and that is stated rather than skipped**:
+nothing agnos-only changed, no new code entered the `#ifdef`, and `render_test`'s 53 pixel checks
+passing unchanged is the proof that what ships still draws exactly as it did.
+
 ## [0.8.9] — 2026-09-13 — Shift: capital letters in names, and a sheet that can finally accept its own language
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
