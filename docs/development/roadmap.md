@@ -268,9 +268,12 @@ toolkit; see the gate table below for what each turned out to be.
 - ✅ **Focusing a pane by its HEADER — SHIPPED.** The last M1–M4 residue. Headers are recorded per
   frame and matched in `crab_hit`'s parent walk, reporting the pane with **no row** — which is what
   keeps the selection and the write layer untouched.
-- **Give the held-key repeat rate a number.** `[0.6.1]` recorded ~1 repeat per 1.6 s hold against
-  ~20 expected as a hypothesis and never measured it. It is agnos-runtime behaviour, so it needs the
-  on-target harness.
+- ⭐ **The held-key repeat rate HAS a number — MEASURED on QEMU 2026-09-13**: `crab-resize-test.py`
+  held `j` for 1.6 s and crab repeated **7 times while held, 0 after release** (design:
+  `CRAB_REPEAT_DELAY_MS` 400 then `CRAB_REPEAT_INTERVAL_MS` 60 → 20 expected). The shortfall is the
+  loop's wake cadence under TCG (7–15 fps), not the constants; the repeat is paced by the frame.
+  ⚠ QEMU's number, not iron's — the linearity (repeats while held, none after) is the durable
+  finding. `[0.6.1]`'s "~1 per 1.6 s" hypothesis is retired.
 
 ### M7 — The index (v0.10.0)
 
@@ -315,6 +318,7 @@ toolkit; see the gate table below for what each turned out to be.
 | ~~Sidebar — VOLUMES + capacity bars~~ | M6 | ✅ **BOTH GATES CLOSED; SHIPPED 0.8.1.** *Capacity*: agnos shipped **`statfs`#103** (1.56.56; all three backends answer it since 1.56.57) and cyrius 6.5.37 the stdlib peer, which crab vendors. *Enumeration*: this row said **"still fully open — `mount`#11 / `umount`#24 are documented no-op stubs"**, which was true when written. crab filed it upstream 2026-09-02; agnos **minted `mountlist`#104** rather than widening `mount`#11 — adopting both halves of crab's filing and crediting it by name — and 0.8.1 consumes it. ⇒ **The gate was REAL, and it closed because crab declined to ship the probe that would have papered over it.** That is the counter-example to the six false gates: not every gate is a stale claim, and the answer to a real one is to file it, not to approximate it. | 2026-09-08 ⭐ done |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Menu bar | M6 | ✅ **UNGATED as of dhancha 0.9.26.** The gate was real but MIS-NAMED: what was missing was not a MENU BAR kind but a **horizontal selectable strip**, since composing one from boxes makes the app paint the current item's highlight — i.e. name `accent`. `dh_list_new_h` is that strip, and it serves a menu bar, a tab strip, a toolbar and crab's own A/B switcher. ✅ **The wait is over**: 0.9.26 is pushed (`cb855c8`) and crab's manifest declares it as of 2026-09-01, verified by check four. ⚠ crab consumes none of it yet. | 2026-09-01 ⭐ resolvable |
+| **The menu bar, the sidebar keyboard route, every `Esc`** | M6 (shipped, dead on agnos) | ⛔⛔ **aethersafha** — `input_map` claims Esc (QUIT), Tab (focus-next) and F4–F10 and consumes them unforwarded. **MEASURED on QEMU 2026-09-13**: crab acted on zero of Tab/F10/Esc while the compositor answered each, and Esc ended the desktop. `F10` is the bar's only door, so File · Edit · Go · View are reachable by nobody; `Tab` is the sidebar's only keyboard door; every Esc cancel is dead and destructive. Filed with three shapes for the decision (surface flag / modifiers on the wire / rebind); the bindings stay. The pointer routes (0.8.5) are the popup's only road today. | 2026-09-13 ⭐ measured |
 | Local index · tags · smart folders | M7 | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
 | Duplicate detection | M7 | **daimon**, or a content hash crab could do alone | 2026-08-31 |
 | Assisted search | M8 | **daimon** local-only embedding | 2026-08-31 |
@@ -453,9 +457,10 @@ surface** — and it is the same gap `crab_transfer_plan` was extracted for in 0
 
 ### Absent affordances
 
-- **crab has no REFRESH key.** Neither the pane listing nor the PLACES model is re-read for changes
-  made outside crab, and the source names a refresh key as the intended home for that work in two
-  places without one existing.
+- ✅ **REFRESH — CLOSED (`[Unreleased]`, 2026-09-13), on `u`.** Both panes relist (selection kept
+  by name, marks cleared, refused during a transfer), PLACES and VOLUMES rebuilt (the two places the
+  source named), the sidebar cursor re-seated by exact path. `View ▸ Refresh`. ⛔ Not F5 — the
+  compositor claims it. ⭐ Proven on QEMU: four presses, eight listings.
 - **crab has no flag surface**, so `crab --about` — which `docs/development/mascot.md` asks for by
   name — cannot be built. It parses positional paths only.
 - **Nothing in crab can overwrite a destination.** There is no replace, keep-both, skip or
@@ -548,7 +553,11 @@ why, is recorded in `ci.yml` itself.
   `tests/crab.fcyr` — most in the event loop, the widest mechanical edit in the most sensitive file.
   ⛔ Its own change, suite run before and after, never a rider.
 - **Bring the agnos/iron harness into this repo.** Both real defects crab has ever shipped were
-  agnos-runtime behaviour no host test can see.
+  agnos-runtime behaviour no host test can see. ⭐ A third harness joined the two in
+  `agnos/scripts/harness/` on 2026-09-13 — `crab-pointer-test.py`, the pointer routes, the refresh
+  key and the claimed-keys measurement — still there, still not here. ⚠ Its header carries four
+  lessons about driving crab under QEMU (the Enter burst spawns a compositor; DOWN bursts wrap; hold
+  keys across drains; report which verb a pick ran), and `crab-resize-test.py` still has the burst.
 
 The parts a green CI still does not prove:
 

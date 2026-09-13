@@ -2,6 +2,133 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — the REFRESH key, and crab on a real kernel again
+
+> `git describe --tags` answered `0.8.6` exactly before a word of this was written — 0.8.6 is tagged
+> `249279f`, on the remote — so `[0.8.6]` below is a record and is left alone. ⚠ `VERSION` reads
+> `0.8.6`; no cut was asked for. Nothing here is committed by anyone but the operator.
+
+### Added — ⭐ `u` is REFRESH: both panes, PLACES and VOLUMES re-read from disk
+
+Since 0.8.0 the comments above the PLACES and VOLUMES models deferred re-reading them to *"a refresh
+key rather than on the frame"*, and no key existed — a `Downloads` created while crab ran, or a file
+written by another program, was invisible until some navigation happened to relist. `u` relists both
+panes and rebuilds both sidebar models, on the keypress, where the cost belongs.
+
+⛔ **NOT F5.** The conventional refresh key is claimed by the compositor for MAXIMIZE and consumed
+without being forwarded — as are Esc, Tab and F2–F10 (see *Measured* below, which is the larger
+finding). `u` is the free letter closest to the word, and it follows every other crab binding's
+shape: a letter, with a menu accelerator (`View ▸ Refresh`, the bar's fifth item).
+
+⛔ **THE SELECTION IS A NAME; THE MARKS ARE INDICES.** Both rules are older than this key and neither
+changed: `crab_refresh_sel` puts the cursor back on the entry the operator was looking at
+(`crab_index_of`, the sort key's precedent) and, when that entry is gone, keeps the old INDEX clamped
+so the eye stays where it was rather than jumping to the top; the marks are cleared, because a stale
+mark set acts on whatever now occupies that row — the `/bin` rule. Both names are captured before
+either relist, because `crab_relist` readdirs into the same buffer. **Refused out loud while a
+transfer steps** — relisting a directory a walk is still writing into is the hazard the drop and
+delete arms already guard.
+
+⭐ **THE SIDEBAR CURSOR IS A ROW INTO A MODEL THAT JUST CHANGED — as stale as a mark.** Its path is
+copied out first (`crab_sb_path` hands back a pointer INTO the buffer being rebuilt), the models are
+rebuilt, and `crab_sb_row_for_path` re-seats it by **exact** path or drops it to -1. ⛔ Exact, not
+containment: `crab_sb_here` would land a vanished row on its containing ancestor, and Enter would
+then navigate UP from a cursor the operator never moved. Asserted against each other.
+
+⛔⛔ **A REFRESH KEEPS THE THUMBNAIL CACHE, AND THAT WAS A REVIEW FINDING BEFORE IT SHIPPED.** The
+first draft went through `crab_relist`, which wipes the 64-slot cache because a *write* can make a
+name mean a different file — and every decode is permanent, charged to a 32 MB session ceiling that
+nothing refunds. A refresh writes nothing; wiping on `u` re-decoded the selected image (or every
+visible gallery cell) and charged it again per press: **four presses on a 1024×1024 image and the
+session would never draw a thumbnail again.** An adversarial review (three lenses, two skeptics per
+finding) found it; `crab_relist_keep_thumbs` is the refresh's relist — the preview memo (a 64 KiB
+header read, no budget) is still forgotten, the cache is not — pinned by a test that claims a slot,
+refreshes, and finds it, with the write-op relist as the control. ⚠ The trade, stated: an image
+rewritten in place under the same path keeps its old thumbnail until that path leaves the cache,
+while its DIMENSIONS/EXIF lines are re-read. Scroll offsets need nothing. The refresh scratch is
+allocated once, not per keypress: the sort arm's per-press `alloc` is a small leak on a heap with no
+`free()`, and this key did not copy it.
+
+⛔ **The cursor re-seat carries its SECTION, also from review.** On agnos `/` is always two rows —
+the Root place and the ext2 volume the kernel mounts first — and a path-only match hopped a cursor
+from the volume row to the place row on every refresh. `crab_sb_row_for_path` takes the kind the
+cursor was on and comes back to a row of that kind or not at all; the alias fixture is in the suite.
+Two stale comments the review caught (the overlay guard's "unexercised defence", `t_menubar`'s
+"where no bar menu reaches yet") now say what the code does.
+
+⭐ **`View ▸ Refresh` makes the separator guard load-bearing at last.** View holds five items now, and
+its fifth (index 4) is exactly the index `crab_menu_row` would shift; the bar's not-mapped guard was
+"unexercised defence" for three cuts and is proven by the render assertion that selects item 4 and
+expects row 4 — the mutation that applies the mapping fails with `got -1`, the shifted highlight
+landing on nothing.
+
+### Measured — ⭐⭐ QEMU, 2026-09-13, `agnos/scripts/harness/crab-pointer-test.py` (new): PASS
+
+The first on-target run since 0.7.0, on agnos `build/agnos` (2026-09-11) with **aethersafha 0.16.24**
+and this tree. Four runs; the first three taught the harness, the fourth is the verdict:
+
+```
+crab launched and presented: True | stray probe windows: 0
+ascended to /: True
+left click resolved to a pane at: (200, 180)
+right click: compositor forwarded a non-left button: True wire number: 2 | crab opened the context menu: 1 time(s)
+pick: a left press at offset (30,16) ran a menu entry | verb by pointer: True     (it ran `crab: copy tree bin` — row 1; refused, /bin exists)
+dismiss: presses off the popup dismissed it 1 time(s); picks total 1
+refresh: `u` x6 -> 4 refresh(es), 8 listing line(s)
+display keys: g -> 1 view line(s); b -> 1 sidebar line(s)
+Tab x6: compositor answered 2 time(s); crab ACTED on 0 key(s)
+F10 x6: compositor answered 1 time(s); crab ACTED on 0 key(s)
+Esc x4: compositor quit: True ; crab ACTED on 0 key(s)
+faults: False
+PASS — right-click menus 1, picks 1, dismisses 1, refreshes 4
+```
+
+⭐ **So the 0.8.5 pointer routes are real on the wire**: a right press arrives as button **2**
+(aethersafha 0.16.24's numbering), crab opens the context menu, a left press on a row runs an entry
+through the synthesised-key road, a press off the popup dismisses. The REFRESH key relists twice per
+press, on a kernel whose `mountlist` path rebuilds VOLUMES for real. `g` and `b` answer.
+
+⛔⛔ **AND THE COMPOSITOR CLAIMS Esc, Tab AND F4–F10 — CONSUMED, NEVER FORWARDED; Esc QUITS THE
+DESKTOP.** Read in aethersafha's `input_map` and its *"CLAIMED KEYS ARE CONSUMED, NOT FORWARDED"*
+block, then **measured**: crab acted on zero of them while the compositor answered every one. Which
+means, on the real desktop: the `F10` menu bar (0.8.0) and everything under it including `View`
+(0.8.6) is reachable by nobody; the `Tab` sidebar route (0.8.3) is unreachable; every `Esc` binding —
+dismiss the menu, close a drop, cancel a transfer, abandon the sheet, leave sidebar focus — is
+unreachable, and the key ends the session. crab already knew about F5/F6 and avoided them; Esc, Tab
+and F10 were recorded nowhere. ⚠ `crab: key received` DOES move on Tab — by the *releases*, which
+the compositor forwards because `input_map` returns nothing for a release; only the press edge is
+gone, which is why the harness counts `crab: key press`. **Filed in aethersafha**
+(`docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md`; crab's copy at
+[`docs/development/issues/2026-09-13-aethersafha-claims-esc-tab-f10.md`](docs/development/issues/2026-09-13-aethersafha-claims-esc-tab-f10.md))
+with three shapes for the decision — a surface flag, modifiers on the wire, or rebinding — none of
+which is crab's to pick. The bindings stay: they are correct the day the key arrives.
+
+⚠ **What the first three runs taught, kept in the harness header:** (1) crab-resize-test's Enter ×8
+launch burst leaks into crab — the launcher eats one and the rest are crab's Enter, which is OPEN on
+the selected row, and `/bin`'s first row is `aethersafha`: run 1 put a **second compositor** on the
+desktop and measured two of them sharing one mouse. (2) A DOWN burst is a coin flip — the launcher
+wraps, so an even count lands back on puka. (3) Keys are lost because the boot-keyboard report is a
+STATE; `sendkey <key> 400` holds the press across the compositor's per-frame drains and the launch
+became deterministic. (4) A pointer pick's row is not knowable from the harness, so it reports which
+verb ran instead of assuming; the pick arm ascends to `/` first so Open can only mean descend.
+⚠ The same Enter burst is still in `crab-resize-test.py`; on this tree it can spawn a compositor.
+
+⚠ **Still not on target**: the *you are here* marker (a pixel claim; the rule is pinned on the host),
+the sidebar keyboard route (unreachable — see above), and iron.
+
+### Verified
+
+`cyrius test` **1838 → 1879 / 0** (+41: `t_refresh` — the selection rule, the exact re-seat against
+the containment rule and against the `/` alias, the menu entry, the accelerator agreement, the
+sidebar gate, the kept thumbnail with the write-op relist as control; and View's fifth row rendered)
+· render_test 53 / 0 · fmt clean · coverage **89 %** · `vet`/`deny` 0 · `deps --verify` 50 / 0 · host
+**1,053,680 B** · `--agnos` **1,094,480 B**. Six mutations, each caught: a vanished name resetting
+to 0; the re-seat by containment; the re-seat ignoring the section; the refresh relist wiping the
+cache; the bar applying the separator mapping (`got -1`); Refresh on F5. ⭐ **Adversarial review**
+(a workflow: three finder lenses over the diff, two refuters per finding, 23 agents): 10 findings
+raised, 3 distinct defects survived both skeptics and are fixed above; the rest were refuted or were
+the same defect seen from another lens.
+
 ## [0.8.6] — 2026-09-13 — `View` is filled: the last M6 interaction gap
 
 > `git describe --tags` answered `0.8.5` exactly before a word of this was written — 0.8.5 is

@@ -1833,8 +1833,27 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
     # ⛔ WHY IT MATTERS AT ALL: the cache is keyed on a NAME, and crab is a program that makes names
     # refer to different files. Renaming `b.png` over `a.png` leaves `a.png` gone and the cache
     # still holding its size.
-    crab_pv_forget();
     crab_thumb_forget();
+    return crab_relist_keep_thumbs(path, buf, sizes, mtimes, pathscr, statbuf);
+}
+
+# @public — `crab_relist` WITHOUT the thumbnail wipe: the REFRESH key's relist (0.8.7).
+#
+# ⛔⛔ EVERY THUMBNAIL DECODE IS PERMANENT, AND A REFRESH IS A KEY THE OPERATOR PRESSES FREELY. The
+# write-op relist above forgets the whole 64-slot cache because a write can make a name refer to a
+# different file. A refresh changes nothing on disk; if it also wiped the cache, the next idle tick
+# would re-decode the selected image — or every visible gallery cell — and charge it AGAIN against
+# `CRAB_THUMB_TOTAL_MAX`, which nothing refunds: **four presses of `u` on a 1024x1024 image and the
+# session never draws a thumbnail again** (found by review before it shipped, not after). So the
+# refresh keeps the cache and forgets only the preview memo, which is a 64 KiB header read with no
+# budget behind it.
+# ⚠ THE TRADE, STATED: an image rewritten IN PLACE under the same path keeps its old thumbnail after
+# a refresh until that path leaves the cache, while its DIMENSIONS and EXIF lines (the memo) are
+# re-read. The other side of that trade is the whole session's thumbnails, and the cache key is a
+# path because nothing cheaper than a decode can say the bytes changed — the stat sweep that could
+# is deferred, and a refresh is exactly when it is pending.
+fn crab_relist_keep_thumbs(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
+    crab_pv_forget();
     var cnt = crab_readdir_into(path, buf);
     crab_stat_for_listing(path, buf, cnt, sizes, mtimes, pathscr, statbuf, crab_sort_mode);
     crab_sort_entries(buf, sizes, mtimes, cnt, crab_sort_mode);

@@ -1,3 +1,50 @@
+# Handoff — **crab ran on a real kernel again: the pointer routes are proven, `u` refreshes, and the compositor eats Esc/Tab/F10.**
+
+> ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
+> **0.8.6 is the last release** (`249279f`, on the remote). `[Unreleased]` holds two things and no
+> cut was asked for; `VERSION` reads 0.8.6; nothing is committed by anyone but the operator.
+>
+> 1. **The REFRESH key, `u`** — both panes relist (selection kept by NAME via `crab_refresh_sel`,
+>    marks cleared, refused out loud during a transfer), PLACES and VOLUMES rebuilt, the sidebar
+>    cursor re-seated by EXACT path (`crab_sb_row_for_path`, asserted against `crab_sb_here`'s
+>    containment, and section-aware because `/` is both a place and a volume) or dropped.
+>    `View ▸ Refresh` is the bar's fifth item — which finally makes the separator-mapping guard
+>    load-bearing (`got -1` when mutated). ⛔ Not F5: claimed. ⛔⛔ **The refresh relist KEEPS the
+>    thumbnail cache** (`crab_relist_keep_thumbs`) — an adversarial review (23 agents) caught the
+>    first draft re-charging the permanent decode budget on every press: four presses on a 1024²
+>    image would have ended thumbnails for the session. **1879 / 0**, six mutations caught.
+> 2. ⭐⭐ **QEMU, run 4 of `agnos/scripts/harness/crab-pointer-test.py` (new): PASS.** The first
+>    on-target run since 0.7.0. Right press → button **2** on the wire → context menu; left press on
+>    a row → `verb by pointer` (it ran row 1, Copy, refused — the harness reports which verb ran
+>    rather than assuming); press beside the popup → dismissed; `u` ×6 → 4 refreshes / 8 listings;
+>    `g`, `b` answer; no faults. Verdict log beside the serial log in `agnos/build/crab-pointer/`.
+>
+> ⛔⛔ **THE FINDING THAT OUTRANKS BOTH: aethersafha's `input_map` CLAIMS Esc, Tab AND F4–F10 AND
+> CONSUMES THEM UNFORWARDED — AND Esc QUITS THE DESKTOP.** Read in its source, then MEASURED: Tab ×6
+> and F10 ×6 → the compositor answered, crab acted on 0; Esc ×4 → `quit on a key`. So on the real
+> desktop the **`F10` menu bar and everything under it (`View` included), the `Tab` sidebar route,
+> and every `Esc` cancel are unreachable** — three shipped affordances, two releases of them, dead
+> on the target and green on the host, because the host pins crab's dispatch table and the wire never
+> delivers the press. ⚠ The RELEASE of a claimed key IS forwarded (`input_map` answers nothing for a
+> release), so `crab: key received` moves and `crab: key press` does not — count the second.
+> Filed in aethersafha (`docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md`,
+> crab's copy in `docs/development/issues/`) with three shapes for the decision — a setu surface
+> flag, modifiers on the wire, or rebinding. **The bindings stay; the decision is not crab's.**
+>
+> ⚠ **What driving crab under QEMU taught, kept in the harness header:** crab-resize-test's Enter ×8
+> launch burst leaks into crab, where Enter is OPEN on the selected row — `/bin`'s first row is
+> `aethersafha`, so run 1 spawned a **second compositor** and measured two of them on one mouse; a
+> DOWN burst is a coin flip because the launcher wraps; keys are lost because the boot-keyboard
+> report is a STATE — `sendkey <key> 400` holds the press across drains and the launch became
+> deterministic; a pointer pick's row is not knowable from the harness, so it ascends to `/` first
+> (Open = descend) and reports which verb ran. ⚠ `crab-resize-test.py` still has the burst.
+> ⚠ `println(lnch_name_at(lsel))` in aethersafha prints the app name's ADDRESS — noted in the filing.
+>
+> ⭐ **Next, ungated:** a flag surface for `--about`; the overwrite policy (operator decision). Then
+> M5's remainder and M7's daimon decision. ⛔ **The keys gate is the one to settle first**: until
+> aethersafha decides, every keyboard-only surface crab builds is built for a key that cannot arrive.
+> ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.6 cut: `View` is filled, and M6's six interaction gaps are all closed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**

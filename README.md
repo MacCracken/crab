@@ -173,6 +173,11 @@ happened rather than showing a blank square.
   the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors
   forward every button as left), left picks and dismisses, and a press with the middle button is
   consumed and ignored — stated rather than left to be discovered.
+- **`Esc`, `Tab` and `F10` never reach crab on agnos — the compositor claims them, and `Esc` quits
+  the desktop.** Measured on QEMU 2026-09-13. So on the real desktop the menu bar (`F10`) and
+  `View`, the sidebar's keyboard route (`Tab`) and every `Esc` cancel are unreachable; the pointer
+  routes are the popup's only road. Filed upstream; the bindings stay until aethersafha decides.
+  `u` refreshes (F5 is claimed too).
 - **`Go` on the menu bar is empty, deliberately.** The bar ships File · Edit · Go · View; `View`
   holds the display switches (0.8.6), and `Go` is refused as a drop-down — an 11-to-17-row popup at
   380×220 would cover the bar and the status line, and the delete prompt would draw underneath it.

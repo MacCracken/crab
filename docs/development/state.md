@@ -24,11 +24,24 @@
 
 ## Version
 
-**0.8.6 IS CUT** — `VERSION` reads `0.8.6` and the CHANGELOG header agrees, on operator direction,
-2026-09-13. ⛔ **The tag, the commit and the push are the operator's**; until `git ls-remote --tags`
-shows `0.8.6`, **0.8.5** (2026-09-13, `4344cb9`) is the last RELEASED version — on the remote, CI and
-Release both green, `git describe` answering `0.8.5` exactly before the cut was written. ⚠ 0.8.4's
-and 0.8.3's CHANGELOG headers still read *"unreleased"*; both are records and are left alone.
+**0.8.6** is the last RELEASED version (2026-09-13, `249279f`), on the remote; `git describe`
+answered `0.8.6` exactly before this cycle's work began. ⚠ 0.8.4's and 0.8.3's CHANGELOG headers
+still read *"unreleased"*; both are records and are left alone. **`[Unreleased]` holds the work in
+flight** (2026-09-13): the **REFRESH key** (`u`), and **crab's first on-target run since 0.7.0** —
+`agnos/scripts/harness/crab-pointer-test.py`, PASS on run 4. ⚠ `VERSION` reads `0.8.6`; no cut was
+asked for; nothing is committed, tagged or pushed.
+
+**Unreleased contents**: `u` relists both panes (selection kept by NAME, marks cleared, refused
+during a transfer) and rebuilds PLACES and VOLUMES (sidebar cursor re-seated by exact path or
+dropped, section-aware — `/` is both a place and a volume); `View ▸ Refresh` is the bar's fifth
+item, which makes the separator guard load-bearing. ⛔ **The refresh relist KEEPS the thumbnail
+cache** (`crab_relist_keep_thumbs`): a review found the first draft re-charging the permanent
+decode budget on every press. **1879 / 0.** ⭐⭐ **QEMU, 2026-09-13**: right-click arrives as button **2**, crab opens the context
+menu, a pointer pick runs an entry, a press off the popup dismisses, `u` relists twice per press,
+`g`/`b` answer. ⛔⛔ **AND THE COMPOSITOR CLAIMS Esc, Tab AND F4–F10 — consumed, never forwarded,
+Esc QUITS THE DESKTOP.** Measured: crab acted on zero of them. On agnos the `F10` menu bar (and
+`View` under it), the `Tab` sidebar route and every `Esc` binding are unreachable. Filed upstream;
+see Known gaps.
 
 **0.8.6 contents** (2026-09-13): the menu bar's **`View` is filled** — Cycle view · Cycle sort ·
 Preview · Sidebar (`g` · `s` · `p` · `b`), display ids 6..9 above `CRAB_MI_COUNT` so the context menu
@@ -310,6 +323,23 @@ the render call sites the deferred-stat drain added.
 
 ## Proven
 
+### ⭐⭐ As of 2026-09-13 — QEMU, a real agnos kernel, aethersafha 0.16.24, one compositor
+
+`agnos/scripts/harness/crab-pointer-test.py` (new), run 4, **PASS**: crab launched from the F2
+launcher (deterministically — one held DOWN, one held Enter, the outcome read), ascended to `/` on
+Backspace, resolved a left click to a pane, **opened the context menu on a right press that arrived as
+button 2**, ran a menu entry from a left press on a popup row (`crab: copy tree bin` — row 1, refused,
+`/bin` exists), dismissed the popup on a press beside it, **refreshed on `u` four times** (eight
+listings), cycled the view on `g`, toggled the sidebar on `b` with VOLUMES from `mountlist`, and
+answered keys throughout. No faults. ⛔ **And it measured the compositor consuming Tab and F10 and
+quitting on Esc** — crab acted on none of the three. Verdict log beside the serial log in
+`agnos/build/crab-pointer/`. ⚠ Runs 1 and 3 were contaminated by the harness's own doing (a stray
+Enter, then a pointer pick of Open on `/bin/aethersafha` — each spawned a second compositor) and are
+discarded; the lessons are in the harness header.
+⚠ **Not on target**: the *you are here* marker (a pixel claim; the rule is host-pinned), the sidebar
+keyboard route (unreachable — Tab is claimed), the menu bar and `View` (unreachable — F10 is
+claimed), and iron.
+
 ### As of 0.7.5 — what is actually verified, and how
 
 | claim | evidence | where |
@@ -511,8 +541,11 @@ separate change, not bundled into a version bump.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,838 passed / 0 failed**
-  *(0.8.6; 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 757 at 0.7.5, 253 at the 0.7.0 cut)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **1,879 passed / 0 failed**
+  *(unreleased; 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 253 at 0.7.0)*
+  ⭐ **+41 unreleased — `t_refresh`**: the selection rule, the exact re-seat asserted AGAINST the
+  containment rule and against the `/` place/volume alias, the menu entry, the sidebar gate, the
+  kept thumbnail cache with the write-op relist as control; six mutations each caught.
   ⭐ **+48 at 0.8.6** — `t_view_menu` (the display ids sit above the context menu's bound, every
   View slot is a display item, the accelerator column agrees with the key sent, none is eaten by
   sidebar focus, always live, the drop fits at 380 px) plus the View drop-down rendered; five
@@ -582,8 +615,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,049,568 B · `ebe13334…`** *(0.8.6; 1,049,480 at 0.8.5, 1,045,288 at 0.8.4, 1,023,968 at 0.7.7)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,090,304 B · `59eeae79…`** *(0.8.6; 1,090,216 at 0.8.5, 1,081,768 at 0.8.3)* — the real target, and **CI builds it** |
+| x86_64 linux | ✅ builds, **1,053,680 B** *(unreleased; 1,049,568 at 0.8.6, 1,049,480 at 0.8.5, 1,045,288 at 0.8.4)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,094,480 B** *(unreleased; 1,090,304 at 0.8.6, 1,081,768 at 0.8.3)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13** (see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -713,6 +746,17 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   fixture never opened one. Arms now exist for the menu, the sheet and the preview. **A new
   render-path branch without an arm here is a new blind spot, not a covered feature.**
 
+- ⛔⛔ **aethersafha CLAIMS Esc, Tab AND F4–F10, CONSUMES THEM, AND QUITS ON Esc** (measured on
+  QEMU 2026-09-13; filed in aethersafha as
+  `docs/development/issues/2026-09-13-claimed-keys-never-reach-a-client.md`, crab's copy at
+  [`issues/2026-09-13-aethersafha-claims-esc-tab-f10.md`](issues/2026-09-13-aethersafha-claims-esc-tab-f10.md)).
+  On the real desktop the **`F10` menu bar and everything under it, the `Tab` sidebar route, and every
+  `Esc` binding are unreachable** — and Esc ends the session. crab's suite pins its dispatch table,
+  which is correct; the wire never delivers the press (the RELEASE is forwarded, which is why
+  `crab: key received` moves and `crab: key press` does not). ⛔ The decision is aethersafha's — a
+  surface flag, modifiers on the wire, or rebinding — and the bindings stay until it is made. ⚠ Until
+  then the pointer routes are the only road to the popup and nobody reaches `View`.
+
 ### Hazards that are permanent, not gaps
 
 - ⛔ **`path` wins over `tag`**, and four of six deps carry an override. A green local build is not
@@ -737,9 +781,12 @@ defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinish
 stages*. ⭐ **The six M6 interaction gaps are CLOSED** (2026-09-13): 0.8.3 gave the sidebar its
 keyboard route; 0.8.5 gave every surface its pointer route — right-click, popup pick and dismiss,
 bar and switcher clicks — on aethersafha 0.16.24's button numbering, and lit the sidebar row the
-active pane is in; 0.8.6 filled `View`. What remains from that audit: the absent affordances (no
-REFRESH key, no flag surface, no overwrite policy) and the *Recorded as facts* list. M6's two
-GATED items stand (the 🦀 chrome button, the held-key repeat number).
+active pane is in; 0.8.6 filled `View`; `[Unreleased]` adds the **REFRESH key** and **proves the
+pointer routes on QEMU**. What remains from that audit: two absent affordances (no flag surface, no
+overwrite policy) and the *Recorded as facts* list. M6's two GATED items stand (the 🦀 chrome button,
+the held-key repeat number). ⛔ **And a NEW upstream gate outranks them**: the compositor claims
+Esc/Tab/F10, so the menu bar, the sidebar keyboard route and every Esc are dead on the real desktop
+until aethersafha decides how chrome keys and client keys coexist.
 
 **M4 is complete. Every UNGATED M5 item is in, and M6 is closed but for two gated items.**
 0.8.0 shipped M6's sidebar, menu bar, switcher and Bueller; **0.8.1** closed the VOLUMES gate on

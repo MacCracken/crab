@@ -169,6 +169,11 @@ fn main(): i64 {
     # refresh key rather than on the frame.
     var places = alloc(CRAB_PLACES_MAX * CRAB_PLACE_SZ);
     var placen = crab_places_build(places, pathscr, statbuf);
+    # ⭐ THE REFRESH KEY (`u`) RE-READS IT — see the arm below. Its scratch is allocated ONCE here,
+    # not per keypress: the sort arm's per-press `alloc` is a small leak on a heap with no `free()`.
+    var rf_lkeep = alloc(CRAB_NAME_MAX);
+    var rf_rkeep = alloc(CRAB_NAME_MAX);
+    var rf_sbpath = alloc(CRAB_PATH_MAX);
     # ⭐ VOLUMES (M6, unblocked by agnos `mountlist`#104). ⚠ Built ONCE at startup like PLACES, and
     # for the same reason: it is two syscalls per volume and the render path must not pay them.
     # ⚠ Returns 0 on the host — neither syscall has a host arm — so the sidebar shows PLACES alone
@@ -1632,6 +1637,72 @@ fn main(): i64 {
                                 crab_say("crab: sort ");
                                 crab_say(crab_sort_name(sm));
                                 crab_say("\n");
+                            }
+                            # ⭐⭐ u — REFRESH: re-read both panes, PLACES and VOLUMES (0.8.7). The
+                            # two model comments above `places`/`vols` deferred re-reading to "a
+                            # refresh key" since 0.8.0, and no key existed; a `Downloads` created
+                            # while crab ran, or a file written by another program, was invisible
+                            # until a navigation happened to relist.
+                            # ⛔ NOT F5. aethersafha claims F5 for MAXIMIZE — and Esc, Tab, F2–F10 —
+                            # and consumes every claimed key without forwarding it. `u` is free.
+                            # ⛔ REFUSED WHILE AN OPERATION STEPS, out loud: a queued transfer relists
+                            # when it ends, and relisting NOW would readdir a directory it is still
+                            # writing into — the same guard the drop and the delete arms carry.
+                            # ⛔ THE SELECTION IS A NAME, THE MARKS ARE INDICES — the sort key's rule
+                            # and the `/bin` rule, both unchanged. `crab_refresh_sel` decides where
+                            # the cursor lands; both names are captured BEFORE either relist because
+                            # `crab_relist` readdirs into the same buffer.
+                            # ⚠ The preview memo is forgotten (a 64 KiB header read); the THUMBNAIL
+                            # cache is deliberately KEPT — see `crab_relist_keep_thumbs`. Scroll
+                            # offsets need nothing (a relist keeps the same row units) and the render
+                            # re-clamps them.
+                            if (u == 0x18) {                                       # u — refresh
+                                if (crab_op_active() == 1) {
+                                    crab_set_notice("cannot refresh while a transfer runs");
+                                } else {
+                                    var rf_osl = sel_l;
+                                    var rf_osr = sel_r;
+                                    store8(rf_lkeep, 0);
+                                    store8(rf_rkeep, 0);
+                                    if (ln > 0) { crab_strcpy_n(rf_lkeep, lbuf + sel_l * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                    if (rn > 0) { crab_strcpy_n(rf_rkeep, rbuf + sel_r * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                    # ⛔ `crab_dir_err` is one global overwritten by every readdir:
+                                    # each pane's state is captured right after its own relist.
+                                    # ⛔ `_keep_thumbs`, NOT `crab_relist`: a refresh changes nothing on
+                                    # disk, and the write-op relist's cache wipe would charge every
+                                    # visible image to the permanent decode budget AGAIN, per press.
+                                    ln = crab_relist_keep_thumbs(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
+                                    crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                    lstate = crab_pane_state(ln, crab_listing_err());
+                                    rn = crab_relist_keep_thumbs(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
+                                    crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                    rstate = crab_pane_state(rn, crab_listing_err());
+                                    var rf_fl = 0 - 1;
+                                    var rf_fr = 0 - 1;
+                                    if (ln > 0) { if (load8(rf_lkeep) != 0) { rf_fl = crab_index_of(lbuf, ln, rf_lkeep); } }
+                                    if (rn > 0) { if (load8(rf_rkeep) != 0) { rf_fr = crab_index_of(rbuf, rn, rf_rkeep); } }
+                                    sel_l = crab_refresh_sel(rf_osl, rf_fl, ln);
+                                    sel_r = crab_refresh_sel(rf_osr, rf_fr, rn);
+                                    # ⭐ THE SIDEBAR'S MODELS, re-read into the same buffers. The
+                                    # keyboard cursor is a ROW into a model that just changed — as
+                                    # stale as a mark — so its PATH is copied out first (the pointer
+                                    # `crab_sb_path` hands back points INTO the buffer being rebuilt)
+                                    # and the cursor is re-seated by EXACT path, or dropped.
+                                    store8(rf_sbpath, 0);
+                                    var rf_sbkind = CRAB_SB_NONE;
+                                    if (sb_row >= 0) {
+                                        var rf_sp = crab_sb_path(sb_row, places, placen, vols, voln);
+                                        if (rf_sp != 0) { crab_strcpy_n(rf_sbpath, rf_sp, CRAB_PATH_MAX); }
+                                        rf_sbkind = crab_sb_row_kind(sb_row, placen, voln);
+                                    }
+                                    placen = crab_places_build(places, pathscr, statbuf);
+                                    voln = crab_volumes_build(vols, statbuf);
+                                    # ⚠ The SECTION goes with the path: `/` is both the Root place and
+                                    # the root volume on agnos, and a cursor comes back to its own kind.
+                                    sb_row = crab_sb_row_for_path(rf_sbpath, rf_sbkind, places, placen, vols, voln);
+                                    crab_set_notice("refreshed");
+                                    crab_say("crab: refresh\n");
+                                }
                             }
                             if (u == 0x13) {                                       # p — the preview column
                                 # ⛔ THE TOGGLE FLIPS EVEN WHEN THE WINDOW CANNOT HONOUR IT, and the

@@ -1142,6 +1142,54 @@ fn crab_sb_shown_row(focused, cursor, here): i64 {
 # trailing slashes as they store, which is what makes a bare `/home/macro` match its Home row.
 # ⚠ Derived per frame, never stored: storing it would be a second copy of the pane path to keep in
 # step. It costs one bounded compare per row, over at most a dozen rows.
+# =================================================================================================
+# THE REFRESH KEY (`u`) — re-read what is on disk, keep what the operator was looking at.
+# =================================================================================================
+#
+# ⛔ NOT F5. The conventional key is claimed by the compositor — aethersafha maps F5 to MAXIMIZE and
+# consumes every claimed key without forwarding it — so a client binding it never sees the press.
+# The same is true of Esc, Tab and F2–F10, and `u` is the free letter closest to the word.
+#
+# ⛔ MARKS ARE INDICES AND DIE WITH THE LISTING — the `/bin` rule, unchanged: a refresh clears them.
+# THE SELECTION IS A NAME and survives when it can — the sort key's rule: `crab_index_of` finds the
+# entry the operator was on in the new listing; when the file is gone the old INDEX is kept, clamped,
+# so the cursor stays where the eye was rather than jumping to the top. Both are the suite's to pin,
+# so the rule lives here and the agnos-only key arm only calls it.
+fn crab_refresh_sel(old_sel, found, count): i64 {
+    if (found >= 0) { return found; }
+    var m = crab_maxsel(count);
+    if (old_sel > m) { return m; }
+    if (old_sel < 0) { return 0; }
+    return old_sel;
+}
+
+# @public — the sidebar row of `kind` whose path EQUALS `path`, or -1. The refresh re-seats the
+# keyboard cursor with this after PLACES/VOLUMES are rebuilt: a row number is an index into a model
+# that just changed, so it is as stale as a mark. ⛔ EQUALITY, NOT CONTAINMENT — `crab_sb_here`
+# would land a vanished row on its containing ancestor, and Enter would then navigate UP from a
+# cursor the operator never moved; a row that is gone is gone, and -1 lets the arrows reseed.
+# ⛔ AND THE SECTION IS PART OF THE IDENTITY. On agnos `/` is ALWAYS two rows — the Root PLACE and the
+# ext2 VOLUME the kernel mounts first — and a path-only match would hop a cursor from the volume row
+# to the place row on every refresh (review finding, 2026-09-13). `kind` is `CRAB_SB_PLACE` or
+# `CRAB_SB_VOLUME`; a cursor was on a row of one kind, and comes back to a row of that kind or not
+# at all.
+fn crab_sb_row_for_path(path, kind, places, placen, vols, voln): i64 {
+    if (path == 0) { return 0 - 1; }
+    if (load8(path) == 0) { return 0 - 1; }
+    var rows = crab_sb_rows(placen, voln);
+    var row = 0;
+    while (row < rows) {
+        if (crab_sb_row_kind(row, placen, voln) == kind) {
+            var p = crab_sb_path(row, places, placen, vols, voln);
+            if (p != 0) {
+                if (crab_streq_n(p, path, CRAB_PATH_MAX) == 1) { return row; }
+            }
+        }
+        row = row + 1;
+    }
+    return 0 - 1;
+}
+
 fn crab_sb_here(path, places, placen, vols, voln): i64 {
     if (path == 0) { return 0 - 1; }
     if (load8(path) == 0) { return 0 - 1; }
@@ -1259,7 +1307,7 @@ fn crab_mb_item_count(i): i64 {
     if (i == CRAB_MB_FILE) { return 3; }       # Open, New folder..., Rename...
     if (i == CRAB_MB_EDIT) { return 3; }       # Copy, Move, Delete
     if (i == CRAB_MB_GO)   { return 0; }       # navigation — refused as a drop-down, see above
-    if (i == CRAB_MB_VIEW) { return 4; }       # Cycle view, Cycle sort, Preview, Sidebar
+    if (i == CRAB_MB_VIEW) { return 5; }       # Cycle view, Cycle sort, Preview, Sidebar, Refresh
     return 0;
 }
 
@@ -1279,6 +1327,7 @@ fn crab_mb_item(i, j): i64 {
         if (j == 1) { return CRAB_MI_SORT; }
         if (j == 2) { return CRAB_MI_PREVIEW; }
         if (j == 3) { return CRAB_MI_SIDEBAR; }
+        if (j == 4) { return CRAB_MI_REFRESH; }
     }
     return 0 - 1;
 }
@@ -1700,7 +1749,8 @@ enum CrabMenuItem {
     CRAB_MI_SORT    = 7;     # s — cycle the sort mode
     CRAB_MI_PREVIEW = 8;     # p — the preview column
     CRAB_MI_SIDEBAR = 9;     # b — the PLACES sidebar
-    CRAB_MI_ALL     = 10;    # every item id there is; the bound for "is this an item at all"
+    CRAB_MI_REFRESH = 10;    # u — re-read both panes, PLACES and VOLUMES (the REFRESH key)
+    CRAB_MI_ALL     = 11;    # every item id there is; the bound for "is this an item at all"
 }
 
 # @public — the label for item `i`, or "" out of range. Never 0.
@@ -1715,6 +1765,7 @@ fn crab_menu_label(i): i64 {
     if (i == CRAB_MI_SORT)    { return "Cycle sort"; }
     if (i == CRAB_MI_PREVIEW) { return "Preview"; }
     if (i == CRAB_MI_SIDEBAR) { return "Sidebar"; }
+    if (i == CRAB_MI_REFRESH) { return "Refresh"; }
     return "";
 }
 
@@ -1732,6 +1783,7 @@ fn crab_menu_key(i): i64 {
     if (i == CRAB_MI_SORT)    { return "s"; }
     if (i == CRAB_MI_PREVIEW) { return "p"; }
     if (i == CRAB_MI_SIDEBAR) { return "b"; }
+    if (i == CRAB_MI_REFRESH) { return "u"; }
     return "";
 }
 
@@ -1762,6 +1814,7 @@ fn crab_menu_accel(i): i64 {
     if (i == CRAB_MI_SORT)    { return 0x16; }         # s
     if (i == CRAB_MI_PREVIEW) { return 0x13; }         # p
     if (i == CRAB_MI_SIDEBAR) { return 0x05; }         # b
+    if (i == CRAB_MI_REFRESH) { return 0x18; }         # u
     return 0;
 }
 
@@ -2877,13 +2930,12 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         # See `crab_menu_row` for what shipped when the two were conflated.
         # ⚠ `crab_menu_row` maps a MODEL index past the separator; a bar menu has none, so its
         # index space and the list's already agree and the mapping must NOT be applied.
-        # ⛔ THIS GUARD IS UNEXERCISED DEFENCE TODAY, AND SAYING SO IS THE POINT. `crab_menu_row`
-        # only shifts indices ABOVE `CRAB_MI_RENAME` (3), and the largest bar menu holds four items
-        # (0..3, `View` as of 0.8.6) — so applying the mapping anyway returns the same number and
-        # **no test can tell the difference**. Mutating this line out fails nothing. It becomes
-        # load-bearing the moment a bar menu grows a FIFTH item (index 4). ⚠ This note said "a
-        # fourth item" until View grew one and nothing moved: index 3 is not above 3. Kept and
-        # labelled rather than deleted, the same way `crab_thumb_draw`'s clip test is.
+        # ⭐ THIS GUARD IS LOAD-BEARING AS OF 0.8.7. `crab_menu_row` shifts indices ABOVE
+        # `CRAB_MI_RENAME` (3), and `View` holds FIVE items — so its last, index 4, would be mapped to
+        # row 5 and the highlight would land on nothing. The suite renders View with item 4 selected
+        # and asserts row 4; mutating this guard out fails it with `got -1`. ⚠ It was unexercised
+        # defence for three cuts, and the note here once said a FOURTH item would exercise it —
+        # index 3 is not above 3, and View's fourth item moved nothing.
         var msrow = menusel;
         if (mbmenu < 0) { msrow = crab_menu_row(menusel); }
         dh_list_select(m, msrow);
