@@ -24,10 +24,31 @@
 
 ## Version
 
-**0.8.10 IS CUT** — `VERSION` reads `0.8.10` and the CHANGELOG header agrees, on operator direction,
-2026-09-13. ⛔ **The commit, the tag and the push are the operator's.**
-⭐ **0.8.7, 0.8.8 and 0.8.9 are now COMMITTED AND TAGGED locally** (`22f7f53` · `60cc05b` · `eeb6a8b`)
-— the backlog earlier entries here describe is cleared; **0.8.10 alone is uncommitted.**
+**0.8.11 IS CUT** — `VERSION` reads `0.8.11` and the CHANGELOG header agrees, on operator direction,
+2026-09-14. ⛔ **The commit, the tag and the push are the operator's.**
+
+**0.8.11 contents**: the **6.6.4 stack** — cyrius 6.6.2 → **6.6.4**, sadish 0.5.4 → **0.5.5**, rekha
+0.3.7 → **0.3.10**, kashi 1.0.7 → **1.0.8**, dhancha 0.9.29 → **0.10.0** (rupa, setu and chitra had
+not moved). ⛔ sadish and rekha are a **floor**, not company: without them dhancha 0.10.0 refuses the
+build — `2 reachable undefined function(s)` (`sd_alloc_set`, `sd_canvas_blit_at`). ⚠ **6.6.3 silently
+corrupts even-length string literals ≥ 64 KB** — agnos found it generating the embedded face and made
+its kernel hash-verify the bytes; crab is past it on 6.6.4.
+⭐⭐ **BOTH BLOCKERS ON `0.9.0` CLOSED, within a day of being filed.** **dhancha 0.10.0** routed the
+scalable canvas through the frame arena (with sadish 0.5.5's `sd_alloc` hook and rekha 0.3.10's
+scoped outline scratch), so **crab's expiry assertion fired and is now INVERTED — a warm frame under
+a real face costs the global heap exactly 0.** ⚠ dhancha's hand-off predicted crab's failure *by name
+and to the byte* from measurements against crab 0.8.10 (`arena_capacity_total == cap0`, got 468,040,
+expected 16,384) — which is what a filing with a gate behind it buys. **agnos 1.57.2 + rekha 0.3.8**
+ship a kernel-owned `/fonts` namespace: **`/fonts/default.ttf`**, Liberation Sans Regular 2.1.5
+unmodified, 410,820 B, SIL OFL 1.1 (licence travels with redistribution), embedded kashi-style and
+FNV-1a-64 verified at boot. ⛔ Read-only `VFS_MEMFILE`, **`lseek` is -1 — one front-to-back pass**.
+✅ **Check four re-run**: overrides off, lock **3 → 7 commit-pinned**, both binaries byte-identical,
+2198 / 0 in that tree. **2198 / 0.** ⇒ **`0.9.0 · A real face` is unblocked**; what remains is crab's
+own, and must be measured on **QEMU** because that file exists on no host.
+⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED locally** (`22f7f53` · `60cc05b` · `eeb6a8b`) and
+**0.8.10's code is committed at `c0c7724`, not yet tagged** — the multi-release backlog earlier
+entries here describe is cleared. ⚠ The operator commits WHILE work is in flight, so a
+committed/uncommitted claim in this file is true as of its writing and `git log` is the authority.
 ⚠ `git ls-remote --tags` answered empty when this was written, so whether those tags are PUSHED is
 unknown from here. Stated rather than assumed: this file has asserted a remote state before and the
 rule it learned was to say which half it actually checked.
@@ -48,11 +69,16 @@ frame with a face **with nothing noticing**. That cost is now measured, with an 
 INVERTED when dhancha fixes it. ⚠ The Latin-1 limit is written down: one **byte** per glyph, a display
 limit owned by dhancha/rekha — crab cannot type such a byte (`crab_key_char` tops at `'z'`) but can
 display one from a readdir record. **2196 / 0.** ⚠ No QEMU arm: nothing agnos-only changed.
-⛔⛔ **`0.9.0` is BLOCKED on two things, neither crab's** — (a) there is no TrueType face anywhere in
-the stack and nothing stages one onto the target (**agnos** + an operator licence ruling; the obvious
-template reads a **host** Arch path that does not exist on AGNOS and would look finished while
-falling back silently), and (b) dhancha's scalable draw allocates outside the frame arena
-(**dhancha**). Its roadmap "blocked by" cell read "—" until this release went looking. ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still
+⛔⛔ **`0.9.0` is BLOCKED on two things, neither crab's, and both are now FILED** — (a) there is no
+TrueType face anywhere in the stack and nothing stages one onto the target; ⭐ **operator ruling
+2026-09-13: *"rekha is that thing... but has yet to get Kernel support"*** — so rekha IS the answer
+and the gate is an **agnos** arc, not a font-picking question. ⚠ The obvious template reads a **host**
+Arch path that does not exist on AGNOS and would look finished while falling back silently. (b)
+dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena
+(**dhancha**). Its roadmap "blocked by" cell read "—" until this release went looking.
+⇒ **Both are filed IN THE OWNING REPOS**, with crab copies beside them:
+`agnos/docs/development/issues/2026-09-13-no-proportional-face-on-the-target.md` and
+`dhancha/docs/development/issues/2026-09-13-scalable-text-allocates-per-call-outside-the-frame-arena.md`. ⚠ 0.8.4's and 0.8.3's CHANGELOG headers still
 read *"unreleased"*; both are records and are left alone.
 
 **0.8.9 contents**: a **Shift latch** — names can hold capital letters. `crab_key_char` has taken the
@@ -693,8 +719,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,071,560 B** *(0.8.10; 1,067,496 at 0.8.9, 1,067,440 at 0.8.8, 1,059,064 at 0.8.7)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,112,424 B** *(0.8.10; 1,112,456 at 0.8.9, 1,112,400 at 0.8.8)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,071,688 B** *(0.8.11, the 6.6.4 stack; 1,071,560 at 0.8.10, 1,067,496 at 0.8.9)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,116,632 B** *(0.8.11; 1,112,424 at 0.8.10, 1,112,456 at 0.8.9)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

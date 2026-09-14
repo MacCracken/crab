@@ -205,7 +205,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.8.8 · Columns** | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
 | ✅ | **0.8.9 · Shift** | type a **capital letter** into a name — and `#` and `*`, the batch sheet's own two operators, into the field that advertises them | — | **shipped** |
 | ✅ | **0.8.10 · Ready for a face** | *(nothing visible — it is the half of 0.9.0 that is not blocked)* every width crab computes is **derived from the font** instead of from kashi's 9 px, and the suite proves it against a synthetic **proportional** face | — | **shipped** |
-| ⛔ | **0.9.0 · A real face** | read crab in a proportional font | ⛔⛔ **TWO BLOCKERS, BOTH OUTSIDE crab** — see below. This cell read "—" until 0.8.10 went looking, which is how a session would have discovered them while writing the code instead of while planning. | `font` is a loaded face on the TARGET (not just the host), and a rendered frame still costs the global heap zero bytes |
+| → | **0.9.0 · A real face** | read crab in a proportional font | ✅ **BOTH BLOCKERS CLEARED, 2026-09-13/14** — agnos **1.57.2** ships `/fonts/default.ttf` (kernel-owned, hash-verified) and dhancha **0.10.0** fixed the per-call allocation. Filed 2026-09-13, both closed within a day. **Nothing blocks it now.** | crab opens `/fonts/default.ttf`, passes the face to `crab_render`, and a warm frame still costs the global heap zero bytes — **measured on QEMU**, because that file exists on no host |
 | | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | **0.9.0**, or an icon path that needs no face | the button draws and `F10` stops being the only door |
 | | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
 | | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
@@ -220,51 +220,44 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 waits on them. **0.9.0 → 0.9.1 is a chain** (the face, then the glyph that needs it), and **0.10.0 →
 0.11.0 is one chain behind one ruling**. That is the whole dependency structure.
 
-### ⛔⛔ What actually blocks `0.9.0 · A real face`
+### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day
 
 Found by 0.8.10 asking where a face would come from **before** writing the code that loads one. Both
-are real, both were verified against source across nineteen repos, and **neither is crab's**.
+were real, both were filed in the repo that owned the fix, and **both closed within 24 hours**. Kept
+as the record, because the pattern is the point: *state the need, decline to approximate it, and let
+the owning repo choose the mechanism.*
 
-1. ⛔ **THERE IS NO TRUETYPE FACE IN THE STACK, AND NOTHING STAGES ONE ONTO THE TARGET.** A search
-   for `*.ttf` / `*.otf` / `*.ttc` / `*.woff*` across every first-party repo returns **zero**. The
-   whole `agnos` repo contains **no occurrence of "ttf", "truetype" or "sfnt"** in any script,
-   manifest or doc, and `agnos/build/rootfs` has no `/usr`, no `/share` and no font directory —
-   `grep -i font agnos/scripts/burn/` is empty, so the path that builds the shipped filesystem has
-   no font concept at all. ⚠ **kashi is not the escape hatch**: it owns AGNOS's *bitmap console*
-   fonts by design (PSF/BDF/PCF, CP437), has no scalable face, and
-   [ADR 0003](../adr/0003-kashi-freestanding-core-over-the-library-face.md)'s written expiry is about
-   runtime BITMAP loading — it has not fired.
-   ⛔⛆ **AND THE OBVIOUS TEMPLATE IS A TRAP.** The one caller in the stack that feeds
-   `rekha_font_open` real file bytes is `dhancha/programs/setu_demo_client.cyr`, and it reads
-   `/usr/share/fonts/liberation/LiberationSans-Regular.ttf` — a **host Arch path that does not exist
-   on AGNOS**. Copied into crab it would work on the host build, fall back silently to the bitmap
-   face on the target, and look finished.
-   ⇒ **Owner: `agnos`** (the rootfs staging, which already places the CA bundle by exactly the
-   pattern a font needs) **plus an operator ruling on which face, under what licence.**
-   ⚠ And rekha 0.3.7 constrains the choice: `glyf` outlines only (CFF/OpenType is rejected outright)
-   and a format-4 BMP `cmap`.
-2. ⛔ **dhancha's SCALABLE PATH ALLOCATES PER CALL, OUTSIDE THE FRAME ARENA — it would destroy crab's
-   headline guarantee.** `dh_draw_text_ink`'s `font != 0` branch opens with
-   `sd_canvas_new(sd_surface_width(sds), sd_surface_height(sds))` — a **full-surface canvas per
-   label, per frame** — plus a sadish path per glyph, all from the global bump allocator that has no
-   `free()`. crab's M1.5 headline is *"a rendered frame costs the global heap ZERO bytes"*, and it
-   would become false on the first frame drawn with a face.
-   ⛔⛆ **The gate would not have noticed**: every render in that test passes `font = 0`, so it
-   measures the branch that is not running — *"a gate that covers one state proves one state"*,
-   exactly as this file warns. ⭐ 0.8.10 added the arm that measures the other branch, so the cost is
-   now a **failing-if-wrong number in crab's suite** rather than a surprise. ⇒ **Owner: `dhancha`** —
-   route that canvas through the per-frame arena, the way every other draw already does.
+1. ✅ **THERE WAS NO TRUETYPE FACE IN THE STACK — CLOSED by agnos 1.57.2 + rekha 0.3.8.** A search
+   across nineteen first-party repos returned zero `*.ttf`; the `agnos` repo contained no occurrence
+   of "ttf", "truetype" or "sfnt" anywhere. ⭐ **The operator's ruling** — *"rekha is that thing...
+   but has yet to get Kernel support"* — named the answer, and agnos shipped it the same day as a
+   **kernel-owned `/fonts` namespace**: the face embedded kashi-style, assembled at boot into a 2 MB
+   direct-map region and **verified by FNV-1a-64 against the generator's hash** before it is exposed.
+   **Liberation Sans Regular 2.1.5, unmodified, 410,820 bytes, SIL OFL 1.1** — ⚠ the licence text must
+   travel with any redistribution.
+   ⇒ **`/fonts/default.ttf`** is the stable contract; `/fonts/LiberationSans-Regular.ttf` is the same
+   bytes under the provenance name. Read-only, a `VFS_MEMFILE` fd, ⛔ **`lseek` is -1 — read it
+   front-to-back in one pass**. Contract: `agnos-userland-abi.md` §3.5.
+   ⭐⭐ **THE FILING'S POSTURE IS WHY THIS IS THE RIGHT MECHANISM AND NOT A STAGED FILE.** It stated
+   the need in one sentence and explicitly declined to design agnos's answer, citing VOLUMES. agnos
+   then chose something the filing had not imagined and would not have asked for.
+2. ✅ **dhancha's SCALABLE PATH ALLOCATED PER CALL — CLOSED by dhancha 0.10.0.** Three moves:
+   **sadish 0.5.5** put every per-call `alloc(` behind an `sd_alloc` / `sd_alloc_set` hook and added
+   `sd_canvas_blit_at`; **rekha 0.3.10** draws its outline scratch from the same seam; **dhancha
+   0.10.0** installs `dh_falloc` as that hook for one `dh_draw_text_ink` and sizes the canvas to
+   clip ∩ surface ∩ run rather than to the surface.
+   ⭐ **crab's expiry assertion fired exactly as written and is now inverted**: a warm frame under a
+   real face costs the global heap **exactly 0**. ⚠ And dhancha's hand-off **predicted crab's failure
+   by name and to the byte** from measurements taken against crab 0.8.10 — not `scost > 0` but
+   `arena_capacity_total(farena) == cap0`, *got 468,040, expected 16,384*. That is what a filing with
+   a gate behind it buys.
 
-⇒ **What 0.9.0 still needs from crab once both clear: almost nothing.** 0.8.10 derived every width
-from the font and proved it against a proportional face; the caret and the Latin-1 limit are
-dhancha's and are written down below.
-
-⛔ **1.0.0 is not a feature release and must not become one.** Its contents are the unchecked boxes in
-*v1.0 criteria*, and three of them are not code: **a green iron burn** (the last was 2026-08-30
-against 0.7.0's tree — and ⛔ **sequencing an iron run is the operator's call, not this file's**),
-`docs/benchmarks.md` written from the harness that already measures, and `docs/examples/` populated.
-⇒ **1.0.0 can be blocked with every version above it shipped.** Nothing here closes those three; they
-close when someone does them.
+⛔ **Three things crab must honour when it loads the face**, all of them from dhancha's hand-off and
+all already reflected in the suite: pin **sadish >= 0.5.5** and **rekha >= 0.3.10** (without them the
+build is REFUSED — `sd_alloc_set` and `sd_canvas_blit_at` are undefined); render **one warm-up face
+frame** at the widest run before measuring, because a cold one chains ~452 KB of arena chunks (the
+arena growing, not a leak); and open the face **outside** a draw, since `rekha_font_open` follows the
+scoped hook and would die at the arena's first reset.
 
 ### M7 — The index
 

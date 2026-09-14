@@ -1,9 +1,57 @@
+# Handoff — **0.8.11 cut: the 6.6.4 stack, and both blockers on a real face cleared within a day.**
+
+> ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.8.11**; ⛔ the commit, the tag and the
+> push are the operator's. ⚠ The operator commits WHILE work is in flight — `git log --oneline -3` is
+> the authority on what is in, not this file.
+>
+> 1. **THE 6.6.4 STACK.** cyrius 6.6.2 → **6.6.4**; sadish **0.5.5**, rekha **0.3.10**, kashi
+>    **1.0.8**, dhancha **0.10.0** (rupa/setu/chitra unmoved). ⛔ sadish and rekha are a **floor**, not
+>    company — without them dhancha 0.10.0 **refuses** the build (`2 reachable undefined function(s)`:
+>    `sd_alloc_set`, `sd_canvas_blit_at`). ⚠ **6.6.3 silently corrupts even-length string literals
+>    ≥ 64 KB**; agnos found it generating the embedded face and made the kernel hash-verify the bytes.
+>    ✅ **Check four re-run**: overrides off, lock **3 → 7 commit-pinned**, both binaries
+>    **byte-identical**, 2198 / 0 in that tree.
+> 2. ⭐⭐ **THE EXPIRY FIRED AND THE ASSERTION IS INVERTED.** 0.8.10 asserted a defect in dhancha and
+>    wrote *"the day dhancha fixes this, the test FAILS and must be inverted."* **dhancha 0.10.0 fixed
+>    it** — sadish 0.5.5's `sd_alloc`/`sd_alloc_set` hook, rekha 0.3.10's scoped outline scratch,
+>    dhancha installing `dh_falloc` as that hook for one `dh_draw_text_ink` and sizing the canvas to
+>    clip ∩ surface ∩ run. ⇒ **A warm frame under a real face costs the global heap exactly 0.**
+>    ⭐ **dhancha's hand-off predicted crab's failure by name and to the byte** from measurements taken
+>    against crab 0.8.10 — not `scost > 0` but `arena_capacity_total(farena) == cap0`, *got 468,040,
+>    expected 16,384*. That is what a filing with a gate behind it buys.
+>    ⛔ **Three rules it taught, now in the suite**: a **warm-up face frame** at the widest run before
+>    measuring (a cold one chains ~452 KB of arena chunks — the arena growing, not a leak); the face
+>    **opened outside a draw** (`rekha_font_open` follows the scoped hook and would die at the arena's
+>    first reset); and the arm placed **below** the bitmap assertions, since a face frame extends the
+>    chunk chain and that is exactly how it broke `cap0`.
+> 3. ✅ **AND agnos 1.57.2 CLOSED THE OTHER ONE, the same day it was filed.** A **kernel-owned
+>    `/fonts` namespace** — the operator's ruling picked rekha, and agnos embedded the face
+>    kashi-style rather than staging an asset. **`/fonts/default.ttf`** is the contract
+>    (`/fonts/LiberationSans-Regular.ttf` is the same bytes); Liberation Sans Regular 2.1.5
+>    unmodified, 410,820 B, **SIL OFL 1.1 — the licence must travel with any redistribution**;
+>    FNV-1a-64 verified at boot. ⛔ Read-only `VFS_MEMFILE`, **`lseek` is -1 — one front-to-back pass**.
+>    Contract: `agnos-userland-abi.md` §3.5.
+>    ⭐⭐ Both filings stated the need and **declined to design the sibling's answer**; both siblings
+>    then picked something better than crab would have asked for. *Declining to approximate is what
+>    got the right primitive built* — twice.
+> 4. ⇒ **`0.9.0 · A real face` IS UNBLOCKED.** What remains is crab's own: open `/fonts/default.ttf`,
+>    hand the face to `crab_render`, prove a warm frame still costs zero. ⛔ **On QEMU** — that file
+>    exists on no host, and the one existing template in the stack reads a host path and would fall
+>    back silently on the target while looking finished.
+>
+> **Suite 2198 / 0**, render_test 53 / 0, fuzz 100k, coverage 88 %, vet/deny clean, `deps --verify`
+> 50 / 0. Host **1,071,688 B** · agnos **1,116,632 B**.
+> ⚠ **The 0.8.10 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.10 cut: every width derived from the font, proved against a proportional face — and the two things that actually block a real one.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** ⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED**
 > by the operator (`22f7f53` / `60cc05b` / `eeb6a8b`) — the three-releases-uncommitted backlog that
-> every block below this one warns about is **cleared**. **0.8.10 is CUT in the working tree and is
-> not committed**; `VERSION` reads 0.8.10 and ⛔ the commit, the tag and the push are the operator's.
+> every block below this one warns about is **cleared**. **0.8.10's CODE is committed** too
+> (`c0c7724`) and is **not yet tagged**; `VERSION` reads 0.8.10 and ⛔ the tag and the push are the
+> operator's. ⚠ The operator was committing WHILE this release was written, so treat any
+> committed/uncommitted claim in this file as of its writing — `git log --oneline -3` is the answer,
+> not a document.
 > ⚠ `git ls-remote --tags` answered empty when this was written, so whether those three tags have
 > been PUSHED is unknown from here — said rather than assumed, because every block below asserts a
 > remote state and this one will not.
@@ -36,13 +84,19 @@
 >    **(a) There is no TrueType face in the stack and nothing stages one onto the target** — zero
 >    `*.ttf`/`*.otf` across every first-party repo, and the `agnos` repo contains no occurrence of
 >    "ttf", "truetype" or "sfnt" anywhere; `build/rootfs` has no `/usr`, no `/share`, no font dir.
+>    ⭐⭐ **OPERATOR RULING 2026-09-13: *"rekha is that thing... but has yet to get Kernel support."***
+>    ⇒ rekha IS the designated answer and the gate is an **agnos** arc — **not** a font-picking
+>    question, and crab must not treat it as one. crab states the need and does not design agnos's
+>    answer (the VOLUMES precedent). ⚠ Two things that look missing are not: a 410 KB read is ordinary
+>    and `stage-tools.sh` already carries `etc/ssl/cert.pem`.
 >    ⛔⛆ **The obvious template is a trap**: the one caller feeding `rekha_font_open` real bytes reads
 >    a **host Arch path that does not exist on AGNOS** — copied into crab it works on the host, falls
->    back silently on the target, and looks finished. ⇒ **agnos** owns the staging; **the operator**
->    owns which face under what licence (rekha 0.3.7 takes `glyf` outlines and a format-4 BMP `cmap`
->    only). ⚠ kashi is not the escape hatch and ADR 0003's expiry has not fired — it is about bitmap
->    loading.
+>    back silently on the target, and looks finished. ⚠ kashi is not the escape hatch and ADR 0003's
+>    expiry has not fired — it is about bitmap loading.
 >    **(b) dhancha's scalable draw allocates outside the frame arena** — item 3. ⇒ **dhancha** owns it.
+>    ⇒ **Both are FILED IN THE OWNING REPOS** (2026-09-13), with crab copies beside them:
+>    `agnos/docs/development/issues/2026-09-13-no-proportional-face-on-the-target.md` and
+>    `dhancha/…/2026-09-13-scalable-text-allocates-per-call-outside-the-frame-arena.md`.
 >
 > **Suite 2196 / 0** (+38), render_test **53 / 0 unchanged** — which is the proof that what ships
 > still draws exactly as it did. Host **1,071,560 B** · agnos **1,112,424 B**.

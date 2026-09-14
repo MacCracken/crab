@@ -2,6 +2,99 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.11] — 2026-09-14 — the 6.6.4 stack, and both blockers on a real face cleared within a day
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Changed — the toolchain and five dependencies
+
+`cyrius` **6.6.2 → 6.6.4**, and with it **sadish 0.5.4 → 0.5.5**, **rekha 0.3.7 → 0.3.10**, **kashi
+1.0.7 → 1.0.8**, **dhancha 0.9.29 → 0.10.0**. rupa (0.1.7), setu (0.8.9) and chitra (1.0.3) had not
+moved.
+
+⛔ **sadish and rekha are not optional company for dhancha 0.10.0 — they are a floor.** dhancha's
+hand-off measured it against crab 0.8.10 and the answer is a refusal, not a warning: without them the
+build stops with `refusing to emit binary with 2 reachable undefined function(s)` — `sd_alloc_set` and
+`sd_canvas_blit_at`.
+
+⚠ **6.6.4 matters for a specific reason**, recorded because it is the kind of thing that looks like a
+routine bump: **6.6.3 silently corrupts even-length string literals ≥ 64 KB**. agnos found it while
+generating the embedded face, filed it in cyrius, and made its kernel hash-verify the font bytes
+rather than trust them. crab is past it.
+
+⭐ **6.6.4 records the toolchain IN THE LOCK** — `cyrius	6.6.4`, one new line, where previous locks
+recorded none. The toolchain pin is now part of the locked, verifiable state rather than living only
+in the manifest.
+⚠ **The bump added no vendored leaf and dropped none**, checked explicitly because the roadmap's
+toolchain-sync item records that a bump CAN add one untracked (6.5.41 brought `lib/hashseed.cyr` in
+that way). Every `lib/` file the new graph produced is tracked; the lock's only structural change is
+the toolchain line above.
+
+✅ **Check four, re-run because the graph moved**: every `path =` override disabled, all seven deps
+cloned at their declared tags — the lock went **3 → 7 commit-pinned**, which is the tell — and both
+binaries came out **byte-identical** to the override build. The suite is 2,198 / 0 in that tree too.
+
+### Fixed — ⭐⭐ the expiry fired, and the assertion is inverted: a face frame now costs ZERO
+
+0.8.10 asserted a **defect in another repo** — that dhancha's scalable text path allocates a
+full-surface canvas per label per frame — and wrote the assertion so that *"the day dhancha routes
+that canvas through the frame arena, this test FAILS and must be inverted."*
+
+**dhancha 0.10.0 did exactly that, and the assertion fired.** Three moves across three repos: sadish
+0.5.5 put every per-call `alloc(` behind an `sd_alloc` / `sd_alloc_set` hook; rekha 0.3.10 draws its
+outline scratch from the same seam; dhancha installs `dh_falloc` as that hook for the duration of one
+`dh_draw_text_ink` and sizes the canvas to clip ∩ surface ∩ run instead of to the surface.
+
+⇒ **A warm frame under a real proportional face now costs the global heap exactly 0** — the same
+claim the bitmap loop has made since M1.5, on the branch that could not make it before.
+
+⭐⭐ **dhancha's hand-off predicted crab's failure by name and to the byte**, from measurements taken
+against crab 0.8.10 rather than from reading crab's source: not `scost > 0` but
+`arena_capacity_total(farena) == cap0`, *got 468,040, expected 16,384*. It was right. **That is what a
+filing with a gate behind it buys** — the fix arrived with crab's own test result already in it.
+
+Three things that note taught, all now in the suite:
+
+- ⛔ **A warm-up face frame is required before measuring**, on the same surface and width. A cold one
+  chains ~452 KB of arena chunks (glyph paths at ~4.3 KB each) — that is the arena **growing**, which
+  `arena_reset` then reuses forever, and it is not a leak. sadish also re-grows a per-row accumulator
+  once for any canvas wider than one it has seen, so a narrow warm-up leaves that cost in the number.
+- ⛔ **The face must be opened OUTSIDE a draw.** `rekha_font_open` follows the scoped hook, so a face
+  opened inside `dh_draw_text_ink` would live on the frame arena and die at its first reset.
+- ⚠ **The arm moved below the bitmap assertions, and that order is now load-bearing** — a face frame
+  extends the chunk chain, which is precisely how it broke `cap0` above.
+
+### ✅ And the other blocker closed too — agnos 1.57.2 ships a kernel-owned `/fonts`
+
+Filed 2026-09-13; resolved the same day. ⭐ **The operator's ruling** — *"rekha is that thing... but
+has yet to get Kernel support"* — named the answer, and agnos chose a mechanism the filing had not
+imagined: the face is **embedded kashi-style**, not staged as an asset. rekha 0.3.8 generates it,
+`kfont_init` assembles it at boot into a 2 MB direct-map region and **verifies it by FNV-1a-64 against
+the generator's hash** before opening the namespace.
+
+**Liberation Sans Regular 2.1.5, unmodified, 410,820 bytes, SIL OFL 1.1** — ⚠ the licence text must
+travel with any redistribution. ⇒ **`/fonts/default.ttf`** is the stable contract to code against;
+`/fonts/LiberationSans-Regular.ttf` is the same bytes under the provenance name. Read-only, a
+`VFS_MEMFILE` fd, ⛔ **`lseek` is -1 — read it front-to-back in one pass.**
+
+⭐⭐ **THE FILING'S POSTURE IS WHY THIS IS THE RIGHT MECHANISM.** It stated the need in one sentence
+and explicitly declined to design agnos's answer, citing the VOLUMES precedent. agnos then picked
+something better than anything crab would have asked for. *Declining to approximate is what got the
+right primitive built* — twice now.
+
+### ⇒ `0.9.0 · A real face` is unblocked
+
+Nothing outside crab stands in the way. What remains is crab's own: open `/fonts/default.ttf`, hand
+the face to `crab_render`, and prove a warm frame still costs zero — ⛔ **on QEMU**, because that file
+exists on no host, and because the one existing template in the stack reads a host path and would
+fall back silently on the target while looking finished.
+
+### Tests
+
+**2,198 assertions** (2,196 → 2,198) — and the two that changed are the inversion, not additions.
+Every other gate green on the new stack: render_test 53 / 0, fuzz 100k, coverage 88 %, vet, deny,
+`deps --verify` 50 / 0, and check four byte-identical.
+
 ## [0.8.10] — 2026-09-13 — every width is derived from the font, proved against a proportional face — and the two things that actually block a real one
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
@@ -93,6 +186,25 @@ Found by asking where a face would come from **before** writing the code that lo
    licence. ⚠ rekha 0.3.7 constrains the choice: `glyf` outlines only, format-4 BMP `cmap`.
 2. **dhancha's scalable draw allocates per call, outside the frame arena** — the defect above.
    ⇒ **dhancha** owns it.
+
+⭐⭐ **OPERATOR RULING, 2026-09-13, which sharpens (1) and is recorded because it changes what the ask
+is**: *"rekha is that thing... but has yet to get Kernel support."* ⇒ **rekha IS the designated answer
+for proportional text, and the gate is an agnos-side arc that has not been walked** — so this is
+**not** a "choose a font, check the licence" question, and the framing above was mine rather than the
+operator's. crab states the need and does not design agnos's answer, per the VOLUMES precedent where
+crab filed, declined to approximate with a probe, and agnos minted `mountlist`#104.
+⇒ **Both blockers are FILED**, one each, in `docs/development/issues/` — because an issue about
+another repository that lives only in this one is an issue nobody who could act on it will read.
+
+### Filed
+
+Both **in the repo that owns the fix**, with a copy in crab beside each — an issue about another
+repository that lives only in this one is an issue nobody who could act on it will read.
+
+- **agnos** — `agnos/docs/development/issues/2026-09-13-no-proportional-face-on-the-target.md`
+  ([crab's copy](docs/development/issues/2026-09-13-no-proportional-face-on-the-target.md)).
+- **dhancha** — `dhancha/docs/development/issues/2026-09-13-scalable-text-allocates-per-call-outside-the-frame-arena.md`
+  ([crab's copy](docs/development/issues/2026-09-13-dhancha-scalable-text-allocates-per-call.md)).
 
 ### Tests
 

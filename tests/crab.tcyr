@@ -721,35 +721,59 @@ fn main() {
     # so twenty frames re-walk the same memory and the global bump pointer never moves.
     assert_eq(alloc_used() - a0, 0, "TWENTY rendered frames cost the global heap exactly 0 bytes");
 
-    # ⛔⛆ AND THE HEADLINE IS TRUE OF **ONE BRANCH** — WHICH IS THE SHAPE THIS FILE ALREADY WARNS
-    # ABOUT: *"a gate that covers one state proves one state."* Every render above passes `font = 0`,
-    # which takes dhancha's BITMAP path. The SCALABLE path is a different function body, and it
-    # allocates: `dh_draw_text_ink` opens with `sd_canvas_new(sd_surface_width(sds),
-    # sd_surface_height(sds))` — a **full-surface canvas per call, per label, per frame** — plus a
-    # sadish path per glyph, all from the global bump allocator with no `free()` and NOT through
-    # dhancha's per-frame arena. ⇒ **The moment crab passes a real face, "twenty frames cost zero
-    # bytes" stops being true and this gate does not notice**, because it is measuring the branch
-    # that is not running.
-    # ⭐ MEASURED HERE RATHER THAN LEFT AS A HAZARD, and this is the arm that will catch the fix:
-    # the fixture face makes the scalable branch reachable from a host test for the first time.
-    # ⚠ ASSERTING A DEFECT, DELIBERATELY AND WITH ITS OWN EXPIRY. This assertion says the scalable
-    # path COSTS heap. It is written this way so the number cannot quietly change and so that the day
-    # dhancha routes that canvas through the frame arena, **this test FAILS and must be inverted** —
-    # which is the only way a blocker in a sibling repo gets a gate in this one.
+    # ⚠ THE DIRECT FORM OF THE SAME CLAIM, and the one that does not depend on the arena's capacity
+    # at all: after twenty identical frames the arena holds exactly ONE frame's worth. The sizes
+    # `crab_render` requests are input-independent (fixed 48/96/24-byte scratch, one widget per row),
+    # so this is exact rather than approximate — and the loop holds `active_pane` fixed to keep it so.
+    assert_eq(arena_used(farena), one_frame, "the arena holds ONE frame after twenty renders");
+    assert_eq(arena_capacity_total(farena), cap0, "...and the chunk chain never had to extend");
+
+    # ⛔⛆ AND EVERY CLAIM ABOVE IS TRUE OF **ONE BRANCH** — the shape this file already warns about:
+    # *"a gate that covers one state proves one state."* Every render above passes `font = 0`, which
+    # takes dhancha's BITMAP path. The SCALABLE path is a different function body, and until
+    # dhancha 0.10.0 it allocated a full-surface canvas per label per frame from the global heap,
+    # outside the arena. crab 0.8.10 filed that (`dhancha/.../scalable-text-allocates-per-call…`) and
+    # asserted the defect here **with a written expiry: the day dhancha fixed it, this must be
+    # inverted**. ⭐ **dhancha 0.10.0 fixed it and the expiry has fired — this is the inversion.**
+    # ⚠ THE ARM MOVED BELOW THE BITMAP ASSERTIONS, AND THAT ORDER IS NOW LOAD-BEARING. It used to sit
+    # above them, and a face frame extends the 8 KiB arena's chunk chain — so it polluted `cap0` and
+    # `arena_capacity_total(farena) == cap0` failed with 468,040 against 16,384. dhancha's hand-off
+    # predicted that failure, by name and to the byte, from measurements taken against crab 0.8.10.
     var sfbuf = alloc(512);
     var sfont = t_prop_face(sfbuf, 512);
     assert(sfont != 0, "the fixture face opens for the allocation arm");
+    # ⛔ THE FONT IS OPENED **OUTSIDE** A DRAW, AND THAT IS A CONTRACT NOW. dhancha 0.10.0 installs
+    # `dh_falloc` as sadish's allocation hook for the duration of one `dh_draw_text_ink` and restores
+    # the previous hook after; `rekha_font_open` follows that hook, so a face opened INSIDE a draw
+    # would live on the frame arena and die at its first reset.
+    # ⚠ WARM UP FIRST, AND ON THE SAME SURFACE AND WIDTH AS THE MEASURED FRAME. A cold face frame
+    # chains ~452 KB of arena chunks (glyph paths at ~4.3 KB each) — that is the arena GROWING, which
+    # `arena_reset` then reuses forever, not a leak. sadish also re-grows a per-row accumulator once
+    # for any canvas wider than one it has seen, so a warm-up narrower than the measured run would
+    # leave that cost in the measurement.
+    store64(asl, 0); store64(asr, 0);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
+    crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
+    crab_render(asurf, sfont, rs);
+    var warmcap = arena_capacity_total(farena);
+    assert(warmcap > cap0, "a cold face frame GROWS the arena — glyph paths are bigger than a bitmap frame");
+
+    # ⭐⭐ THE INVERSION. A warm face frame costs the global heap **exactly zero**, which is the same
+    # claim the bitmap loop above makes and the one dhancha 0.10.0 made reachable.
     store64(asl, 0); store64(asr, 0);
     crab_rs_reset(rs);
     crab_rs_pane(rs, 0, al, 3, "/bin", alz, alm, CRAB_PANE_OK, 0, 0, asl);
     crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
     var sa0 = alloc_used();
     crab_render(asurf, sfont, rs);
-    var scost = alloc_used() - sa0;
-    assert(scost > 0,
-      "⛔ ONE FRAME UNDER A REAL FACE COSTS THE GLOBAL HEAP — dhancha's scalable path allocates per call");
-    # ⚠ Restored immediately: the font is module state, and a later render measuring in a face crab
-    # does not use would make every assertion after this one describe a different program.
+    assert_eq(alloc_used() - sa0, 0,
+      "⭐⭐ A FRAME UNDER A REAL FACE COSTS THE GLOBAL HEAP EXACTLY 0 — dhancha 0.10.0, the expiry fired");
+    assert_eq(arena_capacity_total(farena), warmcap,
+      "...and the chunk chain does not extend again once it is warm");
+
+    # ⚠ AND THE FACE IS PUT AWAY. The font is module state; a later assertion measuring in a face
+    # crab does not draw with would describe a different program.
     crab_set_frame_font(0);
     store64(asl, 0); store64(asr, 0);
     crab_rs_reset(rs);
@@ -757,15 +781,7 @@ fn main() {
     crab_rs_pane(rs, 1, ar2, 3, "/", arz, arm, CRAB_PANE_OK, 0, 0, asr);
     var ba0 = alloc_used();
     crab_render(asurf, 0, rs);
-    assert_eq(alloc_used() - ba0, 0,
-      "⛔ ...WHILE THE BITMAP FACE STILL COSTS EXACTLY ZERO — the two branches are not the same program");
-
-    # ⚠ THE DIRECT FORM OF THE SAME CLAIM, and the one that does not depend on the arena's capacity
-    # at all: after twenty identical frames the arena holds exactly ONE frame's worth. The sizes
-    # `crab_render` requests are input-independent (fixed 48/96/24-byte scratch, one widget per row),
-    # so this is exact rather than approximate — and the loop holds `active_pane` fixed to keep it so.
-    assert_eq(arena_used(farena), one_frame, "the arena holds ONE frame after twenty renders");
-    assert_eq(arena_capacity_total(farena), cap0, "...and the chunk chain never had to extend");
+    assert_eq(alloc_used() - ba0, 0, "...and the bitmap face still costs exactly zero too");
 
     # ⛔⛔ THE SAME CLAIM WITH THE OVERLAY AND THE PREVIEW OPEN — AND THIS ARM EXISTS BECAUSE THE
     # LOOP ABOVE MISSED A REAL, SHIPPED LEAK. `crab_overlay` allocated its placement rect with
