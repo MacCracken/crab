@@ -2,6 +2,98 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.2] — 2026-09-14 — `Go` is filled, and an open menu stops acting on the pane underneath it
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Added — ⭐⭐ `Go` — a thin projection over the sidebar's destinations
+
+`Go` has sat on the bar and **empty since 0.8.0**, because the canvas draws it and crab had no honest
+way to fill it. Its rows are now every selectable sidebar destination, and picking one sends the
+active pane there.
+
+⛔ **THE MENU IS A DISCOVERY SURFACE, NOT A SECOND SET OF VERBS** — the rule every other bar menu
+keeps by rewriting `u` to an existing key. `Go` cannot: its items are **paths**, and no key means
+*"go to /home"*. So it reuses the other road that already exists — `crab_sb_path` and the same
+send-the-pane code the sidebar's Enter runs. ⭐ **`synth_goto` mirrors `synth_u` exactly**: a pointer
+pick becomes a *key* so one binding table answers it; a `Go` pick becomes a *path* so one navigator
+does. The sidebar's Enter now files a destination too, so there is **one navigator with two callers**
+rather than twenty duplicated lines that can drift.
+
+⛔ **A flat list, not `crab_sb_rows`.** The sidebar interleaves two inert headers so a reader can tell
+a disk from a directory; a menu of six rows cannot spend two on headings, and a header in a menu is a
+row the keyboard steps over for no information.
+
+⛔ **A volume is labelled by its PREFIX, not its name**, which closes a recorded defect: *"two FAT
+volumes render as two identical rows."* `crab_vol_dedup` removes *aliases* of one filesystem, not two
+filesystems that share a label. In a sidebar those rows at least sit under a heading and differ by
+position; in a menu two identical rows are two identical choices. `/mnt/fat` and `/mnt/exfat` are
+unique by construction.
+
+### Fixed — ⛔⛆ an open drop-down let **every** key through, not just `d`
+
+The roadmap recorded *"`d` is not consumed by the drop arm — so the delete prompt would draw
+UNDERNEATH the menu."* Reading the arm, it was worse: it handled six keys — Esc, Up/k, Down/j,
+Left/h, Right/l, Enter — each clearing `u`, and **every other key fell through to the main binding
+table with `u` intact**. With a menu open, `c` and `m` started a transfer, `r` and `n` opened an edit
+sheet, Backspace ascended and Space marked — all under a popup painted over them.
+
+⛔⛔ **The delete case defeats a rule written after real loss.** `crab_del_prompt` exists because
+*"THE PROMPT NAMES WHAT DIES"* — written after five system binaries left an iron box. A prompt drawn
+under an opaque menu names what dies to **nobody**, and the next keystroke answers it.
+
+⇒ `crab_mb_drop_key` — the same shape `crab_sb_key` already uses, lifted into a pure function the
+suite can reach, eating the mutating set and refusing out loud. ⭐ **And the two lists are tied
+together by an assertion**: every verb the sidebar eats, the drop-down eats too. Two surfaces that
+borrow the keyboard from the panes must refuse the same verbs, or one of them is a hole.
+
+### Fixed — the drop-down had no HEIGHT rule, and `Go` is the first menu that needed one
+
+`crab_mb_drop_fit` checked width from 0.8.3 and never height, because every menu until now had three
+to five rows and always fit. `Go`'s length is the **model's**.
+
+⛔ **The number is smaller than anyone guesses.** At the shipped 380×220: 220 − the bar's 22 − the
+status line's 22 − the placer's margin leaves 170 px, and a menu row is 26 — **six rows**. The
+roadmap recorded an 11-to-17 row `Go` being *"clamped and flipped to cover BOTH the bar and the
+status line"*; seventeen rows want 442 px, twice the window. ⚠ The status line is subtracted on
+purpose: `dh_place_at_point` clamps against the *surface*, so without it a drop sits legally on top of
+the line that says what is selected — and since 0.9.1 that line also holds the door that closes the
+menu.
+
+⚠ **Refused, not truncated.** A destination list silently cut at six hides places the operator has —
+the same failure as a listing that drops files.
+
+### Changed — `Go ▸ Parent` is absent, and not for the reason the roadmap gave
+
+The condition read *"`Parent` is absent rather than dead at `/`"*, and the first draft of the model
+carried a `hasparent` flag to hide the row at the root. **Wrong shape.** Parent is a **verb** — it is
+Backspace, a key that already exists — and every other bar menu is a selection over the verb space. A
+menu holding both verbs and destinations needs two pick paths in one list, which is exactly the
+complexity that kept `Go` empty. ⇒ It is absent **everywhere**, not just at `/`, because it is not a
+destination. If it is ever wanted on the bar it belongs beside `Open`, with its accelerator shown.
+
+### Tests — ⭐ QEMU caught a bug the suite could not
+
+**2,314 assertions** (2,257 → 2,314). Four mutations planted and caught: `d` leaking again; the height
+cap removed; the status line not subtracted; and a volume indexing by row rather than within its kind.
+
+⛔⛆ **The navigator sat ABOVE the dispatch first, and only the target showed it.** A `Go` pick sets
+`synth_goto` from *inside* the key dispatch, so a navigator above it consumed nothing until the
+**next** key arrived — the menu closed, the pane stayed put, and the destination fired later against
+whatever was pressed next. On QEMU that read as `Go` doing nothing: `crab: go 3 destinations` and no
+`crab: place`. Every line of it is inside the agnos `#ifdef`, so the suite was green throughout.
+
+⭐ `agnos/scripts/harness/crab-go-test.py` — **PASS**. `F10 → Right ×2 → Enter → Enter` sent the pane
+to `/` and listed **8 entries**; `d` ×3 with a drop-down open produced no delete activity at all.
+⚠ **Driven by the keyboard deliberately** — 0.9.1 spent seven runs failing to aim a relative pointer
+at a rect, and `F10 → Right → Enter` is a road `crab-columns-test.py` already drives.
+
+⚠ **Two oracles were weak and are now dispositive**, both found by a harness that could not tell two
+causes apart: `crab: go <n> destinations` (because "the menu did nothing" is either a broken pick or
+an empty model, and nothing outside crab can distinguish them), and `crab: place <path> ok <n>
+entries` (the line used to print whether or not the listing succeeded, and a refusal only ever
+reached the status line).
+
 ## [0.9.1] — 2026-09-14 — the door: the menu row has a second way in, and `F10` stops being the only one
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

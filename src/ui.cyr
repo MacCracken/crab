@@ -1605,14 +1605,24 @@ fn crab_mb_cell_w(i): i64 {
 # ⭐ `View` HOLDS THE DISPLAY ITEMS (0.8.6) — `CRAB_MI_VIEW` … `CRAB_MI_SIDEBAR`, ids above
 # `CRAB_MI_COUNT` so the context menu never lists them. Same maps, same rewrite, same one
 # implementation: `View ▸ Cycle view` is the `g` key with a label on it.
-# ⛔ `Go` STAYS EMPTY, WITH ITS REASONS ON RECORD (roadmap, *M6 surfaces*): an 11-to-17-row
-# drop-down at 380×220 is clamped and flipped over BOTH the bar and the status line, `d` is not
-# consumed by the drop arm so the delete prompt would draw underneath it, and `Go ▸ Parent` ships
-# dead at `/`. The sidebar's keyboard route is `Go`'s shape; `-1` marks a slot that is not an item.
+# ⭐⭐ `Go` IS FILLED AS OF 0.9.2, AND ALL THREE REASONS IT WAS NOT ARE CLOSED — kept here because
+# each one turned out to be a real defect rather than a reason to wait:
+#   · *"an 11-to-17-row drop-down at 380×220 is clamped and flipped over BOTH the bar and the status
+#     line"* — `crab_mb_drop_fit_h` now tests HEIGHT, which no menu needed until one was as long as
+#     its model. Six rows fit at 380×220; longer is refused out loud and names the sidebar.
+#   · *"`d` is not consumed by the drop arm so the delete prompt would draw underneath it"* — and it
+#     was worse: the arm consumed six keys and let **every** other one through, so `c`, `m`, `r`, `n`,
+#     Backspace and Space all acted under the popup too. `crab_mb_drop_key` eats the mutating set.
+#   · *"`Go ▸ Parent` ships dead at `/`"* — Parent is a VERB (Backspace), not a destination, so it is
+#     absent from `Go` everywhere rather than dead in one place. See `crab_go_count`.
+# ⇒ `Go`'s items are the sidebar's destinations; `-1` still marks a slot that is not a VERB, which is
+# what `crab_mb_item` answers for every one of them.
 fn crab_mb_item_count(i): i64 {
     if (i == CRAB_MB_FILE) { return 3; }       # Open, New folder..., Rename...
     if (i == CRAB_MB_EDIT) { return 3; }       # Copy, Move, Delete
-    if (i == CRAB_MB_GO)   { return 0; }       # navigation — refused as a drop-down, see above
+    # ⭐ `Go` IS AS LONG AS THE MODEL (0.9.2) — the first bar menu whose length is not a literal, and
+    # the reason `crab_mb_drop_fit_h` had to learn about height.
+    if (i == CRAB_MB_GO)   { return crab_go_rows(); }
     if (i == CRAB_MB_VIEW) { return 5; }       # Cycle view, Cycle sort, Preview, Sidebar, Refresh
     return 0;
 }
@@ -1670,6 +1680,16 @@ fn crab_mb_cell_x(i): i64 {
 # off a bar is a list the operator is stepping down, and wrapping to the top reads as a jump.
 # ⚠ Returns `j` unchanged when nothing enabled lies that way — a menu with no enabled items at all
 # leaves the highlight where it was rather than spinning.
+# @public — is bar menu `m`'s item `j` enabled?
+# ⛔ A DESTINATION IS ALWAYS ENABLED (0.9.2). `crab_menu_enabled` answers about a VERB against the
+# selected entry — "Delete is off when nothing is selected" — and asking it about a PATH greys rows
+# for reasons that have nothing to do with where they go. `Go` opening onto a greyed row, or arrowing
+# past every row, is what routing the walkers through this prevents.
+fn crab_mb_item_on(m, j, count, isdir, marked): i64 {
+    if (m == CRAB_MB_GO) { return 1; }
+    return crab_menu_enabled(crab_mb_item(m, j), count, isdir, marked);
+}
+
 fn crab_mb_item_move(m, j, d, count, isdir, marked): i64 {
     var n = j;
     var g = 0;
@@ -1677,7 +1697,7 @@ fn crab_mb_item_move(m, j, d, count, isdir, marked): i64 {
         n = n + d;
         if (n < 0) { return j; }
         if (n >= crab_mb_item_count(m)) { return j; }
-        if (crab_menu_enabled(crab_mb_item(m, n), count, isdir, marked) == 1) { return n; }
+        if (crab_mb_item_on(m, n, count, isdir, marked) == 1) { return n; }
         g = g + 1;
     }
     return j;
@@ -1688,7 +1708,7 @@ fn crab_mb_item_move(m, j, d, count, isdir, marked): i64 {
 fn crab_mb_item_first(m, count, isdir, marked): i64 {
     var i = 0;
     while (i < crab_mb_item_count(m)) {
-        if (crab_menu_enabled(crab_mb_item(m, i), count, isdir, marked) == 1) { return i; }
+        if (crab_mb_item_on(m, i, count, isdir, marked) == 1) { return i; }
         i = i + 1;
     }
     return 0 - 1;
@@ -1731,12 +1751,207 @@ fn crab_menubar_sel(w, sel): i64 {
 # which is **214 for File and 266 for Edit**. ⇒ In the whole band 190..265 the bar fits and Edit's
 # menu still opens misplaced, so a single threshold would certify as good the exact widths where the
 # symptom survives. Two questions, two rules.
+# @public — how many drop-down rows fit under the bar without covering the status line, at height `h`.
+#
+# ⛔⛆ DERIVED, AND THE NUMBER IS SMALLER THAN ANYONE GUESSES. At the shipped 380x220: 220 minus the
+# bar's 22, minus the status line's 22, minus the placer's margin leaves ~170 px, and a menu row is
+# 26 — **six rows**. The roadmap recorded an 11-to-17 row `Go` being *"clamped and flipped to cover
+# BOTH the bar and the status line"*; seventeen rows want 442 px, which is twice the whole window.
+# ⚠ THE STATUS LINE IS SUBTRACTED ON PURPOSE. `dh_place_at_point` clamps a popup that would overhang
+# the SURFACE, so without this a drop would sit legally on top of the line that says what is selected
+# — and since 0.9.1 that line also holds the door that closes the menu.
+fn crab_mb_drop_rows(h): i64 {
+    var room = h - CRAB_MB_H - CRAB_STATUS_H - CRAB_MENU_MARGIN;
+    if (room <= 0) { return 0; }
+    return room / CRAB_MENU_ROW_H;
+}
+
+# @public — may menu `m` open as a drop-down in a `w` x `h` window, with `items` rows? 1 = yes.
+#
+# ⛔ THE HEIGHT TEST IS NEW (0.9.2) AND IT IS WHY `Go` COULD NOT SHIP BEFORE. Width was checked since
+# 0.8.3; height was not, because every menu until now had three to five rows and always fit. `Go`'s
+# length is the MODEL's, so it is the first menu that can ask for more than the window has.
+# ⚠ REFUSED, NOT TRUNCATED. A destination list silently cut at six is a menu that hides places the
+# operator has — the same failure as a listing that drops files. The caller says so out loud and
+# names the sidebar, which is the surface that scrolls.
+fn crab_mb_drop_fit_h(w, h, m, items): i64 {
+    if (m < 0) { return 0; }
+    if (m >= CRAB_MB_COUNT) { return 0; }
+    if (items <= 0) { return 0; }
+    if (w < (crab_mb_cell_x(m) + CRAB_MENU_W + CRAB_MENU_MARGIN)) { return 0; }
+    if (items > crab_mb_drop_rows(h)) { return 0; }
+    return 1;
+}
+
 fn crab_mb_drop_fit(w, m): i64 {
     if (m < 0) { return 0; }
     if (m >= CRAB_MB_COUNT) { return 0; }
     if (crab_mb_item_count(m) <= 0) { return 0; }
     if (w < (crab_mb_cell_x(m) + CRAB_MENU_W + CRAB_MENU_MARGIN)) { return 0; }
     return 1;
+}
+
+# =================================================================================================
+# 🧭 `Go` — A THIN PROJECTION OVER THE SIDEBAR'S DESTINATIONS (0.9.2)
+# =================================================================================================
+#
+# ⭐⭐ `Go` HAS BEEN ON THE BAR AND EMPTY SINCE 0.8.0, because the canvas draws it and crab had no
+# honest way to fill it. The roadmap records the reasons and the shape: *"the right shape is a thin
+# projection over the sidebar's keyboard route"*.
+#
+# ⛔ THE MENU IS A DISCOVERY SURFACE, NOT A SECOND SET OF VERBS — the rule every other bar menu
+# follows by rewriting `u` to an existing key. `Go` cannot do that: its items are DESTINATIONS and no
+# key means *"go to /home"*. ⇒ It reuses the other existing road instead — `crab_sb_path` and the
+# same send-the-active-pane code the sidebar's Enter already runs. Nothing here re-implements a
+# navigation; it selects one.
+#
+# ⛔ A FLAT LIST, NOT `crab_sb_rows`. The sidebar interleaves two INERT headers (PLACES, VOLUMES) so
+# a reader can tell a disk from a directory; a menu of six rows has no room to spend two on headings,
+# and a header in a menu is a row the keyboard has to step over for no information.
+# ⛔⛆ AND `Go ▸ Parent` IS NOT HERE, WHICH IS HOW THE ROADMAP'S THIRD CONDITION IS MET. That
+# condition read *"`Parent` is absent rather than dead at `/`"*, and the first draft of this model
+# carried a `hasparent` flag to hide the row at the root. That was the wrong shape: **Parent is a
+# VERB** — it is Backspace, a key that already exists — and every other bar menu is a selection over
+# the verb space. A menu holding both verbs and destinations needs two pick paths in one list, which
+# is precisely the complexity that kept `Go` empty since 0.8.0.
+# ⇒ `Go` is destinations ONLY. Parent is absent everywhere, not just at `/`, because it is not a
+# destination — and the operator ascends with Backspace, as they always have. If it is ever wanted on
+# the bar it belongs in the VERB space beside `Open`, with its accelerator shown.
+var CRAB_GO_NONE   = 0;
+var CRAB_GO_PLACE  = 1;
+var CRAB_GO_VOLUME = 2;
+
+# @public — how many rows `Go` offers: every selectable sidebar destination, and nothing else.
+# ⚠ THE FRAME'S DESTINATION MODEL, recorded on the same discipline as `crab_root` and `crab_llst`:
+# `crab_mb_item_count` is a pure map with no arguments to spare, and `Go`'s length is the MODEL's.
+# ⛔ Set in `crab_render` before the overlay is built. `crab_menubar_fit` is already asked from the
+# event loop against the last frame's state, and this follows it rather than inventing a second rule.
+var crab_gop = 0;
+var crab_gopn = 0;
+var crab_gov = 0;
+var crab_govn = 0;
+
+fn crab_go_model(places, placen, vols, voln): i64 {
+    crab_gop = places; crab_gopn = placen; crab_gov = vols; crab_govn = voln;
+    return 0;
+}
+
+# @public — how many rows `Go` offers for the frame just rendered.
+fn crab_go_rows(): i64 { return crab_go_count(crab_gopn, crab_govn); }
+
+# @public — row `i`'s label and path for the frame just rendered.
+fn crab_go_row_label(i): i64 { return crab_go_label(i, crab_gop, crab_gopn, crab_gov, crab_govn); }
+fn crab_go_row_path(i): i64 { return crab_go_path(i, crab_gop, crab_gopn, crab_gov, crab_govn); }
+
+fn crab_go_count(placen, voln): i64 {
+    var n = 0;
+    if (placen > 0) { n = placen; }
+    if (voln > 0) { n = n + voln; }
+    return n;
+}
+
+# @public — what kind of destination is row `i`?
+fn crab_go_kind(i, placen, voln): i64 {
+    if (i < 0) { return CRAB_GO_NONE; }
+    if (placen > 0) {
+        if (i < placen) { return CRAB_GO_PLACE; }
+    }
+    var r = i - placen;
+    if (placen < 0) { r = i; }
+    if (voln > 0) {
+        if (r >= 0) {
+            if (r < voln) { return CRAB_GO_VOLUME; }
+        }
+    }
+    return CRAB_GO_NONE;
+}
+
+# @public — row `i`'s index WITHIN its own kind, or -1.
+fn crab_go_index(i, placen, voln): i64 {
+    var k = crab_go_kind(i, placen, voln);
+    if (k == CRAB_GO_PLACE) { return i; }
+    if (k == CRAB_GO_VOLUME) { return i - placen; }
+    return 0 - 1;
+}
+
+# @public — the destination path for row `i`, or 0.
+# ⛔ ONE RESOLVER, AND THIS MAKES IT THREE CALLERS. `crab_sb_path` already answers for the sidebar's
+# click route and its keyboard route; `Go` is the third, and it asks the same question rather than
+# re-deriving the answer from the same two arrays.
+fn crab_go_path(i, places, placen, vols, voln): i64 {
+    var k = crab_go_kind(i, placen, voln);
+    var x = crab_go_index(i, placen, voln);
+    if (x < 0) { return 0; }
+    if (k == CRAB_GO_PLACE) { return crab_place_path(places, placen, x); }
+    if (k == CRAB_GO_VOLUME) { return crab_vol_prefix(vols, voln, x); }
+    return 0;
+}
+
+# @public — the label for row `i`, or "" .
+# ⛔⛆ A VOLUME IS LABELLED BY ITS **PREFIX**, NOT ITS NAME, AND THE SIDEBAR'S OWN DEFECT IS WHY. The
+# roadmap records *"two FAT volumes render as two identical rows"* — `crab_vol_dedup` removes ALIASES
+# of one filesystem, not two different filesystems that share a label. In a sidebar the rows at least
+# sit under a VOLUMES heading and can be told apart by position; in a menu two identical rows are two
+# identical choices. The prefix (`/mnt/fat`, `/mnt/exfat`) is unique by construction.
+fn crab_go_label(i, places, placen, vols, voln): i64 {
+    var k = crab_go_kind(i, placen, voln);
+    var x = crab_go_index(i, placen, voln);
+    if (x < 0) { return ""; }
+    if (k == CRAB_GO_PLACE) { return crab_place_label(places, placen, x); }
+    if (k == CRAB_GO_VOLUME) { return crab_vol_prefix(vols, voln, x); }
+    return "";
+}
+
+# =================================================================================================
+# ⛔⛆ WHAT AN OPEN DROP-DOWN DOES WITH A KEY IT DOES NOT OWN (0.9.2)
+# =================================================================================================
+#
+# ⛔⛔ IT USED TO LET IT THROUGH, AND THAT IS WORSE THAN THE ROADMAP RECORDED. The note said *"`d` is
+# not consumed by the drop arm — so the delete prompt would draw UNDERNEATH the menu"*. Reading the
+# arm, `d` is not the only one: it handles Esc, Up/k, Down/j, Left/h, Right/l and Enter, each
+# clearing `u`, and **every other key falls through to the main binding table with `u` intact**. With
+# a menu open, `c` and `m` start a transfer, `r` and `n` open an edit sheet, Backspace ascends, and
+# Space marks — all under a popup that is painted over them.
+#
+# ⛔⛔ THE DELETE CASE IS THE ONE THAT MATTERS, AND IT DEFEATS A RULE WRITTEN IN BLOOD. `crab_del_prompt`
+# exists because *"THE PROMPT NAMES WHAT DIES"* — written after five system binaries left an iron box.
+# A prompt drawn UNDER an opaque menu names what dies to nobody, and the next keystroke answers it.
+#
+# ⇒ THE SAME SHAPE `crab_sb_key` ALREADY USES, and for the same reason: the mutating set is named and
+# EATEN, and the refusal is out loud, because *"a key that does nothing and says nothing is
+# indistinguishable from a dropped keypress"*. Lifted into a pure function so the suite can reach it
+# — the arm itself lives inside the agnos `#ifdef` where no host test can go.
+var CRAB_MBK_NONE  = 0;    # not one of ours — fall through to the ordinary bindings
+var CRAB_MBK_CLOSE = 1;    # Esc — close the drop, keep the bar
+var CRAB_MBK_UP    = 2;
+var CRAB_MBK_DOWN  = 3;
+var CRAB_MBK_PREV  = 4;    # Left / h — the adjacent menu, drop still open
+var CRAB_MBK_NEXT  = 5;    # Right / l
+var CRAB_MBK_RUN   = 6;    # Enter — run the highlighted item
+var CRAB_MBK_EAT   = 7;    # consumed and refused OUT LOUD — it would have acted under the popup
+
+# @public — what does key `u` mean while a bar drop-down is open? -> a CRAB_MBK_* answer.
+fn crab_mb_drop_key(u): i64 {
+    if (u == 0x29) { return CRAB_MBK_CLOSE; }                    # Esc
+    if (u == 0x52) { return CRAB_MBK_UP; }                       # Up
+    if (u == 0x0E) { return CRAB_MBK_UP; }                       # k
+    if (u == 0x51) { return CRAB_MBK_DOWN; }                     # Down
+    if (u == 0x0D) { return CRAB_MBK_DOWN; }                     # j
+    if (u == 0x50) { return CRAB_MBK_PREV; }                     # Left
+    if (u == 0x0B) { return CRAB_MBK_PREV; }                     # h
+    if (u == 0x4F) { return CRAB_MBK_NEXT; }                     # Right
+    if (u == 0x0F) { return CRAB_MBK_NEXT; }                     # l
+    if (u == 0x28) { return CRAB_MBK_RUN; }                      # Enter
+    # ⛔ THE MUTATING SET — the same seven `crab_sb_key` names, and for the same reason: every one of
+    # them acts on a pane the operator cannot see, under a popup that is covering it.
+    if (u == 0x07) { return CRAB_MBK_EAT; }                      # d — delete
+    if (u == 0x06) { return CRAB_MBK_EAT; }                      # c — copy
+    if (u == 0x10) { return CRAB_MBK_EAT; }                      # m — move
+    if (u == 0x15) { return CRAB_MBK_EAT; }                      # r — rename
+    if (u == 0x11) { return CRAB_MBK_EAT; }                      # n — new folder
+    if (u == 0x2A) { return CRAB_MBK_EAT; }                      # Backspace — ascend
+    if (u == 0x2C) { return CRAB_MBK_EAT; }                      # Space — mark
+    return CRAB_MBK_NONE;
 }
 
 fn crab_mb_move(i, d): i64 {
@@ -3238,6 +3453,9 @@ enum CrabMenuGeom {
     # fit rule needs the same number, and two spellings of one margin drift silently — the rule would
     # certify a width the placer then clamps.
     CRAB_MENU_MARGIN = 4;
+    # ⚠ THE MENU ROW HEIGHT, NAMED (0.9.2) — it was the literal 26 handed to `dh_list_new` at the
+    # popup's one call site, and `crab_mb_drop_rows` has to divide by the same number.
+    CRAB_MENU_ROW_H = 26;
     CRAB_MENU_KEYW = 54;
     CRAB_SHEET_H   = 96;
 }
@@ -3404,11 +3622,24 @@ fn crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcount, misdir, mma
         while (i < mn) {
             var mi = i;
             if (mbmenu >= 0) { mi = crab_mb_item(mbmenu, i); }
-            var row = dh_menu_item(m, crab_mspec, crab_menu_label(mi), crab_menu_key(mi));
+            # ⭐⭐ `Go`'s ROWS ARE DESTINATIONS, NOT VERBS (0.9.2), so they come from the frame's model
+            # rather than from `crab_menu_label`. ⛔ AND THE ACCELERATOR COLUMN IS EMPTY, DELIBERATELY:
+            # `crab_menu_key`'s own rule is *"These are the REAL bindings, not decoration — a menu
+            # that lies about a shortcut is worse than one that shows none."* No key means "go to
+            # /home", so the honest column is blank.
+            var rlab = crab_menu_label(mi);
+            var rkey = crab_menu_key(mi);
+            if (mbmenu == CRAB_MB_GO) { rlab = crab_go_row_label(i); rkey = ""; }
+            var row = dh_menu_item(m, crab_mspec, rlab, rkey);
             # ⚠ A DISABLED ENTRY IS GREYED AND INERT, not hidden — entries that move around force
             # the operator to re-read the menu every time. `DH_FLAG_INERT` makes dhancha skip it with
             # the keyboard and miss it with the mouse, so "greyed" is not merely cosmetic.
-            if (crab_menu_enabled(mi, mcount, misdir, mmarked) == 0) {
+            # ⚠ A DESTINATION IS ALWAYS ENABLED. `crab_menu_enabled` answers about a VERB against the
+            # selected entry, and asking it about a path would grey rows for reasons that have nothing
+            # to do with where they go.
+            var ren = 1;
+            if (mbmenu != CRAB_MB_GO) { ren = crab_menu_enabled(mi, mcount, misdir, mmarked); }
+            if (ren == 0) {
                 dh_widget_set_fg(row, dh_theme_faint());
                 dh_widget_set_inert(row, 1);
             }
@@ -4985,7 +5216,11 @@ fn crab_render(surf, font, rs): i64 {
     # CLAMPS a popup that would overhang, sliding it left until it fits — so on a narrow window
     # `Edit`'s menu, Delete included, hangs under the word `File`. A menu pointing at the wrong
     # label is worse than an absent one: the operator reads the label to know what they are in.
-    if (crab_mb_drop_fit(w, mbdrop) == 0) { mbdrop = 0 - 1; }
+    # ⛔ HEIGHT AS WELL AS WIDTH (0.9.2). `Go` is the first menu whose length is the model's, so it is
+    # the first that can ask for more rows than the window has — see `crab_mb_drop_fit_h`.
+    if (mbdrop >= 0) {
+        if (crab_mb_drop_fit_h(w, h, mbdrop, crab_mb_item_count(mbdrop)) == 0) { mbdrop = 0 - 1; }
+    }
     if (mbdrop >= 0) {
         menuopen = 1;
         menux = crab_mb_cell_x(mbdrop);
@@ -5006,6 +5241,9 @@ fn crab_render(surf, font, rs): i64 {
     # from a previous frame would otherwise survive into a layout that built no overlay.
     crab_mlst = 0;
     crab_shlst = 0;
+    # ⭐ THE DESTINATION MODEL FOR THIS FRAME, before anything can ask how long `Go` is.
+    crab_go_model(load64(rs + CRAB_RS_PLACES), load64(rs + CRAB_RS_PLACEN),
+      load64(rs + CRAB_RS_VOLS), load64(rs + CRAB_RS_VOLN));
     if ((menuopen != 0) || (editopen != 0)) {
         crab_overlay(root, w, h, menuopen, menux, menuy, menusel, mcnt, misdir,
           crab_mark_count(mmk, mcnt), mname, editopen, editlabel, mbdrop);

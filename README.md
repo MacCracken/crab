@@ -134,6 +134,8 @@ rename, mkdir, and open. Multi-select with Space, a context menu that is a *disc
 than a second set of verbs — every entry maps to a key binding that already exists — and a transfer
 tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
 Esc cancels them**, so a recursive copy never freezes the window.
+⭐ **`Go` on the menu bar** (0.9.2) — every place and volume the sidebar knows, one keystroke from the
+bar. ⚠ Refused out loud rather than truncated when the window is too short to show them all.
 ⭐ **crab draws in a real proportional font** (0.9.0) — Liberation Sans, read from AGNOS's own
 kernel-owned `/fonts/default.ttf`. A truncated name is cut where it actually stops fitting, measured
 glyph by glyph, rather than at a character count that only describes a fixed-width face. ⚠ On a host

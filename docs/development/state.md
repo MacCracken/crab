@@ -24,8 +24,29 @@
 
 ## Version
 
-**0.9.1 IS CUT** — `VERSION` reads `0.9.1` and the CHANGELOG header agrees, on operator direction,
-2026-09-14. ⚠ 0.9.0 released.
+**0.9.2 IS CUT** — `VERSION` reads `0.9.2` and the CHANGELOG header agrees, on operator direction,
+2026-09-14. ⚠ 0.9.1 released.
+
+**0.9.2 contents — `Go` is filled**, empty on the bar since 0.8.0. Its rows are every sidebar
+destination, picked through **one navigator** (`synth_goto`, mirroring `synth_u`) that the sidebar's
+Enter now shares — because `crab_menu_accel` has nothing to return for a path and inventing a key
+would make the menu a second implementation of navigation.
+⛔⛆ **AND IT CLOSED A KEY LEAK WORSE THAN RECORDED.** The roadmap said `d` was not consumed by the
+drop arm; in fact the arm handled six keys and let **every** other one through with `u` intact, so
+`c`, `m`, `r`, `n`, Backspace and Space all acted under a popup painted over them. The delete case
+defeats `crab_del_prompt`'s whole reason for existing — *"THE PROMPT NAMES WHAT DIES"*, written after
+five system binaries left an iron box. `crab_mb_drop_key` eats the mutating set, and an assertion
+ties that set to `crab_sb_key`'s so two surfaces that borrow the keyboard cannot drift.
+⛔ **The drop-down had no HEIGHT rule** — `Go` is the first menu whose length is the model's. Six rows
+fit at 380×220 (220 − bar 22 − status 22 − margin, over a 26 px row); longer is refused, not cut.
+⚠ **Parent is a VERB, not a destination**, so it is absent everywhere rather than dead at `/` — the
+roadmap's condition met by a better argument than the one it gave. ⚠ Volumes are labelled by
+**prefix**, closing *"two FAT volumes render as two identical rows"*. **2314 / 0**, four mutations.
+⭐⭐ **QEMU, `crab-go-test.py`, PASS** — and it caught a bug the suite could not: the navigator sat
+ABOVE the key dispatch, so a pick made from inside the dispatch was not consumed until the NEXT key.
+On target that read as `Go` doing nothing (`crab: go 3 destinations`, no `crab: place`); the suite was
+green throughout because every line of it is inside the agnos `#ifdef`. Now: `F10 → Right ×2 → Enter
+→ Enter` sends the pane to `/` and lists 8 entries, and `d` ×3 with a menu open does nothing at all.
 
 **0.9.1 contents — the DOOR.** A mark in the status line reveals the menu row, so `F10` is no longer
 the only way in — and for seven releases it was **no way at all** (aethersafha claimed the key until
@@ -762,8 +783,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,080,480 B** *(0.9.1; 1,076,240 at 0.9.0, 1,071,688 at 0.8.11)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,121,344 B** *(0.9.1; 1,121,176 at 0.9.0, 1,116,632 at 0.8.11)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,084,744 B** *(0.9.2; 1,080,480 at 0.9.1, 1,076,240 at 0.9.0)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,129,760 B** *(0.9.2; 1,121,344 at 0.9.1, 1,121,176 at 0.9.0)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

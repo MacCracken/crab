@@ -339,6 +339,19 @@ fn main(): i64 {
         crab_line_u(dh_widget_h(dwid));
         crab_line_say();
     } else { crab_say("crab: door none -- the window is too narrow for it\n"); }
+    # ⭐ HOW MANY DESTINATIONS `Go` HAS, SAID ONCE (0.9.2). ⛔ Not decoration: `Go`'s length is the
+    # MODEL's, so "the menu did nothing" has two completely different causes — a broken pick, or an
+    # empty model on a filesystem with no places and no volumes — and a harness cannot tell them
+    # apart from the outside. The same lesson the door's rect taught one release ago.
+    crab_line_reset();
+    crab_line_s("crab: go ");
+    crab_line_u(crab_go_rows());
+    crab_line_s(" destinations (places ");
+    crab_line_u(placen);
+    crab_line_s(", volumes ");
+    crab_line_u(voln);
+    crab_line_s(")");
+    crab_line_say();
     var resized = 0;        # set by WINDOW_CONFIGURE, consumed by the re-ATTACH after the next render
     # ⭐ POINTER STATE (M2, *deferral #05*), OWNED BY crab RATHER THAN BY `dh_dispatch`.
     # ⛔ `SETU_INPUT_PTR_BTN` CARRIES NO COORDINATES — only button and state. The position comes from
@@ -440,6 +453,12 @@ fn main(): i64 {
             # runs it through the one binding table. There is still exactly one implementation of
             # every verb; the pointer did not grow a second one.
             var synth_u = 0;
+            # ⭐⭐ THE SECOND PENDING CHANNEL (0.9.2), AND IT MIRRORS `synth_u` EXACTLY. A pointer pick
+            # becomes a KEY so the one binding table answers it; a `Go` pick becomes a PATH so the one
+            # navigator answers it. ⛔ It exists because `crab_menu_accel` has nothing to return for a
+            # destination — no key means *"go to /home"* — and inventing one would make the menu a
+            # second implementation of navigation, which is the rule every other bar menu keeps.
+            var synth_goto = 0;
             # ⛔⛔ THE COMPOSITOR CLOSED OUR WINDOW — EXIT, do not keep drawing into a surface nobody
             # composites. Before this, aethersafha's F4 removed the window from its own list and said
             # nothing, so crab carried on forever: on the 2026-08-08 iron burn the process was left
@@ -632,6 +651,9 @@ fn main(): i64 {
                     # contract, pinned in dhancha's own suite.
                     if (pact == CRAB_PA_PICK) {
                         var pmi = 0 - 1;
+                        # ⭐ THE SAME SPLIT ON THE POINTER ROAD (0.9.2): a `Go` row picks a PATH.
+                        var pgo = 0;
+                        if (mb_drop == CRAB_MB_GO) { pgo = crab_go_row_path(popup_row); }
                         if (mb_drop >= 0) { pmi = crab_mb_item(mb_drop, popup_row); }
                         else { pmi = crab_menu_item_at(popup_row); }
                         menu_open = 0;
@@ -643,7 +665,8 @@ fn main(): i64 {
                         # from a menu would be refused with a notice about a surface the operator
                         # was not using. The verb acts on the active pane; the keys go there too.
                         sb_focus = 0;
-                        if (pmi >= 0) { synth_u = crab_menu_accel(pmi); }
+                        if (pgo != 0) { synth_goto = pgo; }
+                        else { if (pmi >= 0) { synth_u = crab_menu_accel(pmi); } }
                         crab_say("crab: menu pick by pointer\n");
                     }
                     # ⭐ DISMISS — a press anywhere else while a popup or the bar is up closes it and
@@ -940,6 +963,10 @@ fn main(): i64 {
             var kdisp = 0;
             if (k == KEY) { kdisp = 1; }
             if (synth_u != 0) { kdisp = 1; }
+            # ⚠ A PENDING DESTINATION ENTERS BY THE SAME DOOR, so a pick made with the POINTER is
+            # consumed by the same pass that consumes one made with Enter — "two roads in, one table",
+            # now with a second table.
+            if (synth_goto != 0) { kdisp = 1; }
             if (kdisp == 1) {
                 var u = synth_u;
                 var kacts = 1;
@@ -1204,11 +1231,12 @@ fn main(): i64 {
                                     if (u == 0x29) { mb_sel = 0 - 1; u = 0; }              # Esc
                                     if ((u == 0x50) || (u == 0x0B)) { mb_sel = crab_mb_move(mb_sel, 0 - 1); u = 0; }
                                     if ((u == 0x4F) || (u == 0x0F)) { mb_sel = crab_mb_move(mb_sel, 1); u = 0; }
-                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN. `View` is filled (0.8.6);
-                                    # `Go` is on the bar because the canvas draws it and is EMPTY on
-                                    # purpose — refused as a drop-down, reasons in the roadmap — and
-                                    # opening an empty popup would read as a broken menu rather than
-                                    # a refused one.
+                                    # ⚠ A MENU WITH NO ITEMS DOES NOT OPEN, and opening an empty popup
+                                    # would read as a broken menu rather than a refused one.
+                                    # ⭐ `Go` IS FILLED AS OF 0.9.2 — it was on the bar and empty since
+                                    # 0.8.0 because the canvas draws it and crab had no honest way to
+                                    # fill it. It is now as long as the destination model, which is
+                                    # also why it can be refused for HEIGHT and the others cannot.
                                     if (u == 0x28) {
                                         # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
                                         # row means `dh_list_select` refuses it and the drop-down
@@ -1219,30 +1247,49 @@ fn main(): i64 {
                                         u = 0;
                                     }
                                 } else {
-                                    if (u == 0x29) { mb_drop = 0 - 1; u = 0; }             # Esc — close the drop
+                                    # ⭐⭐ ONE DECISION, ASKED ONCE (0.9.2) — `crab_mb_drop_key`, which
+                                    # the suite can reach. ⛔ AND IT CLOSES A LEAK WORSE THAN THE ONE
+                                    # RECORDED: this arm used to handle six keys and let **every
+                                    # other key through with `u` intact**, so with a menu open `d`
+                                    # raised the delete prompt UNDER it, `c`/`m` started a transfer,
+                                    # `r`/`n` opened a sheet, Backspace ascended and Space marked.
+                                    # The delete case defeats `crab_del_prompt`'s whole reason for
+                                    # existing — *"THE PROMPT NAMES WHAT DIES"*, written after five
+                                    # system binaries left an iron box. A prompt under an opaque menu
+                                    # names what dies to nobody, and the next keystroke answers it.
+                                    var mbk = crab_mb_drop_key(u);
+                                    if (mbk == CRAB_MBK_CLOSE) { mb_drop = 0 - 1; u = 0; }
                                     # ⛔ SKIP DISABLED ENTRIES, as the context menu has always done.
-                                    if ((u == 0x52) || (u == 0x0E)) {                      # Up / k
+                                    if (mbk == CRAB_MBK_UP) {
                                         mb_item = crab_mb_item_move(mb_drop, mb_item, 0 - 1, mcnt2, misdir2, mmark2);
                                         u = 0;
                                     }
-                                    if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
+                                    if (mbk == CRAB_MBK_DOWN) {
                                         mb_item = crab_mb_item_move(mb_drop, mb_item, 1, mcnt2, misdir2, mmark2);
                                         u = 0;
                                     }
                                     # ⚠ Left/Right walk to the adjacent menu WITH the drop still
                                     # open, which is how every menu bar behaves.
-                                    if ((u == 0x50) || (u == 0x0B)) {
+                                    if (mbk == CRAB_MBK_PREV) {
                                         mb_sel = crab_mb_move(mb_sel, 0 - 1);
                                         var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
                                         if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
                                         else { mb_drop = 0 - 1; }
                                         u = 0;
                                     }
-                                    if ((u == 0x4F) || (u == 0x0F)) {
+                                    if (mbk == CRAB_MBK_NEXT) {
                                         mb_sel = crab_mb_move(mb_sel, 1);
-                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
+                                        var fn3 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        if (fn3 >= 0) { mb_drop = mb_sel; mb_item = fn3; }
                                         else { mb_drop = 0 - 1; }
+                                        u = 0;
+                                    }
+                                    # ⛔⛔ EATEN AND REFUSED OUT LOUD — the same rule `crab_sb_key`
+                                    # follows. A key that does nothing and says nothing is
+                                    # indistinguishable from a dropped keypress, and the operator's
+                                    # next move is to press it again.
+                                    if (mbk == CRAB_MBK_EAT) {
+                                        crab_set_notice("close the menu first (Esc)");
                                         u = 0;
                                     }
                                     if (u == 0x28) {                                       # Enter — run it
@@ -1251,6 +1298,12 @@ fn main(): i64 {
                                         # entry names and falls through — so there is ONE
                                         # implementation of each command and the accelerator column
                                         # cannot drift from what the entry actually does.
+                                        # ⭐ A `Go` PICK IS A DESTINATION, NOT A KEY (0.9.2) — see
+                                        # `synth_goto`. `crab_menu_accel` has nothing to return for a
+                                        # path, so the pick files one instead of rewriting `u`.
+                                        # ⚠ Read BEFORE `mb_drop` is cleared, which is two lines down.
+                                        var gsel = 0;
+                                        if (mb_drop == CRAB_MB_GO) { gsel = crab_go_row_path(mb_item); }
                                         var bi = crab_mb_item(mb_drop, mb_item);
                                         mb_drop = 0 - 1;
                                         mb_sel = 0 - 1;
@@ -1258,7 +1311,8 @@ fn main(): i64 {
                                         # chain was written out here and again in the context arm
                                         # below — two copies of one rule, both inside the agnos-only
                                         # `#ifdef`, neither assertable.
-                                        u = crab_menu_accel(bi);
+                                        if (gsel != 0) { synth_goto = gsel; u = 0; }
+                                        else { u = crab_menu_accel(bi); }
                                     }
                                 }
                             }
@@ -1335,27 +1389,13 @@ fn main(): i64 {
                                     u = 0;
                                 }
                                 if (sbk == CRAB_SBK_OPEN) {
+                                    # ⭐ IT FILES THE DESTINATION RATHER THAN NAVIGATING (0.9.2). The
+                                    # body that used to be here is now the one arm below, because
+                                    # `Go` needs the same twenty lines and two copies of a navigation
+                                    # is how the two start to differ. See `synth_goto`.
                                     var sbp = crab_sb_path(sb_row, places, placen, vols, voln);
-                                    if (sbp != 0) {
-                                        if (active_pane == 0) {
-                                            var sgn0 = crab_goto(sbp, lpath, lbuf, lsizes, lmtimes,
-                                              lmarks, pathscr, statbuf);
-                                            if (sgn0 >= 0) {
-                                                ln = sgn0;
-                                                lstate = crab_pane_state(ln, crab_listing_err());
-                                                sel_l = 0;
-                                            } else { crab_set_notice("crab cannot go there"); }
-                                        } else {
-                                            var sgn1 = crab_goto(sbp, rpath, rbuf, rsizes, rmtimes,
-                                              rmarks, pathscr, statbuf);
-                                            if (sgn1 >= 0) {
-                                                rn = sgn1;
-                                                rstate = crab_pane_state(rn, crab_listing_err());
-                                                sel_r = 0;
-                                            } else { crab_set_notice("crab cannot go there"); }
-                                        }
-                                        crab_say("crab: place "); crab_say(sbp); crab_say("\n");
-                                    } else { crab_set_notice("nothing to go to"); }
+                                    if (sbp != 0) { synth_goto = sbp; }
+                                    else { crab_set_notice("nothing to go to"); }
                                     u = 0;
                                 }
                             }
@@ -1948,6 +1988,53 @@ fn main(): i64 {
                     }                                  # end of the EDIT-FIELD `else`
                 }
             }
+            # ⛔⛆ IT SAT ABOVE THE DISPATCH FIRST, AND QEMU IS WHAT CAUGHT IT. A `Go` pick sets
+            # `synth_goto` from INSIDE the dispatch, so a navigator above it consumed nothing until
+            # the NEXT key arrived — the menu closed, the pane stayed put, and the destination fired
+            # later against whatever the operator pressed next. On the target that read as `Go` doing
+            # nothing at all: `crab: go 3 destinations` but no `crab: place`. The suite could not see
+            # it — every line of this is inside the agnos `#ifdef`.
+            # ⭐⭐ THE ONE NAVIGATOR (0.9.2), AND IT RUNS **AFTER** THE DISPATCH, WHICH IS THE WHOLE
+            # CORRECTNESS OF IT. Both the
+            # sidebar's Enter and a `Go` pick file a destination here rather than each carrying
+            # its own twenty lines of `crab_goto` + pane-state + selection reset — two copies of
+            # a navigation is how the two start to differ, which is the same argument
+            # `crab_menu_accel` makes for verbs and `crab_sb_path` makes for resolving a row.
+            # ⚠ CLEARED WHETHER OR NOT IT WORKED: a destination left pending would be retried on
+            # the next keypress, sending the pane somewhere the operator did not ask for twice.
+            if (synth_goto != 0) {
+                var gok = 0 - 1;
+                if (active_pane == 0) {
+                    var sgn0 = crab_goto(synth_goto, lpath, lbuf, lsizes, lmtimes,
+                      lmarks, pathscr, statbuf);
+                    if (sgn0 >= 0) {
+                        ln = sgn0;
+                        lstate = crab_pane_state(ln, crab_listing_err());
+                        sel_l = 0;
+                        gok = sgn0;
+                    } else { crab_set_notice("crab cannot go there"); }
+                } else {
+                    var sgn1 = crab_goto(synth_goto, rpath, rbuf, rsizes, rmtimes,
+                      rmarks, pathscr, statbuf);
+                    if (sgn1 >= 0) {
+                        rn = sgn1;
+                        rstate = crab_pane_state(rn, crab_listing_err());
+                        sel_r = 0;
+                        gok = sgn1;
+                    } else { crab_set_notice("crab cannot go there"); }
+                }
+                # ⛔ THE LINE CARRIES THE RESULT, NOT JUST THE INTENT. It printed the path whether the
+                # listing succeeded or not, so a harness could not tell "the pane moved" from "crab
+                # refused and said so" — and a status-line notice never reaches serial. One write.
+                crab_line_reset();
+                crab_line_s("crab: place ");
+                crab_line_s(synth_goto);
+                if (gok >= 0) { crab_line_s(" ok "); crab_line_u(gok); crab_line_s(" entries"); }
+                else { crab_line_s(" refused"); }
+                crab_line_say();
+                synth_goto = 0;
+            }
+
             # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run
             # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
             # into a surface the compositor had just destroyed, and leaking a full render to do it.

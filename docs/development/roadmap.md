@@ -222,7 +222,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.8.10 · Ready for a face** | *(nothing visible — it is the half of 0.9.0 that is not blocked)* every width crab computes is **derived from the font** instead of from kashi's 9 px, and the suite proves it against a synthetic **proportional** face | — | **shipped** |
 | ✅ | **0.9.0 · A real face** | **read crab in a proportional font** — Liberation Sans, from the kernel's own `/fonts/default.ttf` | — | **shipped** |
 | ✅ | **0.9.1 · The door** | **open the menu row with the pointer** — a mark in the status line, so `F10` is not the only way in | — | **shipped** ⚠ *not a crab GLYPH — that is closed at three independent levels; see below* |
-| | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
+| ✅ | **0.9.2 · `Go`** | **jump to a place from the menu bar** — every sidebar destination, picked through one navigator | — | **shipped** ⭐ *and it closed a key leak worse than the one recorded* |
 | | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
 | | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
 | | **0.9.5 · Pointer polish** | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
@@ -231,7 +231,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.2 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
+⭐ **0.9.3 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
 downstream waits on them. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
@@ -399,14 +399,20 @@ promising the AI arc** — open since the roadmap was written.
   tries until a free name is found. ⛔ Replace **unlinks first**, the one sequence that means the same
   on both targets (the host is `O_EXCL`, agnos has no `AO_EXCL` and truncates). ⚠ The policy resets
   every run: an armed `replace all` that survived would destroy without asking later.
-- **`Go` on the menu bar is empty, and stays empty with reasons.** An 11-to-17 row drop-down at
-  380×220 is clamped and flipped to cover **both the bar and the status line**, and `d` is not
-  consumed by the drop arm — so the delete prompt would draw *underneath the menu*, defeating the
-  ⛔⛆ "THE PROMPT NAMES WHAT DIES" written after five system binaries left an iron box. Also: two FAT
-  volumes render as two identical rows, and `Go ▸ Parent` would ship enabled-but-dead at `/`.
-  ⇒ **The right shape is a thin projection over the sidebar's keyboard route** (`crab_sb_row_of` /
-  `crab_sb_path`), capped by `crab_mb_drop_fit`. Recorded with its reason, as `Tags`/`Index` are.
-  ⇒ **0.9.2** — the shape is decided, so what is left is the three conditions in the ladder.
+- ✅ **`Go` — CLOSED (0.9.2), and all four recorded reasons were real defects rather than reasons to
+  wait.** Its rows are every sidebar destination, picked through **one navigator** (`synth_goto`,
+  mirroring `synth_u`) that the sidebar's own Enter now shares.
+  · *"an 11-to-17 row drop-down is clamped and flipped over both the bar and the status line"* —
+  `crab_mb_drop_fit_h` tests HEIGHT now, which no menu needed until one was as long as its model.
+  **Six rows fit at 380×220**; longer is refused out loud rather than cut.
+  · *"`d` is not consumed by the drop arm"* — **worse than recorded**: the arm handled six keys and
+  let *every* other one through, so `c`, `m`, `r`, `n`, Backspace and Space all acted under the
+  popup too. `crab_mb_drop_key` eats the mutating set, and an assertion ties that set to
+  `crab_sb_key`'s so the two surfaces cannot drift.
+  · *"two FAT volumes render as two identical rows"* — a volume is labelled by its **prefix**, which
+  is unique by construction, rather than by a name two filesystems can share.
+  · *"`Go ▸ Parent` would ship enabled-but-dead at `/`"* — **Parent is a VERB** (Backspace), not a
+  destination, so it is absent everywhere rather than dead in one place.
 
 ### Recorded as facts, never as work
 

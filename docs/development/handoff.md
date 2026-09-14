@@ -1,3 +1,49 @@
+# Handoff — **0.9.2 cut: `Go` is filled, and an open menu stops acting on the pane underneath it.**
+
+> ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.2**; **0.9.1 released**. ⛔ commit,
+> tag and push are the operator's; `git log --oneline -3` is the authority.
+>
+> 1. ⭐⭐ **`Go` IS FILLED**, empty on the bar since 0.8.0. Its rows are every sidebar destination,
+>    picked through **one navigator** — `synth_goto`, mirroring `synth_u` exactly: a pointer pick
+>    becomes a KEY so one binding table answers it; a `Go` pick becomes a PATH so one navigator does.
+>    The sidebar's Enter now files a destination too, so twenty lines of `crab_goto` + pane-state +
+>    selection reset exist **once**. ⛔ `crab_menu_accel` has nothing to return for a path, and
+>    inventing a key would make the menu a second implementation of navigation.
+> 2. ⛔⛆ **AND IT CLOSED A KEY LEAK WORSE THAN THE ONE RECORDED.** The roadmap said `d` was not
+>    consumed by the drop arm. In fact the arm handled **six** keys and let **every other key through
+>    with `u` intact** — with a menu open, `c`/`m` started a transfer, `r`/`n` opened a sheet,
+>    Backspace ascended, Space marked, all under a popup painted over them. The delete case defeats
+>    `crab_del_prompt`'s whole reason for existing — *"THE PROMPT NAMES WHAT DIES"*, written after
+>    five system binaries left an iron box. ⇒ `crab_mb_drop_key`, the `crab_sb_key` shape, lifted so
+>    the suite can reach it — and **an assertion ties the two eat-sets together**, because two
+>    surfaces that borrow the keyboard from the panes must refuse the same verbs or one is a hole.
+> 3. ⛔ **THE DROP-DOWN HAD NO HEIGHT RULE**, and `Go` is the first menu that needed one: its length
+>    is the MODEL's. **Six rows fit at 380×220** — 220 − bar 22 − status 22 − margin, over a 26 px
+>    row. Seventeen want 442. ⚠ The status line is subtracted on purpose: `dh_place_at_point` clamps
+>    against the SURFACE, so without it a drop sits legally on the line that says what is selected —
+>    which since 0.9.1 also holds the door that closes the menu. ⚠ **Refused, not truncated.**
+> 4. ⚠ **`Parent` is a VERB, not a destination** — Backspace. The roadmap's condition was *"absent
+>    rather than dead at `/`"* and the first draft carried a `hasparent` flag; wrong shape, because a
+>    menu holding both verbs and destinations needs two pick paths in one list, which is exactly what
+>    kept `Go` empty. It is absent **everywhere**. ⚠ Volumes are labelled by **prefix** (unique by
+>    construction), closing *"two FAT volumes render as two identical rows"*.
+> 5. ⭐⭐ **QEMU CAUGHT A BUG THE SUITE COULD NOT.** The navigator sat ABOVE the key dispatch, so a
+>    pick made from *inside* the dispatch was not consumed until the NEXT key — the menu closed, the
+>    pane stayed, and the destination fired later against whatever was pressed next. On target that
+>    read as `Go` doing nothing. The suite was green throughout: every line is inside the agnos
+>    `#ifdef`. ⭐ `crab-go-test.py` **PASS** — `F10 → Right ×2 → Enter → Enter` sends the pane to `/`
+>    and lists 8 entries; `d` ×3 with a menu open does nothing at all.
+>    ⚠ **Driven by the keyboard deliberately** — 0.9.1 spent seven runs failing to aim a relative
+>    pointer, and `F10 → Right → Enter` is a road `crab-columns-test.py` already drives.
+> 6. ⚠ **Two oracles were weak and are now dispositive**, both found by a harness that could not tell
+>    two causes apart: `crab: go <n> destinations` (a dead pick and an empty model look identical from
+>    outside) and `crab: place <path> ok <n> entries` (the line printed whether or not the listing
+>    succeeded, and a refusal only ever reached the status line).
+>
+> **Suite 2314 / 0**, render_test 53 / 0. Host **1,084,744 B** · agnos **1,129,760 B**.
+> ⭐ **Next: `0.9.3 · Symlinks`** — or any of 0.9.3–0.9.5; they are independent.
+> ⚠ **The 0.9.1 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.9.1 cut: the door — the menu row has a second way in.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.1**; **0.9.0 released**. ⛔ the
