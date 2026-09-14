@@ -24,8 +24,30 @@
 
 ## Version
 
-**0.8.11 IS CUT** — `VERSION` reads `0.8.11` and the CHANGELOG header agrees, on operator direction,
-2026-09-14. ⛔ **The commit, the tag and the push are the operator's.**
+**0.9.0 IS CUT** — `VERSION` reads `0.9.0` and the CHANGELOG header agrees, on operator direction,
+2026-09-14. ⛔ **The commit, the tag and the push are the operator's.** ⚠ The operator commits while
+work is in flight; `git log --oneline -3` is the authority on what is in, not this file.
+
+**0.9.0 contents — ⭐⭐ A REAL FACE, the M5 item that has been open longest.** `crab_face()` opens
+agnos 1.57.2's kernel-owned **`/fonts/default.ttf`** — Liberation Sans Regular 2.1.5, unmodified,
+410,820 B, **SIL OFL 1.1 (the licence travels with any redistribution)** — once, before the first
+frame, and all eight `crab_render` sites draw with it. ⛔ Read front-to-back in one pass (`lseek` is
+-1 on a `VFS_MEMFILE`); opened **outside any draw**, because dhancha 0.10.0 scopes sadish's allocation
+hook to one `dh_draw_text_ink` and `rekha_font_open` follows it; a full read buffer is treated as a
+**truncation**, since with no `lseek` that is the only signal there is.
+⛔⛆ **THE COINCIDENCE THAT WOULD FOOL A VERIFIER**: Liberation Sans's `n` is 1139/2048 em, which at
+16 px rounds to **exactly kashi's 9** — so every derived width is numerically identical to the bitmap
+face's. The proof is `i=4 m=13`. *The columns did not move; what goes in them did.*
+⭐ **And the `~` marker finally measures.** `crab_name_cell` truncated at a CHARACTER COUNT — ten
+`m`s "fit" a ten-character column and measure 160 px in 120. `crab_name_cell_px` measures greedily,
+reserving the marker's own width **before** any name byte, so the `~`'s claim is true. At `font = 0`
+it reduces exactly to the old arithmetic; the bitmap build is unchanged.
+⭐ `crab_say_u` — arena-free integer logging, which crab had none of. **2213 / 0.**
+⭐⭐ **QEMU, `crab-face-test.py`, PASS**: `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048
+i=4 m=13`, exactly one load per session, navigation and view switching under the face, no faults and
+no allocator failure — ⛔ the last of which **dhancha 0.10.0 is what makes passable**.
+⚠ **One mutation PASSED and is recorded**: deleting `crab_face`'s memo leaves the host green (the
+load fails at its first step either way), so the memo's gate is ARM 2 on the target, not the suite.
 
 **0.8.11 contents**: the **6.6.4 stack** — cyrius 6.6.2 → **6.6.4**, sadish 0.5.4 → **0.5.5**, rekha
 0.3.7 → **0.3.10**, kashi 1.0.7 → **1.0.8**, dhancha 0.9.29 → **0.10.0** (rupa, setu and chitra had
@@ -719,8 +741,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,071,688 B** *(0.8.11, the 6.6.4 stack; 1,071,560 at 0.8.10, 1,067,496 at 0.8.9)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,116,632 B** *(0.8.11; 1,112,424 at 0.8.10, 1,112,456 at 0.8.9)* — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,076,240 B** *(0.9.0; 1,071,688 at 0.8.11, 1,071,560 at 0.8.10)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,121,176 B** *(0.9.0; 1,116,632 at 0.8.11, 1,112,424 at 0.8.10)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

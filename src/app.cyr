@@ -1838,6 +1838,138 @@ fn crab_say_edit_open(label): i64 {
     return 0;
 }
 
+# @public — print an unsigned number to serial. crab had no integer logging at all before 0.9.0.
+#
+# ⛔ ARENA-FREE, AND THAT IS THE WHOLE REASON IT EXISTS RATHER THAN REUSING `crab_u2s`. `crab_u2s`
+# (`src/ui.cyr`) formats through `dh_falloc(24)` — the per-FRAME arena — and the one caller that
+# needs numbers here runs BEFORE the first frame, where `dh_frame_arena_get()` is still 0. Two
+# allocate-once buffers instead: one for the digits, which come out reversed, and one for the answer.
+var crab_nrev = 0;
+var crab_nout = 0;
+
+fn crab_say_u(n): i64 {
+    if (crab_nrev == 0) { crab_nrev = alloc(24); crab_nout = alloc(24); }
+    if (crab_nrev == 0) { return 0; }
+    if (n <= 0) { crab_say("0"); return 1; }
+    var i = 0;
+    var v = n;
+    while (v > 0) { store8(crab_nrev + i, 48 + (v - (v / 10) * 10)); i = i + 1; v = v / 10; }
+    var j = 0;
+    while (j < i) { store8(crab_nout + j, load8(crab_nrev + (i - 1 - j))); j = j + 1; }
+    store8(crab_nout + i, 0);
+    crab_say(crab_nout);
+    return i;
+}
+
+# =================================================================================================
+# 🔤 THE FACE (0.9.0) — crab draws in a proportional font
+# =================================================================================================
+#
+# ⭐⭐ crab PASSED `font = 0` FOR ITS WHOLE LIFE, and every width it computed was kashi's CP437 8x16
+# cell. 0.8.8 gave the 9 px advance one reader; 0.8.10 derived all seven widths from the font and
+# proved them against a synthetic proportional face. Both halves were built for a face that did not
+# exist: there was no TrueType file anywhere in the AGNOS stack. This is the other end of it.
+#
+# ⭐ **agnos 1.57.2 ships the face IN THE KERNEL** (`kernel/core/kfont.cyr`), embedded kashi-style
+# rather than staged as an asset, assembled at boot into a direct-map region and **verified by
+# FNV-1a-64 against the generator's hash** before the namespace opens. Liberation Sans Regular 2.1.5,
+# unmodified, 410,820 bytes, **SIL OFL 1.1 — the licence text must travel with any redistribution**
+# (`rekha/fonts/LICENSE-LiberationFonts`).
+#
+# ⛔⛔ THE FILE IS READ FRONT-TO-BACK IN ONE PASS, AND THAT IS A CONTRACT, NOT A STYLE. `/fonts` is a
+# `VFS_MEMFILE`: `lseek`#58 returns **-1**, `write` returns -1, and `read`#5 returns bytes until EOF
+# and then 0. A reader that seeks — to size the file first, or to retry — gets an error, not a
+# rewind. This loop only ever moves forward.
+#
+# ⛔⛆ AND IT MUST BE MEASURED ON THE TARGET, BECAUSE THE FAILURE IS SILENT BY CONSTRUCTION. The only
+# prior art in the stack (`dhancha/programs/setu_demo_client.cyr`) reads a HOST path
+# (`/usr/share/fonts/liberation/...`) behind an `if (flen > 0)` guard — correct code that, copied
+# here, would work on the host build, fall back to the bitmap face on the target that ships, and look
+# finished. ⇒ The `crab: font ...` line below is the oracle, and `crab-face-test.py` reads it.
+#
+# ⚠ OPENED ONCE, OUTSIDE ANY DRAW, AND THAT ORDERING IS LOAD-BEARING. dhancha 0.10.0 installs
+# `dh_falloc` as sadish's allocation hook for the duration of one `dh_draw_text_ink` and restores the
+# previous hook after; `rekha_font_open` follows that hook, so a face opened INSIDE a draw would live
+# on the frame arena and die at its first reset. `crab_face` is memoised and called before the first
+# `crab_render`, which is what keeps it on the global heap where it belongs.
+enum CrabFace {
+    # ⚠ The shipped face is 410,820 B. The cap is generous rather than exact because a cap that
+    # equals the file cannot tell "read it all" from "truncated at the cap" — see the check below.
+    CRAB_FACE_MAX = 786432;      # 768 KiB
+}
+
+var crab_facebuf = 0;
+var crab_facefont = 0;
+var crab_facetried = 0;
+
+# @public — the proportional face, or 0 when there is none. Loaded at most once.
+#
+# ⚠ 0 IS AN ORDINARY ANSWER AND EVERY CALLER ALREADY HANDLES IT: it is what crab passed for its whole
+# life, and it selects dhancha's bitmap branch. A host build has no `/fonts`, so the host build draws
+# exactly as it always has — which is why the suite's numbers do not move.
+fn crab_face(): i64 {
+    if (crab_facetried == 1) { return crab_facefont; }
+    crab_facetried = 1;
+    # ⚠ PROBED BEFORE THE BUFFER IS ALLOCATED. `file_read_all` would open for us, but then a host
+    # build with no `/fonts` would still have spent 768 KiB of a bump allocator that cannot give it
+    # back. Open first; allocate only for a file that is really there.
+    var fd = file_open("/fonts/default.ttf", 0, 0);
+    if (fd < 0) {
+        crab_say("crab: font none -- /fonts/default.ttf did not open; drawing with the bitmap face\n");
+        return 0;
+    }
+    file_close(fd);
+    crab_facebuf = alloc(CRAB_FACE_MAX);
+    if (crab_facebuf == 0) {
+        crab_say("crab: font none -- no buffer for the face\n");
+        return 0;
+    }
+    var n = file_read_all("/fonts/default.ttf", crab_facebuf, CRAB_FACE_MAX);
+    if (n <= 0) {
+        crab_say("crab: font none -- read failed\n");
+        return 0;
+    }
+    # ⛔ A READ THAT FILLED THE BUFFER IS A TRUNCATION, NOT A SUCCESS, and handing rekha a partial
+    # font is how a face half-parses. `lseek` is -1 here, so there is no way to ask how much is left:
+    # a full buffer is the only signal there is, and it is treated as failure.
+    if (n >= CRAB_FACE_MAX) {
+        crab_say("crab: font none -- the face is larger than the buffer; refusing a partial read\n");
+        return 0;
+    }
+    crab_facefont = rekha_font_open(crab_facebuf, n);
+    if (crab_facefont == 0) {
+        crab_say("crab: font none -- rekha refused the face (glyf outlines and a format-4 cmap only)\n");
+        return 0;
+    }
+    # ⭐ THE ORACLE. Byte count AND the advance it produces, because the two answer different
+    # questions: the count says the file arrived whole, the advance says the face is really driving
+    # crab's layout — every column width is `chars * crab_char_w()`, and `crab_char_w` asks the face
+    # about `n` at `CRAB_TEXT_EM`. A face that loaded but measured 9 would be indistinguishable from
+    # the bitmap font in the only way that matters.
+    crab_say("crab: font /fonts/default.ttf ");
+    crab_say_u(n);
+    crab_say(" bytes adv=");
+    crab_say_u(rekha_char_advance_px(crab_facefont, 110, CRAB_TEXT_EM));
+    crab_say(" upem=");
+    crab_say_u(rekha_units_per_em(crab_facefont));
+    # ⛔⛆ AND TWO MORE GLYPHS, BECAUSE `adv` ALONE CANNOT TELL A PROPORTIONAL FACE FROM THE BITMAP
+    # ONE. Liberation Sans's `n` is 1139/2048 em, which at 16 px rounds to **9** — the exact advance
+    # of kashi's CP437 8x16 cell. So the representative advance, and every column width derived from
+    # it, come out numerically identical to the bitmap face's. That is a coincidence of one glyph at
+    # one size, and without these two it would be indistinguishable from the face never loading.
+    # ⇒ `i` and `m` are the narrowest and widest lowercase letters: if they differ, the face is
+    # really measuring per glyph and `crab_text_w` is doing something `length x advance` cannot.
+    crab_say(" i=");
+    crab_say_u(rekha_char_advance_px(crab_facefont, 105, CRAB_TEXT_EM));
+    crab_say(" m=");
+    crab_say_u(rekha_char_advance_px(crab_facefont, 109, CRAB_TEXT_EM));
+    crab_say("\n");
+    return crab_facefont;
+}
+
+# @public — for the suite: has the load been attempted? Distinguishes "no face" from "not yet asked".
+fn crab_face_tried(): i64 { return crab_facetried; }
+
 # Log a navigation to serial (the smoke's dispositive gate — like "key received").
 fn crab_log_cd(path): i64 {
     crab_say("crab: cd ");

@@ -293,7 +293,16 @@ fn main(): i64 {
     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
 
-    var sds = crab_render(surf, 0, rs);
+    # ⭐⭐ THE FACE IS LOADED HERE, EXPLICITLY, BEFORE THE FIRST FRAME (0.9.0) — not left to the
+    # argument evaluation below. dhancha 0.10.0 installs `dh_falloc` as sadish's allocation hook for
+    # the duration of one `dh_draw_text_ink`, and `rekha_font_open` follows that hook — so a face
+    # opened inside a draw would live on the frame arena and die at its first reset. `crab_render`
+    # installs the arena itself, so "before the first render" is the only place this is safe, and
+    # spelling it out beats relying on when an argument happens to be evaluated.
+    # ⚠ 0 IS FINE AND IS WHAT A HOST BUILD GETS: `/fonts` is an agnos kernel namespace, so on the
+    # host this reports `font none` and crab draws exactly as it always has.
+    crab_face();
+    var sds = crab_render(surf, crab_face(), rs);
     if (sds == 0) { crab_say("crab: initial render failed\n"); return 1; }
     setu_buf_write(buf_id, sd_surface_pixels(sds), nbytes);
     if (setu_send(fd, setu_create_surface(w, h, crab_surface_flags())) < 0) { crab_say("crab: create_surface send failed\n"); return 1; }
@@ -1928,7 +1937,7 @@ fn main(): i64 {
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                var s2 = crab_render(surf, 0, rs);
+                var s2 = crab_render(surf, crab_face(), rs);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
                     setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
@@ -2033,7 +2042,7 @@ fn main(): i64 {
                     crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                    var s3 = crab_render(surf, 0, rs);
+                    var s3 = crab_render(surf, crab_face(), rs);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
                 }
@@ -2140,7 +2149,7 @@ fn main(): i64 {
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                var s5 = crab_render(surf, 0, rs);
+                var s5 = crab_render(surf, crab_face(), rs);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
             }
@@ -2238,7 +2247,7 @@ fn main(): i64 {
                     if (qsel < qcnt) { qpsl = crab_thumb_slot_for(qpath, qbuf + qsel * CRAB_REC_SZ, pathscr); }
                     crab_rs_thumb(rs, crab_thumb_pixels_of(qpsl), crab_tc_state(qpsl));
                     crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                    var s7 = crab_render(surf, 0, rs);
+                    var s7 = crab_render(surf, crab_face(), rs);
                     if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s7), nbytes); }
                 }
@@ -2278,7 +2287,7 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                var sm = crab_render(surf, 0, rs);
+                var sm = crab_render(surf, crab_face(), rs);
                 if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(sm), nbytes); }
             }
@@ -2306,7 +2315,7 @@ fn main(): i64 {
                         crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                         crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                         crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                        var s6 = crab_render(surf, 0, rs);
+                        var s6 = crab_render(surf, crab_face(), rs);
                         if (s6 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                         else { setu_buf_write(buf_id, sd_surface_pixels(s6), nbytes); }
                     }
@@ -2354,7 +2363,7 @@ fn main(): i64 {
                 crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                 crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
                 crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
-                var s4 = crab_render(surf, 0, rs);
+                var s4 = crab_render(surf, crab_face(), rs);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }
             }

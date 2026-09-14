@@ -2,6 +2,92 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] — 2026-09-14 — A REAL FACE: crab draws in Liberation Sans on the target
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⭐⭐ **The roadmap item that has been open since M5.** It was blocked by two things a day ago, both
+> outside crab, both filed in the repo that owned them, and both closed within 24 hours. This is the
+> crab half.
+
+### Added — ⭐⭐ crab opens `/fonts/default.ttf` and measures in it
+
+`crab_face()` opens the kernel-owned namespace agnos 1.57.2 added — **Liberation Sans Regular 2.1.5,
+unmodified, 410,820 bytes, SIL OFL 1.1** (⚠ the licence text must travel with any redistribution) —
+once, before the first frame, and hands the result to all eight `crab_render` call sites.
+
+⛔ **Read front-to-back in one pass, because that is the contract and not a style.** `/fonts` is a
+`VFS_MEMFILE`: `lseek` returns **-1**, so a reader that seeks — to size the file first, or to retry —
+gets an error rather than a rewind.
+
+⛔ **Opened once, outside any draw, and that ordering is load-bearing.** dhancha 0.10.0 installs
+`dh_falloc` as sadish's allocation hook for the duration of one `dh_draw_text_ink`; `rekha_font_open`
+follows that hook, so a face opened *inside* a draw would live on the frame arena and die at its
+first reset. The call is spelled out before the first render rather than left to argument evaluation.
+
+⚠ **A full buffer is treated as a truncation, not a success.** With no `lseek` there is no way to ask
+how much is left, so filling the read cap is the only signal there is — and handing rekha a partial
+font is how a face half-parses.
+
+### ⛔⛆ The coincidence that would have fooled the obvious test
+
+**Liberation Sans's `n` advances 1139/2048 em — at 16 px that is 8.9, which rounds to exactly 9: the
+advance of kashi's CP437 8×16 cell.**
+
+So every width crab derives — `crab_col_name_min()` and its six siblings, the two-pane threshold,
+the column set — comes out **numerically identical to the bitmap face's**. A harness that asserted
+"the advance changed" would have failed against a perfectly working face, and one that asserted
+"the layout moved" would have failed too.
+
+⇒ The oracle prints `i` and `m` as well: **`i=4 m=13`**. A monospace face cannot produce that. *The
+columns did not move; what goes in them did.*
+
+### Fixed — ⛔⛆ the truncation marker was still lying, and that was the whole point of the item
+
+`crab_name_cell` truncated at a **character count**. A count describes a monospace column exactly and
+a proportional one only on average — `crab_col_chars(120)` answers 10 for this face, and **ten `m`s
+measure 160 px in a 120 px column.** The name would be clipped by the column while carrying a `~`
+claiming it had been cut to fit: a cut name, marked, *at the wrong place*, still hiding the
+difference between two files. That is precisely the 0.5.0 defect the marker exists to prevent —
+`agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendering as one identical row.
+
+⇒ **`crab_name_cell_px` measures**, greedily, one glyph at a time, and the count form converts into
+it. ⛔ The marker's own width is reserved **before any name byte is accepted** — filling the column
+and then appending `~` overflows by exactly one glyph, and the mark saying "this was cut" would be
+the thing clipped off the edge. ⚠ At `font = 0` every advance is `CRAB_COL_CHARW`, so this reduces
+exactly to the arithmetic it replaced: the bitmap build is unchanged and the suite's numbers did not
+move.
+
+### Added — integer logging, because crab had none
+
+`crab_say_u`. ⛔ **Arena-free, and that is why it is not `crab_u2s`**: that one formats through
+`dh_falloc(24)` — the per-*frame* arena — and the caller that needs numbers here runs before the
+first frame, where `dh_frame_arena_get()` is still 0.
+
+### Tests — ⭐ QEMU, because `/fonts` exists on no host
+
+**2,213 assertions** (2,203 → 2,213). Three mutations planted and caught: the count converting at
+kashi's 9 instead of the face's advance; the marker's width not reserved; and — under the synthetic
+proportional face — wide glyphs cut early, narrow ones left whole.
+
+⚠ **One mutation PASSED and is recorded rather than deleted.** Deleting `crab_face`'s memo early
+return leaves the host suite green: with no `/fonts` the load fails at its first step either way, so
+"asked once" and "asked twice" give identical answers. ⇒ The memo's real gate is **ARM 2 of
+`crab-face-test.py`** — exactly one `crab: font` line in a whole session. Unmemoised, crab would
+`open`/`read`/parse a 410 KB file **on every frame** from an allocator with no `free()`.
+
+⭐ **`agnos/scripts/harness/crab-face-test.py` — PASS.** The face loads as
+`/fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13`; exactly one load in the session; crab
+navigates and switches views under it; no faults and no allocator failure — ⛔ **the last of which
+dhancha 0.10.0 is what makes passable**: before it, every label allocated a full-surface canvas per
+frame and a session in a face would have exhausted the heap.
+
+⚠ **Two bugs of my own, caught by the suite and kept in the source as comments**, because both are
+the kind that look right: exiting the greedy loop by assigning `j = n` ended the walk and destroyed
+the count in the same statement (the marker was then placed by re-scanning for a NUL nothing had
+written — SIGSEGV); and summing `dh_text_advance` *before* checking `crab_font == 0` dereferences a
+null font, because the bitmap face is a different branch rather than a fallback value.
+
 ## [0.8.11] — 2026-09-14 — the 6.6.4 stack, and both blockers on a real face cleared within a day
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

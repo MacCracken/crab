@@ -134,6 +134,10 @@ rename, mkdir, and open. Multi-select with Space, a context menu that is a *disc
 than a second set of verbs — every entry maps to a key binding that already exists — and a transfer
 tray with a progress bar, a rate and an ETA. ⛔ **Long transfers are stepped off the idle tick and
 Esc cancels them**, so a recursive copy never freezes the window.
+⭐ **crab draws in a real proportional font** (0.9.0) — Liberation Sans, read from AGNOS's own
+kernel-owned `/fonts/default.ttf`. A truncated name is cut where it actually stops fitting, measured
+glyph by glyph, rather than at a character count that only describes a fixed-width face. ⚠ On a host
+build there is no `/fonts`, so crab draws in the kashi bitmap face exactly as it always has.
 ⭐ **Typed names take Shift** (0.8.9) — capital letters, and the shifted symbol row with them, so the
 batch-rename sheet's own two operators (`#` for the sequence number, `*` for the old name) can finally
 be typed into the field that advertises them. ⛔ **A collision asks** (0.8.7): replace · skip · keep

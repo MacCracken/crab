@@ -475,20 +475,85 @@ fn crab_col_chars(px): i64 {
 # `CRAB_NAME_MAX` (64) would read that byte and render it as a character on a record the kernel
 # failed to terminate. This reads only what is a name.
 fn crab_name_cell(dst, name, chars): i64 {
-    if (chars <= 0) { store8(dst, 0); return 0; }
+    # ⛔⛆ THE COUNT IS TURNED BACK INTO PIXELS AND THE CUT IS MEASURED (0.9.0). A character count is
+    # what a MONOSPACE column can be described by; under a proportional face it is an estimate, and
+    # this function is the one place where an estimate reinstates the exact defect it exists to
+    # prevent. `crab_col_chars(90)` answers 10 for Liberation Sans at em 16 — and ten `m`s measure
+    # **130 px** in a 90 px column. The name would be clipped by the column with a `~` claiming it
+    # fit: a cut name, marked as a cut name, at the wrong place, still hiding the difference between
+    # two files. ⇒ Callers that HAVE a width should call `crab_name_cell_px`; this form is kept for
+    # callers that genuinely think in characters, and it converts rather than approximating.
+    return crab_name_cell_px(dst, name, chars * crab_char_w());
+}
+
+# @public — copy `name` into `dst` cut to fit `px` PIXELS, marking the cut with '~'. -> bytes written.
+#
+# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives every port). Names can be 62 bytes and any column is
+# narrower, so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one identical row —
+# two DIFFERENT files, with no indication either was truncated. In a file manager that is not
+# cosmetic: the operator selects, descends and acts on rows.
+# ⚠ '~' (126), not '…' — the kashi CP437 face has no ellipsis glyph, and the marker predates the
+# proportional face.
+# ⛔⛔ THE SCAN IS BOUNDED, AND `name` IS KERNEL DATA. It points into a readdir record the kernel
+# filled — untrusted by crab's own rule, and the exact data whose unbounded copies caused the 0.5.0
+# P-1 that made `src/path.cyr` a file. The bound is `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, and the
+# one-byte difference is the point: byte 63 is the record's TYPE, and scanning it would render a type
+# byte as a character.
+# ⚠ MEASURED GREEDILY, ONE GLYPH AT A TIME, because that is the only way to know where a
+# proportional run crosses a pixel edge. At `font = 0` every advance is `CRAB_COL_CHARW`, so this
+# reduces exactly to the character arithmetic it replaced — the bitmap build is unchanged.
+fn crab_name_cell_px(dst, name, px): i64 {
+    if (px <= 0) { store8(dst, 0); return 0; }
     var n = 0;
     while ((n < CRAB_REC_TYPE) && (load8(name + n) != 0)) { n = n + 1; }
-    if (n <= chars) {
+    # ⚠ The whole name first: if it fits, nothing is cut and no marker is written.
+    # ⛔⛆ THE FONT CHECK COMES FIRST, NOT AFTERWARDS. A first draft summed `dh_text_advance` and THEN
+    # overwrote the total when `crab_font == 0` — but `dh_text_advance(0, ...)` reaches
+    # `rekha_units_per_em(0)`, which is a `load64` off a null pointer. It crashed before it could be
+    # corrected. The bitmap face is not a fallback VALUE here; it is a different branch.
+    var full = 0;
+    if (crab_font == 0) { full = n * CRAB_COL_CHARW; }
+    else {
+        var k = 0;
+        while (k < n) {
+            full = full + dh_text_advance(crab_font, load8(name + k), CRAB_TEXT_EM);
+            k = k + 1;
+        }
+    }
+    if (full <= px) {
         var i = 0;
         while (i < n) { store8(dst + i, load8(name + i)); i = i + 1; }
         store8(dst + n, 0);
         return n;
     }
+    # ⛔ THE MARKER'S OWN WIDTH IS RESERVED BEFORE ANY NAME BYTE IS ACCEPTED. A cut that filled the
+    # column and then appended '~' would overflow by exactly one glyph — the marker saying "this was
+    # cut" would itself be the thing clipped off the edge.
+    var mw = crab_text_w("~");
+    var room = px - mw;
+    if (room < 0) { room = 0; }
+    # ⚠ `fit` IS ITS OWN COUNTER, NOT THE LOOP INDEX. A first draft exited by assigning `j = n`,
+    # which ended the walk and destroyed the count in the same statement — the marker was then placed
+    # by re-scanning `dst` for a NUL nothing had written yet, and the scan walked off the buffer.
+    # SIGSEGV, immediately. Two variables, one job each.
+    var w = 0;
+    var fit = 0;
     var j = 0;
-    while (j < chars - 1) { store8(dst + j, load8(name + j)); j = j + 1; }
-    store8(dst + chars - 1, 126);                      # '~' — this name was cut
-    store8(dst + chars, 0);
-    return chars;
+    var stop = 0;
+    while ((j < n) && (stop == 0)) {
+        var a = CRAB_COL_CHARW;
+        if (crab_font != 0) { a = dh_text_advance(crab_font, load8(name + j), CRAB_TEXT_EM); }
+        if ((w + a) > room) { stop = 1; }
+        else {
+            store8(dst + fit, load8(name + j));
+            w = w + a;
+            fit = fit + 1;
+            j = j + 1;
+        }
+    }
+    store8(dst + fit, 126);                            # '~' — this name was cut
+    store8(dst + fit + 1, 0);
+    return fit + 1;
 }
 
 # One row of the pane, as CELLS in the shared column spec (dhancha 0.9.20) rather than one

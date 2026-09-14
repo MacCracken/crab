@@ -152,6 +152,13 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
   N-deep, **the gate is the write layer, not the renderer**.
   ⭐ Proven on QEMU (`crab-columns-test.py`) — the listing itself is inside the agnos `#ifdef` and no
   host test can reach it.
+- ✅ **Proportional text — CLOSED (0.9.0).** crab draws in **Liberation Sans**, read from the kernel's
+  own `/fonts/default.ttf`, and the `~` marker finally measures instead of counting.
+  ⛔⛆ **The coincidence worth knowing before anyone "verifies" this**: Liberation Sans's `n` is
+  1139/2048 em, which at 16 px rounds to **exactly kashi's 9** — so every derived column width comes
+  out numerically identical to the bitmap face's. A check that asserted "the advance changed" would
+  fail against a working face. The proof is `i=4 m=13`: *the columns did not move; what goes in them
+  did.* What follows is the record of how it was carried before it closed.
 - **Proportional text** — M5's other, and **half of the crab side closed in 0.8.8**. ⭐ The upstream
   half closed 2026-09-02 (rekha 0.3.6's `rekha_advance_width`, dhancha 0.9.27's `dh_text_advance`).
   ⭐ **0.8.8 gave the 9 ONE reader**: `crab_char_w()` answers `CRAB_COL_CHARW` for the bitmap font and
@@ -205,8 +212,8 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.8.8 · Columns** | press `g` to a fourth view: the listing plus a context column naming where it sits | — | **shipped** |
 | ✅ | **0.8.9 · Shift** | type a **capital letter** into a name — and `#` and `*`, the batch sheet's own two operators, into the field that advertises them | — | **shipped** |
 | ✅ | **0.8.10 · Ready for a face** | *(nothing visible — it is the half of 0.9.0 that is not blocked)* every width crab computes is **derived from the font** instead of from kashi's 9 px, and the suite proves it against a synthetic **proportional** face | — | **shipped** |
-| → | **0.9.0 · A real face** | read crab in a proportional font | ✅ **BOTH BLOCKERS CLEARED, 2026-09-13/14** — agnos **1.57.2** ships `/fonts/default.ttf` (kernel-owned, hash-verified) and dhancha **0.10.0** fixed the per-call allocation. Filed 2026-09-13, both closed within a day. **Nothing blocks it now.** | crab opens `/fonts/default.ttf`, passes the face to `crab_render`, and a warm frame still costs the global heap zero bytes — **measured on QEMU**, because that file exists on no host |
-| | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | **0.9.0**, or an icon path that needs no face | the button draws and `F10` stops being the only door |
+| ✅ | **0.9.0 · A real face** | **read crab in a proportional font** — Liberation Sans, from the kernel's own `/fonts/default.ttf` | — | **shipped** |
+| → | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | — *(**0.9.0 shipped**, so the face it needed is here; an icon path is no longer the only road)* | the button draws and `F10` stops being the only door |
 | | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
 | | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
 | | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
@@ -216,9 +223,9 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.2 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing downstream
-waits on them. **0.9.0 → 0.9.1 is a chain** (the face, then the glyph that needs it), and **0.10.0 →
-0.11.0 is one chain behind one ruling**. That is the whole dependency structure.
+⭐ **0.9.1 – 0.9.5 are now ALL ungated and can be reordered freely** — one change each, nothing
+downstream waits on them. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
+chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
 ### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day
 
@@ -308,7 +315,7 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 
 | item | milestone | gated on | verified |
 |---|---|---|---|
-| Proportional text | M5 → **0.9.0** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
+| ✅ Proportional text | M5 → **0.9.0, SHIPPED** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
 | The 🦀 chrome button | M6 → **0.9.1** | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from **0.9.0**. | 2026-09-01 |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Local index · tags · smart folders | M7 → **0.10.0** | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |

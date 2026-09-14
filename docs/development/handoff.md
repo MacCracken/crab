@@ -1,3 +1,52 @@
+# Handoff — **0.9.0 cut: A REAL FACE — crab draws in Liberation Sans on the target.**
+
+> ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.0**; ⛔ the commit, the tag and the
+> push are the operator's. ⚠ The operator commits while work is in flight — `git log --oneline -3` is
+> the authority, not this file.
+>
+> **M5's longest-open item is closed.** Two days ago it was blocked by two things outside crab; both
+> were filed in the repo that owned them and both closed within 24 hours.
+>
+> 1. ⭐⭐ **crab OPENS `/fonts/default.ttf`** — agnos 1.57.2's kernel-owned namespace. Liberation Sans
+>    Regular 2.1.5, unmodified, 410,820 B, **SIL OFL 1.1: the licence text must travel with any
+>    redistribution.** Loaded once, before the first frame; all eight `crab_render` sites draw in it.
+>    ⛔ **Read front-to-back in one pass** — `lseek` is -1 on a `VFS_MEMFILE`, so a reader that seeks
+>    gets an error, not a rewind. ⛔ **Opened outside any draw**: dhancha 0.10.0 scopes sadish's
+>    allocation hook to one `dh_draw_text_ink` and `rekha_font_open` follows it, so a face opened
+>    inside would live on the frame arena and die at its first reset. ⚠ A full read buffer is a
+>    **truncation**, not a success — with no `lseek` it is the only signal there is.
+> 2. ⛔⛆ **THE COINCIDENCE THAT WOULD FOOL ANYONE VERIFYING THIS.** Liberation Sans's `n` is
+>    1139/2048 em; at 16 px that is 8.9, which rounds to **exactly kashi's 9**. So every width crab
+>    derives comes out **numerically identical to the bitmap face's** — a check asserting "the advance
+>    changed" or "the layout moved" would FAIL against a perfectly working face. ⇒ The oracle prints
+>    **`i=4 m=13`**, which a monospace face cannot produce. *The columns did not move; what goes in
+>    them did.*
+> 3. ⭐ **AND THE `~` MARKER FINALLY MEASURES — this was the whole point of the item.**
+>    `crab_name_cell` truncated at a CHARACTER COUNT: ten `m`s "fit" a ten-character column and
+>    measure **160 px in 120**, so the name was clipped by the column while carrying a `~` claiming it
+>    had been cut to fit — the 0.5.0 defect, reinstated by an estimate. `crab_name_cell_px` measures
+>    greedily and **reserves the marker's own width before accepting any name byte** (otherwise the
+>    mark saying "this was cut" is the thing clipped off the edge). ⚠ At `font = 0` it reduces exactly
+>    to the old arithmetic — the bitmap build is unchanged and the suite's numbers did not move.
+> 4. ⭐⭐ **QEMU — `crab-face-test.py`, PASS.**
+>    `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13`; exactly one load per
+>    session; navigation and view switching under the face; no faults, no allocator failure — ⛔ the
+>    last of which **dhancha 0.10.0 is what makes passable**: before it, every label allocated a
+>    full-surface canvas per frame and a session in a face would have exhausted the heap.
+>    ⚠ **One mutation PASSED and is recorded**: deleting `crab_face`'s memo leaves the host suite
+>    green, because with no `/fonts` the load fails at its first step either way. **The memo's gate is
+>    ARM 2 on the target**, not the suite — unmemoised, crab would re-parse 410 KB every frame.
+> 5. ⚠ **Two bugs of mine, kept in the source as comments** because both look right: exiting the
+>    greedy loop with `j = n` destroyed the count in the same statement that ended the walk (SIGSEGV
+>    when the marker was then placed by scanning for a NUL nothing had written); and summing
+>    `dh_text_advance` **before** the `crab_font == 0` check dereferences a null font — the bitmap
+>    face is a different BRANCH, not a fallback value.
+>
+> **Suite 2213 / 0**, render_test 53 / 0. Host **1,076,240 B** · agnos **1,121,176 B**.
+> ⭐ **Next: `0.9.1 · The 🦀 button`** — and it is no longer chained to anything, because the face it
+> needed is here. See [the ladder to 1.0](roadmap.md); every entry there is a version.
+> ⚠ **The 0.8.11 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.8.11 cut: the 6.6.4 stack, and both blockers on a real face cleared within a day.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.8.11**; ⛔ the commit, the tag and the

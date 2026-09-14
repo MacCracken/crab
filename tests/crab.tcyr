@@ -4232,6 +4232,33 @@ fn t_gridview(): i64 {
     # ever passes 0, so the assignment is a no-op until a real face arrives. It is asserted anyway
     # because it is the premise every number below rests on: if this ever stops being 0 without the
     # constants moving with it, the rest of this block is describing a font crab is not using.
+    # --- 0.9.0: THE FACE LOADER, AND WHAT A HOST TEST CAN HONESTLY SAY ABOUT IT -------------------
+    # ⭐⭐ crab NOW ASKS FOR A PROPORTIONAL FACE. `crab_face` opens `/fonts/default.ttf` — an **agnos
+    # kernel namespace** (1.57.2, `VFS_MEMFILE`, hash-verified at boot) — once, before the first
+    # frame, and hands the result to all eight `crab_render` call sites.
+    # ⛔⛆ THE HOST HAS NO `/fonts`, SO THIS TEST CAN ONLY PROVE THE REFUSAL PATH — and the refusal
+    # path is exactly where the danger is. The one piece of prior art in the stack reads a HOST font
+    # path behind an `if (flen > 0)` guard; copied here it would work on the host, fall back silently
+    # on the target, and look finished. ⇒ What the target actually does is gated by
+    # `agnos/scripts/harness/crab-face-test.py`, and is NOT claimed here.
+    assert_eq(crab_face(), 0, "no `/fonts` on the host, so there is no face and crab draws as it always has");
+    assert_eq(crab_face_tried(), 1, "...and the attempt is recorded");
+    # ⛔ MEMOISED, WHICH IS NOT COSMETIC: `crab_face` is called at every render site, so an unmemoised
+    # one would `open` / `read` / `rekha_font_open` a **410 KB** file on every frame, from a bump
+    # allocator with no `free()` — the session would exhaust the heap.
+    # ⚠ AND A HOST TEST CANNOT PIN THAT, WHICH A MUTATION IS HOW WE KNOW. Deleting the early return
+    # leaves these two green: with no `/fonts` the load fails at its first step either way, so "asked
+    # once" and "asked twice" produce identical answers. ⇒ **The memo's real gate is ARM 2 of
+    # `crab-face-test.py`** — exactly one `crab: font` line in a whole session on the target. These
+    # assert the contract; they do not prove it.
+    assert_eq(crab_face(), 0, "asking again answers the same");
+    assert_eq(crab_face_tried(), 1, "...and the attempt is still recorded once");
+    # ⚠ AND THE REFUSAL COSTS NOTHING. The buffer is allocated only after the file is known to open,
+    # so a host build does not spend 768 KiB of a bump allocator on a face that is not there.
+    var fa0 = alloc_used();
+    crab_face();
+    assert_eq(alloc_used() - fa0, 0, "a refused face allocates nothing at all");
+
     assert_eq(crab_frame_font(), 0, "crab renders with the bitmap font today (a premise, not a gate)");
     assert_eq(crab_char_w(), CRAB_COL_CHARW, "...so the advance is kashi's 9 px, exactly");
     assert_eq(CRAB_TEXT_EM, 16, "...asked at the em height that 9 is the advance FOR");
@@ -4362,6 +4389,44 @@ fn t_gridview(): i64 {
       "a two-byte UTF-8 character measures as TWO .notdef glyphs — exactly the two dhancha would draw");
     assert(crab_text_w(l1b) != 2 * crab_char_w(),
       "⛔ ...and NOT two representative advances — which is the difference measuring makes");
+
+    # --- 0.9.0: THE TRUNCATION MARKER IS HONEST UNDER A PROPORTIONAL FACE -------------------------
+    # ⛔⛆ THIS IS THE DEFECT THE WHOLE PROPORTIONAL-TEXT ITEM WAS ABOUT, AND IT SURVIVED UNTIL 0.9.0.
+    # `crab_name_cell` truncated at a CHARACTER COUNT. A count describes a monospace column exactly
+    # and a proportional one only on average — so `crab_col_chars(120)` answers 10 for this face, and
+    # ten `m`s measure **160 px** in a 120 px column. The name would be clipped by the column while
+    # carrying a `~` that claims it was cut to fit: a cut name, marked, at the wrong place, still
+    # hiding the difference between two files. ⇒ `crab_name_cell_px` MEASURES, and the count form
+    # converts into it.
+    # ⚠ On the real face this is not hypothetical: Liberation Sans's `n` rounds to exactly kashi's
+    # 9 px at em 16, so every derived column width comes out numerically identical to the bitmap
+    # face's — and `m` is 13 px while `i` is 4. The columns did not move; what goes IN them did.
+    var tcd = alloc(CRAB_NAME_MAX + 8);
+    assert_eq(crab_char_w(), 12, "...still measuring in the fixture face");
+    assert_eq(crab_text_w("~"), 8, "the marker itself is an unmapped glyph here — 8 px");
+
+    # ⛔ WIDE GLYPHS ARE CUT EARLIER THAN THE COUNT WOULD ALLOW. Asking for "10 characters" of a
+    # 120 px column and getting 7 back is the fix: 7 x 16 = 112, plus the 8 px marker, is exactly 120.
+    var tcw = crab_name_cell(tcd, "mmmmmmmmmm", 10);
+    assert_eq(tcw, 8, "⛔ TEN 'm's IN A TEN-CHARACTER COLUMN COME BACK AS 7 + '~' — measured, not counted");
+    assert(t_streq(tcd, "mmmmmmm~"), "...and that is what was written");
+    assert(crab_text_w(tcd) <= 10 * crab_char_w(),
+      "⛔⛔ AND THE RESULT REALLY FITS THE COLUMN — the claim the '~' makes is now true");
+
+    # ⚠ AND NARROW GLYPHS ARE NOT CUT SHORT, which is the other half and the one a pixel rule could
+    # easily get wrong: ten unmapped glyphs at 8 px are 80 px in a 120 px column, so nothing is cut
+    # and NO marker is written. A `~` on a name that fitted is its own kind of lie.
+    var tcn = crab_name_cell(tcd, "aaaaaaaaaa", 10);
+    assert_eq(tcn, 10, "ten narrow glyphs fit a ten-character column whole");
+    assert(t_streq(tcd, "aaaaaaaaaa"), "...unmarked, because nothing was cut");
+
+    # ⛔ THE MARKER'S OWN WIDTH IS RESERVED BEFORE ANY NAME BYTE IS ACCEPTED. Filling the column and
+    # then appending `~` would overflow by exactly one glyph — the mark saying "this was cut" would
+    # be the thing clipped off the edge.
+    var tcx = crab_name_cell_px(tcd, "mmmmmmmmmm", 16 + 8);
+    assert_eq(tcx, 2, "a column with room for one glyph and the marker yields exactly that");
+    assert(t_streq(tcd, "m~"), "...one 'm' and the mark");
+    assert_eq(crab_name_cell_px(tcd, "mmmm", 0), 0, "a zero-width column yields the empty string");
 
     # ⚠ AND EVERYTHING GOES BACK. The face is module state; a test that left it installed would hand
     # every later assertion a crab measuring in a font it does not use.
