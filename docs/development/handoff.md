@@ -1,3 +1,46 @@
+# Handoff — **0.9.1 cut: the door — the menu row has a second way in.**
+
+> ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.1**; **0.9.0 released**. ⛔ the
+> commit, the tag and the push are the operator's; `git log --oneline -3` is the authority.
+>
+> 1. ⭐⭐ **A MARK IN THE STATUS LINE OPENS THE MENU ROW.** `F10` was the only door — and for seven
+>    releases it was **no door**, because aethersafha claimed that key until 0.16.25. ⛔ **Zero
+>    rows**: the status line is now a `BOX_H` of [door][text], the shape `crab_pane` already uses for
+>    the A/B strip. The text flexes; the mark does not.
+> 2. ⛔⛆ **THE TOGGLE IS THE Z-ORDER, NOT A STATE BIT.** The door sits BELOW the bar branch in
+>    `crab_pointer_action`, so a press on it with the bar shown never reaches its own arm — the bar
+>    branch sees a press off a bar cell and answers DISMISS. Open when closed, close when open, from
+>    one hit test. Moving it up is a mutation that returns DOOR where DISMISS is expected.
+> 3. ⛔⛆ **IT IS NOT A CRAB GLYPH, AND THE ROADMAP SAID 0.9.0 WOULD MAKE IT ONE. That line was mine
+>    and it was wrong three times over**: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code
+>    (*"format 4 is BMP-only"*); the shipped face has **no format-12 subtable**; and
+>    `dh_draw_text_ink` walks **one byte per glyph in both branches**. U+1F980 is 128,896. Any one is
+>    fatal alone. ⭐ **CANVAS is the open road** — crab already draws thumbnails through
+>    `dh_canvas_new`; *an icon is a glyph with no font*. The door is three filled boxes.
+>    ⚠ No font also sidesteps a 0.9.0 consequence: **byte 0xF0 is `≡` through kashi and `ð` through
+>    rekha**, so crab's drawable alphabet is printable ASCII and a text mark would differ between the
+>    host build and the target.
+> 4. ⛔⛆ **A SERIAL LINE MUST BE ONE WRITE — MEASURED.** The console is shared unserialised by three
+>    processes and spliced both new oracles: `crab: font /fonts/default.ttf 0` (digits lost) and
+>    `crab: door ptrscan: first sample handed to ring 3` (the kernel, mid-line). A harness reading
+>    either gets a parse failure **indistinguishable from the feature being broken** — three QEMU runs
+>    went on that before it was the diagnosis. ⇒ `crab_line_*` composes, then emits once. A single
+>    `crab_say` is still fine; it is the SEQUENCE that is not atomic.
+> 5. ⚠ **THE PRESS ITSELF IS UNMEASURED, AND THE HARNESS SAYS SO.** On target crab reports
+>    `crab: door 0 196 22 22` every run. **Seven runs** went into landing a press inside that rect
+>    and none did: the rect is in crab's SURFACE coordinates, the monitor moves a RELATIVE
+>    `usb-mouse` in SCREEN coordinates, the compositor picks the window origin, and homing is
+>    unreliable — an unchanged script proved delivery at (200,80), (100,80), (200,130) and (200,180),
+>    and put the pane edge at y=154 one run and y=104 the next. Sweeping the mapped region in both
+>    axes delivered nothing, i.e. presses were **dropped**. ⇒ FAIL would assert the door is broken,
+>    which nothing shows and nine suite assertions contradict. `crab-door-test.py` returns
+>    **INCONCLUSIVE** and carries all seven runs' findings in its header.
+>
+> **Suite 2257 / 0**, render_test 53 / 0. Host **1,080,480 B** · agnos **1,121,344 B**.
+> ⭐ **Next: `0.9.2 · Go`** — the shape is already decided (a thin projection over the sidebar's
+> keyboard route, capped by `crab_mb_drop_fit`). 0.9.2–0.9.5 are all independent.
+> ⚠ **The 0.9.0 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.9.0 cut: A REAL FACE — crab draws in Liberation Sans on the target.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.0**; ⛔ the commit, the tag and the

@@ -246,6 +246,25 @@ enum CrabCol {
     # ~7 visible list rows that is 3x the entries on screen, which is the whole point.
     CRAB_GRID_CELL_H  = 26;
     CRAB_GRID_GAP     = 6;
+    # ⭐ THE STATUS LINE'S OWN HEIGHT, NAMED (0.9.1) — it was a literal 22 at its one call site, and
+    # the door below is square in it, so the two had to stop being independent numbers.
+    CRAB_STATUS_H     = 22;
+    # ⭐⭐ THE 🦀 DOOR (0.9.1) — the mark that reveals the menu row, so `F10` is not the only way in.
+    # ⛔⛆ IT IS NOT A CRAB GLYPH, AND IT CANNOT BE ONE. The roadmap carried this as *"needs an icon
+    # path or proportional text"*, and 0.9.0 shipped proportional text — so a line was added saying
+    # the face unblocked it. **That line was wrong, and it was written here one release ago.**
+    # U+1F980 is 128,896: `rekha_char_to_glyph` returns 0 for any codepoint above 65,535 in its own
+    # code (*"format 4 is BMP-only"*), the shipped face carries no format-12 subtable, and dhancha
+    # walks ONE BYTE per glyph in both branches — so the crab is three independent steps away from
+    # drawable, and no font fixes any of them. ⇒ **The icon path, which is what the gate always said.**
+    # ⚠ AND IT USES NO FONT AT ALL, which is the point: three filled boxes. That sidesteps something
+    # 0.9.0 made live — the same byte draws a DIFFERENT character on the two faces (byte 0xF0 is
+    # CP437 `≡` through kashi and U+00F0 `ð` through rekha), so any mark made of text would render
+    # one way on the host build and another on the target.
+    CRAB_DOOR_W       = 22;     # = CRAB_STATUS_H — square in the row it lives in
+    CRAB_DOOR_BAR_H   = 2;      # one stroke
+    CRAB_DOOR_PAD     = 4;
+    CRAB_DOOR_GAP     = 2;      # 3 strokes + 2 gaps + 2 pads = 18, inside the 22 px row
     CRAB_PV_ROW_H     = 18;     # a preview line, matching the column header's row height
     CRAB_PV_HDR_H     = 28;     # ...and its header, matching a PANE header so the two tops line up
 }
@@ -271,6 +290,17 @@ enum CrabCol {
 fn crab_two_panes_fit(w): i64 {
     var panew = (w - CRAB_PANE_GAP) / 2;
     if (panew >= (crab_col_name_min() + crab_col_size_w() + crab_col_mtime_w())) { return 1; }
+    return 0;
+}
+
+# @public — is the 🦀 door worth its width at window width `w`? 1 = draw it.
+#
+# ⛔ DERIVED LIKE EVERY OTHER FIT RULE HERE, not chosen: the door takes its width from the status
+# line, and what the status line is FOR is saying what is selected — so the floor is the door plus
+# the same name floor every other surface uses. Below it the door is dropped and `F10` is the only
+# door again, which is exactly the state 0.9.1 improves on rather than a broken one.
+fn crab_door_fit(w): i64 {
+    if (w >= (CRAB_DOOR_W + crab_col_name_min())) { return 1; }
     return 0;
 }
 
@@ -884,6 +914,7 @@ var CRAB_PA_SWITCH  = 4;   # left on the A/B strip — focus that pane
 var CRAB_PA_PLACE   = 5;   # left on a sidebar row — send the active pane there
 var CRAB_PA_PANE    = 6;   # left on a pane — the 0.6.1 click: focus, select, arm the drag
 var CRAB_PA_MENU    = 7;   # right on a pane — open the context menu there
+var CRAB_PA_DOOR    = 8;   # left on the 🦀 door — reveal the menu row (0.9.1)
 
 # @public — decide what a press does from what each surface answered about the point.
 #   btn         the wire button number (`POINTER_BTN`'s `a`)
@@ -913,7 +944,7 @@ var CRAB_PA_MENU    = 7;   # right on a pane — open the context menu there
 # navigate. The middle button does nothing anywhere yet, and says so by returning NONE rather than
 # by being absent from this table.
 fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row,
-  pane_hit): i64 {
+  pane_hit, door_hit): i64 {
     if (blocked != 0) { return CRAB_PA_NONE; }
     if (popup_open != 0) {
         if (popup_row >= 0) {
@@ -934,6 +965,15 @@ fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell,
             return CRAB_PA_NONE;
         }
         return CRAB_PA_DISMISS;
+    }
+    # ⭐⭐ THE DOOR (0.9.1), AND ITS SLOT IS THE WHOLE OF ITS TOGGLE BEHAVIOUR. It sits BELOW the two
+    # branches above, which means a press on it while the bar is already shown never reaches here:
+    # the bar branch sees a click that is not on a bar cell and answers `DISMISS`. ⇒ **Open when
+    # closed, close when open, from one hit test and no state of its own.** Placing it any higher
+    # would make the door the only chrome that cannot be used to put the bar away.
+    if (door_hit != 0) {
+        if (btn == CRAB_BTN_LEFT) { return CRAB_PA_DOOR; }
+        return CRAB_PA_NONE;
     }
     if (sw_cell >= 0) {
         if (btn == CRAB_BTN_LEFT) { return CRAB_PA_SWITCH; }
@@ -1779,6 +1819,70 @@ fn crab_switcher_fit(panew): i64 {
 #
 # ⚠ `dh_list_add` pins each cell's width from the list's cell size and forces flex 0, so the two
 # cells cannot stretch to share the header and the strip stays exactly `CRAB_SW_W` wide.
+# @public — the 🦀 DOOR: the mark in the status line that reveals the menu row. -> its widget, or 0.
+#
+# ⭐⭐ `F10` WAS THE ONLY WAY INTO THE MENU BAR, AND FOR A WHILE IT WAS NO WAY AT ALL — aethersafha
+# claimed F10 until 0.16.25, so between 0.8.0 and that release the bar crab had built was reachable
+# by nobody. A surface with exactly one door and no visible affordance is a surface most operators
+# never learn exists.
+#
+# ⛔⛔ IT COSTS ZERO ROWS, AND THAT IS THE CONSTRAINT THAT CHOSE ITS HOME. The bar is collapsed by
+# default because *"at the shipped 380x220 every row is contended"* — a permanent bar would spend a
+# listing row forever to show six words. A permanent BUTTON row would spend one to show a mark, which
+# is the same trade and a worse one. ⇒ It lives INSIDE the status line, which is always drawn: the
+# line becomes a `BOX_H` of [door][text], exactly the shape `crab_pane` already uses when the A/B
+# switcher shares a header with the path.
+#
+# ⛔ NO FONT, AND NOT BECAUSE IT WAS SIMPLER. Three filled boxes. A crab glyph is unreachable — see
+# `CRAB_DOOR_W` — and 0.9.0 made any TEXT mark ambiguous besides: the same byte draws a different
+# character through kashi than through rekha, so a mark made of characters would differ between the
+# host build and the target.
+# ⚠ `dh_theme_ink`, never a colour of crab's own — ADR 0001. The strokes read against the panel the
+# status line already paints.
+fn crab_door(parent): i64 {
+    if (parent == 0) { return 0; }
+    var col = dh_widget_new(BOX);
+    dh_widget_set_layout(col, BOX_V);
+    dh_widget_set_pref(col, CRAB_DOOR_W, 0);
+    dh_widget_set_flex(col, 0);                   # ⛔ fixed: the TEXT flexes, the mark does not
+    dh_widget_set_bg(col, dh_theme_panel());
+    dh_widget_set_padding(col, CRAB_DOOR_PAD);
+    dh_widget_set_gap(col, CRAB_DOOR_GAP);
+    var i = 0;
+    while (i < 3) {
+        var bar = dh_widget_new(BOX);
+        dh_widget_set_pref(bar, 0, CRAB_DOOR_BAR_H);
+        dh_widget_set_flex(bar, 0);
+        dh_widget_set_bg(bar, dh_theme_ink());
+        dh_widget_add_child(col, bar);
+        i = i + 1;
+    }
+    dh_widget_add_child(parent, col);
+    return col;
+}
+
+# @public — the door widget for the frame just rendered, or 0 if none was drawn.
+# ⛔ Cleared in `crab_render` before the chrome is built, on the same discipline as `crab_swlst` and
+# `crab_mlst`: a pointer from a frame that HAD a door must not survive into one that does not,
+# because `dh_frame_begin` has already rewound the arena it pointed into.
+fn crab_door_widget(): i64 { return crab_doorw; }
+var crab_doorw = 0;
+
+# @public — is (x, y) inside the door? 1 = yes.
+# ⚠ FROM THE LAID-OUT WIDGET, not from arithmetic about where the door ought to be. A second answer
+# to "where is the door" is free to disagree with the one layout produced, and it is the disagreement
+# rather than either answer that makes a click miss.
+fn crab_door_hit(x, y): i64 {
+    if (crab_doorw == 0) { return 0; }
+    var dx = dh_widget_x(crab_doorw);
+    var dy = dh_widget_y(crab_doorw);
+    if (x < dx) { return 0; }
+    if (x >= (dx + dh_widget_w(crab_doorw))) { return 0; }
+    if (y < dy) { return 0; }
+    if (y >= (dy + dh_widget_h(crab_doorw))) { return 0; }
+    return 1;
+}
+
 fn crab_switcher(parent, which): i64 {
     var sw = dh_list_new_h(CRAB_SW_CELL_W);
     if (sw == 0) { return 0; }
@@ -4845,15 +4949,26 @@ fn crab_render(surf, font, rs): i64 {
     # ⭐ THE TRAY, built between the panes and the status line so it reads as belonging to neither.
     # ⚠ `content`, not `root` — the flow lives there now; only the overlay layer sits on the root.
     if (trayh > 0) { crab_tray(content, w, opname, opdone, optotal, oprate, opeta); }
+    # ⭐ THE STATUS LINE IS A ROW NOW, NOT A LABEL (0.9.1) — [door][text] — so the door costs zero
+    # rows. ⚠ The same shape `crab_pane` uses when the A/B strip shares a header with the path: a
+    # fixed child and a flexed label, which is what keeps the text taking whatever the mark leaves.
+    crab_doorw = 0;
+    var statusrow = dh_widget_new(BOX);
+    dh_widget_set_layout(statusrow, BOX_H);
+    dh_widget_set_bg(statusrow, dh_theme_panel());
+    dh_widget_set_pref(statusrow, 0, CRAB_STATUS_H);
+    dh_widget_set_flex(statusrow, 0);
+    if (crab_door_fit(w) == 1) { crab_doorw = crab_door(statusrow); }
     var status = dh_widget_new(LABEL);
     dh_widget_set_bg(status, dh_theme_panel());   # status line
-    dh_widget_set_pref(status, 0, 22);
+    dh_widget_set_flex(status, 1);                # the text takes whatever the door leaves
     # ⚠ THE NOTICE OUTRANKS THE ROW. When crab is asking a question ("delete this?") or reporting a
     # refusal, that is the only thing the status line may say — showing the selected file's size
     # underneath a pending confirmation is how the wrong key gets pressed.
     if (crab_notice != 0) { dh_widget_set_text(status, crab_notice); }
     else { dh_widget_set_text(status, crab_status_str(abuf, asel, asz, amt, acnt)); }
-    dh_widget_add_child(content, status);
+    dh_widget_add_child(statusrow, status);
+    dh_widget_add_child(content, statusrow);
 
     # ⭐ THE OVERLAY GOES LAST — after the status line and after everything else — because sibling
     # order IS z-order in both the paint and the hit-test. See `crab_overlay`.

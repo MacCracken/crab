@@ -317,6 +317,28 @@ fn main(): i64 {
     if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) { crab_say("crab: attach_buf send failed\n"); return 1; }
     if (setu_send(fd, setu_commit(sid)) < 0) { crab_say("crab: commit send failed\n"); return 1; }
     crab_say("crab: dual-pane file-manager UI presented over setu\n");
+    # ⭐⭐ WHERE THE 🦀 DOOR IS, SAID ONCE (0.9.1). ⛔ THIS IS NOT DECORATION — it is the only way a
+    # harness can press it. The pointer on this stack is a RELATIVE `usb-mouse`: it cannot be told to
+    # land on a chosen pixel, and the compositor picks the window geometry, so a harness aiming at
+    # "the status line's left edge" is guessing twice. Three QEMU runs were spent guessing before
+    # this line existed — one found nothing, one hit the panes, one disagreed with itself between
+    # runs. ⇒ crab says the rect; the harness reads it and presses the middle of it.
+    # ⚠ PRINTED FROM HERE RATHER THAN FROM `crab_render`, and that is the layering rule, not taste:
+    # `crab_say` lives in `src/app.cyr` and `src/ui.cyr` sits BELOW it — the render path may never
+    # call up. `main.cyr` is above both and already holds the frame that was just laid out.
+    var dwid = crab_door_widget();
+    if (dwid != 0) {
+        # ⛔ ONE WRITE — see `crab_line_reset`. A measured run came back as
+        # `crab: door ptrscan: first sample handed to ring 3`: the KERNEL spliced into the middle of
+        # this line, because the console is shared unserialised by three processes.
+        crab_line_reset();
+        crab_line_s("crab: door ");
+        crab_line_u(dh_widget_x(dwid)); crab_line_s(" ");
+        crab_line_u(dh_widget_y(dwid)); crab_line_s(" ");
+        crab_line_u(dh_widget_w(dwid)); crab_line_s(" ");
+        crab_line_u(dh_widget_h(dwid));
+        crab_line_say();
+    } else { crab_say("crab: door none -- the window is too narrow for it\n"); }
     var resized = 0;        # set by WINDOW_CONFIGURE, consumed by the re-ATTACH after the next render
     # ⭐ POINTER STATE (M2, *deferral #05*), OWNED BY crab RATHER THAN BY `dh_dispatch`.
     # ⛔ `SETU_INPUT_PTR_BTN` CARRIES NO COORDINATES — only button and state. The position comes from
@@ -588,8 +610,11 @@ fn main(): i64 {
                     var sw_cell = dh_list_index_at(crab_switcher_widget(), ptr_x, ptr_y);
                     var sbi = crab_sidebar_hit(ptr_x, ptr_y);
                     var phit = crab_hit(ptr_x, ptr_y, hit);
+                    # ⭐ THE DOOR'S HIT IS ASKED OF THE LAID-OUT WIDGET (0.9.1), like every other
+                    # chrome hit here — see `crab_door_hit`.
+                    var doorh = crab_door_hit(ptr_x, ptr_y);
                     var pact = crab_pointer_action(pbtn, blocked, popup_open, popup_row, bar_shown,
-                      bar_cell, sw_cell, sbi, phit);
+                      bar_cell, sw_cell, sbi, phit, doorh);
                     # ⛔ EVERY ARM BUT THE PANE CLICK CONSUMES THE DOUBLE-CLICK PAIR. The sidebar arm
                     # never did: click a row, click a place (the pane re-lists), click the same row
                     # index inside 400 ms — and `crab_is_double` descended into whatever entry now
@@ -652,6 +677,21 @@ fn main(): i64 {
                     # ⭐ SWITCH — the A/B strip is a CONTROL now, not only a display. Its own hit,
                     # never `crab_hit`'s pane index, and a strip press is also a header press, which
                     # is why the decision asks the strip first.
+                    # ⭐⭐ THE DOOR OPENS THE MENU ROW (0.9.1), and it reuses `F10`'s arm rather than
+                    # minting a second way to open a bar — the same rule the context menu follows by
+                    # rewriting `u` instead of carrying its own verbs.
+                    # ⛔ ASKED WITH `crab_menubar_fit`, THE SAME PREDICATE THE RENDERER ASKS. A door
+                    # that revealed a bar the frame then refused to draw would be worse than no door.
+                    # ⚠ CLOSING IS NOT HERE, AND THAT IS DELIBERATE: with the bar shown, a press on
+                    # the door is a press off a bar cell, which `crab_pointer_action` already answers
+                    # `DISMISS`. One hit test, both directions, no state of its own.
+                    if (pact == CRAB_PA_DOOR) {
+                        if (crab_menubar_fit(w, 1) == 1) {
+                            mb_sel = 0;
+                            mb_drop = 0 - 1;
+                            crab_say("crab: menu bar by pointer\n");
+                        } else { crab_set_notice("the menu bar needs a wider window"); }
+                    }
                     if (pact == CRAB_PA_SWITCH) {
                         if (sw_cell <= 1) { active_pane = sw_cell; }
                         sb_focus = 0;

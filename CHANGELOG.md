@@ -2,6 +2,86 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.1] — 2026-09-14 — the door: the menu row has a second way in, and `F10` stops being the only one
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Added — ⭐⭐ a mark in the status line that reveals the menu row
+
+`F10` was the only door — and for seven releases it was **no door at all**, because aethersafha
+claimed that key until 0.16.25: the bar crab shipped in 0.8.0 was reachable by nobody. A surface with
+one invisible door is a surface most operators never learn exists.
+
+⛔ **It costs ZERO rows, and that constraint chose its home.** The bar is collapsed by default
+because *"at the shipped 380×220 every row is contended"* — a permanent bar would spend a listing row
+forever to show six words, and a permanent **button row** would spend one to show a mark. So the door
+lives *inside* the status line: the line became a `BOX_H` of `[door][text]`, the same shape
+`crab_pane` already uses when the A/B strip shares a header with the path. The text flexes; the mark
+does not.
+
+⛔⛆ **THE TOGGLE IS THE Z-ORDER, NOT A STATE BIT.** The door sits *below* the bar branch in
+`crab_pointer_action`, so a press on it while the bar is already shown never reaches its own arm —
+the bar branch sees a press that is not on a bar cell and answers `DISMISS`. Open when closed, close
+when open, from one hit test and no flag of its own. Placing it any higher would make the door the
+only piece of chrome that cannot put the bar away. *(The mutation that moves it up returns `DOOR`
+where `DISMISS` is expected, which is the assertion that pins this.)*
+
+### ⛔⛆ It is not a crab glyph, and the roadmap said it would be — that line was mine, from 0.9.0
+
+The gate line always read *"needs an icon path **or** proportional text"*. 0.9.0 shipped proportional
+text, so a line went in saying the face had unblocked this. **It had not, three times over:**
+
+- `rekha_char_to_glyph` returns 0 for any codepoint above 65,535 — in its own code, with the comment
+  *"format 4 is BMP-only"*. **U+1F980 is 128,896.**
+- The shipped Liberation Sans carries **no format-12 subtable** (three cmap subtables, all format 4/6).
+- `dh_draw_text_ink` walks **one byte per glyph in both branches**. There is no UTF-8 decode on the
+  draw path at all.
+
+Any one of the three is fatal on its own. ⇒ The icon path: **three filled boxes, no font**. ⭐ And the
+road to an actual crab is recorded rather than guessed at — **CANVAS**, which crab already ships for
+thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`). *An icon is a glyph with no font.*
+
+⚠ **Using no font also sidesteps something 0.9.0 made live**: the same byte draws CP437 through kashi
+and Latin-1 through rekha — byte 0xF0 is `≡` on the host build and `ð` on the target — so a mark made
+of characters would render differently on the two. crab's drawable alphabet is printable ASCII.
+
+### Fixed — ⛔⛆ a serial line must be ONE write, because the console is shared
+
+Measured on QEMU, not reasoned. crab composed two oracles out of many small `crab_say` calls, and the
+other two processes on the console spliced into both:
+
+```
+crab: font /fonts/default.ttf 0                      <- the byte count lost its digits
+crab: door ptrscan: first sample handed to ring 3    <- the KERNEL, mid-line
+```
+
+The source already recorded one instance of this — *"the 2026-08-30 burn has crab's own exit line
+spliced into the middle of aethersafha's frame banner"* — and 0.9.0 and 0.9.1 both walked into it. A
+harness reading either line gets a parse failure **indistinguishable from the feature being broken**,
+and three QEMU runs went on the door before that was the diagnosis.
+
+⇒ `crab_line_reset` / `crab_line_s` / `crab_line_u` / `crab_line_say`: compose into a buffer, emit
+once. ⚠ A single `crab_say` is still fine — it is the **sequence** that is not atomic.
+
+### Tests
+
+**2,257 assertions** (2,250 → 2,257 plus the door's own group). Four mutations planted and caught:
+the door moved above the bar branch (the toggle dies); the fit rule stopping asking whether the text
+keeps its floor; the stale-pointer clear removed; and the status text no longer flexing.
+
+⭐ **On target, measured every run**: crab builds the door and reports it laid out at
+`crab: door 0 196 22 22` under the real face.
+
+⚠ **A pointer press ON it is NOT measured, and the harness says UNMEASURED rather than PASS or FAIL.**
+Seven QEMU runs went into aiming one. The rect is in crab's *surface* coordinates; the monitor moves
+a **relative** `usb-mouse` in *screen* coordinates; the compositor chooses the window origin; and
+`mouse_move -4000 -4000` does not reliably home — an unchanged script proved delivery at (200,80),
+(100,80), (200,130) and (200,180) across four runs, and the pane edge at y=154 in one run and y=104
+in the next. Sweeping the mapped region in both axes delivered nothing, which means presses were
+being **dropped**, not missing. ⇒ Reporting FAIL would assert the door is broken, which the harness
+has no evidence for and the suite has nine assertions against. `crab-door-test.py` stays, with all
+seven runs' findings in its header, for a session that can place an absolute pointer.
+
 ## [0.9.0] — 2026-09-14 — A REAL FACE: crab draws in Liberation Sans on the target
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

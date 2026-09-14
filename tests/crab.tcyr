@@ -3956,6 +3956,104 @@ fn t_gridview(): i64 {
       "⛔ ...AND AN UNKNOWN ID SCROLLS IDENTICALLY — the grid branch would answer from a cell it lacks");
 
     # =============================================================================================
+    test_group("crab — 0.9.1: the 🦀 door");
+    # =============================================================================================
+    # ⭐⭐ THE MENU ROW HAD EXACTLY ONE DOOR, `F10`, AND FOR SEVEN RELEASES IT HAD NONE: aethersafha
+    # claimed that key until 0.16.25, so the bar crab shipped in 0.8.0 was reachable by nobody. A
+    # surface with one invisible door is a surface most operators never learn exists.
+    #
+    # ⛔⛆ IT IS NOT A CRAB GLYPH, AND THE ROADMAP SAID IT WOULD BE. That line — *"0.9.0 shipped, so
+    # the face it needed is here"* — was written one release ago and is wrong three times over:
+    # U+1F980 is 128,896 and `rekha_char_to_glyph` returns 0 above 65,535 in its own code ("format 4
+    # is BMP-only"); the shipped face carries no format-12 subtable; and dhancha walks ONE BYTE per
+    # glyph in both branches. **No font fixes any of the three.** ⇒ The icon path, which is what the
+    # gate line always said — *"needs an icon path OR proportional text"*, and only one of those was
+    # ever going to work.
+    assert_eq(crab_door_fit(CRAB_DOOR_W + crab_col_name_min()), 1, "the door fits when the text still has its floor");
+    assert_eq(crab_door_fit(CRAB_DOOR_W + crab_col_name_min() - 1), 0, "...and not one px below it");
+    assert_eq(crab_door_fit(0), 0, "a zero-width window has no door");
+    # ⚠ THE MARK IS 18 px TALL IN A 22 px ROW, and the arithmetic is asserted rather than eyeballed:
+    # three strokes, two gaps, two pads. A mark taller than its row is clipped by the row.
+    assert_eq((3 * CRAB_DOOR_BAR_H) + (2 * CRAB_DOOR_GAP) + (2 * CRAB_DOOR_PAD), 18,
+      "the mark is 18 px of strokes, gaps and padding");
+    assert(((3 * CRAB_DOOR_BAR_H) + (2 * CRAB_DOOR_GAP) + (2 * CRAB_DOOR_PAD)) <= CRAB_STATUS_H,
+      "⛔ ...which fits inside the status line's own height");
+    assert_eq(CRAB_DOOR_W, CRAB_STATUS_H, "the door is square in the row it lives in");
+
+    var dsurf = dh_surface_new(760, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    assert(crab_render(dsurf, 0, rs) != 0, "a frame with the door renders");
+    var door = crab_door_widget();
+    assert(door != 0, "the door was built");
+    assert_eq(dh_widget_kind(door), BOX, "...as a BOX — it uses no font at all");
+    # ⛔ THREE STROKES, AND THEY ARE BOXES TOO. A glyph would have been a LABEL, and a LABEL is where
+    # the byte-vs-codepoint divergence 0.9.0 exposed would have bitten: the same byte draws CP437
+    # through kashi and Latin-1 through rekha, so a mark made of characters would render one way on
+    # the host build and another on the target.
+    var dstroke = dh_widget_first_child(door);
+    assert(dstroke != 0, "the mark has strokes");
+    assert_eq(dh_widget_kind(dstroke), BOX, "...and a stroke is a filled BOX, not a glyph");
+    var dstrokes = 0;
+    var dkid = dh_widget_first_child(door);
+    while (dkid != 0) { dstrokes = dstrokes + 1; dkid = dh_widget_next_sibling(dkid); }
+    assert_eq(dstrokes, 3, "three strokes");
+    assert_eq(dh_widget_w(door), CRAB_DOOR_W, "the door is laid out at its declared width");
+
+    # ---- it is hit-testable, from the laid-out widget ---------------------------------------------
+    # ⚠ FROM THE WIDGET, not from arithmetic about where the door ought to be: a second answer to
+    # "where is the door" is free to disagree with the one layout produced, and it is the
+    # disagreement rather than either answer that makes a click miss.
+    var ddx = dh_widget_x(door);
+    var ddy = dh_widget_y(door);
+    assert_eq(crab_door_hit(ddx + 2, ddy + 2), 1, "a press inside the door hits it");
+    assert_eq(crab_door_hit(ddx + dh_widget_w(door) - 1, ddy + dh_widget_h(door) - 1), 1,
+      "...including its last pixel");
+    assert_eq(crab_door_hit(ddx - 1, ddy + 2), 0, "one px left of it misses");
+    assert_eq(crab_door_hit(ddx + dh_widget_w(door), ddy + 2), 0, "...and one px right of it misses");
+    assert_eq(crab_door_hit(ddx + 2, ddy - 1), 0, "...and one px above");
+    assert_eq(crab_door_hit(ddx + 2, ddy + dh_widget_h(door)), 0, "...and one px below");
+
+    # ---- it costs NO row, which is the constraint that chose its home -----------------------------
+    # ⛔⛔ THE BAR IS COLLAPSED BY DEFAULT BECAUSE EVERY ROW IS CONTENDED AT 380x220 — a permanent bar
+    # would spend a listing row forever to show six words, and a permanent BUTTON row would spend one
+    # to show a mark. ⇒ The door lives INSIDE the status line: the line became a `BOX_H` of
+    # [door][text], the shape `crab_pane` already uses for the A/B strip. The status line is still
+    # exactly one row of its own height.
+    assert_eq(dh_widget_h(dh_widget_parent(door)), CRAB_STATUS_H,
+      "⛔ THE STATUS ROW IS STILL ONE ROW TALL — the door cost nothing");
+    # ⚠ And the TEXT is still there and still flexes, or the door would have eaten the line it lives in.
+    var dsib = dh_widget_next_sibling(door);
+    assert(dsib != 0, "the status text sits beside the door");
+    assert_eq(dh_widget_kind(dsib), LABEL, "...and it is still a LABEL");
+    assert(dh_widget_w(dsib) > dh_widget_w(door), "...taking the width the mark left, not the other way round");
+
+    # ---- too narrow: the door goes, the text stays ------------------------------------------------
+    var dnarrow = dh_surface_new(100, 300);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    assert(crab_render(dnarrow, 0, rs) != 0, "a window too narrow for the door still renders");
+    assert_eq(crab_door_widget(), 0, "⛔ THE DOOR IS DROPPED, and the status line keeps its width");
+    assert_eq(crab_door_hit(2, 290), 0, "...and nothing can be pressed where it would have been");
+
+    # ---- a stale pointer must not outlive its frame ------------------------------------------------
+    # ⛔⛆ `dh_frame_begin` REWINDS THE ARENA, so a `crab_doorw` from a frame that HAD a door names
+    # memory the next frame has already reused — and this one is hit-tested on every pointer press,
+    # which is the worst place for a pointer into recycled memory. Same discipline as `crab_swlst`.
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_render(dsurf, 0, rs);
+    assert(crab_door_widget() != 0, "a frame WITH a door");
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, gb, 3, "/r", gz, gm, CRAB_PANE_OK, 0, 0, gsl);
+    crab_rs_pane(rs, 1, rb, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, gsr);
+    crab_render(dnarrow, 0, rs);
+    assert_eq(crab_door_widget(), 0, "⛔ ...AND THE NEXT FRAME WITHOUT ONE CLEARS THE POINTER");
+
+    # =============================================================================================
     test_group("crab — 0.8.8: the COLUMNS view");
     # =============================================================================================
     # ⭐⭐ THE COLUMNS VIEW IS A VIEW MODE OF **ONE** PANE — the active listing plus a narrow context
@@ -4241,6 +4339,40 @@ fn t_gridview(): i64 {
     # path behind an `if (flen > 0)` guard; copied here it would work on the host, fall back silently
     # on the target, and look finished. ⇒ What the target actually does is gated by
     # `agnos/scripts/harness/crab-face-test.py`, and is NOT claimed here.
+    # --- 0.9.1: A SERIAL LINE IS ONE WRITE, BECAUSE THE CONSOLE IS SHARED ------------------------
+    # ⛔⛆ MEASURED ON QEMU, NOT REASONED. crab composed two oracles out of many small `crab_say`
+    # calls, and the other two processes on the console spliced into both:
+    #     `crab: font /fonts/default.ttf 0`                    the byte count lost its digits
+    #     `crab: door ptrscan: first sample handed to ring 3`  the KERNEL, mid-line
+    # A harness reading either gets a parse failure indistinguishable from the feature being broken —
+    # three QEMU runs went on the door before that was the diagnosis. ⇒ Compose, then emit once.
+    crab_line_reset();
+    assert_eq(crab_line_len(), 0, "a reset line is empty");
+    crab_line_s("crab: door ");
+    crab_line_u(0);
+    crab_line_s(" ");
+    crab_line_u(198);
+    crab_line_s(" ");
+    crab_line_u(22);
+    assert(t_streq(crab_line_buf(), "crab: door 0 198 22"), "the line composes exactly, digits and all");
+    assert_eq(crab_line_len(), 19, "...and its length is what was written");
+    # ⚠ ZERO IS A DIGIT, NOT AN ABSENCE — the door sits at x = 0 and an appender that skipped it would
+    # have produced `crab: door  198 22` and a harness would have read the y as the x.
+    crab_line_reset();
+    crab_line_u(0);
+    assert(t_streq(crab_line_buf(), "0"), "zero appends as '0'");
+    crab_line_reset();
+    crab_line_u(410820);
+    assert(t_streq(crab_line_buf(), "410820"), "a six-digit count appends in order, not reversed");
+    # ⛔ AND IT STOPS AT THE CAP RATHER THAN GROWING. A diagnostic that allocates under pressure is a
+    # diagnostic that changes what it is measuring.
+    crab_line_reset();
+    var lli = 0;
+    while (lli < 40) { crab_line_s("0123456789"); lli = lli + 1; }
+    assert(crab_line_len() < CRAB_LINE_MAX, "a runaway line is capped, never grown");
+    assert_eq(load8(crab_line_buf() + crab_line_len()), 0, "...and stays NUL-terminated");
+    crab_line_reset();
+
     assert_eq(crab_face(), 0, "no `/fonts` on the host, so there is no face and crab draws as it always has");
     assert_eq(crab_face_tried(), 1, "...and the attempt is recorded");
     # ⛔ MEMOISED, WHICH IS NOT COSMETIC: `crab_face` is called at every render site, so an unmemoised
@@ -5961,42 +6093,74 @@ fn t_pointer_routes(): i64 {
     var L = CRAB_BTN_LEFT;
     var R = CRAB_BTN_RIGHT;
     var M = CRAB_BTN_MIDDLE;
-    # crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row, pane_hit)
+    # crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row, pane_hit, door_hit)
+    # ---- 0.9.1: THE 🦀 DOOR'S SLOT, AND WHY ITS POSITION IS ITS WHOLE TOGGLE ----------------------
+    # ⭐⭐ `F10` WAS THE ONLY WAY INTO THE MENU ROW — and between 0.8.0 and aethersafha 0.16.25 it was
+    # no way at all, because the compositor claimed the key. The door is the visible affordance.
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_DOOR,
+      "a left press on the door reveals the menu row");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_NONE,
+      "...a right press on it does nothing — it is a button, not a surface with a context menu");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_NONE,
+      "...nor a middle press");
+    # ⛔⛔ THE TOGGLE IS THE SLOT, NOT A STATE. The door sits BELOW the bar branch, so a press on it
+    # while the bar is already shown never reaches its own arm: the bar branch sees a press that is
+    # not on a bar cell and answers DISMISS. ⇒ Open when closed, close when open, from one hit test
+    # and no flag of its own. Placing the door any higher would make it the only piece of chrome that
+    # cannot put the bar away.
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_DISMISS,
+      "⛔ THE SAME PRESS WITH THE BAR SHOWN CLOSES IT — the toggle is the z-order, not a state bit");
+    # ⛔ AND A POPUP STILL OUTRANKS IT. A press while a menu is open belongs to the menu, always.
+    assert_eq(crab_pointer_action(L, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_PICK,
+      "an open popup outranks the door");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_DISMISS,
+      "...and a press off that popup dismisses rather than opening the bar");
+    assert_eq(crab_pointer_action(L, 1, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_NONE,
+      "a blocked pointer does not reach the door either");
+    # ⛔ THE DOOR OUTRANKS EVERY SURFACE BENEATH IT, and this is the assertion that says so: it lives
+    # in the status line, which overlaps nothing — but the decision must not depend on that staying
+    # true. A press that is somehow on the door AND the switcher AND the sidebar AND a pane is the
+    # door's.
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0, 0, 1, 1), CRAB_PA_DOOR,
+      "⛔ the door outranks the strip, the sidebar and the panes");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0, 0, 1, 0), CRAB_PA_SWITCH,
+      "...and with no door hit, the strip answers as it always did");
+
     # ---- blocked beats everything ----------------------------------------------------------------
-    assert_eq(crab_pointer_action(L, 1, 1, 0, 1, 0, 0, 0, 1), CRAB_PA_NONE, "blocked: nothing, even with every surface hit");
-    assert_eq(crab_pointer_action(R, 1, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "blocked: a right-click opens no menu");
+    assert_eq(crab_pointer_action(L, 1, 1, 0, 1, 0, 0, 0, 1, 0), CRAB_PA_NONE, "blocked: nothing, even with every surface hit");
+    assert_eq(crab_pointer_action(R, 1, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE, "blocked: a right-click opens no menu");
     # ---- a popup captures the pointer ------------------------------------------------------------
-    assert_eq(crab_pointer_action(L, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PICK, "popup row under a left press: PICK — even though the pane under it was hit too");
-    assert_eq(crab_pointer_action(R, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "popup row under a RIGHT press: nothing fires");
-    assert_eq(crab_pointer_action(M, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "...nor under a middle press");
-    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "left press off the popup, on a pane: DISMISS, never the pane");
-    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "right press off the popup: DISMISS, never a second menu");
-    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 3, 0), CRAB_PA_DISMISS, "left press off the popup, on a place: DISMISS, never navigation");
-    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_DISMISS, "left press off the popup, on the strip: DISMISS, never a switch");
+    assert_eq(crab_pointer_action(L, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PICK, "popup row under a left press: PICK — even though the pane under it was hit too");
+    assert_eq(crab_pointer_action(R, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE, "popup row under a RIGHT press: nothing fires");
+    assert_eq(crab_pointer_action(M, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE, "...nor under a middle press");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS, "left press off the popup, on a pane: DISMISS, never the pane");
+    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS, "right press off the popup: DISMISS, never a second menu");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 3, 0, 0), CRAB_PA_DISMISS, "left press off the popup, on a place: DISMISS, never navigation");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1, 0), CRAB_PA_DISMISS, "left press off the popup, on the strip: DISMISS, never a switch");
     # ⛔ THE FLIPPED DROP-DOWN: its rows lie ON the bar row, so both answer. The popup wins.
-    assert_eq(crab_pointer_action(L, 0, 1, 1, 1, 0, 0 - 1, 0 - 1, 0), CRAB_PA_PICK, "a drop row that is also a bar cell: PICK, the popup is asked first");
-    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0), CRAB_PA_BAR, "a neighbouring bar cell while a drop is open: BAR (switch menus)");
-    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "...but not with the right button");
-    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "drop open, press on neither: DISMISS");
+    assert_eq(crab_pointer_action(L, 0, 1, 1, 1, 0, 0 - 1, 0 - 1, 0, 0), CRAB_PA_PICK, "a drop row that is also a bar cell: PICK, the popup is asked first");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_BAR, "a neighbouring bar cell while a drop is open: BAR (switch menus)");
+    assert_eq(crab_pointer_action(R, 0, 1, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "...but not with the right button");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS, "drop open, press on neither: DISMISS");
     # ---- a revealed bar with no drop -------------------------------------------------------------
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0), CRAB_PA_BAR, "bar revealed, left on a cell: BAR");
-    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "bar revealed, right on a cell: nothing");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_DISMISS, "bar revealed, press on a pane: DISMISS — the bar is modal");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 2, 0), CRAB_PA_DISMISS, "bar revealed, press on a place: DISMISS");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0, 0), CRAB_PA_BAR, "bar revealed, left on a cell: BAR");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 1, 2, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "bar revealed, right on a cell: nothing");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS, "bar revealed, press on a pane: DISMISS — the bar is modal");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 2, 0, 0), CRAB_PA_DISMISS, "bar revealed, press on a place: DISMISS");
     # ---- nothing open: the ordinary surfaces, in order --------------------------------------------
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_SWITCH, "the strip beats the header it sits in");
-    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1), CRAB_PA_NONE, "a right press on the strip: nothing — not the pane's menu");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0), CRAB_PA_PLACE, "a place: PLACE");
-    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0), CRAB_PA_NONE, "a right press on a place: nothing");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a pane: the click");
-    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_MENU, "a pane, RIGHT: the context menu — the whole point of aethersafha 0.16.24");
-    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_NONE, "a pane, middle: nothing yet");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "empty space: nothing");
-    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0), CRAB_PA_NONE, "empty space, right: no menu with nothing to act on");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1, 0), CRAB_PA_SWITCH, "the strip beats the header it sits in");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1, 0), CRAB_PA_NONE, "a right press on the strip: nothing — not the pane's menu");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0, 0), CRAB_PA_PLACE, "a place: PLACE");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0, 0), CRAB_PA_NONE, "a right press on a place: nothing");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PANE, "a pane: the click");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_MENU, "a pane, RIGHT: the context menu — the whole point of aethersafha 0.16.24");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE, "a pane, middle: nothing yet");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "empty space: nothing");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "empty space, right: no menu with nothing to act on");
     # ⛔ A popup row answer with NO popup open is a stale widget from an earlier frame. It must not
     # pick: the route reads the open flag, not the widget.
-    assert_eq(crab_pointer_action(L, 0, 0, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a popup ROW with no popup OPEN is ignored — the pane takes it");
-    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 1, 0 - 1, 0 - 1, 1), CRAB_PA_PANE, "a bar CELL with no bar SHOWN is ignored — the pane takes it");
+    assert_eq(crab_pointer_action(L, 0, 0, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PANE, "a popup ROW with no popup OPEN is ignored — the pane takes it");
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PANE, "a bar CELL with no bar SHOWN is ignored — the pane takes it");
     # ---- every answer is one of the eight, and NONE is 0 so a forgotten arm is a no-op -----------
     assert_eq(CRAB_PA_NONE, 0, "NONE is zero");
     assert_neq(CRAB_PA_PICK, CRAB_PA_DISMISS, "the answers are distinct (spot check)");

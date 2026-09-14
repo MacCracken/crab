@@ -24,8 +24,29 @@
 
 ## Version
 
-**0.9.0 IS CUT** — `VERSION` reads `0.9.0` and the CHANGELOG header agrees, on operator direction,
-2026-09-14. ⛔ **The commit, the tag and the push are the operator's.** ⚠ The operator commits while
+**0.9.1 IS CUT** — `VERSION` reads `0.9.1` and the CHANGELOG header agrees, on operator direction,
+2026-09-14. ⚠ 0.9.0 released.
+
+**0.9.1 contents — the DOOR.** A mark in the status line reveals the menu row, so `F10` is no longer
+the only way in — and for seven releases it was **no way at all** (aethersafha claimed the key until
+0.16.25). ⛔ **Zero rows**: the status line became a `BOX_H` of [door][text], the shape `crab_pane`
+already uses for the A/B strip. ⛔⛆ **The toggle is the Z-ORDER, not a state bit** — the door sits
+BELOW the bar branch, so a press with the bar shown never reaches its arm and `DISMISS` closes it.
+⛔⛆ **IT IS NOT A CRAB GLYPH, AND THE ROADMAP SAID 0.9.0 WOULD MAKE IT ONE — that claim was wrong
+three times over**: `rekha_char_to_glyph` returns 0 above U+FFFF ("format 4 is BMP-only"), the
+shipped face has no format-12 cmap, and `dh_draw_text_ink` walks ONE BYTE per glyph in both branches.
+U+1F980 is 128,896. ⭐ **CANVAS is the open road** to a real crab — crab already draws thumbnails
+through `dh_canvas_new`; an icon is a glyph with no font.
+⚠ Using no font also sidesteps a 0.9.0 consequence: **byte 0xF0 is `≡` through kashi and `ð` through
+rekha**, so crab's drawable alphabet is printable ASCII.
+⛔⛆ **AND A SERIAL LINE MUST BE ONE WRITE** — measured, not reasoned: the console is shared
+unserialised by three processes and spliced both new oracles (`crab: font /fonts/default.ttf 0`;
+`crab: door ptrscan: first sample handed to ring 3`). ⇒ `crab_line_*` composes, then emits once.
+**2257 / 0**, four mutations each caught.
+⚠ **On target crab reports `crab: door 0 196 22 22` every run — but a PRESS on it is UNMEASURED**,
+and the harness says so rather than PASS or FAIL. Seven runs went into aiming one: the rect is in
+crab's surface coordinates, the monitor moves a RELATIVE pointer in screen coordinates, and homing is
+unreliable (delivery proved at four different points across four runs of an unchanged script). ⛔ **The commit, the tag and the push are the operator's.** ⚠ The operator commits while
 work is in flight; `git log --oneline -3` is the authority on what is in, not this file.
 
 **0.9.0 contents — ⭐⭐ A REAL FACE, the M5 item that has been open longest.** `crab_face()` opens
@@ -741,8 +762,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,076,240 B** *(0.9.0; 1,071,688 at 0.8.11, 1,071,560 at 0.8.10)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,121,176 B** *(0.9.0; 1,116,632 at 0.8.11, 1,112,424 at 0.8.10)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,080,480 B** *(0.9.1; 1,076,240 at 0.9.0, 1,071,688 at 0.8.11)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,121,344 B** *(0.9.1; 1,121,176 at 0.9.0, 1,116,632 at 0.8.11)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

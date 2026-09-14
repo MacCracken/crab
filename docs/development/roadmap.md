@@ -173,10 +173,18 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
   `CRAB_GAL_CELL_W` all encode character counts at 9 px, and they pick the **wrong layout** rather
   than failing honestly. ⚠ It also invalidates the caret arithmetic (`dh_draw_widget_ink` advances a
   fixed 9 px) and the scalable path is Latin-1 only (`load8(text + i)`).
-- **The 🦀 chrome button** (canvas turn 2) — the crab as the door to the menu row. ⛔ **GATED ON
-  crab's OWN FONT, not on dhancha**: `font = 0` is kashi's CP437 8×16 bitmap and `dh_draw_text`
-  walks one BYTE per glyph — there is no crab glyph in CP437 and no UTF-8 path to one. It needs an
-  icon path or proportional text, above. `F10` is the door until then and the row itself ships.
+- ✅ **The door — CLOSED (0.9.1); the 🦀 GLYPH is not.** A mark in the status line opens the menu
+  row, so `F10` is no longer the only way in — and for seven releases it was no way at all, because
+  aethersafha claimed that key until 0.16.25. ⛔ It costs **zero rows**: the status line became a
+  `BOX_H` of [door][text], the shape `crab_pane` already uses for the A/B strip. It uses **no font**
+  — three filled boxes — which also sidesteps something 0.9.0 made live: the same byte draws CP437
+  through kashi and Latin-1 through rekha, so a mark made of characters renders differently on the
+  host build and the target.
+  ⛔⛆ **AND THE GLYPH IS STILL CLOSED — this bullet said proportional text would open it, and 0.9.0
+  shipped proportional text.** That was wrong three times over: `rekha_char_to_glyph` returns 0 above
+  U+FFFF, the face has no format-12 cmap, and the draw loop walks one byte per glyph. ⭐ **CANVAS is
+  the open road** — crab already draws thumbnails through `dh_canvas_new`, and an icon is a glyph
+  with no font.
 - **Three key spaces, four repos, and crab reads raw wire numbers.** aethersafha forwards
   `bhumi_key_usage(ev)` — an **HID usage** — unchanged. dhancha's `DhKey` constants are puka's
   **ASCII/Unicode sym** space, not evdev (`dhancha/src/event.cyr:61-62`; the word *evdev* appears
@@ -213,7 +221,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.8.9 · Shift** | type a **capital letter** into a name — and `#` and `*`, the batch sheet's own two operators, into the field that advertises them | — | **shipped** |
 | ✅ | **0.8.10 · Ready for a face** | *(nothing visible — it is the half of 0.9.0 that is not blocked)* every width crab computes is **derived from the font** instead of from kashi's 9 px, and the suite proves it against a synthetic **proportional** face | — | **shipped** |
 | ✅ | **0.9.0 · A real face** | **read crab in a proportional font** — Liberation Sans, from the kernel's own `/fonts/default.ttf` | — | **shipped** |
-| → | **0.9.1 · The 🦀 button** | open the menu row by pressing the crab | — *(**0.9.0 shipped**, so the face it needed is here; an icon path is no longer the only road)* | the button draws and `F10` stops being the only door |
+| ✅ | **0.9.1 · The door** | **open the menu row with the pointer** — a mark in the status line, so `F10` is not the only way in | — | **shipped** ⚠ *not a crab GLYPH — that is closed at three independent levels; see below* |
 | | **0.9.2 · `Go`** | jump to a place from the menu bar | — *(shape already decided: a thin projection over the sidebar's keyboard route, capped by `crab_mb_drop_fit`)* | the drop fits at 380×220 without covering the status line, `d` is consumed by the drop arm, and `Parent` is absent rather than dead at `/` |
 | | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
 | | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
@@ -223,7 +231,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.1 – 0.9.5 are now ALL ungated and can be reordered freely** — one change each, nothing
+⭐ **0.9.2 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
 downstream waits on them. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
@@ -316,7 +324,7 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 | item | milestone | gated on | verified |
 |---|---|---|---|
 | ✅ Proportional text | M5 → **0.9.0, SHIPPED** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
-| The 🦀 chrome button | M6 → **0.9.1** | ⛔ **crab's OWN font, not dhancha.** CP437 has no crab glyph and `dh_draw_text` walks one byte per glyph. Needs an icon path or the face from **0.9.0**. | 2026-09-01 |
+| The 🦀 **glyph** | M6 → later | ⛔⛆ **STILL CLOSED, AND 0.9.0 DID NOT OPEN IT — this row said the face would.** Three independent walls: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code (*"format 4 is BMP-only"*), the shipped face carries no format-12 subtable, and `dh_draw_text_ink` walks ONE BYTE per glyph in **both** branches. U+1F980 is 128,896. ⭐ **The open road is CANVAS**, which crab already ships for thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`) — an icon is a glyph with no font. **0.9.1 shipped the DOOR** (three filled boxes) and left the crab for whoever wants to bake a bitmap. | 2026-09-14 ⛔ **re-derived — the 0.9.0 claim was wrong** |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
 | Local index · tags · smart folders | M7 → **0.10.0** | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
 | Duplicate detection | M7 → **0.10.0** | **daimon**, or a content hash crab could do alone | 2026-08-31 |
