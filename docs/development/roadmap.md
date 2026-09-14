@@ -223,7 +223,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.0 · A real face** | **read crab in a proportional font** — Liberation Sans, from the kernel's own `/fonts/default.ttf` | — | **shipped** |
 | ✅ | **0.9.1 · The door** | **open the menu row with the pointer** — a mark in the status line, so `F10` is not the only way in | — | **shipped** ⚠ *not a crab GLYPH — that is closed at three independent levels; see below* |
 | ✅ | **0.9.2 · `Go`** | **jump to a place from the menu bar** — every sidebar destination, picked through one navigator | — | **shipped** ⭐ *and it closed a key leak worse than the one recorded* |
-| | **0.9.3 · Symlinks** | see that a link is a link, and know what a verb will do to it | — *(the cyrius gate closed at 6.5.37; `sys_lstat` is vendored and deliberately uncalled)* | the write layer has an ANSWER — refuse, report, or recreate — and the listing shows which entries are links |
+| ✅ | **0.9.3 · Symlinks** | **see that a link is a link** — marked `@`, KIND says Link — and know what each verb does with one | — | **shipped** ([ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)) |
 | | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
 | | **0.9.5 · Pointer polish** | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
 | ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
@@ -231,7 +231,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.3 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
+⭐ **0.9.4 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
 downstream waits on them. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
@@ -424,9 +424,18 @@ promising the AI arc** — open since the roadmap was written.
   one while the other is held must stay shifted, which a boolean loses) and the field reads
   `crab_shift_held()`. ⭐ Proven on QEMU — the ORDER of the latch against the modifier suppression is
   invisible to the suite and would have failed green.
-- **`sys_lstat` is vendored and deliberately never called**, so symlinks stay invisible to the write
-  layer. The gate closed upstream at cyrius 6.5.37; what remains is a decision about what crab should
-  DO with the answer — refuse, report, or recreate. ⇒ **0.9.3.**
+- ✅ **Symlinks — CLOSED (0.9.3), and `sys_lstat` is called now.** ⛔ **readdir could never have told
+  crab**: agnos's `ext2_readdir_at_sys` sets byte 63 with `if (ftype == 2) { t = 1; }` — one bit, DIR
+  or not — so a link arrived indistinguishable from a file. ⭐ The stat sweep already visits every
+  entry, so `lstat` costs **no extra syscall**; the kind goes into the type byte crab already had.
+  ⇒ **Delete and move PRESERVE a link** (`unlink`/`rename` act on the link itself); **copy
+  DEREFERENCES**, as `cp -r` does, now as a decision rather than an accident. Recreate is possible
+  (`symlink`#63 + `readlink`#70, both with peers) and deferred: both are **ext2-only** and crab copies
+  between volumes.
+  ⛔⛆ **It found a real defect**: `crab_fs_delete` chose `rmdir` on `is_dir != 0`, so the moment the
+  type byte had a third value every link would have been **undeletable**.
+  ⭐ And the obvious fear is not real — a link cannot make the walk loop, because the walk descends
+  only on `1` and a link is `2`.
 - **The preview's dimension + EXIF read is a synchronous 64 KiB open/read/close on the SELECTION
   path**, against crab's own rule that reads belong on the idle tick. Memoised, but arrowing through
   a directory of large JPEGs pays per entry. ⇒ **0.9.4.**

@@ -19,7 +19,18 @@
 # both files can see. Layering follows the include order, not the other way round.
 enum CrabRec {
     CRAB_REC_SZ   = 64;      # bytes per record
-    CRAB_REC_TYPE = 63;      # offset of the type byte within a record (1 = dir)
+    CRAB_REC_TYPE = 63;      # offset of the type byte within a record
+    # ⛔ THE BYTE'S VALUES BELONG BESIDE THE BYTE'S OFFSET, AND 0.9.3 LEARNED IT THE SLOW WAY. These
+    # were declared in `app.cyr`, which is ABOVE `ui.cyr` in the include order — so the moment
+    # `ui.cyr` started naming them (the `@` marker, the KIND column, the delete prompt) the
+    # **render gate stopped compiling**, and `src/render_test.cyr` includes `ui.cyr` ALONE precisely
+    # to catch a render path that reaches upward. It caught it; nothing ran the gate for a release.
+    # ⇒ Declared here, at the bottom, where `path.cyr` is included by `ui.cyr` which is included by
+    # `app.cyr`: every layer that reads the byte can name what it read. Same reasoning as the two
+    # notes above and in `ui.cyr` — **layering follows the include order, not the other way round.**
+    CRAB_KIND_FILE = 0;      # a regular file
+    CRAB_KIND_DIR  = 1;      # a directory — the ONLY value the recursive walk descends
+    CRAB_KIND_LINK = 2;      # a symlink (0.9.3): one entry, never a tree
 }
 
 # ⛔⛔ ONE CAP FOR EVERY PATH BUFFER, AND THE HELPERS TAKE IT (0.5.0). Until 0.5.0 `crab_strcpy` and

@@ -2,6 +2,161 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.3] — 2026-09-14 — crab can see a symlink, and the write layer stops guessing what one is
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⇒ Recorded as **[ADR 0004](docs/adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)**,
+> because the roadmap carried this as a decision — *"refuse, report, or recreate"* — rather than a
+> dependency.
+
+### Added — ⭐⭐ the listing shows which entries are links, for no extra syscall
+
+⛔ **readdir cannot tell crab a link is a link, and that is a kernel fact rather than an oversight.**
+agnos's `ext2_readdir_at_sys` writes a 64-byte record and sets byte 63 with
+`var t = 0; if (ftype == 2) { t = 1; }` — one bit, DIR or not — so `EXT2_FT_SYMLINK` arrives
+indistinguishable from a regular file. crab has never had the information to show.
+
+⭐ **But the stat sweep already visits every entry**, so the answer is free: `crab_stat_batch` walks
+32 entries per idle tick until none is pending, whatever the sort mode — the synchronous storm is
+only for a SIZE or MTIME sort, which cannot order anything without the data. It asks **`lstat`** now,
+and the kind goes into the type byte crab already had (`0` file, `1` dir, now `2` link).
+
+A link is marked `@` in the listing — ASCII, which is not a style choice: 0.9.0 made the two faces
+disagree about every byte ≥ 128, so a non-ASCII marker would render one way on the host build and
+another on the target. The KIND column says **Link**, and it outranks the extension: a symlink named
+`cover.png` is a link, and calling it an Image in the one column whose job is to say what a thing IS
+would be the `/` marker problem in words.
+
+⛔ **`lstat` first, `stat` as the fallback, and the fallback is load-bearing**: `lstat`#102 is
+**ext2-only** — FAT and exFAT cannot represent a symlink and the kernel returns -1 rather than
+succeeding on a surface `stat`#33 does not have. crab lists FAT volumes, so an lstat-only sweep would
+leave a whole disk unstatted. ⚠ And it loses nothing: a filesystem that cannot hold a link cannot
+have one to miss.
+
+### Fixed — ⛔⛔ deleting a link deleted what it POINTED AT, and that is older than this release
+
+**MEASURED ON IRON, BOTH WAYS** — `agnos/scripts/harness/crab-symlink-test.py`, a real ext2 symlink
+in the image, the image read back afterwards with `debugfs` rather than crab asked for its own
+opinion. Against the pre-fix question, deleting `/bin/zzlink → zztarget/`:
+
+```
+ARM 3: crab: delete zzlink -> done          <- the operator is told it worked
+ARM 3: /bin/zzlink still on disk: True      <- the link is still there
+ARM 3: debugfs /bin/zztarget -> 0/3 files survived: []
+```
+
+**Three files the operator never pointed at, gone, on a reported success.** The single-entry delete
+verb read `if (ddir != 0)` and handed anything non-zero to `crab_walk_begin(CRAB_OP_DTREE, …)`, which
+**type-checks nothing**: it takes the name, builds a path, and the walk readdirs it — through the
+link, into the target. Then the final `rmdir` of the root refused (the root is not a directory), so
+the link survived its own deletion and `done` was reported anyway.
+
+⚠ **It is NOT a regression from making links visible.** `crab_stat_one` used to call `stat`, which
+FOLLOWS a link — so a link to a directory was already stored as type `1` and already took this
+branch. Visibility did not open the hole; **the `!= 0` audit is what found it**, and it is the reason
+that audit was worth doing properly rather than once.
+
+⇒ The decision moved out of the `#ifdef` into **`crab_delete_plan(kind)`** — `CRAB_DEL_TREE` for a
+directory, `CRAB_DEL_ONE` for everything else, forever. Same remedy as the planner below: a branch no
+host test could reach became a function the suite drives exhaustively.
+
+### Fixed — ⛆ the same `!= 0`, in six more readers, and the first audit found one of them
+
+The type byte was two-valued and its readers disagreed about how to ask — some `== 1`, some `!= 0`.
+The first sweep grepped `== 1` and `!= 1` and **missed the whole `!= 0` and `== 0` families**, which
+is where the damage was. Every reader of `CRAB_REC_TYPE` was then enumerated rather than pattern-
+matched — 22 sites, each traced to what it decides:
+
+- ⛔⛔ **the delete verb** (above) — a link became the root of a recursive delete.
+- ⛔⛔ **the delete prompt** — `!= 0` meant "directory", so deleting a link asked *"delete this
+  **FOLDER** `<name>` and everything in it?"*. `crab_del_prompt` exists because five system binaries
+  left an iron box on one confirm, and **the prompt names what dies**; naming a folder and its
+  contents over a single link is that same failure with the words rearranged. A link now gets its own
+  sentence — *"LINK `<name>`? the target is not touched"* — which says what **survives** as well as
+  what goes.
+- ⛔ **the transfer planner**, at both call sites — a link planned as `CTREE`/`MOVEDIR`, so
+  `crab_walk_begin` would `mkdir` a destination FOLDER named after the link and walk a tree that is
+  not there. `crab_transfer_plan` now takes the **kind** instead of a boolean each caller derived:
+  two chances to derive it wrong, in code no host test can reach, became one classification the suite
+  can drive.
+- ⛔ **Enter / Open** — `!= 0` sent a link to `crab_descend`, which refuses anything that is not a
+  directory, and the site dropped the `-1` with no else arm: the key **did nothing and said nothing**,
+  which the operator cannot tell from a keypress crab never received.
+- **two thumbnail readers** — gated on `== 0`, so a link was offered a preview it has no bytes for.
+- **`crab_fs_delete`** — chose `rmdir` on `is_dir != 0`, so links would have been **undeletable**.
+
+⚠ **Widening a field is only safe where every reader agrees how to ask** — and the way to know they
+agree is to enumerate them, not to grep for the shapes you happen to remember writing. All of it now
+goes through `crab_kind_mark`, `crab_delete_plan`, `crab_transfer_plan` and `== CRAB_KIND_DIR`.
+
+⭐ **The wire records what the operator was asked.** `crab: prompt <text>` is new, because the prompt
+is the last thing between a keypress and an irreversible verb and nothing outside the screen knew
+what it said — so a prompt naming the **wrong thing** was invisible to every harness on the target.
+One `crab_line_*` write, not four: the serial console is shared unserialised by three processes.
+
+### ⛔⛔ And the hazard everyone expects is not real — the same one bit is why
+
+A symlink pointing at an **ancestor** does not make the recursive walk loop forever, on either target:
+the walk descends only where the type byte says `1`, and neither agnos (`ftype == 2` only) nor the
+host path (`dt == 4` only) ever sets that for a link — and 0.9.3 writes `2`. **The one-bit type byte
+that hid links is the same one that bounded the walk.** `CRAB_PATH_MAX` bounds it a second time:
+`crab_join_n` refuses at depth 127 before `CRAB_WALK_DEPTH_MAX` can fire. Asserted, so it stays true.
+
+### Decided — what each verb does with a link
+
+- **Delete preserves it** — `unlink` removes the LINK, never its target. POSIX's rule, and agnos's
+  `unlink`#30 follows it. ⛔ **This was the intent and not the behaviour** until `crab_delete_plan`
+  landed; see *Fixed*, and the harness that now holds it.
+- **Move preserves it** — `rename` moves the link itself.
+- **Copy dereferences it** — `open` + `read` copies the target's bytes, which is what `cp -r` does. It
+  is now a decision rather than an accident, and the operator can see that an entry is a link
+  **before** acting on it, which they could not before.
+
+⚠ **Recreate is possible and deliberately not done.** agnos has `symlink`#63 and `readlink`#70, both
+with cyrius peers — but both are **ext2-only**, and crab's whole two-pane premise is copying between
+volumes. A recreate that works on one side of a copy and fails on the other needs a decision about
+what a link *becomes* when it lands somewhere that cannot hold one. Deferred with the primitives
+confirmed present, rather than half-built.
+
+### Tests
+
+**2,345 assertions** (2,314 → 2,345). Six mutations planted and caught: a link marked `/` like a
+directory; the kind test comparing the whole mode rather than its top nibble (which would answer
+"file" for every real symlink on disk); the KIND column calling a link an Image; the delete prompt's
+`!= 0` calling a link a FOLDER; the planner's boolean tree-copying a link; and `crab_delete_plan`'s
+`!= 0` walking one.
+
+⭐⭐ **And an iron arm, because the decision being right is not the same as the consequence being
+right.** `agnos/scripts/harness/crab-symlink-test.py` is new: `mkfs.ext2 -d` carries a host symlink
+into the image as a **real ext2 symlink**, crab is driven to it by keyboard, and the image is read
+back with **`debugfs`** afterwards. It gates the prompt's wording, that Enter on a link answers out
+loud, that the link is deleted, and — the arm that matters — that the target directory and all three
+of its files are **still on disk**. Run against the planted defect it reports the data loss above; run
+against the fix it PASSes. ⚠ `crab_stat_one`, `crab_readdir_into` and the whole delete verb are inside
+the agnos `#ifdef` with no `#else`, so **no host test can reach any of it** — which is why the
+decisions are lifted into pure functions the suite proves exhaustively *and* why the consequence
+needed iron.
+
+### Fixed — ⛆ the render gate stopped compiling, and the gate is what was supposed to catch this
+
+`CRAB_KIND_FILE` / `_DIR` / `_LINK` were declared in `app.cyr` — which **includes** `ui.cyr`. So the
+moment the render path started naming them (the `@` marker, the KIND column, the delete prompt) they
+were invisible to it, and **`src/render_test.cyr` stopped building**. That file includes `ui.cyr`
+ALONE for exactly this reason: `ui.cyr` sits BELOW `app.cyr` and the render path must never call up.
+⇒ **The architectural gate worked. Nothing ran it** — `cyrius test` discovers `tests/*.tcyr` and does
+not build `render_test.cyr`, so a green suite said nothing about it, and `ci.yml` would have caught it
+on the push. The three values now live in `path.cyr`'s `CrabRec`, beside `CRAB_REC_TYPE` itself: the
+byte's values next to the byte's offset, at the bottom layer every reader can see.
+⚠ Both files already carried the rule in a comment — *"layering follows the include order, not the
+other way round"* — which is the part worth keeping: a written-down rule is not a gate.
+
+⛔ **The harness does not count keypresses.** A first run pressed Down 80 times to "clamp at the
+bottom", landed on `whirl`, and deleted it: keys are lost between the compositor's per-frame drains,
+so N presses are not N rows and a blind count silently aims at the wrong file. It homes on the answer
+instead — press `d`, read the name out of `crab: prompt`, cancel, step, repeat — so it cannot confirm
+a prompt naming the wrong entry.
+
 ## [0.9.2] — 2026-09-14 — `Go` is filled, and an open menu stops acting on the pane underneath it
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

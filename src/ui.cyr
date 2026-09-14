@@ -588,6 +588,23 @@ fn crab_name_cell_px(dst, name, px): i64 {
 
 # One row of the pane, as CELLS in the shared column spec (dhancha 0.9.20) rather than one
 # space-padded string. `ncols` is what the pane's width can honestly show.
+# @public — the one-character marker for an entry kind: `/` for a directory, `@` for a symlink, 0 for
+# a plain file. -> the byte, or 0 when the name stands alone.
+#
+# ⛔⛆ THE TYPE BYTE WAS TWO-VALUED AND EVERY READER KNEW IT — some as `== 1`, some as `!= 0`. 0.9.3
+# gave it a third value (2 = symlink) and the `!= 0` readers would have rendered **every link as a
+# directory**: a trailing `/` on the name and a `-` where its size goes. A widened field is only
+# widened where every reader agrees, so the marker is one function now and the size column asks
+# `== 1` rather than "not a file".
+# ⚠ `@` IS ASCII, WHICH IS NOT A STYLE CHOICE HERE. 0.9.0 made the two faces disagree about every
+# byte >= 128 (CP437 through kashi, Latin-1 through rekha), so a non-ASCII marker would render one
+# way on the host build and another on the target. `@` is also what `ls -F` has used for forty years.
+fn crab_kind_mark(kind): i64 {
+    if (kind == CRAB_KIND_DIR) { return 47; }          # '/'
+    if (kind == CRAB_KIND_LINK) { return 64; }         # '@'
+    return 0;
+}
+
 fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime, marked): i64 {
     var row = dh_table_row(spec);
     # ⭐ NO BACKGROUND (0.4.10). Rows used to paint their own selection — accent when the pane was
@@ -617,15 +634,20 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime, marked): i64 {
     # the `+ 3` keeps a byte of slack so a future marker is not an overflow.
     var nm = dh_falloc(CRAB_REC_TYPE + 3);
     var nchars = namew;
-    if (is_dir != 0) { nchars = nchars - 1; }          # leave room for the '/'
+    # ⚠ Room for the marker, whichever it is — see `crab_kind_mark`.
+    if (crab_kind_mark(is_dir) != 0) { nchars = nchars - 1; }
     var used = crab_name_cell(nm, name, nchars);
-    if (is_dir != 0) { store8(nm + used, 47); store8(nm + used + 1, 0); }
+    var rmk = crab_kind_mark(is_dir);
+    if (rmk != 0) { store8(nm + used, rmk); store8(nm + used + 1, 0); }
     dh_table_cell(row, spec, 0, nm);
 
     # SIZE — a directory has no meaningful byte size; its "size" is the entry, not its contents.
     if (ncols >= 2) {
         var ss = dh_falloc(24);
-        if (is_dir != 0) { store8(ss, 45); store8(ss + 1, 0); }   # "-"
+        # ⛔ ONLY A DIRECTORY HAS NO SIZE. This read `!= 0`, which with 0.9.3's third type value would
+        # have blanked every link's size too — and a link HAS one: `lstat` reports the length of the
+        # target text, which is exactly what `ls -l` shows for it.
+        if (is_dir == CRAB_KIND_DIR) { store8(ss, 45); store8(ss + 1, 0); }   # "-"
         else { crab_size_str(ss, size); }
         dh_table_cell(row, spec, 1, ss);
     }
@@ -696,8 +718,9 @@ fn crab_grid_cell(g, rec, is_dir, marked): i64 {
     var n = crab_name_cell(disp, rec, chars);
     # ⚠ The trailing `/` marks a directory, as in the list. It is appended only when there is room,
     # so a name that already fills the cell is not silently one character longer than it can draw.
-    if (is_dir == 1) {
-        if (n < chars) { store8(disp + n, 47); store8(disp + n + 1, 0); }
+    var gmk = crab_kind_mark(is_dir);
+    if (gmk != 0) {
+        if (n < chars) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
     }
     dh_widget_set_text(cell, disp);
     dh_grid_add(g, cell);
@@ -719,7 +742,11 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
     var pix = 0;
     var tstate = CRAB_TH_NONE;
-    if (is_dir == 0) {
+    # ⚠ `== CRAB_KIND_FILE`, NOT `== 0`. It means the same today and says what it means: a thumbnail
+    # is for a plain file. A LINK is deliberately not thumbnailed — the cell would show the target's
+    # picture under the link's name, which is the row that says "these two entries are the same file"
+    # when they are not.
+    if (is_dir == CRAB_KIND_FILE) {
         if (crab_is_image(rec) == 1) {
             # ⚠ The join is per cell per frame. `crab_join_n` is bounded and the cache scan is 64
             # slots, so this is a constant per visible cell — and the alternative, threading a
@@ -760,8 +787,9 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     var chars = crab_col_chars(crab_gal_cell_w());
     var disp = dh_falloc(CRAB_NAME_MAX + 4);
     var n = crab_name_cell(disp, rec, chars);
-    if (is_dir == 1) {
-        if (n < chars) { store8(disp + n, 47); store8(disp + n + 1, 0); }
+    var gmk = crab_kind_mark(is_dir);
+    if (gmk != 0) {
+        if (n < chars) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
     }
     dh_widget_set_text(lab, disp);
     dh_widget_add_child(cell, lab);
@@ -2677,8 +2705,9 @@ fn crab_col_ctx(parent, title, buf, count, sel): i64 {
         # string must live exactly as long as the widget — one frame. See `crab_grid_cell`.
         var disp = dh_falloc(CRAB_NAME_MAX + 4);
         var dn = crab_name_cell(disp, rec, chars);
-        if (isd == 1) {
-            if (dn < chars) { store8(disp + dn, 47); store8(disp + dn + 1, 0); }
+        var cmk = crab_kind_mark(isd);
+        if (cmk != 0) {
+            if (dn < chars) { store8(disp + dn, cmk); store8(disp + dn + 1, 0); }
         }
         dh_widget_set_text(row, disp);
         dh_list_add(lst, row);
@@ -2991,7 +3020,21 @@ fn crab_del_prompt(dir, buf, marks, count, sel, marked): i64 {
         var rec = buf + sel * CRAB_REC_SZ;
         # ⛔ A FOLDER PROMPT MUST SAY WHAT ELSE GOES. "delete the selected entry?" in front of a
         # directory is technically true and practically a lie.
-        if (load8(rec + CRAB_REC_TYPE) != 0) {
+        # ⛔⛆ AND IT READ `!= 0`, WHICH 0.9.3's THIRD TYPE VALUE TURNED INTO A DIFFERENT LIE: a symlink
+        # (2) is not 0, so deleting one prompted *"delete this **FOLDER** <name> and everything in
+        # it?"* — naming a folder and its contents when what actually dies is one link, and the target
+        # is not touched at all. That is precisely the failure `crab_del_prompt` exists to prevent:
+        # **THE PROMPT NAMES WHAT DIES**, written after five system binaries left an iron box.
+        var dkind = load8(rec + CRAB_REC_TYPE);
+        if (dkind == CRAB_KIND_LINK) {
+            # ⭐ A LINK GETS ITS OWN SENTENCE, because what survives matters as much as what goes.
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "LINK ");
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "? the target is not touched  y = yes");
+            store8(d + w, 0);
+            return d;
+        }
+        if (dkind == CRAB_KIND_DIR) {
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "FOLDER ");
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " and everything in it");
@@ -4259,7 +4302,11 @@ fn crab_exif_sub_buf(): i64 {
 # table grows forever once it exists. crab names the two kinds it can act on differently — a folder
 # it can descend into, and an image it can read dimensions from — and calls everything else a file.
 fn crab_kind_str(name, is_dir): i64 {
-    if (is_dir == 1) { return "Folder"; }
+    if (is_dir == CRAB_KIND_DIR) { return "Folder"; }
+    # ⭐ A LINK IS ITS OWN KIND (0.9.3), and it outranks the extension: a symlink named `cover.png` is
+    # a link, and calling it an Image in the one column whose job is to say what a thing IS would be
+    # the listing's `/` marker problem in words.
+    if (is_dir == CRAB_KIND_LINK) { return "Link"; }
     if (crab_is_image(name) == 1) { return "Image"; }
     return "File";
 }

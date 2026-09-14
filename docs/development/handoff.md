@@ -1,3 +1,87 @@
+# Handoff — **0.9.3: crab sees a symlink; a data-loss defect FOUND AND FIXED, and H1 still open.**
+
+> ⛔⛔⛔ **READ THIS FIRST — H1, CONFIRMED, NOT FIXED.** Cancelling a copy that **merged** into an
+> existing folder deletes that folder wholesale, **including files crab never wrote**. Reproduced by
+> the operator (`tests/zz_h1_repro.tcyr`, since removed):
+> `POST-CANCEL precious.txt exists = 0 *** DELETED BY CRAB ***`.
+> ⇒ **The source predicted it exactly.** `crab_walk_reroot_dtree` says: *"WHY DELETING HERE IS SAFE…
+> rests on one invariant in `crab_walk_begin`: that function REFUSES with `EEXIST` if the destination
+> already exists… If that guard is ever relaxed to allow merging into an existing destination, THIS
+> FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same change."* **0.8.7 relaxed exactly
+> that guard** (`crab_walk_begin`: *"THE ROOT MERGES LIKE ANY OTHER DIRECTORY (0.8.7)"*) and did not
+> delete the function.
+> ⇒ **The fix, named**: a record flag set in `crab_walk_begin` meaning *crab created this root*;
+> `crab_walk_reroot_dtree` reroots only when it is set. A cancelled MERGE then unlinks the in-flight
+> file and leaves the partial merge — the honest outcome, against deleting data the operator did not
+> name, which is the failure this project already paid for once (`/bin`, 2026-09-03).
+> ⚠ **Not fixed in 0.9.3 because the operator was actively probing the same file** (`h3probe.cyr`,
+> `h5probe.cyr`, `probe_h7.cyr` in the tree) and two concurrent edits to a cancel path is exactly
+> where that goes wrong.
+>
+> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.3; 0.9.2 released.** ⛔ commit, tag and push are the operator's.
+>
+> 1. ⭐⭐ **crab CAN SEE A SYMLINK.** ⛔ readdir never could: agnos's `ext2_readdir_at_sys` sets byte
+>    63 with `if (ftype == 2) { t = 1; }` — one bit, DIR or not — so a link arrived indistinguishable
+>    from a file. ⭐ The stat sweep already visits every entry (32/tick until none is pending,
+>    whatever the sort mode), so **`lstat` costs no extra syscall**, and the kind goes into the type
+>    byte crab already had: `0` file, `1` dir, **`2` link**. Marked `@`, KIND says **Link**, size is
+>    the link's own as `ls -l` shows. ⚠ `lstat` first, `stat` as the fallback — `lstat`#102 is
+>    **ext2-only** and crab lists FAT volumes, so an lstat-only sweep would leave a whole disk
+>    unstatted. It loses nothing: a filesystem that cannot hold a link has none to miss.
+> 2. ⛔⛔ **DELETING A LINK DELETED WHAT IT POINTED AT — MEASURED, FIXED, AND OLDER THAN THIS WORK.**
+>    The single-entry delete verb read `if (ddir != 0)` and handed anything non-zero to
+>    `crab_walk_begin(CRAB_OP_DTREE, …)`, which **type-checks nothing**. So a link pointing at a
+>    directory became the ROOT OF A RECURSIVE DELETE and the walk went through it into the target.
+>    On iron: `crab: delete zzlink -> done`, link **still on disk**, **0 of 3 files survived** in
+>    `zztarget/`. ⚠ **Not a regression from making links visible** — `crab_stat_one` used to call
+>    `stat`, which FOLLOWS a link, so a link to a directory was already stored as `1` and already
+>    took that branch. Fixed by **`crab_delete_plan(kind)`**; held by `crab-symlink-test.py`.
+> 2b. ⛆ **AND THE FIRST AUDIT REPORTED ITSELF COMPLETE HAVING MISSED SIX READERS.** It grepped `== 1`
+>    and `!= 1`; the entire `!= 0` / `== 0` family went unlooked-at, and that is where the damage
+>    was — the delete verb above, the delete **prompt** (a link announced as *"FOLDER `<name>` and
+>    everything in it"*), the transfer planner at both call sites, Enter/Open (did nothing and said
+>    nothing), two thumbnail readers, and `crab_fs_delete`. The second audit **enumerated all 22
+>    reads of `CRAB_REC_TYPE`** and traced each to its decision. ⇒ Widening a field is only safe
+>    where every reader agrees how to ask, and **the way to know they agree is to enumerate them, not
+>    to grep for the shapes you remember writing.**
+> 3. ⭐ **THE OBVIOUS FEAR IS NOT REAL, and the same one bit is why.** A symlink to an ancestor cannot
+>    make the recursive walk loop: it descends only where the type byte says `1`, and neither agnos
+>    (`ftype == 2`) nor the host (`dt == 4`) sets that for a link — and 0.9.3 writes `2`. Asserted.
+> 4. ⇒ **Delete and move PRESERVE a link; copy DEREFERENCES** (`cp -r`'s behaviour), now a decision
+>    rather than an accident — **[ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)**.
+>    ⚠ **Recreate is possible and deferred**: `symlink`#63 and `readlink`#70 both have cyrius peers,
+>    but both are **ext2-only** and crab's whole premise is copying between volumes — what a link
+>    *becomes* when it lands somewhere that cannot hold one needs its own decision.
+>
+> **Suite 2345 / 0**, render_test **53 / 0 — and it did not COMPILE for most of this release.**
+> ⛔⛆ **THE RENDER GATE WAS BROKEN BY 0.9.3 AND I CLAIMED IT GREEN FROM MEMORY.** `CRAB_KIND_FILE/
+> _DIR/_LINK` were declared in `app.cyr`, which **includes** `ui.cyr` — so the moment the render path
+> started naming them (`@`, the KIND column, the delete prompt) they were invisible to it, and
+> `src/render_test.cyr`, which includes `ui.cyr` ALONE precisely to catch a render path reaching
+> upward, stopped building. ⇒ **The architectural gate worked; nobody ran it.** `ci.yml:72` runs it,
+> so the 0.9.3 push would have gone red. Fixed by moving the three values into `path.cyr`'s `CrabRec`
+> beside `CRAB_REC_TYPE` — the byte's values next to the byte's offset, at the bottom layer every
+> reader can see. ⚠ Both `path.cyr` and `ui.cyr` already carried a note saying exactly this
+> (*"layering follows the include order, not the other way round"*); the rule was written down and I
+> put the enum on the wrong side of it anyway.
+> ⇒ **`cyrius test` does not build `render_test.cyr`** — it discovers `tests/*.tcyr` only. A green
+> suite is not evidence the render gate compiles; build it explicitly.
+> Host **1,084,832 B** · agnos **1,129,864 B**.
+> ⭐⭐ **QEMU: `crab-symlink-test.py` PASSES** (2026-09-14) — a real ext2 symlink placed by
+> `mkfs.ext2 -d`, crab driven to it by keyboard, and the image read back with **`debugfs`** after
+> shutdown rather than crab asked whether crab did the right thing. Gates the prompt's wording, that
+> Enter answers out loud, that the link is deleted, and that the target and all three of its files
+> survive. Run against the planted `!= 0` it reports the data loss in item 2 — **the harness is
+> mutation-proven, not just green.**
+> ⛔ **It does not count keypresses.** A first run pressed Down 80 times to "clamp at the bottom",
+> landed on `whirl` and deleted it — keys are lost between the compositor's per-frame drains, so N
+> presses are not N rows. It homes on `crab: prompt` instead and only confirms once the prompt names
+> the right entry.
+> ⚠ `crab_stat_one`, `crab_readdir_into` and the delete verb are all inside the agnos `#ifdef` with no
+> `#else`, so **no host test reaches any of them** — the decisions are lifted into `crab_stat_kind`,
+> `crab_delete_plan` and `crab_transfer_plan` and proven in the suite; the consequence needed iron.
+> ⚠ **The 0.9.2 block below is one release stale but its reasoning is current.**
+
 # Handoff — **0.9.2 cut: `Go` is filled, and an open menu stops acting on the pane underneath it.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.2**; **0.9.1 released**. ⛔ commit,

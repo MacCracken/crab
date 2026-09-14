@@ -882,8 +882,10 @@ fn main(): i64 {
                                     # it is reachable by the suite, which this branch is not.
                                     var dmk = lmarks; if (drag_pane == 1) { dmk = rmarks; }
                                     var dmarked = crab_mark_count(dmk, sc2);
-                                    var ddir = 0;
-                                    if (load8(srec2 + CRAB_REC_TYPE) != 0) { ddir = 1; }
+                                    # ⚠ THE RAW KIND, NOT A BOOLEAN — `crab_transfer_plan` classifies
+                                    # it now, because a boolean each call site derived was two chances
+                                    # to derive it wrong and both sites are unreachable from the suite.
+                                    var ddir = load8(srec2 + CRAB_REC_TYPE);
                                     # ⛔⛆ CAPTURE THE NAME **BEFORE** THE DISPATCH, NOT INSIDE ONE ARM.
                                     # `namescr` is a long-lived scratch buffer shared with every other
                                     # verb, so an arm that reads it without writing it first acts on
@@ -1165,7 +1167,9 @@ fn main(): i64 {
                                     # is why it sits behind the same y-confirmation, why the prompt says
                                     # "and everything in it", and why Esc stops it mid-walk.
                                     var rcd = 0;
-                                    if (ddir != 0) {
+                                    # ⛔ `crab_delete_plan`, NOT `ddir != 0` — see the function. A link
+                                    # is one entry; `!= 0` made it the ROOT OF A RECURSIVE DELETE.
+                                    if (crab_delete_plan(ddir) == CRAB_DEL_TREE) {
                                         rcd = crab_walk_begin(CRAB_OP_DTREE, dpath, namescr, 0,
                                           pathscr, pathscr2, statbuf);
                                         if (rcd == CRAB_FS_OK) { crab_set_notice("deleting folder..."); }
@@ -1563,7 +1567,11 @@ fn main(): i64 {
                                 if (active_pane == 1) { epath = rpath; ebuf = rbuf; esel = sel_r; ecnt = rn; }
                                 if (ecnt <= 0) { crab_set_notice("nothing to open"); }
                                 else {
-                                    if (load8(ebuf + esel * CRAB_REC_SZ + CRAB_REC_TYPE) != 0) {
+                                    # ⛔ ONLY A DIRECTORY IS DESCENDED INTO. This read `!= 0`, so with
+                                    # 0.9.3's third value Enter on a symlink tried to descend, and
+                                    # `crab_descend` refused it (`!= 1`) — the key did nothing at all.
+                                    # A link goes to the open-a-file road below, which follows it.
+                                    if (load8(ebuf + esel * CRAB_REC_SZ + CRAB_REC_TYPE) == CRAB_KIND_DIR) {
                                         if (active_pane == 0) {
                                             var nl = crab_descend(lpath, lbuf, sel_l, ln, namescr, pathscr,
                                               lsizes, lmtimes, statbuf);
@@ -1656,7 +1664,19 @@ fn main(): i64 {
                                     if (active_pane == 1) {
                                         qdir = rpath; qbuf = rbuf; qsel = sel_r; qcnt = rn; qmk = rmarks;
                                     }
-                                    crab_set_notice(crab_del_prompt(qdir, qbuf, qmk, qcnt, qsel, nmark));
+                                    var dprompt = crab_del_prompt(qdir, qbuf, qmk, qcnt, qsel, nmark);
+                                    crab_set_notice(dprompt);
+                                    # ⭐ THE WIRE RECORDS WHAT THE OPERATOR WAS ASKED. The prompt is the
+                                    # last thing between a keypress and an irreversible verb, and until
+                                    # 0.9.3 nothing outside the screen knew what it said — so a prompt
+                                    # naming the WRONG THING (a symlink announced as *"FOLDER <name> and
+                                    # everything in it"*) was invisible to every harness on the target.
+                                    # ⚠ ONE WRITE, NOT FOUR — the serial console is shared unserialised
+                                    # by three processes and a multi-call sequence gets spliced.
+                                    crab_line_reset();
+                                    crab_line_s("crab: prompt ");
+                                    crab_line_s(dprompt);
+                                    crab_line_say();
                                 } else { crab_set_notice("nothing selected to delete"); }
                             }
                             # ⭐ COPY AND MOVE GO TO THE OTHER PANE, WHICH IS WHAT THE SECOND PANE IS FOR.
@@ -1688,8 +1708,8 @@ fn main(): i64 {
                                     # nothing includes `main.cyr`. Both defects this branch shipped were
                                     # decisions, not wiring, so the decision moved somewhere the suite can reach
                                     # it and this stays a dispatch.
-                                    var isdirsel = 0;
-                                    if (load8(srec + CRAB_REC_TYPE) != 0) { isdirsel = 1; }
+                                    # ⚠ THE RAW KIND — see `crab_transfer_plan`, which classifies it.
+                                    var isdirsel = load8(srec + CRAB_REC_TYPE);
                                     var ismv = 0;
                                     if (u == 0x10) { ismv = 1; }
                                     var plan = crab_transfer_plan(ismv, smarked, isdirsel);
@@ -2336,7 +2356,9 @@ fn main(): i64 {
                 var qdid = 0;
                 while (qi <= qlast) {
                     var qrec = qbuf + qi * CRAB_REC_SZ;
-                    if (load8(qrec + CRAB_REC_TYPE) == 0) {
+                    # ⚠ `== CRAB_KIND_FILE` says what `== 0` meant. A link is not thumbnailed: the
+                    # cell would draw the target's picture under the link's name.
+                    if (load8(qrec + CRAB_REC_TYPE) == CRAB_KIND_FILE) {
                         if (crab_is_image(qrec) == 1) {
                             if (crab_fs_path(pathscr, qpath, qrec) >= 0) {
                                 if (crab_tc_find(pathscr) < 0) {

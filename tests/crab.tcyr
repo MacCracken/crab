@@ -119,6 +119,27 @@ fn t_prop_face(buf, len): i64 {
     return rekha_font_open(buf, len);
 }
 
+# Does the cstring `h` contain the cstring `n`? 1 = yes. ⚠ Bounded by CRAB_DEL_MSG_CAP: the strings
+# it is asked about are prompts crab composed, and an unterminated one must cost a wrong answer
+# rather than a walk off the buffer.
+fn t_contains(h, n): i64 {
+    if (h == 0) { return 0; }
+    if (n == 0) { return 0; }
+    var i = 0;
+    while ((i < CRAB_DEL_MSG_CAP) && (load8(h + i) != 0)) {
+        var j = 0;
+        while (1 == 1) {
+            var c = load8(n + j);
+            if (c == 0) { return 1; }
+            if (load8(h + i + j) != c) { j = 0 - 1; }
+            if (j < 0) { break; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
 fn t_entry(buf, i, name, is_dir): i64 {
     var rec = buf + i * 64;
     var k = 0;
@@ -6088,6 +6109,107 @@ fn t_pointer_routes(): i64 {
     assert_eq(crab_menu_item_at(0 - 1), 0 - 1, "no row -> no item");
     assert_eq(crab_menu_item_at(CRAB_MI_COUNT + 1), 0 - 1, "a row past the last item -> no item");
     assert_eq(crab_menu_item_at(CRAB_MI_COUNT + 40), 0 - 1, "...however far past");
+
+    # =============================================================================================
+    test_group("crab — 0.9.3: crab can SEE a symlink");
+    # =============================================================================================
+    # ⛔⛆ readdir CANNOT TELL crab A LINK IS A LINK, AND THAT IS A KERNEL FACT. agnos's
+    # `ext2_readdir_at_sys` writes `var t = 0; if (ftype == 2) { t = 1; }` into byte 63 — one bit,
+    # DIR or not — so `EXT2_FT_SYMLINK` arrives indistinguishable from a regular file.
+    # ⭐⭐ THE STAT SWEEP ALREADY VISITS EVERY ENTRY, so the answer costs **no extra syscall**:
+    # `crab_stat_batch` walks 32 per idle tick until none is pending, whatever the sort mode. It asks
+    # `lstat` now, and the kind goes into the type byte crab already has.
+    assert_eq(crab_stat_kind(0xA1FF), CRAB_KIND_LINK, "mode 0xA000 is a symlink");
+    assert_eq(crab_stat_kind(0x41ED), CRAB_KIND_DIR, "0x4000 is a directory");
+    assert_eq(crab_stat_kind(0x81A4), CRAB_KIND_FILE, "0x8000 is a regular file");
+    # ⚠ ANYTHING ELSE IS NEITHER. A fifo, a socket or a device is not a directory and not a link, and
+    # crab has no third thing to say about it — "file" is the honest default, not a fallback.
+    assert_eq(crab_stat_kind(0x1180), CRAB_KIND_FILE, "a fifo is not a directory and not a link");
+    assert_eq(crab_stat_kind(0xC000), CRAB_KIND_FILE, "...nor a socket");
+    assert_eq(crab_stat_kind(0), CRAB_KIND_FILE, "...nor a zero mode");
+    # ⛔ THE PERMISSION BITS MUST NOT REACH THE DECISION. 0xA1FF and 0xA000 are the same kind, and a
+    # test that compared the whole mode would answer "file" for every real symlink on disk.
+    assert_eq(crab_stat_kind(0xA000), crab_stat_kind(0xA1FF), "the mode's permission bits do not change the kind");
+
+    # ---- the marker, and the readers that had to be widened with it -------------------------------
+    # ⛔⛆ THE TYPE BYTE WAS TWO-VALUED AND ITS READERS DISAGREED ABOUT HOW TO ASK — some `== 1`, some
+    # `!= 0`. Giving it a third value would have made every `!= 0` reader render a LINK AS A
+    # DIRECTORY: a trailing `/` on the name and a `-` where its size goes.
+    assert_eq(crab_kind_mark(CRAB_KIND_DIR), 47, "a directory is marked with '/'");
+    assert_eq(crab_kind_mark(CRAB_KIND_LINK), 64, "⭐ a symlink is marked with '@' — as `ls -F` has for forty years");
+    assert_eq(crab_kind_mark(CRAB_KIND_FILE), 0, "a plain file stands alone");
+    assert(crab_kind_mark(CRAB_KIND_LINK) != crab_kind_mark(CRAB_KIND_DIR),
+      "⛔ A LINK AND A DIRECTORY DO NOT LOOK THE SAME — the whole point of the release");
+    # ⚠ AND THE MARKER IS ASCII, WHICH IS NOT A STYLE CHOICE. 0.9.0 made the two faces disagree about
+    # every byte >= 128 — CP437 through kashi, Latin-1 through rekha — so a non-ASCII marker would
+    # render one way on the host build and another on the target.
+    assert(crab_kind_mark(CRAB_KIND_LINK) < 128, "the marker renders identically on both faces");
+    assert(crab_kind_mark(CRAB_KIND_DIR) < 128, "...and so does the directory's");
+    # ⭐ THE KIND COLUMN SAYS SO TOO, and a link outranks the extension: a symlink named `cover.png`
+    # is a Link, and calling it an Image in the one column whose job is to say what a thing IS would
+    # be the `/` marker problem in words.
+    assert(t_streq(crab_kind_str("cover.png", CRAB_KIND_LINK), "Link"), "a link named like an image is a Link");
+    assert(t_streq(crab_kind_str("cover.png", CRAB_KIND_FILE), "Image"), "...and a real one is still an Image");
+    assert(t_streq(crab_kind_str("docs", CRAB_KIND_DIR), "Folder"), "...and a directory is still a Folder");
+
+    # ---- ⛔⛆ EVERY READER OF THE TYPE BYTE, AUDITED — AND THE FIRST AUDIT MISSED SIX ------------
+    # ⛔⛔ THE PROMPT MUST NAME WHAT DIES, AND FOR ONE BUILD IT NAMED THE WRONG THING. The delete
+    # prompt read `load8(rec + CRAB_REC_TYPE) != 0` to mean "directory", so a symlink — 2, not 0 —
+    # produced *"delete this **FOLDER** <name> and everything in it?"*. What actually dies is one
+    # link, and the target is not touched. `crab_del_prompt` exists because of five system binaries
+    # that left an iron box; a prompt that names a folder and its contents over a single link is that
+    # failure with the words rearranged.
+    var dpb = alloc(16 * CRAB_REC_SZ);
+    t_entry(dpb, 0, "notes.txt", CRAB_KIND_FILE);
+    var dpz = alloc(16 * 8);
+    var dpm = alloc(16 * 8);
+    var dpk = alloc(16);
+    var dps = crab_del_prompt("/r", dpb, dpk, 1, 0, 0);
+    assert(dps != 0, "a file's prompt exists");
+    # ⚠ A LINK: its own sentence, and it says what SURVIVES as well as what goes.
+    t_entry(dpb, 0, "shortcut", CRAB_KIND_LINK);
+    var dpl = crab_del_prompt("/r", dpb, dpk, 1, 0, 0);
+    assert(t_contains(dpl, "LINK"), "⛔ A LINK'S PROMPT CALLS IT A LINK");
+    assert_eq(t_contains(dpl, "FOLDER"), 0,
+      "⛔⛔ ...AND NEVER A FOLDER — `!= 0` made it one, over a single link");
+    assert(t_contains(dpl, "target is not touched"), "...and says the target survives");
+    # ⚠ A DIRECTORY still says FOLDER and still says what else goes.
+    t_entry(dpb, 0, "docs", CRAB_KIND_DIR);
+    var dpd = crab_del_prompt("/r", dpb, dpk, 1, 0, 0);
+    assert(t_contains(dpd, "FOLDER"), "a directory's prompt still says FOLDER");
+    assert_eq(t_contains(dpd, "LINK"), 0, "...and never LINK");
+
+    # ⛔⛆ AND THE TRANSFER PLANNER WOULD HAVE TREE-COPIED A SYMLINK. Two call sites — the keyboard
+    # verb and the drag — both read `!= 0` into `cursor_is_dir`, so a link planned as CTREE/MOVEDIR:
+    # `crab_walk_begin` would `mkdir` a destination FOLDER named after the link and walk a tree that
+    # is not there. A link is a single entry and plans SINGLE, like any other one.
+    assert_eq(crab_transfer_plan(0, 0, CRAB_KIND_LINK), CRAB_PLAN_SINGLE,
+      "⛔ A LINK IS COPIED AS ONE ENTRY, never planned as a tree");
+    assert_eq(crab_transfer_plan(1, 0, CRAB_KIND_LINK), CRAB_PLAN_SINGLE, "...and moved as one too");
+    assert_eq(crab_transfer_plan(0, 0, CRAB_KIND_FILE), CRAB_PLAN_SINGLE, "a file is one entry");
+    assert(crab_transfer_plan(0, 0, CRAB_KIND_DIR) != CRAB_PLAN_SINGLE, "...and a directory is not");
+
+    # ⛔⛔ AND THE SEVENTH READER WAS THE DELETE VERB ITSELF — THE WORST ONE IN THE PROGRAM. `d` on a
+    # single entry read `if (ddir != 0)` and handed anything non-zero to `crab_walk_begin(CRAB_OP_DTREE,
+    # …)`, which type-checks NOTHING: it takes the name, builds a path, and the walk readdirs it. A
+    # symlink pointing at a DIRECTORY therefore became the ROOT OF A RECURSIVE DELETE, and what the
+    # walk enumerated through it was the TARGET's contents — files crab was never pointed at.
+    # ⚠ OLDER THAN THE SYMLINK WORK. `crab_stat_one` used to call `stat`, which FOLLOWS a link, so a
+    # link to a directory was already stored as type 1 and already took this branch. Visibility did
+    # not open the hole; the `!= 0` audit is what found it.
+    assert_eq(crab_delete_plan(CRAB_KIND_LINK), CRAB_DEL_ONE,
+      "⛔⛔ A LINK IS UNLINKED, NEVER WALKED — `!= 0` made it the root of a recursive delete");
+    assert_eq(crab_delete_plan(CRAB_KIND_FILE), CRAB_DEL_ONE, "a file is one entry too");
+    assert_eq(crab_delete_plan(CRAB_KIND_DIR), CRAB_DEL_TREE, "...and only a directory recurses");
+
+    # ---- ⛔⛔ THE WALK STILL CANNOT DESCEND INTO A LINK, WHICH IS WHY THE OBVIOUS FEAR IS NOT REAL --
+    # A symlink pointing at an ANCESTOR does not make the recursive walk loop forever, on either
+    # target: it descends only where the type byte says 1, and neither agnos (`ftype == 2` only) nor
+    # the host path (`dt == 4` only) ever sets that for a link — and 0.9.3 writes 2, not 1. The same
+    # one-bit type byte that hid links is what bounded the walk. This assertion is that invariant.
+    assert(CRAB_KIND_LINK != CRAB_KIND_DIR,
+      "⛔ A LINK IS NOT THE VALUE THE WALK DESCENDS ON — no symlink loop is reachable");
+    assert_eq(CRAB_KIND_DIR, 1, "...and the value it descends on is still 1, as every reader assumes");
 
     # =============================================================================================
     test_group("crab — 0.9.2: `Go` — a thin projection over the sidebar's destinations");

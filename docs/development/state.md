@@ -24,8 +24,60 @@
 
 ## Version
 
-**0.9.2 IS CUT** — `VERSION` reads `0.9.2` and the CHANGELOG header agrees, on operator direction,
-2026-09-14. ⚠ 0.9.1 released.
+**0.9.3 IS CUT** — `VERSION` reads `0.9.3` and the CHANGELOG header agrees, on operator direction,
+2026-09-14. ⚠ 0.9.2 released.
+
+⛔⛔ **AND A CONFIRMED DATA-LOSS DEFECT IS OPEN — H1, NOT FIXED HERE.** `crab_walk_reroot_dtree`
+carries its own condition: *"WHY DELETING HERE IS SAFE… rests on one invariant in `crab_walk_begin`:
+that function REFUSES with `EEXIST` if the destination already exists… ⇒ If that guard is ever
+relaxed to allow merging into an existing destination, THIS FUNCTION BECOMES A DATA-LOSS BUG and must
+be deleted in the same change."* **0.8.7 relaxed exactly that guard** — `crab_walk_begin` now reads
+*"THE ROOT MERGES LIKE ANY OTHER DIRECTORY (0.8.7)"* — and the function was not deleted. ⇒ Cancelling
+a copy that MERGED into an existing folder deletes that folder wholesale, **including files crab never
+wrote**. Reproduced by the operator (`tests/zz_h1_repro.tcyr`, since removed):
+`POST-CANCEL precious.txt exists = 0 *** DELETED BY CRAB ***`.
+⇒ **The named fix**: a record flag set in `crab_walk_begin` meaning *crab created this root*, and
+`crab_walk_reroot_dtree` reroots only when it is set. A cancelled MERGE then unlinks the in-flight
+file and leaves the partial merge, which is the honest outcome — the alternative is deleting data the
+operator did not name, which is the failure this project has already paid for once (`/bin`, 2026-09-03).
+
+**0.9.3 contents**: crab can **see a symlink**. ⛔ readdir never could — agnos's
+`ext2_readdir_at_sys` sets byte 63 with `if (ftype == 2) { t = 1; }`, one bit, so a link arrived
+indistinguishable from a file. ⭐ The stat sweep already visits every entry, so `lstat` costs **no
+extra syscall**; the kind goes into the type byte crab already had (2 = link). Marked `@` (ASCII, so
+both faces agree), KIND says **Link**, and the size column shows the link's own size as `ls -l` does.
+⚠ `lstat` first, `stat` as the fallback — `lstat`#102 is **ext2-only** and crab lists FAT volumes.
+⛔⛔ **It found SEVEN broken readers, and one of them was data loss.** The single-entry delete verb
+read `if (ddir != 0)` and handed anything non-zero to `crab_walk_begin(CRAB_OP_DTREE, …)`, which
+type-checks nothing — so a link pointing at a directory became the **root of a recursive delete** and
+the walk went through it into the target. MEASURED: `crab: delete zzlink -> done`, the link still on
+disk, **0 of 3 files left in what it pointed at**. ⚠ Older than the symlink work — `crab_stat_one`
+used to call `stat`, which follows a link, so a link to a directory was already type `1` and already
+took that branch. The other six: the delete **prompt** calling a link a FOLDER *"and everything in
+it"*; the transfer planner tree-copying one at both call sites; Enter doing nothing and saying
+nothing; two thumbnail readers; and `crab_fs_delete` making links undeletable.
+⛔ **The first audit reported itself complete and had missed six of them** — it grepped `== 1` and
+`!= 1`, and the whole `!= 0` family is where the damage was. The second **enumerated all 22 reads of
+`CRAB_REC_TYPE`** and traced each to its decision. ⇒ Widening a field is only safe where every reader
+agrees how to ask, and the way to know they agree is to list them.
+⇒ Three decisions moved out of the `#ifdef` into functions the suite can drive: **`crab_delete_plan`**,
+**`crab_transfer_plan`** (now takes the kind, not a boolean each caller derived), and `crab_kind_mark`.
+⭐ And the obvious fear is not real: a link cannot make the walk loop, because the walk descends only
+on `1` and a link is `2` — the same one bit that hid links is what bounded the walk. ⇒ **Delete and
+move PRESERVE a link; copy DEREFERENCES** (as `cp -r` does), recorded as **ADR 0004**. Recreate is
+possible (`symlink`#63 + `readlink`#70, both with peers) and deferred: both are ext2-only and crab
+copies between volumes. **2345 / 0**, six mutations.
+⭐⭐ **AND AN IRON ARM** — `crab-symlink-test.py` (new): a real ext2 symlink via `mkfs.ext2 -d`, driven
+by keyboard, and the image read back with **`debugfs`** afterwards rather than crab asked its own
+opinion. PASSes against the fix, reports the data loss above against the planted defect. New oracle
+`crab: prompt <text>` — the prompt is the last thing before an irreversible verb and nothing outside
+the screen knew what it said.
+⛆ **And the render gate was broken for most of the release**: `CRAB_KIND_*` were declared in
+`app.cyr`, which INCLUDES `ui.cyr`, so `src/render_test.cyr` — which includes `ui.cyr` alone to
+enforce that the render path never calls up — stopped compiling. The gate worked; nothing ran it,
+because `cyrius test` discovers `tests/*.tcyr` and does not build it. Values moved to `path.cyr`'s
+`CrabRec`, beside `CRAB_REC_TYPE`. ⇒ **Build `render_test.cyr` explicitly; a green suite is not
+evidence it compiles.**
 
 **0.9.2 contents — `Go` is filled**, empty on the bar since 0.8.0. Its rows are every sidebar
 destination, picked through **one navigator** (`synth_goto`, mirroring `synth_u`) that the sidebar's
@@ -783,8 +835,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,084,744 B** *(0.9.2; 1,080,480 at 0.9.1, 1,076,240 at 0.9.0)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,129,760 B** *(0.9.2; 1,121,344 at 0.9.1, 1,121,176 at 0.9.0)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,084,832 B** *(0.9.3; 1,084,744 at 0.9.2, 1,080,480 at 0.9.1)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,129,864 B** *(0.9.3; 1,129,760 at 0.9.2, 1,121,344 at 0.9.1)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain

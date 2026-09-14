@@ -747,6 +747,27 @@ fn crab_drag_targets(frompane, topane): i64 {
     return 1;
 }
 
+# @public — what should `d` actually DO to ONE entry? `CRAB_DEL_TREE` or `CRAB_DEL_ONE`.
+#
+# ⛔⛔ THIS IS THE MOST DESTRUCTIVE BRANCH IN THE PROGRAM AND IT ASKED THE WRONG QUESTION. The delete
+# verb read `if (ddir != 0)` on the raw type byte and sent anything non-zero into
+# `crab_walk_begin(CRAB_OP_DTREE, …)` — a RECURSIVE delete rooted at that entry. `crab_walk_begin`
+# type-checks nothing: it takes the name, builds a path, and the walk readdirs it.
+# ⇒ So a symlink POINTING AT A DIRECTORY became the root of a recursive delete, and what the walk
+# enumerates through it is the TARGET's contents — files crab was never pointed at and the operator
+# never saw. That is data loss through a link, and it is the exact failure ADR 0004 claims cannot
+# happen ("delete and move PRESERVE them… `unlink` removes the LINK, never its target").
+# ⚠ AND IT IS OLDER THAN THE SYMLINK WORK, not a regression from it. Before the type byte had a third
+# value, `crab_stat_one` called `stat`, which FOLLOWS a link — so a link to a directory was already
+# stored as type 1 and already took this branch. Making links visible did not open this hole; it made
+# it findable. The `!= 0` audit is what found it.
+# ⇒ ONLY A DIRECTORY IS A TREE. Everything else — file, link, anything a later type byte adds — is
+# one entry and goes to `crab_fs_delete`, which unlinks it and leaves whatever it pointed at alone.
+fn crab_delete_plan(kind): i64 {
+    if (kind == CRAB_KIND_DIR) { return CRAB_DEL_TREE; }
+    return CRAB_DEL_ONE;
+}
+
 # @public — what should `c` / `m` actually DO? One of the `CRAB_PLAN_*` answers.
 #
 # ⛔⛔ THIS EXISTS BECAUSE THE DECISION IT REPLACES WAS UNREACHABLE BY EVERY TEST crab HAS. It lived
@@ -768,9 +789,18 @@ fn crab_drag_targets(frompane, topane): i64 {
 # refused there by `crab_copy_begin`'s `EISDIR` guard, which `crab_queue_advance` skips past. Making
 # a mark mean "recurse" would make one keystroke mean two very different amounts of work depending
 # on data the operator cannot see from the row.
-fn crab_transfer_plan(is_move, marked, cursor_is_dir): i64 {
+fn crab_transfer_plan(is_move, marked, cursor_kind): i64 {
     if (marked > 0) { return CRAB_PLAN_QUEUE; }
-    if (cursor_is_dir == 0) { return CRAB_PLAN_SINGLE; }
+    # ⛔⛆ IT TAKES THE **KIND**, NOT A BOOLEAN, AND 0.9.3 IS WHY. The parameter was `cursor_is_dir`
+    # and both call sites computed it as `load8(rec + CRAB_REC_TYPE) != 0` — correct while the type
+    # byte had two values, and wrong the moment it had three: a symlink (2) is not 0, so a link
+    # planned as CTREE/MOVEDIR and `crab_walk_begin` would `mkdir` a destination FOLDER named after
+    # it and walk a tree that is not there.
+    # ⇒ The conversion moved INTO the decision. Both call sites are inside the agnos `#ifdef` where
+    # no host test can reach them, so a boolean they each had to derive correctly was two chances to
+    # derive it wrong; a kind the function classifies itself is one chance, in a function the suite
+    # can drive. ⚠ Only a DIRECTORY is a tree — a link is one entry, like a file.
+    if (cursor_kind != CRAB_KIND_DIR) { return CRAB_PLAN_SINGLE; }
     # ⛔ NO `CRAB_OP_MTREE` EXISTS — the walk kinds are IDLE/COPY/MOVE/CTREE/DTREE — so there is no
     # source-removing tree walk to dispatch to, and running a copy while calling it a move is not an
     # answer. ⭐ BUT THAT ONLY BINDS THE CROSS-FILESYSTEM CASE (0.8.2): within one filesystem a
@@ -1497,6 +1527,8 @@ enum CrabFs {
 # ⚠ What `c` / `m` resolves to, as an answer the suite can assert on rather than a shape buried in
 # an agnos-only key branch. See `crab_transfer_plan`.
 enum CrabPlan {
+    CRAB_DEL_ONE        = 0;   # unlink/rmdir this one entry — a file, or a LINK (never its target)
+    CRAB_DEL_TREE       = 1;   # a directory: recurse, and it is not undoable
     CRAB_PLAN_QUEUE     = 0;   # marks outrank the cursor — transfer the marked set
     CRAB_PLAN_TREE      = 1;   # nothing marked, cursor on a folder, COPY — recurse
     CRAB_PLAN_SINGLE    = 2;   # nothing marked, cursor on a file — the single-entry path
@@ -1572,7 +1604,15 @@ fn crab_fs_delete(dir, name, is_dir, pathscr): i64 {
     var l = crab_fs_path(pathscr, dir, name);
     if (l < 0) { return l; }
     var rc = 0;
-    if (is_dir != 0) { rc = crab_fs_rmdir_raw(pathscr, l); }
+    # ⛔⛆ `== CRAB_KIND_DIR`, NOT `!= 0`, AND 0.9.3 IS WHY. The type byte was two-valued and this read
+    # it as "not a file"; the moment a third value existed (2 = symlink) that sent every LINK to
+    # `rmdir`, which refuses a non-directory — so a link would have become **undeletable**, failing
+    # with a system error against a name the operator can see and select.
+    # ⚠ AND `unlink` IS THE RIGHT CALL FOR A LINK, which is the whole reason this is a one-line fix
+    # rather than a new branch: unlinking a symlink removes the LINK, never its target. That is the
+    # POSIX rule and agnos's `unlink`#30 follows it — the kernel's own note records that #30 "refuses
+    # only directories" and that the ELOOP fixture `/lp` removes happily.
+    if (is_dir == CRAB_KIND_DIR) { rc = crab_fs_rmdir_raw(pathscr, l); }
     else { rc = crab_fs_unlink_raw(pathscr, l); }
     if (rc < 0) { return CRAB_FS_ESYS; }
     return CRAB_FS_OK;
@@ -2353,6 +2393,49 @@ fn crab_sort_needs_stats(mode): i64 {
 
 # stat ONE entry into sizes[i] / mtimes[i]. A stat failure — or a join that would not fit — stores -1
 # in both, which is the honest "unstattable" answer and is distinct from the -2 pending marker.
+# =================================================================================================
+# 🔗 SEEING A SYMLINK (0.9.3)
+# =================================================================================================
+#
+# ⛔⛆ readdir CANNOT TELL crab A LINK IS A LINK, AND THAT IS A KERNEL FACT RATHER THAN AN OVERSIGHT.
+# `ext2_readdir_at_sys` writes a 64-byte record and sets byte 63 with
+# `var t = 0; if (ftype == 2) { t = 1; }` — one bit, DIR or not — so `EXT2_FT_SYMLINK` arrives
+# indistinguishable from a regular file. The listing has never had the information to show.
+#
+# ⭐⭐ BUT THE STAT SWEEP ALREADY VISITS EVERY ENTRY, so the answer costs **no extra syscall at all**.
+# `crab_stat_batch` walks 32 entries per idle tick until none is left pending, whatever the sort mode
+# — the synchronous storm in `crab_stat_for_listing` is only for a SIZE or MTIME sort, which needs
+# the data to order anything. ⇒ The sweep calls `lstat` instead of `stat` and keeps the mode.
+#
+# ⭐ AND THE ANSWER GOES IN THE TYPE BYTE crab ALREADY HAS. It held 0 = file, 1 = dir; it now holds
+# 2 = symlink. Every existing `== 1` test is untouched — including the one that matters most, the
+# recursive walk's descend gate, so a link can no more be recursed into after this than before.
+#
+# ⛔⛔ AND THAT GATE IS WHY THE OBVIOUS FEAR IS NOT REAL. A symlink pointing at an ANCESTOR does not
+# make `crab_walk_*` recurse forever, on either target: the walk descends only where the type byte
+# says 1, and neither agnos (`ftype == 2` only) nor the host path (`dt == 4` only) ever sets it for a
+# link. The one-bit type byte that hid links is the same one that bounded the walk. ⚠ `CRAB_PATH_MAX`
+# bounds it a second time — `crab_join_n` refuses at depth 127 before `CRAB_WALK_DEPTH_MAX` can fire.
+# ⇒ `CRAB_KIND_FILE` / `_DIR` / `_LINK` are declared in `src/path.cyr`'s `CrabRec`, beside
+# `CRAB_REC_TYPE` itself. They lived HERE for one release and it broke the render gate silently:
+# `app.cyr` includes `ui.cyr`, so anything declared here is invisible to the render path that has to
+# name these values, and `src/render_test.cyr` — which includes `ui.cyr` alone to enforce exactly
+# that layering — stopped compiling. See the note at the declaration.
+
+# @public — what kind of entry does a stat `mode` describe? -> a CRAB_KIND_*.
+#
+# ⚠ THE PURE HALF, LIFTED SO THE SUITE CAN REACH IT. Everything that CALLS it is inside the agnos
+# `#ifdef` — `crab_stat_one`'s whole body is, so on the host it stats nothing and stores -1 — which
+# means the decision is testable here and the syscall is gated by QEMU, exactly as the listing is.
+# ⚠ POSIX top nibble: 0xA000 symlink, 0x4000 directory, 0x8000 regular. Anything else (fifo, socket,
+# device) is not a directory and not a link, and crab has no third thing to say about it.
+fn crab_stat_kind(mode): i64 {
+    var t = mode & 0xF000;
+    if (t == 0xA000) { return CRAB_KIND_LINK; }
+    if (t == 0x4000) { return CRAB_KIND_DIR; }
+    return CRAB_KIND_FILE;
+}
+
 fn crab_stat_one(path, buf, i, sizes, mtimes, pathscr, statbuf): i64 {
     var rec = buf + i * CRAB_REC_SZ;
     var sz = 0 - 1;                                  # stat-failure default
@@ -2361,9 +2444,29 @@ fn crab_stat_one(path, buf, i, sizes, mtimes, pathscr, statbuf): i64 {
     # someone else's size and mtime against this row. Unstattable is the honest answer.
     var jl = crab_join_n(pathscr, CRAB_PATH_MAX, path, rec);
     #ifdef CYRIUS_TARGET_AGNOS
-    if ((jl >= 0) && (sys_stat(pathscr, strlen(pathscr), statbuf) == 0)) {
+    # ⭐⭐ `lstat` FIRST, `stat` AS THE FALLBACK (0.9.3), and the fallback is not belt-and-braces —
+    # ⛔ **`lstat`#102 is ext2-ONLY**: FAT and exFAT cannot represent a symlink and the kernel returns
+    # -1 there rather than succeeding on a surface `stat`#33 does not have. crab lists FAT volumes
+    # (the sidebar shows them), so an lstat-only sweep would leave every entry on a FAT volume
+    # unstatted — no size, no date, for a whole disk. ⇒ Ask the question that can distinguish a link,
+    # and fall back to the one that always answers.
+    # ⚠ A FALLBACK IS NOT A LOSS HERE: a filesystem that cannot hold a symlink cannot have one to
+    # miss, so `stat` on FAT is the complete answer rather than a degraded one.
+    var lok = 0;
+    if (jl >= 0) {
+        if (sys_lstat(pathscr, strlen(pathscr), statbuf) == 0) { lok = 1; }
+        else { if (sys_stat(pathscr, strlen(pathscr), statbuf) == 0) { lok = 1; } }
+    }
+    if (lok == 1) {
         sz = load64(statbuf + STAT_SIZE);            # agnos stat struct §4.1 — named, not a literal
         mt = load64(statbuf + STAT_MTIME);           # unix seconds
+        # ⭐ THE KIND GOES BACK INTO THE RECORD crab ALREADY HAS. ⚠ Only a LINK is written: the
+        # directory bit came from readdir and is authoritative there, and overwriting it from a mode
+        # would make two sources of one fact — the thing this file spends most of its comments
+        # avoiding. A link is the one kind readdir cannot express.
+        if (crab_stat_kind(load64(statbuf + STAT_MODE)) == CRAB_KIND_LINK) {
+            store8(rec + CRAB_REC_TYPE, CRAB_KIND_LINK);
+        }
         # ⛔⛔ ONE CONSOLE LINE PER ENTRY IS A PER-NAVIGATION COST, AND THE CAP JUST GREW 8x.
         # This printed unconditionally for every entry and allocated 24 B for every entry — with
         # the old 32-entry cap that was 32 lines; on a real `/` (122 entries, iron 2026-08-30) it
