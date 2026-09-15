@@ -185,10 +185,24 @@ happened rather than showing a blank square.
   agnos **`mountlist`#104** (0.8.1) for enumeration and `statfs`#103 for capacity. Grid, gallery and
   columns all ship — see `g` above. ⇒ Under-claiming is the same failure as over-claiming, and this section's
   own header says so.
-- **The middle mouse button does nothing.** Right-click opens the context menu over the row under
-  the pointer (0.8.5; it arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors
-  forward every button as left), left picks and dismisses, and a press with the middle button is
-  consumed and ignored — stated rather than left to be discovered.
+- **The middle mouse button marks the row under the pointer (0.9.5)** — the same thing `Space` does,
+  aimed with the mouse instead of the cursor. It is an *alias* of that key, not a verb of its own.
+  ⛔ It is deliberately the safest gesture on the table: X11 numbers buttons 1/2/3 as
+  left/**middle**/right, so an operator with X11 muscle memory aims middle where crab's **right**
+  lives — and right opens a menu with `Delete` in it. A mark is self-inverse, touches nothing on
+  disk, and costs one more press to undo.
+  ⚠ Middle also **dismisses** an open popup or a revealed menu bar, and has since 0.8.5 — this
+  section previously said the button did nothing, which was never true. It is still refused on a
+  popup row, a bar cell, the door, the A/B strip and the sidebar: every surface where the thing
+  underneath is a verb. Right-click opens the context menu over the row under the pointer (0.8.5; it
+  arrives as a right-click only on aethersafha ≥ 0.16.24 — older compositors forward every button as
+  left). **Measured on QEMU, 2026-09-14**: button 3 reaches crab, the first time it has been observed
+  anywhere in this stack.
+- **A popup's highlight follows the pointer (0.9.5).** Hovering a context-menu or menu-bar row moves
+  the selection, so the mouse and `Enter` agree about what is selected. ⚠ It does not engage until
+  the pointer has *moved* — the popup is placed at the pointer and may be flipped above it, so the
+  cursor that opened the menu can be sitting over a row nobody aimed at. Sweeping off the popup
+  restores whatever the menu opened on, rather than leaving `Enter` armed on the last row crossed.
 - **The compositor's chrome keys are Ctrl chords (aethersafha ≥ 0.16.25): Ctrl+Q quits the desktop,
   Ctrl+Tab cycles windows, Ctrl+F4–F10 close/maximize/minimize/move.** On an OLDER compositor bare
   Esc/Tab/F4–F10 were claimed and `Esc` ended the desktop — measured on QEMU 2026-09-13, fixed the

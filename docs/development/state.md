@@ -24,9 +24,44 @@
 
 ## Version
 
-**0.9.4 IS CUT** — `VERSION` reads `0.9.4` and the CHANGELOG header agrees, 2026-09-14.
-⚠ 0.9.3 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this;
-the operator uses git continuously and this line rots. **Next: `0.9.5 · Pointer polish`.**
+**0.9.5 IS CUT** — `VERSION` reads `0.9.5` and the CHANGELOG header agrees, 2026-09-14.
+⚠ 0.9.4 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this;
+the operator uses git continuously and this line rots.
+**Next: the daimon ruling, then `0.10.0 · The index` (M7).** 0.9.x is COMPLETE.
+
+**0.9.5 contents — pointer polish, and the roadmap's premise was wrong.** The item read *"the middle
+mouse button does nothing"*; it has **DISMISSED popups since 0.8.5** — both `CRAB_PA_DISMISS` returns
+are button-blind and never test `btn` — and three doc sites claimed otherwise while no test pinned the
+one behaviour it had. ⭐⭐ **MIDDLE NOW MARKS the row under the pointer**, an ALIAS of `Space`
+(`crab_pa_accel` answers `0x2C`, the arm synthesises that one key through the one binding table, so
+there is no second `crab_mark_toggle` call site) — and *"middle is Space, not `d`"* is a HOST
+assertion instead of a literal inside the agnos `#ifdef`. ⛔⛔ Deliberately the safest gesture
+available: X11 numbers buttons left/**middle**/right, so X11 muscle memory aims middle where crab's
+RIGHT lives and `Delete` is a row in the menu right opens — a mark is self-inverse and moves nothing.
+Middle stays refused on a popup row, a bar cell, the door, the strip and the sidebar.
+⭐⭐ **THE POPUP HIGHLIGHT FOLLOWS THE POINTER.** ⛔ It does not engage until the pointer has MOVED:
+the popup is placed AT the pointer and `dh_place_at_point` FLIPS it above the anchor when it would
+overhang (which at 380x220 it usually does), so the cursor that opened the menu sits mid-list over a
+row nobody aimed at. ⛔⛆ And `-1` from `dh_list_index_at` means BOTH "inert row" and "outside the
+list": inside-on-inert HOLDS (the keyboard's rule), OUTSIDE RESTORES the open-time choice — otherwise
+sweeping off a menu leaves `Enter` armed on the last row crossed, and the natural exit is
+down-and-right through `Delete`.
+⛔⛆ **Fixed: the context menu opened on an EMPTY pane with NO HIGHLIGHT AT ALL** — `menu_sel = 0` is
+`CRAB_MI_OPEN`, which `crab_menu_enabled` refuses when `count <= 0`, so `dh_list_select` refused the
+inert row and `Enter` did nothing. MEASURED: `enabled(OPEN,0) = 0`, first enabled = 5. `crab_menu_first`
+is the twin `crab_mb_item_first` has had since 0.8.6; fixed at BOTH open sites.
+⛆ Cut four false claims in `crab_mlst`'s comment (all falsified by 0.8.5, left standing four releases)
+and corrected the README. **2421 / 0**, five mutations; one expiry fired and was INVERTED
+(`"a pane, middle: nothing yet"` → `CRAB_PA_MARK`).
+⭐⭐ **QEMU `crab-button-test.py` PASSES, four arms** — and **button 3 is observed for the FIRST TIME
+anywhere in this stack**: mask 4 → `crab: mark by middle click`. The hover trace
+`menu 3→2→1→0→1→2→3→4→5→0` shows the sweep up a flipped menu, back down all six rows, and the final
+`→0` as the pointer leaves and `Enter` means `Open` again.
+⛔ **Three harness lessons, each of which gave a WRONG answer first**: a `-2000` home with 0.3 s
+settles found nothing (needs `-4000` and 0.8 s — the pin needs its own frame) and would have produced
+a false cross-repo blocker; aethersafha's diagnostic is ONE-SHOT so press ORDER decides what it can
+tell you; and a popup left open by one probe decides the next in the wrong branch (middle with a menu
+up is DISMISS, not MARK).
 
 **0.9.4 contents — the preview shows the SELECTION, and costs nothing.** The roadmap asked for one
 thing (*"the 64 KiB dimension+EXIF read is on the idle tick"*) and moving it exposed that the whole

@@ -1,4 +1,4 @@
-# Handoff — **0.9.3: crab sees a symlink; a data-loss defect FOUND AND FIXED, and H1 still open.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⛔⛔⛔ **READ THIS FIRST — H1, CONFIRMED, NOT FIXED.** Cancelling a copy that **merged** into an
 > existing folder deletes that folder wholesale, **including files crab never wrote**. Reproduced by
@@ -18,9 +18,76 @@
 > `h5probe.cyr`, `probe_h7.cyr` in the tree) and two concurrent edits to a cancel path is exactly
 > where that goes wrong.
 >
-> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.4; 0.9.3 released (tagged).** ⛔ commit, tag and push are the
+> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.5; 0.9.4 released (tagged).** ⛔ commit, tag and push are the
 > operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
-> **Next: `0.9.5 · Pointer polish`.**
+> **0.9.x IS COMPLETE. Next: the daimon ruling, then `0.10.0 · The index` (M7).**
+>
+> ## ⛔⛔ READ THIS FIRST — TWO LIVE DATA-LOSS DEFECTS IN THE DRAG PATH, FOUND IN 0.9.5, NOT FIXED
+>
+> They are **not** pointer polish and were deliberately left out of that release rather than bundled
+> (CLAUDE.md: *"ONE change at a time"*). Both are confirmed by reading; neither is hypothetical.
+> ⇒ **`dragging` / `drag_pane` are touched in exactly three places** — the motion arm, the press arm
+> and the release arm. **Nothing in the key dispatch consults drag state at all.** That single fact
+> is what both defects rest on.
+>
+> 1. ⛔⛆ **THE DROP HAS NO MODAL GATE — the 0.8.5 data-loss path, one input kind over.** The release
+>    is gated on the LEFT button and nothing else: neither `crab_pointer_blocked` nor
+>    `crab_pointer_modal` is asked, though the click and the wheel both ask. Steps: left-press a row
+>    in pane 0 and hold; move 4 px (`dragging = 1`); press `d` — the key dispatch is not gated on
+>    drag state, so `confirm_del = 1` and the status line asks *"delete … and everything in it?"*;
+>    move into pane 1; release. The drop executes, moves the file, **relists BOTH panes**,
+>    `crab_mark_clear`s both and CLAMPS `sel_l`/`sel_r`. Now `y` answers a prompt about an entry that
+>    is no longer selected. ⇒ **The prompt names one thing and the delete takes another** — precisely
+>    what 0.8.0 closed for clicks and 0.8.5 for the wheel.
+>    ⇒ Fix: ask the predicate that already exists. `crab_pointer_blocked(confirm_del, edit_open,
+>    crab_op_waiting())` is pure, in ui.cyr, and the suite already drives it.
+> 2. ⛔⛆ **`drag_row` IS INVALIDATED BY THE KEYBOARD MID-DRAG.** Enter or Backspace can descend or
+>    ascend the SOURCE pane while the button is held. The drop then indexes `drag_row` against the
+>    NEW listing — the bounds check passes on any listing long enough — and captures a name from a
+>    directory the operator never dragged from. Same class as the double-click bug the code already
+>    fixed by consuming the pair: **a row index is identity only while the listing holds still.**
+> 3. ⚠ **And nothing disarms a drag except a left release, which the compositor may never deliver.**
+>    `ae_ptr_forward` re-derives the window per event and drops a release outside the content rect,
+>    so dragging onto the titlebar and releasing leaves `dragging = 1` with no button down.
+>
+> ⛔ **H1 is still open too** — see below. Two data-loss items and H1 make three; none is mine to
+> schedule.
+>
+> ## 0.9.5 — the middle button marks, and a popup's highlight follows the pointer
+>
+> ⚠ **THE ROADMAP'S PREMISE WAS WRONG AND CHECKING IT WAS THE FIRST JOB.** *"The middle mouse button
+> does nothing"* — it has **DISMISSED popups since 0.8.5**: both `CRAB_PA_DISMISS` returns are
+> button-BLIND and never test `btn`. Three doc sites said otherwise in prose; no test pinned it.
+> - ⭐⭐ **MIDDLE MARKS the row under the pointer**, an **alias of `Space`** — `crab_pa_accel` answers
+>   `0x2C` and the arm synthesises that one key through the one binding table, so there is no second
+>   `crab_mark_toggle` call site, and *"middle is Space, not `d`"* is a HOST assertion rather than a
+>   literal inside the agnos `#ifdef`.
+>   ⛔⛔ Chosen as the SAFEST binding available: X11 is left/**middle**/right, so X11 muscle memory
+>   aims middle where crab's RIGHT lives — and `Delete` is literally a row in the menu right opens.
+>   A mark is self-inverse. Middle stays refused on a popup row, a bar cell, the door, the strip and
+>   the sidebar. ⚠ The row is GUARDED, not clamped: `crab_hit` records HEADERS, which answer row -1
+>   with `pane_hit` 1, and `-1 < ln` is true.
+> - ⭐⭐ **THE HIGHLIGHT FOLLOWS THE POINTER**, armed only after it has MOVED. ⛔ The popup is placed
+>   AT the pointer and `dh_place_at_point` FLIPS it above the anchor when it would overhang — which
+>   at 380x220 it usually does — so the cursor that opened the menu sits mid-list over a row nobody
+>   aimed at. ⛔⛆ And `-1` means BOTH "inert row" and "outside the list": inside-on-inert HOLDS (the
+>   keyboard's rule), OUTSIDE RESTORES the open-time choice — else sweeping off a menu leaves `Enter`
+>   armed on the last row crossed, and the natural exit is down-and-right through `Delete`.
+> - ⛔⛆ **Fixed: the context menu opened on an EMPTY pane with NO HIGHLIGHT AT ALL.** `menu_sel = 0`
+>   is `CRAB_MI_OPEN`, refused by `crab_menu_enabled` when `count <= 0`; `dh_list_select` refuses an
+>   inert row. MEASURED: `enabled(OPEN,0) = 0`, first enabled = 5. `crab_menu_first` is the twin
+>   `crab_mb_item_first` has had since 0.8.6 — fixed at BOTH open sites.
+>
+> **Suite 2421 / 0**, render_test 53 / 0, five mutations caught, one expiry INVERTED.
+> Host **1,093,184 B** · agnos **1,138,312 B**.
+> ⭐⭐ **QEMU `crab-button-test.py` PASSES (4 arms)** — and **button 3 is observed for the first time
+> anywhere in this stack**. Hover trace: `menu 3→2→1→0→1→2→3→4→5→0` — up a flipped menu, back down
+> all six rows, and the final `→0` as the pointer leaves and `Enter` means `Open` again.
+> ⛔ **Three harness lessons, each of which gave a WRONG answer first**: a `-2000` home with 0.3 s
+> settles found nothing (needs `-4000` and **0.8 s per move** — the pin needs its own frame) and on
+> that evidence I would have filed a FALSE cross-repo blocker; aethersafha's diagnostic is ONE-SHOT,
+> so press ORDER decides what it can tell you; and a popup left open by one probe decides the next in
+> the wrong branch (middle with a menu up is DISMISS, not MARK).
 >
 > ## 0.9.4 — the preview shows the SELECTION, and costs nothing
 >
@@ -127,7 +194,7 @@
 > `crab_delete_plan` and `crab_transfer_plan` and proven in the suite; the consequence needed iron.
 > ⚠ **The 0.9.2 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.2 cut: `Go` is filled, and an open menu stops acting on the pane underneath it.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.2**; **0.9.1 released**. ⛔ commit,
 > tag and push are the operator's; `git log --oneline -3` is the authority.
@@ -174,7 +241,7 @@
 > independent and can be reordered freely.
 > ⚠ **The 0.9.1 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.1 cut: the door — the menu row has a second way in.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.1**; **0.9.0 released**. ⛔ the
 > commit, the tag and the push are the operator's; `git log --oneline -3` is the authority.
@@ -217,7 +284,7 @@
 > keyboard route, capped by `crab_mb_drop_fit`). 0.9.2–0.9.5 are all independent.
 > ⚠ **The 0.9.0 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.0 cut: A REAL FACE — crab draws in Liberation Sans on the target.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.0**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits while work is in flight — `git log --oneline -3` is
@@ -266,7 +333,7 @@
 > needed is here. See [the ladder to 1.0](roadmap.md); every entry there is a version.
 > ⚠ **The 0.8.11 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.11 cut: the 6.6.4 stack, and both blockers on a real face cleared within a day.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.8.11**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits WHILE work is in flight — `git log --oneline -3` is
@@ -311,7 +378,7 @@
 > 50 / 0. Host **1,071,688 B** · agnos **1,116,632 B**.
 > ⚠ **The 0.8.10 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.10 cut: every width derived from the font, proved against a proportional face — and the two things that actually block a real one.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** ⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED**
 > by the operator (`22f7f53` / `60cc05b` / `eeb6a8b`) — the three-releases-uncommitted backlog that
@@ -372,7 +439,7 @@
 > `#ifdef`.
 > ⚠ **The 0.8.9 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.9 cut: Shift — capital letters in names, and a sheet that can accept its own language.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7, 0.8.8 and 0.8.9 are all CUT and none is committed** — `VERSION` reads
@@ -421,7 +488,7 @@
 > itself is now **blocked on agnos and dhancha**. See [the ladder to 1.0](roadmap.md).
 > ⚠ **The 0.8.8 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.8 cut: the COLUMNS view, one reader for the 9 px advance, and a roadmap with an order.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7 and 0.8.8 are both CUT and neither is committed** — `VERSION` reads 0.8.8,
@@ -478,7 +545,7 @@
 > claim it can make).
 > ⚠ **The 0.8.7 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.7 cut: a collision you can answer, a flag surface, `u` refreshes, chrome keys on Ctrl, and crab proven on a real kernel.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 is the last release** (`249279f`, on the remote). `[Unreleased]` holds two things and no
@@ -532,7 +599,7 @@
 > the CHANGELOG's harvested-deferral count).
 > ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.6 cut: `View` is filled, and M6's six interaction gaps are all closed.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 IS CUT on operator direction** — `VERSION` = 0.8.6, CHANGELOG `[0.8.6]`, every gate and
@@ -569,7 +636,7 @@
 > milestones name and the manifest declares nowhere.
 > ⚠ **The 0.8.5 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.8.5 cut: the 6.6.2 stack, the pointer reaches every surface, the sidebar knows where you are.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.5 IS CUT on operator direction** — `VERSION` = 0.8.5, CHANGELOG `[0.8.5]`, every gate and
@@ -626,7 +693,7 @@
 > change). ⚠ **The 0.8.3 block below is two releases stale but its reasoning is current**; the
 > `Open` lesson — check the caller's POSITION, not just its logic — is the one to carry.
 
-# Handoff — **0.8.3 in preparation: the M6 interaction gaps, and a menu verb that was dead.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **0.8.3, updated 2026-09-09. `Open` WAS DEAD ON BOTH MENU SURFACES, IN EVERY BUILD THAT SHIPPED
 > EITHER.** The context menu and the menu bar both answer Enter by rewriting `u` to the chosen
@@ -652,7 +719,7 @@
 > ⚠ **aethersafha was left exactly as found** — no hand-edited `lib/`, no unverified push. Do not
 > guess a button number either; no repo defines one and X11's order is the wrong default here.
 
-# Handoff — **0.8.2: the audit backlog's correctness bugs, and a walk that never ran.**
+# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
 
 > ⭐⭐ **READ THIS FIRST, BECAUSE IT IS THE TRANSFERABLE PART: RECURSIVE COPY AND RECURSIVE DELETE HAD
 > NEVER RUN IN ANY SHIPPED BUILD, AND THE SUITE WAS GREEN THE WHOLE TIME.** `src/main.cyr`'s idle

@@ -225,13 +225,13 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.2 · `Go`** | **jump to a place from the menu bar** — every sidebar destination, picked through one navigator | — | **shipped** ⭐ *and it closed a key leak worse than the one recorded* |
 | ✅ | **0.9.3 · Symlinks** | **see that a link is a link** — marked `@`, KIND says Link — and know what each verb does with one | — | **shipped** ([ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)) |
 | ✅ | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry — and see the picture of the file you are actually on | — | **shipped** ⛔ *and it found TWO live wrong-on-screen defects: the thumbnail lagged one file behind, and CAMERA persisted onto text files* |
-| | **0.9.5 · Pointer polish** | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
+| ✅ | **0.9.5 · Pointer polish** | **mark a row with the middle button**, and see a popup's highlight follow the pointer | — | **shipped** ⛔ *and the premise was wrong: middle had DISMISSED popups since 0.8.5, in three doc sites' teeth* |
 | ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
 | | **0.10.0 · The index** (M7) | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.5 is ungated** — one change, nothing downstream waits on it. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
+⭐ **0.9.x IS COMPLETE.** What remains before 1.0 is **the daimon ruling**, then 0.10.0 → 0.11.0. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
 ### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day
@@ -455,8 +455,20 @@ promising the AI arc** — open since the roadmap was written.
   *"the shifted row is symbols crab does not need"* — while crab needed two of them by name. The row
   is filled, all ten, and the suite pins `#` and `*` against `crab_batch_name` itself rather than
   against two literals, so the keyboard and the language cannot drift apart.
-- **The middle mouse button does nothing**, and pointer MOTION does not move a popup's highlight.
-  ⇒ **0.9.5** — do both, or write both down as deliberate.
+- ✅ **Pointer polish — CLOSED (0.9.5), and the premise was wrong.** The middle button never "did
+  nothing": both `CRAB_PA_DISMISS` returns are button-BLIND, so it has closed popups since 0.8.5 —
+  unasserted, while three doc sites said the opposite. It now also **marks the row under the pointer**,
+  an ALIAS of `Space` rather than a verb of its own. ⛔ Chosen as the safest binding available: X11 is
+  left/**middle**/right, so X11 muscle memory aims middle where crab's RIGHT lives and `Delete` is a
+  row in that menu; a mark is self-inverse. **Button 3 observed on iron for the first time anywhere in
+  this stack.**
+  ⭐ The popup highlight follows the pointer, armed only after it MOVES (the popup is placed at the
+  cursor and may FLIP above it), and OUTSIDE the popup restores the open-time choice rather than
+  holding the last row swept.
+- ✅ **And it fixed a live defect neither half was aimed at**: the context menu opened on an EMPTY pane
+  with **no highlight at all** — `menu_sel = 0` is `CRAB_MI_OPEN`, which is greyed when the pane is
+  empty, so `dh_list_select` refused it and `Enter` did nothing. `crab_menu_first` is the twin the
+  menu bar's drop-down has had since 0.8.6.
 - **Compositor-side focus is a left-button gesture**, so a right-click reaches an unfocused crab
   without focusing its window — aethersafha's policy, not crab's.
 

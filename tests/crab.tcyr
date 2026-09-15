@@ -2936,6 +2936,7 @@ fn main() {
     t_preview();
     t_preview_dims();
     t_pv_094();
+    t_pointer_095();
     t_thumbnails();
     t_exif();
     t_gridview();
@@ -3312,6 +3313,103 @@ fn t_preview(): i64 {
 #
 # Every decision below used to live inside `#ifdef CYRIUS_TARGET_AGNOS` in main.cyr, or inline in a
 # render block, where no host test could reach it. Two of them were WRONG and shipping.
+# ⭐⭐ 0.9.5 — THE POINTER POLISH: the middle button, and a highlight that follows the pointer.
+fn t_pointer_095(): i64 {
+    test_group("crab — 0.9.5: the middle button, and a popup highlight that follows the pointer");
+    var L = CRAB_BTN_LEFT; var R = CRAB_BTN_RIGHT; var M = CRAB_BTN_MIDDLE;
+
+    # ---- ⛔⛆ "THE MIDDLE BUTTON DOES NOTHING" WAS NEVER TRUE ------------------------------------
+    # Both CRAB_PA_DISMISS returns are button-BLIND — they never test `btn`. So a middle press off
+    # an open popup, or off a revealed bar, has closed it since 0.8.5: the one middle-button
+    # behaviour crab had, asserted NOWHERE, while three doc sites claimed the opposite in prose.
+    assert_eq(crab_pointer_action(M, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS,
+      "⛔⛆ A MIDDLE PRESS OFF AN OPEN POPUP HAS ALWAYS DISMISSED IT — pinned at last");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 1, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS,
+      "...and off a revealed menu bar likewise");
+    assert_eq(crab_pointer_action(L, 0, 1, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_DISMISS,
+      "...as it does for left — the arm is button-blind, which is the whole point");
+
+    # ---- ⛔ MIDDLE IS REFUSED WHERE THE THING UNDER IT IS A VERB --------------------------------
+    # The sibling that numbers these buttons warns that an X11 reader "puts Delete on the middle
+    # button" — X11 is 1/2/3 = left/MIDDLE/right, so X11 muscle memory aims middle where crab's
+    # RIGHT lives, and `Delete` is literally a row in the menu right opens.
+    assert_eq(crab_pointer_action(M, 0, 1, 2, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE,
+      "⛔⛔ MIDDLE ON A POPUP ROW FIRES NOTHING — the X11-Delete guard");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 1, 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE,
+      "...middle on a menu-bar cell opens no menu");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 1), CRAB_PA_NONE,
+      "...middle on the door reveals nothing");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 1, 0 - 1, 1, 0), CRAB_PA_NONE,
+      "...middle on the A/B strip switches nothing");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 2, 0, 0), CRAB_PA_NONE,
+      "...middle on a sidebar place navigates nowhere");
+    assert_eq(crab_pointer_action(M, 1, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE,
+      "⛔ ...and a question being asked blocks middle like every other button");
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE,
+      "...middle on empty space does nothing");
+    # ⚠ An unknown button — nothing forwards one today (aethersafha's INPUT_BTN_COUNT is 3) — must
+    # not fall through to a surface's action.
+    assert_eq(crab_pointer_action(4, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE,
+      "an unknown button reaches no pane action");
+    assert_eq(crab_pointer_action(4, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 2, 0, 0), CRAB_PA_NONE,
+      "...nor a sidebar one");
+    # ⚠ LEFT and RIGHT are unchanged by the new arm — the regression this release could cause.
+    assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PANE,
+      "left on a pane is still the click");
+    assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_MENU,
+      "right on a pane is still the context menu");
+
+    # ---- ⛔⛆ THE EMPTY-PANE MENU OPENED WITH NO HIGHLIGHT AT ALL ---------------------------------
+    # Both open sites set `menu_sel = 0` = CRAB_MI_OPEN, and on an empty pane `crab_menu_enabled`
+    # refuses everything needing a row before it reaches its OPEN branch. `crab_overlay` marks the
+    # row inert, `dh_list_select` refuses an inert row, and Enter did nothing. MEASURED:
+    # enabled(OPEN, count=0) = 0, first enabled = 5.
+    assert_eq(crab_menu_enabled(CRAB_MI_OPEN, 0, 0, 0), 0,
+      "⛔ on an EMPTY pane the menu's row 0 is DISABLED — which is what `menu_sel = 0` selected");
+    assert_eq(crab_menu_first(0, 0, 0), CRAB_MI_NEWDIR,
+      "⛔⛆ SO THE MENU OPENS ON `New folder` — the first row an empty pane can actually use");
+    assert(crab_menu_enabled(crab_menu_first(0, 0, 0), 0, 0, 0) == 1,
+      "...and whatever it picks is ENABLED, by construction");
+    assert_eq(crab_menu_first(3, 0, 0), CRAB_MI_OPEN,
+      "a pane with rows still opens on Open — the common case is unchanged");
+    assert(crab_menu_enabled(crab_menu_first(3, 1, 2), 3, 1, 2) == 1,
+      "...and with a mark set too, whatever that makes legal");
+    assert_eq(crab_menu_first(3, 0, 5), CRAB_MI_OPEN, "Rename is greyed by a mark set; Open is not");
+
+    # ---- crab_hover_armed — ⛔ THE POPUP OPENS **UNDER** THE POINTER -----------------------------
+    # `dh_place_at_point` FLIPS a popup above its anchor when it would overhang, so the cursor that
+    # opened the menu can end up mid-list over a row nobody aimed at. A hover that engaged at once
+    # would move Enter onto it before a muscle moved.
+    assert_eq(crab_hover_armed(100, 100, 100, 100), 0, "⛔ A POINTER THAT HAS NOT MOVED HAS NOT AIMED");
+    assert_eq(crab_hover_armed(100, 100, 101, 101), 0, "...a 2 px twitch is not an aim either");
+    assert_eq(crab_hover_armed(100, 100, 104, 100), 1, "...4 px is, in x");
+    assert_eq(crab_hover_armed(100, 100, 100, 104), 1, "...and in y");
+    assert_eq(crab_hover_armed(100, 100, 96, 100), 1, "⚠ and the distance is unsigned — leftwards counts");
+    assert_eq(crab_hover_armed(100, 100, 98, 98), 1, "...as does a diagonal that no single axis would arm");
+
+    # ---- crab_hover_sel — ⛔⛆ `-1` MEANS FOUR THINGS AND ONLY TWO MEAN HOLD ---------------------
+    # `dh_list_index_at` answers -1 for an INERT row (separator, greyed verb) AND for a point
+    # OUTSIDE the list. Treating them alike leaves the highlight on the last live row crossed — so
+    # sweeping off a menu to see the pane underneath leaves Enter armed on whatever was passed last,
+    # and the natural exit from a menu anchored at the pointer is down-and-right through `Delete`.
+    assert_eq(crab_hover_sel(1, 1, 1, CRAB_MI_COPY, CRAB_MI_OPEN, CRAB_MI_OPEN), CRAB_MI_COPY,
+      "⭐ the highlight FOLLOWS the pointer onto a live row");
+    assert_eq(crab_hover_sel(1, 1, 1, 0 - 1, CRAB_MI_COPY, CRAB_MI_OPEN), CRAB_MI_COPY,
+      "⛔ INSIDE the popup on an INERT row HOLDS — the keyboard steps over disabled items too");
+    assert_eq(crab_hover_sel(1, 1, 0, 0 - 1, CRAB_MI_DELETE, CRAB_MI_OPEN), CRAB_MI_OPEN,
+      "⛔⛆ OUTSIDE the popup RESTORES what Enter meant when it opened — never the last row swept");
+    assert_eq(crab_hover_sel(1, 0, 1, CRAB_MI_DELETE, CRAB_MI_OPEN, CRAB_MI_OPEN), CRAB_MI_OPEN,
+      "⛔⛔ AN UNARMED POINTER MOVES NOTHING — the popup opened underneath it");
+    assert_eq(crab_hover_sel(0, 1, 1, CRAB_MI_DELETE, CRAB_MI_OPEN, CRAB_MI_OPEN), CRAB_MI_OPEN,
+      "a closed popup has no highlight to move");
+
+    # ---- crab_motion_redraw_due — the gate the motion path does not have yet -------------------
+    assert_eq(crab_motion_redraw_due(1, 1, 0, 0), 0, "a motion that changed nothing is not a frame");
+    assert_eq(crab_motion_redraw_due(1, 2, 0, 0), 1, "the context menu's highlight moving is");
+    assert_eq(crab_motion_redraw_due(1, 1, 0, 3), 1, "...and so is a drop-down's");
+    return 0;
+}
+
 fn t_pv_094(): i64 {
     test_group("crab — 0.9.4: the preview is a function of the SELECTION, not of the last read");
     var scr = alloc(CRAB_PATH_MAX);
@@ -6516,7 +6614,15 @@ fn t_pointer_routes(): i64 {
     assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 4, 0, 0), CRAB_PA_NONE, "a right press on a place: nothing");
     assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_PANE, "a pane: the click");
     assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_MENU, "a pane, RIGHT: the context menu — the whole point of aethersafha 0.16.24");
-    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_NONE, "a pane, middle: nothing yet");
+    # ⭐⭐ 0.9.5 — MIDDLE ON A PANE MARKS THE ROW UNDER THE POINTER. This assertion said
+    # "nothing yet" for four releases and its expiry has now fired, which is what an expiry is for.
+    assert_eq(crab_pointer_action(M, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 1, 0), CRAB_PA_MARK,
+      "⭐ a pane, MIDDLE: mark the row under the pointer (0.9.5)");
+    assert_eq(crab_pa_accel(CRAB_PA_MARK), 0x2C,
+      "⛔ AND IT IS AN ALIAS OF **SPACE**, NOT A VERB OF ITS OWN — one crab_mark_toggle call site");
+    assert_eq(crab_pa_accel(CRAB_PA_MENU), 0,
+      "...while an action that is not a key alias synthesises nothing");
+    assert_eq(crab_pa_accel(CRAB_PA_NONE), 0, "...and neither does nothing");
     assert_eq(crab_pointer_action(L, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "empty space: nothing");
     assert_eq(crab_pointer_action(R, 0, 0, 0 - 1, 0, 0 - 1, 0 - 1, 0 - 1, 0, 0), CRAB_PA_NONE, "empty space, right: no menu with nothing to act on");
     # ⛔ A popup row answer with NO popup open is a stale widget from an earlier frame. It must not

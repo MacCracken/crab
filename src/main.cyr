@@ -93,6 +93,21 @@ fn main(): i64 {
     var menu_x = 0;
     var menu_y = 0;
     var menu_sel = 0;
+    # ⭐⭐ THE HOVER'S TWO FACTS (0.9.5), and neither is derivable from the three above.
+    # ⛔ `hover_x`/`hover_y` are WHERE THE POPUP OPENED, not where the pointer is. The popup is
+    # placed AT the pointer and `dh_place_at_point` may FLIP it above the anchor — so the cursor
+    # that opened it is then sitting over a row nobody aimed at, and a hover that engaged
+    # immediately would move Enter onto it before a muscle moved. The highlight does not follow
+    # until the pointer has TRAVELLED: `crab_hover_armed`.
+    # ⛔ `menu_open_sel` is WHAT ENTER MEANT WHEN IT OPENED. Sweeping the pointer OFF the popup
+    # restores it, because `dh_list_index_at` answers -1 both for an inert row and for a point
+    # outside the list — and holding the last live row crossed leaves Enter armed on whatever the
+    # exit path swept through. The natural exit from a menu anchored at the pointer is
+    # down-and-right, straight through `Delete`.
+    var hover_x = 0;
+    var hover_y = 0;
+    var menu_open_sel = 0;
+    var mb_open_item = 0;
     # ⚠ `edit_open` doubles as the MODE: 1 = rename the selected entry, 2 = create a folder. The two
     # share the field, the keys and the sheet; only the commit differs.
     var edit_open = 0;
@@ -533,6 +548,57 @@ fn main(): i64 {
                         }
                     }
                 }
+                # ⭐⭐ THE HIGHLIGHT FOLLOWS THE POINTER (0.9.5). Until now a popup's highlight moved
+                # only for the arrow keys, so the operator had to aim with the mouse and then commit
+                # with a key that was pointing somewhere else entirely — the one gesture in crab
+                # where the two input roads disagreed about what was selected.
+                # ⛔ IT COSTS NO EXTRA REDRAW, AND THAT IS A MEASURED FACT RATHER THAN A DESIGN: the
+                # render at the bottom of this `if (ev > 0)` block is UNCONDITIONAL — every pointer
+                # event already repaints the window and rewrites w*h*4 bytes of shm. `crab_hover_*`
+                # is asked here; `crab_motion_redraw_due` exists so a later cut can gate that render
+                # on something having changed, which nothing in this loop does today.
+                # ⛔ THE POPUP IS ASKED, NOT THE MODEL. `mb_drop >= 0` does NOT mean a drop-down is on
+                # screen — `crab_render` refuses one locally when it does not fit and never tells
+                # main() — so the hit test is what decides, and a refused drop hit-tests to nothing.
+                # ⚠ ONE LIST, ONE HIT TEST — exactly the shape the CLICK path already uses.
+                # `crab_overlay` builds a single popup list into `crab_mlst` for BOTH the context
+                # menu and a bar drop-down, so the hit test is shared and only the row->index
+                # MAPPING differs. Asking a second widget would be a second answer free to disagree.
+                # ⛔ ASK THE LAID-OUT TREE, NOT THE MODEL. `mb_drop >= 0` does not mean a drop-down
+                # is on screen: `crab_render` refuses one locally when it will not fit under its own
+                # cell and never tells main(). A refused drop hit-tests to nothing, so the hover
+                # cannot move a highlight in a popup the operator cannot see.
+                var hlst = crab_menu_list();
+                if (hlst != 0) {
+                    var hsel0 = menu_sel;
+                    var hitem0 = mb_item;
+                    var hin = dh_widget_contains(hlst, ptr_x, ptr_y);
+                    var hrow = dh_list_index_at(hlst, ptr_x, ptr_y);
+                    var harm = crab_hover_armed(hover_x, hover_y, ptr_x, ptr_y);
+                    if (mb_drop >= 0) {
+                        # A drop-down has no separator and indexes its own slice: the ROW is the
+                        # index `mb_item` holds. No mapping.
+                        mb_item = crab_hover_sel(1, harm, hin, hrow, mb_item, mb_open_item);
+                    } else {
+                        # ⛔ THE ROW IS NOT THE ITEM. The context menu carries a separator, so a row
+                        # past it is one more than its item — `crab_menu_item_at` inverts that, and
+                        # it is the difference between New folder and Delete.
+                        var hitem = 0 - 1;
+                        if (hrow >= 0) { hitem = crab_menu_item_at(hrow); }
+                        menu_sel = crab_hover_sel(1, harm, hin, hitem, menu_sel, menu_open_sel);
+                    }
+                    # ⭐ THE WIRE SEES THE HIGHLIGHT MOVE, AND ONLY WHEN IT MOVES. Bounded by
+                    # `crab_motion_redraw_due`, not by the motion stream: a pointer crossing one row
+                    # emits one line, and a pointer sweeping a popup emits one per row — so a harness
+                    # can assert the hover without drowning a console three processes share.
+                    if (crab_motion_redraw_due(hsel0, menu_sel, hitem0, mb_item) == 1) {
+                        crab_line_reset();
+                        crab_line_s("crab: hover ");
+                        if (mb_drop >= 0) { crab_line_s("drop "); crab_line_u(mb_item); }
+                        else { crab_line_s("menu "); crab_line_u(menu_sel); }
+                        crab_line_say();
+                    }
+                }
             }
             # ⭐⭐ THE WHEEL (M2, *deferral #05*). Five repos had to move for this event to exist:
             # agnos 1.56.49 reads HID report byte [3] (documented and never read until then), bhumi
@@ -634,6 +700,18 @@ fn main(): i64 {
                     # sat at that index in a directory the first click never saw. One line, above
                     # every arm, so a route added later cannot omit it.
                     if (pact != CRAB_PA_PANE) { last_pane = 0 - 1; last_row = 0 - 1; }
+                    # ⭐ A PRESS THAT DID NOTHING SAYS SO, WITH ITS BUTTON NUMBER. Until 0.9.5 the only
+                    # way to tell "the button never reached crab" from "it reached crab and no surface
+                    # wanted it" was to have neither line — indistinguishable from a lost event, which
+                    # is the failure the pointer harness spent seven runs chasing.
+                    # ⚠ ONE WRITE: the serial console is shared unserialised by three processes.
+                    if (pact == CRAB_PA_NONE) {
+                        crab_line_reset();
+                        crab_line_s("crab: press btn ");
+                        crab_line_u(pbtn);
+                        crab_line_s(" no action");
+                        crab_line_say();
+                    }
                     # ⭐ PICK — a left press on a popup row runs that entry, exactly as Enter does:
                     # the entry's key is SYNTHESISED and falls through the one binding table below.
                     # ⛔ THE ROW IS NOT THE ITEM. A context menu carries a separator, so a list row
@@ -686,7 +764,13 @@ fn main(): i64 {
                             if (bcnt > 0) { bisdir = load8(bbufp + bselp * CRAB_REC_SZ + CRAB_REC_TYPE); }
                             var bmark = crab_mark_count(bmkp, bcnt);
                             var bf0 = crab_mb_item_first(bar_cell, bcnt, bisdir, bmark);
-                            if (bf0 >= 0) { mb_drop = bar_cell; mb_item = bf0; }
+                            if (bf0 >= 0) {
+                                mb_drop = bar_cell; mb_item = bf0;
+                                # ⚠ LATCH THE HOVER'S ANCHOR AT EVERY OPEN SITE. `crab_hover_armed`
+                                # measures from here, so a stale anchor from a popup that closed
+                                # minutes ago would arm the hover before the pointer had moved.
+                                hover_x = ptr_x; hover_y = ptr_y; mb_open_item = bf0;
+                            }
                             else { mb_drop = 0 - 1; crab_set_notice("that menu has no items yet"); }
                         }
                         crab_say("crab: bar click\n");
@@ -728,10 +812,51 @@ fn main(): i64 {
                             if (mhp == 1) { if (mhr < rn) { sel_r = mhr; } }
                         }
                         menu_open = 1;
-                        menu_sel = 0;
+                        # ⛔⛆ THE FIRST **ENABLED** ITEM, NOT ROW 0 (0.9.5). `menu_sel = 0` is
+                        # `CRAB_MI_OPEN`, and on an EMPTY pane `crab_menu_enabled` refuses it — so
+                        # `crab_overlay` marked row 0 inert, `dh_list_select` refused an inert row,
+                        # and the menu opened with NO HIGHLIGHT AT ALL and Enter did nothing.
+                        # `crab_mb_item_first` has answered this for the BAR's drop-down since 0.8.6;
+                        # the context menu simply never got the twin.
+                        var mmk = crab_mark_count(lmarks, ln);
+                        if (mhp == 1) { mmk = crab_mark_count(rmarks, rn); }
+                        var mcnt = ln; if (mhp == 1) { mcnt = rn; }
+                        var misd = 0;
+                        if (mcnt > 0) {
+                            var mrec = lbuf; if (mhp == 1) { mrec = rbuf; }
+                            var mrs = sel_l; if (mhp == 1) { mrs = sel_r; }
+                            misd = load8(mrec + mrs * CRAB_REC_SZ + CRAB_REC_TYPE);
+                        }
+                        menu_sel = crab_menu_first(mcnt, misd, mmk);
+                        if (menu_sel < 0) { menu_sel = 0; }
                         menu_x = ptr_x;
                         menu_y = ptr_y;
+                        hover_x = ptr_x;
+                        hover_y = ptr_y;
+                        menu_open_sel = menu_sel;
                         crab_say("crab: context menu opened by pointer\n");
+                    }
+                    # ⭐⭐ MARK — a MIDDLE press on a pane marks the row under the pointer (0.9.5).
+                    # ⛔ IT IS AN ALIAS OF SPACE, NOT A VERB. The row is selected first (the MENU
+                    # arm's rule: act on what was POINTED at, not on what the arrows last touched),
+                    # then the existing `0x2C` is SYNTHESISED and falls through the one binding
+                    # table below — so there is no second `crab_mark_toggle` call site to drift.
+                    # ⛔ THE ROW IS GUARDED, NOT CLAMPED. `crab_hit` records pane HEADERS too, and a
+                    # header answers row -1 with `pane_hit` 1 — indistinguishable here from a row.
+                    # The MENU arm survives that because opening a menu needs no row; this one ACTS,
+                    # and `-1 < ln` is true, so a missing guard would mark `buf + -1 * CRAB_REC_SZ`.
+                    if (pact == CRAB_PA_MARK) {
+                        var khp = load64(hit);
+                        var khr = load64(hit + 8);
+                        if (khr >= 0) {
+                            active_pane = khp;
+                            sb_focus = 0;
+                            var kok = 0;
+                            if (khp == 0) { if (khr < ln) { sel_l = khr; kok = 1; } }
+                            if (khp == 1) { if (khr < rn) { sel_r = khr; kok = 1; } }
+                            if (kok == 1) { synth_u = crab_pa_accel(pact); }
+                        }
+                        crab_say("crab: mark by middle click\n");
                     }
                     var paneclick = 0;
                     if (pact == CRAB_PA_PANE) { paneclick = 1; }
@@ -1240,7 +1365,10 @@ fn main(): i64 {
                                         # row means `dh_list_select` refuses it and the drop-down
                                         # paints no highlight at all — while Enter still fires it.
                                         var f0 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (f0 >= 0) { mb_drop = mb_sel; mb_item = f0; }
+                                        if (f0 >= 0) {
+                                            mb_drop = mb_sel; mb_item = f0;
+                                            hover_x = ptr_x; hover_y = ptr_y; mb_open_item = f0;
+                                        }
                                         else { crab_set_notice("that menu has no items yet"); }
                                         u = 0;
                                     }
@@ -1271,7 +1399,10 @@ fn main(): i64 {
                                     if (mbk == CRAB_MBK_PREV) {
                                         mb_sel = crab_mb_move(mb_sel, 0 - 1);
                                         var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (fn2 >= 0) { mb_drop = mb_sel; mb_item = fn2; }
+                                        if (fn2 >= 0) {
+                                            mb_drop = mb_sel; mb_item = fn2;
+                                            hover_x = ptr_x; hover_y = ptr_y; mb_open_item = fn2;
+                                        }
                                         else { mb_drop = 0 - 1; }
                                         u = 0;
                                     }
@@ -1635,9 +1766,27 @@ fn main(): i64 {
                             # ⚠ `menu_x`/`menu_y` PLACE it at the last tracked pointer position.
                             if (u == 0x65) {                                       # the Menu key
                                 menu_open = 1;
-                                menu_sel = 0;
+                                # ⛔ THE FIRST **ENABLED** ITEM — the same fix as the pointer road's
+                                # open site, and it has to be in BOTH or the two roads open the same
+                                # menu differently. On an empty pane row 0 (`CRAB_MI_OPEN`) is greyed,
+                                # `dh_list_select` refuses an inert row, and the menu drew no
+                                # highlight at all.
+                                var kmcnt = ln; if (active_pane == 1) { kmcnt = rn; }
+                                var kmmk = crab_mark_count(lmarks, ln);
+                                if (active_pane == 1) { kmmk = crab_mark_count(rmarks, rn); }
+                                var kmisd = 0;
+                                if (kmcnt > 0) {
+                                    var kmb = lbuf; var kms = sel_l;
+                                    if (active_pane == 1) { kmb = rbuf; kms = sel_r; }
+                                    kmisd = load8(kmb + kms * CRAB_REC_SZ + CRAB_REC_TYPE);
+                                }
+                                menu_sel = crab_menu_first(kmcnt, kmisd, kmmk);
+                                if (menu_sel < 0) { menu_sel = 0; }
                                 menu_x = ptr_x;
                                 menu_y = ptr_y;
+                                hover_x = ptr_x;
+                                hover_y = ptr_y;
+                                menu_open_sel = menu_sel;
                             }
                             if (u == 0x07) {                                       # d — delete, with a confirmation
                                 var qcnt = ln; if (active_pane == 1) { qcnt = rn; }

@@ -949,7 +949,7 @@ var CRAB_BTN_RIGHT  = 2;
 var CRAB_BTN_MIDDLE = 3;
 
 # What a pointer PRESS means. One table, one order, where the suite can reach it.
-var CRAB_PA_NONE    = 0;   # consumed, nothing happens: blocked, a middle button, or empty space
+var CRAB_PA_NONE    = 0;   # consumed, nothing happens: blocked, a refused button, or empty space
 var CRAB_PA_PICK    = 1;   # left on a popup row — run that entry
 var CRAB_PA_DISMISS = 2;   # any button outside an open popup / off a revealed bar — close it
 var CRAB_PA_BAR     = 3;   # left on a bar cell — open or switch to that menu
@@ -958,6 +958,7 @@ var CRAB_PA_PLACE   = 5;   # left on a sidebar row — send the active pane ther
 var CRAB_PA_PANE    = 6;   # left on a pane — the 0.6.1 click: focus, select, arm the drag
 var CRAB_PA_MENU    = 7;   # right on a pane — open the context menu there
 var CRAB_PA_DOOR    = 8;   # left on the 🦀 door — reveal the menu row (0.9.1)
+var CRAB_PA_MARK    = 9;   # MIDDLE on a pane — mark the row under the pointer (0.9.5)
 
 # @public — decide what a press does from what each surface answered about the point.
 #   btn         the wire button number (`POINTER_BTN`'s `a`)
@@ -984,8 +985,22 @@ var CRAB_PA_DOOR    = 8;   # left on the 🦀 door — reveal the menu row (0.9.
 # in: `crab_hit` records headers, so a strip press is also a header press.
 # ⛔ RIGHT OPENS THE CONTEXT MENU ON A PANE AND DOES NOTHING ANYWHERE ELSE. A right press on a
 # popup row must not fire the verb, on a bar cell must not open a menu, on a place must not
-# navigate. The middle button does nothing anywhere yet, and says so by returning NONE rather than
-# by being absent from this table.
+# navigate.
+#
+# ⛔⛆ AND "THE MIDDLE BUTTON DOES NOTHING" WAS NEVER TRUE — THIS COMMENT SAID IT FOR FOUR RELEASES.
+# Both `CRAB_PA_DISMISS` returns below are button-BLIND: they never test `btn`. So a middle press
+# off an open popup, or off a revealed bar, has always closed it — the one middle-button behaviour
+# crab had, asserted nowhere, while three doc sites said the opposite in prose.
+# ⇒ Since 0.9.5 middle also MARKS the row under the pointer on a pane. ⛔ It is an ALIAS OF SPACE,
+# not a verb of its own: `crab_pa_accel` answers 0x2C and the press synthesises that one key through
+# the one binding table, so there is no second `crab_mark_toggle` call site to drift.
+# ⛔⛔ AND IT IS DELIBERATELY THE SAFEST THING ON THE TABLE. The sibling that numbers these buttons
+# warns "a reader who assumes X11 puts **Delete** on the middle button" — X11 is 1/2/3 = left/MIDDLE/
+# right, so an operator whose muscle memory is X11 aims middle where crab's RIGHT lives, and `Delete`
+# is literally a row in the menu that right opens. A mark is self-inverse: the same gesture undoes it,
+# nothing on disk moves, and a mis-aimed middle click costs one more press to correct.
+# ⚠ MIDDLE IS STILL REFUSED on the popup row, the bar cell, the door, the strip and the sidebar —
+# every surface where the thing under it is a VERB rather than a selection.
 fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell, sw_cell, sb_row,
   pane_hit, door_hit): i64 {
     if (blocked != 0) { return CRAB_PA_NONE; }
@@ -1029,10 +1044,98 @@ fn crab_pointer_action(btn, blocked, popup_open, popup_row, bar_shown, bar_cell,
     if (pane_hit != 0) {
         if (btn == CRAB_BTN_LEFT) { return CRAB_PA_PANE; }
         if (btn == CRAB_BTN_RIGHT) { return CRAB_PA_MENU; }
+        if (btn == CRAB_BTN_MIDDLE) { return CRAB_PA_MARK; }
         return CRAB_PA_NONE;
     }
     return CRAB_PA_NONE;
 }
+
+# @public — the KEY a pointer action synthesises, or 0 if it does not stand in for one.
+#
+# ⭐ SO "MIDDLE IS SPACE, NOT `d`" IS A HOST ASSERTION. The press arm lives inside main.cyr's agnos
+# `#ifdef` where no host test reaches, so a literal `0x2C` written there would be a binding nothing
+# could check. Here the suite drives it — the 0.9.3/0.9.4 lifting rule.
+fn crab_pa_accel(pact): i64 {
+    if (pact == CRAB_PA_MARK) { return 0x2C; }      # Space — mark and advance
+    return 0;
+}
+
+# ⛔⛆ THE POPUP OPENS **UNDER THE POINTER**, WHICH IS WHY THE HOVER MUST BE ARMED. `menu_x = ptr_x;
+# menu_y = ptr_y;` at the open site, and `dh_place_at_point` puts the popup's top-left AT that point
+# — then FLIPS it above the anchor when it would overhang the window, and CLAMPS it to the margin.
+# At crab's shipped 380x220 a 7-row menu is taller than the space below a mid-window click, so it
+# flips: the pointer that opened the menu is then sitting somewhere in the MIDDLE of it, over a row
+# the operator never aimed at. A hover that engaged immediately would move Enter off `Open` onto
+# whatever landed under the stationary cursor — possibly `Delete` — before a muscle had moved.
+# ⇒ THE POINTER MUST TRAVEL FIRST. Same shape and the same threshold as the drag arm already in this
+# loop: a pointer that has not moved has not expressed an intent.
+var CRAB_HOVER_THRESHOLD = 4;
+
+fn crab_hover_armed(open_x, open_y, x, y): i64 {
+    var dx = x - open_x; if (dx < 0) { dx = 0 - dx; }
+    var dy = y - open_y; if (dy < 0) { dy = 0 - dy; }
+    if ((dx + dy) >= CRAB_HOVER_THRESHOLD) { return 1; }
+    return 0;
+}
+
+# @public — where should a popup's highlight be after a pointer motion? -> the new selection.
+#
+#   open      the popup is open (0 = leave `cur` alone; there is nothing to highlight)
+#   armed     `crab_hover_armed` — the pointer has moved since the popup opened
+#   inside    the point is within the popup's list rect (`dh_widget_contains`)
+#   row       `dh_list_index_at`, or -1
+#   cur       the highlight now
+#   open_sel  the highlight the OPEN SITE chose — what Enter meant before the pointer touched it
+#
+# ⛔⛆ `-1` MEANS FOUR THINGS AND ONLY TWO OF THEM MEAN "HOLD". `dh_list_index_at` answers -1 for an
+# inert row (a separator, a greyed verb) AND for a point outside the list entirely. Treating them
+# alike leaves the highlight on the last live row the pointer crossed — so sweeping OFF a menu to
+# see the pane underneath leaves Enter armed on whatever was passed last. The natural exit from a
+# menu whose top-left is at the pointer is down-and-right, straight through `Delete`.
+# ⇒ INSIDE on an inert row HOLDS, which is what the keyboard already does — `crab_mb_item_move`
+# steps over disabled items rather than landing on them. OUTSIDE RESTORES the open-time choice, the
+# only answer that leaves Enter meaning what it meant before the pointer wandered.
+fn crab_hover_sel(open, armed, inside, row, cur, open_sel): i64 {
+    if (open == 0) { return cur; }
+    if (armed == 0) { return cur; }
+    if (inside == 0) { return open_sel; }
+    if (row < 0) { return cur; }
+    return row;
+}
+
+# @public — should a motion that moved the highlight cost a redraw? -> 1 when something CHANGED.
+#
+# ⛔⛔ AND THE ANSWER MATTERS MORE THAN IT LOOKS, BECAUSE THE MOTION PATH ALREADY REPAINTS
+# UNCONDITIONALLY. Every `POINTER_BTN`/`POINTER_MOVE`/`POINTER_SCROLL` event falls into the same
+# `if (ev > 0)` render — a full `crab_render` plus a w*h*4 shm write, 334,400 bytes at the shipped
+# 380x220 — with no dirty flag anywhere in the loop. So the hover costs no EXTRA redraw today, and
+# this predicate is what lets a later cut stop repainting a frame nothing changed.
+# ⚠ ASKED ON THE FRAME, NOT ONLY ON THE MOTION EVENT. A wheel or a key can change what sits under a
+# STATIONARY pointer, and aethersafha dedupes motion — so no event follows to correct it.
+fn crab_motion_redraw_due(sel_before, sel_after, item_before, item_after): i64 {
+    if (sel_after != sel_before) { return 1; }
+    if (item_after != item_before) { return 1; }
+    return 0;
+}
+
+# @public — the first ENABLED item of the context menu for this pane, or -1.
+#
+# ⛔⛆ A LIVE DEFECT UNTIL 0.9.5, AND ITS TWIN HAS EXISTED SINCE 0.8.6. Both open sites set
+# `menu_sel = 0`, which is `CRAB_MI_OPEN` — and on an EMPTY pane `crab_menu_enabled` refuses
+# everything that needs a row (`if (count <= 0) { return 0; }`) before it reaches its OPEN branch.
+# So `crab_overlay` marks row 0 inert, `dh_list_select` refuses an inert row, and the menu opened
+# with **no highlight at all**: measured — `enabled(OPEN, count=0) = 0`, first enabled item = 5.
+# ⇒ The same answer `crab_mb_item_first` has given the menu BAR's drop-down all along. The context
+# menu simply never got the twin.
+fn crab_menu_first(count, isdir, marked): i64 {
+    var i = 0;
+    while (i < CRAB_MI_COUNT) {
+        if (crab_menu_enabled(i, count, isdir, marked) == 1) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
 
 # =================================================================================================
 # M6 — VOLUMES. The sidebar's second section, unblocked by agnos `mountlist`#104 (1.56.59).
@@ -3529,11 +3632,13 @@ fn crab_mspec_init(): i64 {
 # ⚠ The menu's LIST, exposed for the SUITE — refreshed every frame like `crab_llst`/`crab_rlst`:
 # set in `crab_overlay`, cleared to 0 there and in `crab_render` when no menu is up, so it never
 # outlives its frame.
-# ⛔ IT SAID "recorded for hit-testing", AND THE MENU IS NEVER HIT-TESTED. `crab_hit` walks parents
-# against `crab_llst` and `crab_rlst` only — `crab_mlst` is not in that walk — and `crab_menu_list`
-# has no caller anywhere in `src/`; its only callers are in `tests/crab.tcyr`. There is no pointer
-# path to the menu at all: `menu_open = 1` occurs exactly once, under the Menu key, and the
-# `POINTER_BTN` arm reads only press/release and never a button code.
+# ⭐ AND IT **IS** THE HIT-TEST NOW. This carried four claims that 0.8.5 falsified and 0.9.5 deleted —
+# that `crab_menu_list` had no caller in `src/`, that no pointer path to the menu existed, that
+# `menu_open = 1` happened only under the Menu key, and that the `POINTER_BTN` arm never read a
+# button code. All four were written when they were true and left standing for four releases after
+# they stopped being. `crab_menu_list()` is the FIRST surface the press arm asks (`dh_list_index_at`,
+# then `crab_pointer_action` orders the answers) and, since 0.9.5, what the HOVER asks on every
+# motion. ⇒ A comment true when written and false now is worse than none.
 var crab_mlst = 0;
 fn crab_menu_list(): i64 { return crab_mlst; }
 

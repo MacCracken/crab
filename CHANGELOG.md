@@ -2,6 +2,120 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.5] — 2026-09-14 — the middle button marks, and a popup's highlight follows the pointer
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⚠ **The roadmap's premise was wrong, and checking it was the first job.** The item read *"the
+> middle mouse button does nothing"*. It has DISMISSED popups since 0.8.5 — both `CRAB_PA_DISMISS`
+> returns are button-blind and never test `btn` — and three doc sites said otherwise in prose while
+> no test pinned the one behaviour it had.
+
+### Added — ⭐⭐ MIDDLE-CLICK MARKS THE ROW UNDER THE POINTER
+
+**MEASURED ON IRON FIRST, because the whole half rested on a claim about five repos.** agnos captures
+the HID bitmap, aethersafha 0.16.24 forwards bits 0–2 as `wire = kernel_bit + 1`, setu carries it
+opaque — but `crab-pointer-test.py` had only ever proved button **2**. Button 3 had never been
+observed anywhere in this stack. It arrives:
+
+```
+QEMU mask 4 -> crab: mark by middle click     (wire 3, middle)
+QEMU mask 1 -> crab: click                    (wire 1, left)
+QEMU mask 2 -> crab: context menu opened      (wire 2, right)
+```
+
+⛔ **It is an ALIAS OF `Space`, not a verb of its own.** `crab_pa_accel(CRAB_PA_MARK)` answers `0x2C`
+and the arm synthesises that one key through the one binding table — so there is no second
+`crab_mark_toggle` call site to drift, and *"middle is Space, not `d`"* is a **host assertion** rather
+than a literal buried in main.cyr's agnos `#ifdef`.
+
+⛔⛔ **And it is deliberately the safest gesture on the table.** The sibling that numbers these buttons
+warns: *"a reader who assumes X11 puts **Delete** on the middle button."* X11 is 1/2/3 =
+left/**middle**/right, so an operator with X11 muscle memory aims middle exactly where crab's **right**
+lives — and `Delete` is literally a row in the menu right opens. A mark is self-inverse, moves nothing
+on disk, and costs one press to undo. Middle stays **refused** on a popup row, a bar cell, the door,
+the A/B strip and the sidebar — every surface where the thing underneath is a verb. Gated on iron:
+*"ARM 3: middle inside the open popup fired a verb: False"*.
+
+⚠ **The row is GUARDED, not clamped.** `crab_hit` records pane **headers**, which answer row `-1` with
+`pane_hit` 1 — indistinguishable inside `crab_pointer_action`. The shipping MENU arm survives that
+because opening a menu needs no row; this one ACTS, and `-1 < ln` is true, so a missing guard would
+mark `buf + -1 * CRAB_REC_SZ`.
+
+### Added — ⭐⭐ A POPUP'S HIGHLIGHT FOLLOWS THE POINTER
+
+Until now a popup's highlight moved only for the arrow keys, so the operator aimed with the mouse and
+committed with a key that was pointing somewhere else — the one gesture in crab where the two input
+roads disagreed about what was selected.
+
+⛔⛆ **IT DOES NOT ENGAGE UNTIL THE POINTER HAS MOVED, AND THAT IS NOT A REFINEMENT.** The popup is
+placed **at** the pointer, and `dh_place_at_point` **FLIPS** it above the anchor when it would overhang
+— which at crab's shipped 380x220 it usually does. So the cursor that opened the menu ends up sitting
+in the MIDDLE of it, over a row nobody aimed at. A hover that engaged immediately would move `Enter`
+onto that row before a muscle moved. `crab_hover_armed` uses the drag threshold already in this arm:
+a pointer that has not travelled has not expressed an intent. Gated on iron — *"hover lines BEFORE the
+pointer moved: none"*.
+
+⛔⛆ **AND `-1` MEANS FOUR THINGS, OF WHICH ONLY TWO MEAN "HOLD".** `dh_list_index_at` answers `-1`
+both for an INERT row (a separator, a greyed verb) and for a point OUTSIDE the list. Treating them
+alike leaves the highlight on the last live row the pointer crossed — so sweeping off a menu to see
+the pane underneath leaves `Enter` armed on whatever was passed last, and the natural exit from a menu
+anchored at the pointer is down-and-right, straight through `Delete`.
+⇒ **INSIDE on an inert row HOLDS** (what the keyboard already does — `crab_mb_item_move` steps over
+disabled items). **OUTSIDE RESTORES** the open-time choice. Both visible in the iron trace:
+
+```
+crab: hover menu 3 → 2 → 1 → 0 → 1 → 2 → 3 → 4 → 5 → 0
+```
+
+the sweep up through a flipped menu, back down through all six rows, and the final `→ 0` as the
+pointer leaves the popup and `Enter` means `Open` again.
+
+### Fixed — ⛔⛆ the context menu opened on an EMPTY pane with NO HIGHLIGHT AT ALL
+
+Both open sites set `menu_sel = 0`, which is `CRAB_MI_OPEN` — and on an empty pane `crab_menu_enabled`
+refuses everything that needs a row (`if (count <= 0) { return 0; }`) before it reaches its OPEN
+branch. So `crab_overlay` marked row 0 inert, `dh_list_select` refuses an inert row, and the menu drew
+no highlight and `Enter` did nothing. **Measured**: `enabled(OPEN, count=0) = 0`, first enabled = `5`.
+⇒ `crab_menu_first` — the twin `crab_mb_item_first` has given the menu BAR's drop-down since 0.8.6.
+The context menu simply never got one. Fixed at **both** open sites, or the two roads would open the
+same menu differently.
+
+### Fixed — ⛆ four false claims in one comment, and one in the README
+
+`src/ui.cyr`'s note on `crab_mlst` said `crab_menu_list` had no caller in `src/`, that no pointer path
+to the menu existed, that `menu_open = 1` happened only under the Menu key, and that the `POINTER_BTN`
+arm never read a button code. **All four were falsified by 0.8.5 and left standing for four releases.**
+`crab_menu_list()` is the FIRST surface the press arm asks, and since this release it is what the hover
+asks on every motion. Cut, not annotated. The README's *"the middle mouse button does nothing"* is
+corrected to what it actually did and now does.
+
+### Tests
+
+**2,421 assertions** (2,384 → 2,421). Five mutations planted and caught: the `-1` collapse (leaving a
+popup holds the last row swept), the hover engaging unarmed, `crab_pa_accel` mapping middle to `d`
+instead of Space, `crab_menu_first` ignoring whether a row is enabled, and the popup-row arm firing on
+any button. ⚠ **One assertion's expiry fired and was inverted, not deleted** — `"a pane, middle:
+nothing yet"` had asserted `CRAB_PA_NONE` since 0.8.5 and is now `CRAB_PA_MARK`. That is what an
+expiry is for.
+
+⭐⭐ **`agnos/scripts/harness/crab-button-test.py` is new** and gates all four arms: which buttons
+arrive and as what number, that middle reaches the mark arm, that middle fires no verb inside a popup,
+and that the highlight follows the pointer only after it moves.
+
+⛔ **Three harness lessons, each of which produced a WRONG answer first:**
+1. **A `-2000` home and 0.3 s settles found nothing.** The proven aiming needs `-4000` and **0.8 s per
+   move** — the kernel accumulates deltas between drains and the compositor clamps the NET move, so a
+   pin and a walk folded into one drain land on the titlebar. On that evidence I would have filed a
+   false cross-repo blocker saying middle does not arrive.
+2. **Press ORDER was the whole test.** aethersafha's diagnostic is one-shot, so whichever non-left
+   button arrives first is the only one it ever names; pressing right before middle spends it on wire
+   2 and makes "dropped" indistinguishable from "forwarded silently".
+3. **A popup left open by one probe decides the next one in the wrong branch.** A middle press with a
+   menu up is `DISMISS`, not `MARK` — the harness measured crab correctly and the SCENARIO was wrong.
+   And a one-directional sweep only works for one popup placement: the flip means the menu may lie
+   entirely above the cursor, which is why ARM 4 now sweeps both ways.
+
 ## [0.9.4] — 2026-09-14 — the preview shows the SELECTION, and costs nothing to do it
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
