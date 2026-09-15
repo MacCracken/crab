@@ -24,8 +24,42 @@
 
 ## Version
 
-**0.9.3 IS CUT** — `VERSION` reads `0.9.3` and the CHANGELOG header agrees, on operator direction,
-2026-09-14. ⚠ 0.9.2 released.
+**0.9.4 IS CUT** — `VERSION` reads `0.9.4` and the CHANGELOG header agrees, 2026-09-14.
+⚠ 0.9.3 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this;
+the operator uses git continuously and this line rots. **Next: `0.9.5 · Pointer polish`.**
+
+**0.9.4 contents — the preview shows the SELECTION, and costs nothing.** The roadmap asked for one
+thing (*"the 64 KiB dimension+EXIF read is on the idle tick"*) and moving it exposed that the whole
+column was reading process-wide *"last touched"* state instead of anything derived from the selection.
+⛔⛆ **Two of those readers were wrong and shipping, both measured on the host BEFORE any change:**
+(1) the **thumbnail lagged one file behind** — the keypress frame asked `crab_thumb_pixels()` ("what
+the last STEP was about") and the tick's gate `if (tafter != tbefore)` skips on `OK -> OK`, so **no
+frame was drawn at all** and the previous picture stayed under the new name. That is 0.8.2's bug,
+whose own fix comment names the mechanism, obeyed by **1 of 8 render sites**. (2) **`CAMERA: Canon
+EOS R5` stayed under a TEXT FILE's name** — `crab_preview_dims` returned at its `is_image` gate
+before clearing the process-wide EXIF buffers, and the CAMERA/SHOT rows sit outside the column's
+`is_image` block. ⇒ Both die by construction: `crab_pvc_*` (128 path-keyed slots in ui.cyr, 56,320 B
+once) holds dims AND EXIF together, `crab_pv_publish` is the ONE publisher for all eight sites and
+CLEARS as well as sets, and `crab_pv_redraw_due` makes the SLOT part of the redraw answer.
+⭐ **The read is on the tick** (`crab_pv_step`, at most one file per tick, gated on
+`crab_preview_fit` — the EFFECTIVE state, so a too-narrow window now reads nothing). MEASURED:
+selection path **4 µs per keystroke, the SAME with an empty cache as a warm one** — a miss is a
+lookup, never a read. ⚠ The host number understates agnos by ~100x; crab's own recorded figure for
+the cheaper *stat* sweep is ~1.1 ms/entry, which is why that was deferred too. Arrowing BACK is now
+free (the old memo held ONE entry). Also fixed: a bare `sys_read` that memoised a wrong negative on a
+short read, and the **mascot**, the one render site of eight that published no preview state at all.
+**2384 / 0**, five mutations; a sixth SURVIVED and is recorded at its assertion (a regular file never
+short-reads, so the loop is unprovable with a file fixture).
+⭐⭐ **QEMU `crab-preview-test.py` PASSES and is mutation-proven** — new `crab: pv` oracle emitted by
+the DRAIN and nothing else; 137x42 and 320x200 each resolved correctly, every file read **exactly
+once**, and the 48 non-images produced no line. Against a planted re-read it reports files read up to
+**36 times each**.
+⛔⛆ **AND THE LAYERING GATE WAS HALF A GATE.** `render_test` includes `ui.cyr` alone to stop the
+render path calling up — but an undefined **constant** is `error:` (build fails) while an undefined
+**function** is only `warning:` (build exits 0, `53 checks, 0 failed`). Enforced for enums, NOT for
+functions — the likelier mistake. `ci.yml` now fails on the warning, mutation-proven both ways.
+⛔ Its first draft had a second hole: `cyrius build … | tee` hides the build's exit status, so a
+FAILED build ran the STALE binary and reported its old green count. Caught doing exactly that.
 
 ⛔⛔ **AND A CONFIRMED DATA-LOSS DEFECT IS OPEN — H1, NOT FIXED HERE.** `crab_walk_reroot_dtree`
 carries its own condition: *"WHY DELETING HERE IS SAFE… rests on one invariant in `crab_walk_begin`:

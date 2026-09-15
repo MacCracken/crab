@@ -326,7 +326,7 @@ fn main(): i64 {
     crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
     crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
     crab_rs_preview(rs, 1);
-    crab_rs_dims(rs, 4096, 2160);
+    crab_rs_dims(rs, 4096, 2160, CRAB_PVD_OK);
     crab_rs_thumb(rs, fake, CRAB_TH_OK);
     var tds = crab_render(tsurf, 0, rs);
     check(tds != 0, 1);

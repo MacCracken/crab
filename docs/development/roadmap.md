@@ -224,15 +224,14 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.1 · The door** | **open the menu row with the pointer** — a mark in the status line, so `F10` is not the only way in | — | **shipped** ⚠ *not a crab GLYPH — that is closed at three independent levels; see below* |
 | ✅ | **0.9.2 · `Go`** | **jump to a place from the menu bar** — every sidebar destination, picked through one navigator | — | **shipped** ⭐ *and it closed a key leak worse than the one recorded* |
 | ✅ | **0.9.3 · Symlinks** | **see that a link is a link** — marked `@`, KIND says Link — and know what each verb does with one | — | **shipped** ([ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)) |
-| | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry | — | the 64 KiB dimension+EXIF read is on the idle tick, not the selection path |
+| ✅ | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry — and see the picture of the file you are actually on | — | **shipped** ⛔ *and it found TWO live wrong-on-screen defects: the thumbnail lagged one file behind, and CAMERA persisted onto text files* |
 | | **0.9.5 · Pointer polish** | use the middle button, and see a popup's highlight follow the pointer | — | both do something, or both are written down as deliberate |
 | ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
 | | **0.10.0 · The index** (M7) | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.4 – 0.9.5 are ungated and can be reordered freely** — one change each, nothing
-downstream waits on them. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
+⭐ **0.9.5 is ungated** — one change, nothing downstream waits on it. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
 ### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day
@@ -436,9 +435,20 @@ promising the AI arc** — open since the roadmap was written.
   type byte had a third value every link would have been **undeletable**.
   ⭐ And the obvious fear is not real — a link cannot make the walk loop, because the walk descends
   only on `1` and a link is `2`.
-- **The preview's dimension + EXIF read is a synchronous 64 KiB open/read/close on the SELECTION
-  path**, against crab's own rule that reads belong on the idle tick. Memoised, but arrowing through
-  a directory of large JPEGs pays per entry. ⇒ **0.9.4.**
+- ✅ **The preview's synchronous 64 KiB read — CLOSED (0.9.4), and it was the smallest of three.**
+  The read is on the idle tick (`crab_pv_step`, one file per tick, gated on `crab_preview_fit` so a
+  too-narrow column reads nothing). MEASURED: **4 µs per keystroke, identical with an empty cache** —
+  a miss is a lookup, never a read; and arrowing BACK is free, where the one-entry memo re-read
+  everything. ⚠ The host figure understates agnos by ~100x: the cheaper *stat* sweep is recorded at
+  ~1.1 ms/entry, which is why it was deferred too.
+  ⛔⛆ **Moving it exposed two LIVE wrong-on-screen defects**, both measured before any change: the
+  **thumbnail lagged one file behind** (the tick's `OK -> OK` gate drew no frame — 0.8.2's bug, obeyed
+  by 1 of 8 render sites), and **`CAMERA: Canon EOS R5` stayed under a text file's name**. One root
+  cause: the column read process-wide *"last touched"* state instead of the selection. ⇒ It is now a
+  pure function of the selected path.
+- ✅ **And the layering gate was half a gate — CLOSED (0.9.4), cross-cutting.** `render_test` includes
+  `ui.cyr` alone so an up-call fails; an undefined **constant** is `error:` (it caught 0.9.3) but an
+  undefined **function** is only `warning:` and the build exits 0. `ci.yml` fails on the warning now.
 - ✅ **The batch-rename operators can be typed — CLOSED (0.8.9), and by the Shift work rather than by
   anything aimed at it.** The sheet advertised a language its own field could not produce: `#` is
   Shift+3 and `*` is Shift+8, and the whole shifted number row answered 0 under a comment reading

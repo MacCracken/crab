@@ -2935,6 +2935,7 @@ fn main() {
     t_img_dims();
     t_preview();
     t_preview_dims();
+    t_pv_094();
     t_thumbnails();
     t_exif();
     t_gridview();
@@ -3307,10 +3308,137 @@ fn t_preview(): i64 {
 # here exists on the host, so none of it is taken on trust.
 # ⚠ `build/` is gitignored, so the debris of a failed run is never committed — the same scratch the
 # M4 write-layer group uses.
-fn t_preview_dims(): i64 {
-    test_group("crab — M5: the preview's dimension read, against REAL files");
+# ⭐⭐ 0.9.4 — THE PREVIEW SHOWS THE SELECTION, AND COSTS NOTHING TO DO IT.
+#
+# Every decision below used to live inside `#ifdef CYRIUS_TARGET_AGNOS` in main.cyr, or inline in a
+# render block, where no host test could reach it. Two of them were WRONG and shipping.
+fn t_pv_094(): i64 {
+    test_group("crab — 0.9.4: the preview is a function of the SELECTION, not of the last read");
     var scr = alloc(CRAB_PATH_MAX);
-    var out = alloc(CRAB_IMG_SZ);
+
+    # ---- crab_pvd_row — the flicker rule -------------------------------------------------------
+    # ⛔ "no answer" AND "no answer YET" ARE DIFFERENT ROWS. Drawing both as nothing makes the
+    # DIMENSIONS row APPEAR a tick after every selection and shove MODIFIED, CAMERA and SHOT down
+    # with it — a row has no reserved height, its presence IS the layout.
+    assert_eq(crab_pvd_row(CRAB_PVD_PENDING, 0, 0), CRAB_PVD_ROW_WAIT,
+      "⛔ PENDING DRAWS THE ROW, with '?' — so nothing appears or disappears as the answer lands");
+    assert_eq(crab_pvd_row(CRAB_PVD_PENDING, 4096, 2160), CRAB_PVD_ROW_WAIT,
+      "...and PENDING outranks stale numbers that happen to be in the record");
+    assert_eq(crab_pvd_row(CRAB_PVD_NONE, 0, 0), CRAB_PVD_ROW_NONE,
+      "a decided NONE draws NO row — 'DIMENSIONS: —' under every text file is a promise crab breaks");
+    assert_eq(crab_pvd_row(CRAB_PVD_NONE, 4096, 2160), CRAB_PVD_ROW_NONE,
+      "...even carrying numbers: the STATE decides, not the value");
+    assert_eq(crab_pvd_row(CRAB_PVD_OK, 4096, 2160), CRAB_PVD_ROW_VALUE, "OK with real numbers draws them");
+    assert_eq(crab_pvd_row(CRAB_PVD_OK, 0, 2160), CRAB_PVD_ROW_NONE, "⛔ OK with a zero width draws NO row");
+    assert_eq(crab_pvd_row(CRAB_PVD_OK, 4096, 0), CRAB_PVD_ROW_NONE, "...and a zero height likewise");
+    assert_eq(crab_pvd_row(CRAB_PVD_OK, 0 - 4, 10), CRAB_PVD_ROW_NONE, "...and a negative extent is not a measurement");
+
+    # ---- crab_pv_redraw_due — ⛔⛆ THE BUG THAT WAS SHIPPING ------------------------------------
+    # The idle tick's gate was `if (tafter != tbefore)`. Arrowing between two ALREADY-DECODED images
+    # is OK -> OK, so NO FRAME WAS DRAWN and the PREVIOUS file's picture stayed on screen under the
+    # new file's name — permanently, because nothing else corrected it. Measured on the host against
+    # two real PNGs before this release: different slots, `redraw fired: 0`.
+    assert_eq(crab_pv_redraw_due(CRAB_TH_OK, CRAB_TH_OK, 3, 3, CRAB_PVD_OK, CRAB_PVD_OK), 0,
+      "the same file on a later tick redraws NOTHING — or the idle loop is a busy loop");
+    assert_eq(crab_pv_redraw_due(CRAB_TH_OK, CRAB_TH_OK, 3, 4, CRAB_PVD_OK, CRAB_PVD_OK), 1,
+      "⛔⛆ A DIFFERENT SLOT AT THE SAME STATE MUST REDRAW — 'OK -> OK' left the last image on screen");
+    assert_eq(crab_pv_redraw_due(CRAB_TH_NONE, CRAB_TH_OK, 0 - 1, 2, CRAB_PVD_OK, CRAB_PVD_OK), 1,
+      "a decode landing redraws");
+    assert_eq(crab_pv_redraw_due(CRAB_TH_OK, CRAB_TH_OK, 3, 3, CRAB_PVD_PENDING, CRAB_PVD_OK), 1,
+      "⭐ and the DIMENSIONS settling from '?' to numbers redraws, with no thumbnail change at all");
+    assert_eq(crab_pv_redraw_due(CRAB_TH_OK, CRAB_TH_OK, 3, 3, CRAB_PVD_PENDING, CRAB_PVD_NONE), 1,
+      "...as does a header crab decides it cannot read: '?' must not stay forever");
+
+    # ---- crab_pv_should_step — what the tick is allowed to spend a read on ---------------------
+    assert_eq(crab_pv_should_step(1, 5, CRAB_PVD_PENDING), 1, "a pending image in a fitting preview is read");
+    assert_eq(crab_pv_should_step(0, 5, CRAB_PVD_PENDING), 0,
+      "⛔ A PREVIEW THE WINDOW IS TOO NARROW TO DRAW READS NOTHING — that cost is the point of 0.9.4");
+    assert_eq(crab_pv_should_step(1, 0, CRAB_PVD_PENDING), 0, "an empty pane reads nothing");
+    assert_eq(crab_pv_should_step(1, 5, CRAB_PVD_OK), 0, "an answered file is never re-read");
+    assert_eq(crab_pv_should_step(1, 5, CRAB_PVD_NONE), 0,
+      "⛔ AND A REMEMBERED REFUSAL IS NEVER RETRIED — re-deciding it every tick re-opens the file forever");
+
+    # ---- crab_pv_read_all — ⛔ the short read that memoised a wrong negative --------------------
+    # A bare `sys_read` is permitted to return fewer bytes than asked for. The old code took whatever
+    # came back, and a JPEG whose SOF sat past the prefix was recorded as "no dimensions" — a
+    # REMEMBERED refusal, never retried.
+    var dir = "build";
+    crab_fs_path(scr, dir, "pvloop.bin");
+    var lf = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(lf >= 0, "the read-loop fixture is created");
+    var big = alloc(5000);
+    var bi = 0;
+    while (bi < 5000) { store8(big + bi, 65); bi = bi + 1; }
+    sys_write(lf, big, 5000);
+    sys_close(lf);
+    var rb = alloc(8192);
+    var rfd = crab_fs_open_r(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(rfd >= 0, "...and opened for reading");
+    # ⛔⛆ AND THIS ASSERTION DOES NOT PROVE THE LOOP — RECORDED, NOT HIDDEN. Replacing the whole of
+    # `crab_pv_read_all` with a bare `return sys_read(fd, buf, cap);` — the exact pre-0.9.4 code —
+    # leaves the suite at 2384 passed, 0 failed. A regular local file never returns a short read, so
+    # a file fixture cannot tell a loop from a single call, and a pipe cannot either (its buffer
+    # coalesces both writes into one read). What it DOES pin is the byte count and the cap.
+    # ⚠ THE LOOP IS STILL RIGHT, and agnos is where it will matter: a short read is permitted at any
+    # time and is most plausible on a request spanning ext2 blocks over NVMe, which is exactly the
+    # read this function makes. ⇒ Proving it needs a fixture that can short-read on purpose; until
+    # then this is an honest partial gate, and saying so is the point.
+    assert_eq(crab_pv_read_all(rfd, rb, 8192), 5000,
+      "the read reports every byte to EOF (⚠ does NOT prove the loop — see above)");
+    sys_close(rfd);
+    var rfd2 = crab_fs_open_r(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert_eq(crab_pv_read_all(rfd2, rb, 100), 100, "...and stops exactly at the cap");
+    sys_close(rfd2);
+    crab_fs_delete(dir, "pvloop.bin", 0, scr);
+
+    # ---- crab_pv_state_for — PENDING is DERIVED, never stored ----------------------------------
+    crab_pvc_clear();
+    assert_eq(crab_pv_state_for(dir, "nosuch.png", scr), CRAB_PVD_PENDING,
+      "an image with no slot yet is PENDING — the tick has not reached it");
+    assert_eq(crab_pv_state_for(dir, "notes.txt", scr), CRAB_PVD_NONE,
+      "⛔ A NON-IMAGE IS NONE AND TAKES NO SLOT — or the cache fills with proof that .c files are not photos");
+    assert_eq(crab_pv_slot_for(dir, "notes.txt", scr), 0 - 1, "...and it is never looked up");
+    assert_eq(crab_pv_state_for(dir, 0, scr), CRAB_PVD_NONE, "a null name is NONE, not PENDING");
+
+    # ---- crab_pvc_claim — ⛔⛆ IT MUST ZERO THE PAYLOAD -----------------------------------------
+    # `crab_tc_claim` writes only the path and the state, because its payload is pixels nothing draws
+    # unless the state says OK. THIS slot's payload is CAMERA and SHOT, whose only draw gate is
+    # `load8(cam) != 0`. A slot claimed for B still holding A's bytes would publish A's camera under
+    # B's name — the very defect this cache exists to end, re-created inside the fix.
+    crab_pvc_clear();
+    var s1 = crab_pvc_claim("/a/one.jpg");
+    var c1 = crab_pvc_cam(s1);
+    store8(c1, 90); store8(c1 + 1, 0);                       # pretend a camera was written
+    store8(crab_pvc_shot(s1), 90); store8(crab_pvc_shot(s1) + 1, 0);
+    crab_pvc_set(s1, CRAB_PVD_OK, 111, 222);
+    assert_eq(crab_pvc_w(s1), 111, "a slot holds what was written to it");
+    var s2 = crab_pvc_claim("/a/two.jpg");
+    assert(s2 != s1, "the next claim takes a different slot");
+    # now force the cursor all the way round so slot s1 is re-claimed for a THIRD path
+    var n = 0;
+    while (n < CRAB_PVC_N) { crab_pvc_claim("/a/filler.jpg"); n = n + 1; }
+    var s3 = crab_pvc_find("/a/filler.jpg");
+    assert(s3 >= 0, "the evicting claims landed");
+    assert_eq(load8(crab_pvc_cam(s3)), 0,
+      "⛔⛆ A CLAIMED SLOT CARRIES NO PREVIOUS FILE'S CAMERA — `load8(cam) != 0` is the only draw gate");
+    assert_eq(load8(crab_pvc_shot(s3)), 0, "...nor its SHOT");
+    assert_eq(crab_pvc_w(s3), 0, "...nor its width");
+    assert_eq(crab_pvc_h(s3), 0, "...nor its height");
+    assert_eq(crab_pvc_state(s3), CRAB_PVD_NONE, "...and it claims to know nothing until the read finishes");
+
+    # ---- out-of-range slots answer, rather than reading past the cache --------------------------
+    assert_eq(crab_pvc_state(0 - 1), CRAB_PVD_NONE, "slot -1 is NONE");
+    assert_eq(crab_pvc_w(0 - 1), 0, "...with no width");
+    assert_eq(crab_pvc_cam(0 - 1), 0, "...and no camera pointer to dereference");
+    assert_eq(crab_pvc_state(CRAB_PVC_N), CRAB_PVD_NONE, "one past the end is NONE too");
+    assert_eq(crab_pvc_cam(CRAB_PVC_N), 0, "...and hands back no pointer");
+    crab_pvc_clear();
+    return 0;
+}
+
+fn t_preview_dims(): i64 {
+    test_group("crab — M5/0.9.4: the preview's dimension read, against REAL files");
+    var scr = alloc(CRAB_PATH_MAX);
     var hdr = alloc(64);
     var dir = "build";
 
@@ -3328,14 +3456,14 @@ fn t_preview_dims(): i64 {
     sys_write(fd, hdr, 32);
     sys_close(fd);
 
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "a real PNG on disk reports dimensions");
-    assert_eq(load64(out + CRAB_IMG_W), 137, "...its width");
-    assert_eq(load64(out + CRAB_IMG_H), 42, "...and its height");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvtest.png", scr), CRAB_PVD_OK, "a real PNG on disk reports dimensions");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvtest.png", scr)), 137, "...its width");
+    assert_eq(crab_pvc_h(crab_pv_slot_for(dir, "pvtest.png", scr)), 42, "...and its height");
     # ⚠ THE SECOND CALL IS A CACHE HIT and must give the same answer — a memo that returns something
     # different from the read it stands in for is worse than no memo.
-    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the memoised second call still answers");
-    assert_eq(load64(out + CRAB_IMG_W), 137, "...with the same width");
+    assert_eq(crab_pv_step(dir, "pvtest.png", scr), CRAB_PVD_OK, "the memoised second call still answers");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvtest.png", scr)), 137, "...with the same width");
 
     # ⛔ THE EXTENSION IS A GATE ON *OPENING*, NOT A CLAIM ABOUT THE FILE. A text file with a `.png`
     # name gets opened and then REFUSED by the signature check — which is the correct order: the
@@ -3345,10 +3473,10 @@ fn t_preview_dims(): i64 {
     assert(fd2 >= 0, "the impostor fixture is created");
     sys_write(fd2, "this is not a png at all, not even close", 40);
     sys_close(fd2);
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvfake.png", out, scr), 0,
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvfake.png", scr), CRAB_PVD_NONE,
       "a text file NAMED .png is refused by its bytes, not trusted by its name");
-    assert_eq(load64(out + CRAB_IMG_W), 0, "...and reports no width");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvfake.png", scr)), 0, "...and reports no width");
 
     # ⚠ A NON-IMAGE EXTENSION IS NOT EVEN OPENED — the cheap gate that keeps a file read off the
     # arrow-key path for the directory full of source files crab is usually looking at.
@@ -3356,33 +3484,33 @@ fn t_preview_dims(): i64 {
     var fd3 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
     sys_write(fd3, hdr, 32);                        # real PNG bytes, wrong name
     sys_close(fd3);
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvtest.txt", out, scr), 0,
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvtest.txt", scr), CRAB_PVD_NONE,
       "a .txt is not opened at all, even holding a valid PNG header");
 
     # ⚠ A FILE THAT IS NOT THERE reports nothing rather than failing the frame.
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvmissing.png", out, scr), 0, "a missing file reports no dimensions");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvmissing.png", scr), CRAB_PVD_NONE, "a missing file reports no dimensions");
     # ⚠ AND A FILE TOO SHORT TO HOLD A HEADER. `got <= 0` and a truncated parse are different paths.
     crab_fs_path(scr, dir, "pvshort.png");
     var fd4 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
     sys_write(fd4, hdr, 12);
     sys_close(fd4);
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvshort.png", out, scr), 0, "a truncated PNG reports nothing");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvshort.png", scr), CRAB_PVD_NONE, "a truncated PNG reports nothing");
     crab_fs_path(scr, dir, "pvempty.png");
     var fd5 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
     sys_close(fd5);
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvempty.png", out, scr), 0, "an EMPTY file reports nothing");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvempty.png", scr), CRAB_PVD_NONE, "an EMPTY file reports nothing");
 
     # ⛔⛔ THE CACHE IS KEYED ON A NAME, AND crab MAKES NAMES REFER TO DIFFERENT FILES. This is the
     # assertion that the invalidation is real: read `pvtest.png` (137x42), then overwrite that name
-    # with a DIFFERENT image, and the answer must change. Without `crab_pv_forget` in `crab_relist`
+    # with a DIFFERENT image, and the answer must change. Without `crab_pvc_clear` in `crab_relist`
     # the preview would keep reporting the old file's size next to the new file's name.
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the original is read");
-    assert_eq(load64(out + CRAB_IMG_W), 137, "...at 137 wide");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvtest.png", scr), CRAB_PVD_OK, "the original is read");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvtest.png", scr)), 137, "...at 137 wide");
     store8(hdr + 18, 1); store8(hdr + 19, 0);       # width  = 256
     store8(hdr + 22, 0); store8(hdr + 23, 100);     # height = 100
     crab_fs_path(scr, dir, "pvtest.png");
@@ -3404,18 +3532,18 @@ fn t_preview_dims(): i64 {
     sys_close(fd6);
     # ⚠ WITHOUT the invalidation the stale answer stands — this asserts the STALENESS exists, so
     # that the assertion after it is not vacuous.
-    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "the cache still answers for that name");
-    assert_eq(load64(out + CRAB_IMG_W), 137, "...and it is STALE, which is exactly why forgetting matters");
-    crab_pv_forget();
-    assert_eq(crab_preview_dims(dir, "pvtest.png", out, scr), 1, "after forgetting, the file is re-read");
-    assert_eq(load64(out + CRAB_IMG_W), 256, "...and the NEW width is reported");
-    assert_eq(load64(out + CRAB_IMG_H), 100, "...with the new height");
+    assert_eq(crab_pv_step(dir, "pvtest.png", scr), CRAB_PVD_OK, "the cache still answers for that name");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvtest.png", scr)), 137, "...and it is STALE, which is exactly why forgetting matters");
+    crab_pvc_clear();
+    assert_eq(crab_pv_step(dir, "pvtest.png", scr), CRAB_PVD_OK, "after forgetting, the file is re-read");
+    assert_eq(crab_pvc_w(crab_pv_slot_for(dir, "pvtest.png", scr)), 256, "...and the NEW width is reported");
+    assert_eq(crab_pvc_h(crab_pv_slot_for(dir, "pvtest.png", scr)), 100, "...with the new height");
 
     # ⚠ Null arguments are refused rather than dereferenced, as everywhere else in this codebase.
-    assert_eq(crab_preview_dims(0, "a.png", out, scr), 0, "a null directory is refused");
-    assert_eq(crab_preview_dims(dir, 0, out, scr), 0, "a null name is refused");
-    assert_eq(crab_preview_dims(dir, "a.png", 0, scr), 0, "a null output record is refused");
-    assert_eq(crab_preview_dims(dir, "a.png", out, 0), 0, "a null path scratch is refused");
+    assert_eq(crab_pv_step(0, "a.png", scr), CRAB_PVD_NONE, "a null directory is refused");
+    assert_eq(crab_pv_step(dir, 0, scr), 0, "a null name is refused");
+    assert_eq(crab_pv_step(dir, "a.png", scr), 0, "a null output record is refused");
+    assert_eq(crab_pv_step(dir, "a.png", 0), 0, "a null path scratch is refused");
 
     # ⚠ THE TWO SCRATCH BUFFERS ARE ALLOCATED ONCE FOR THE PROCESS, like the sort scratch and the
     # copy buffer — `alloc` has no `free()`, so a buffer minted per call would be a 64 KiB leak per
@@ -3423,8 +3551,8 @@ fn t_preview_dims(): i64 {
     # the property has.
     assert(crab_pv_hdr_buf() != 0, "the header buffer is created");
     assert_eq(crab_pv_hdr_buf(), crab_pv_hdr_buf(), "...and the SAME buffer is returned every time");
-    assert(crab_pv_key_buf() != 0, "the cache-key buffer is created");
-    assert_eq(crab_pv_key_buf(), crab_pv_key_buf(), "...and it is a singleton too");
+    assert(crab_pvc_base() != 0, "the preview cache is created");
+    assert_eq(crab_pvc_base(), crab_pvc_base(), "...and it is a singleton too");
 
     # Tidy up — `build/` is gitignored but a test that leaves debris makes the next run ambiguous.
     crab_fs_delete(dir, "pvtest.png", 0, scr);

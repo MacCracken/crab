@@ -2,6 +2,138 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.4] — 2026-09-14 — the preview shows the SELECTION, and costs nothing to do it
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⚠ **The roadmap asked for one thing and the work found three.** The item was *"the 64 KiB
+> dimension+EXIF read is on the idle tick, not the selection path"*. Moving it exposed that the
+> preview column was reading **process-wide "last touched" state** rather than anything derived from
+> the selection — and two of those readers were WRONG AND SHIPPING. They are one change, not three:
+> the column is now a pure function of the selected path.
+
+### Fixed — ⛔⛆ the preview's thumbnail lagged ONE FILE behind the selection, permanently
+
+**MEASURED ON THE HOST before a line was changed**, two real decodable PNGs:
+
+```
+A: state 1  redraw fired: 1        <- CRAB_TH_OK, the tick redraws
+B: state 1  redraw fired: 0        <- OK -> OK, the guard skips entirely
+slot(A)=0 slot(B)=1 slot the keypress frame drew=0
+```
+
+Arrowing from image A to image B, the keypress frame asked `crab_thumb_pixels()` — *"what the last
+STEP was about"* — which is still A. Then the idle tick stepped to B, but the gate was
+`if (tafter != tbefore)` and **`OK -> OK` is not a change, so no frame was drawn at all**. A's picture
+stayed under B's name until some unrelated event forced a repaint; while arrowing, the thumbnail is
+permanently one file behind.
+
+⚠ **This is 0.8.2's own bug, still live.** Its fix comment sits at the gallery site and names the
+mechanism exactly — *"it PERSISTED: the preview's own redraw fires only when its state CHANGES, and
+OK -> OK is not a change, so nothing corrected it. ⇒ Look the selection's slot up directly"* — and
+**only 1 of 8 render sites obeyed it.** ⇒ `crab_pv_redraw_due` makes the SLOT part of the answer: a
+different slot is a different file, whatever its state says.
+
+### Fixed — ⛔⛆ `CAMERA: Canon EOS R5` stayed on screen under a TEXT FILE's name
+
+Also measured before changing anything, with a real EXIF JPEG:
+
+```
+1. select shot.jpg   : CAMERA row drawn: YES -> "Canon EOS R5"
+2. arrow to notes.txt: CAMERA row drawn: YES -> "Canon EOS R5"
+```
+
+`crab_preview_dims` returned at its `crab_is_image` gate **before** clearing the two process-wide EXIF
+buffers, and the CAMERA/SHOT rows are drawn *outside* the column's `is_image` block — their only gate
+is `load8(cam) != 0`. So the last photograph's camera sat under whatever was selected next.
+⇒ EXIF now lives **in the cache slot beside the dimensions it was read with**, and `crab_pv_publish`
+publishes `""` for a non-image, an empty pane or a closed preview. Not patched — unreachable.
+
+### Changed — ⭐⭐ the read moved to the idle tick, and a MISS now costs what a HIT costs
+
+```
+SELECTION PATH (crab_pv_publish, warm cache): 4 us per keystroke
+SELECTION PATH (cache EMPTY, all PENDING)   : 4 us per keystroke
+IDLE TICK    (crab_pv_step, forced cold)    : 8 us per file, off the keystroke
+```
+
+⚠ **The invariance is the result, not the number.** Before, a keystroke onto an unread image cost an
+`open` + `read(64 KiB)` + `close`; onto a read one, nothing. ⛔ **And the host figure understates the
+target by two orders of magnitude** — crab's own recorded measurement for the much cheaper *stat*
+sweep is **~1.1 ms per entry on agnos**, which is why that sweep was deferred in the first place. The
+honest claim is not "12 µs became 4 µs"; it is **the selection path no longer opens files at all.**
+
+⭐ **And arrowing BACK is now free.** The old memo held ONE entry, so reversing direction re-read
+every file. The cache holds 128, keyed by full path — 56,320 bytes taken once.
+⭐ **A preview the window is too narrow to draw now reads nothing**, which it did not before:
+`crab_pv_should_step` gates on `crab_preview_fit`, the EFFECTIVE state, not the operator's want.
+
+### Fixed — ⛆ a short read memoised a wrong negative
+
+`crab_preview_dims` had a bare `sys_read` with no loop. A read may return fewer bytes than asked for
+at any time, so a JPEG whose SOF sat past the returned prefix was recorded as *"no dimensions"* — and
+that is a REMEMBERED refusal, never retried, so the file stayed dimensionless for the session.
+`crab_pv_read_all` loops. ⚠ **Its test does not prove the loop and says so at the assertion** — a
+regular local file never short-reads, so replacing the function with the old one-liner leaves the
+suite green. Recorded rather than deleted; agnos, spanning ext2 blocks over NVMe, is where it matters.
+
+### Fixed — ⛆ the mascot drew the preview from a record that could be minutes stale
+
+It was the one render site of eight that published **no preview state at all**, and `crab_rs_reset` is
+never called inside the loop — so it drew DIMENSIONS, the thumbnail and CAMERA from whatever was last
+written, possibly about a different directory. It fires precisely when the operator has been idle long
+enough to be reading the screen. Since the publish is now a lookup there is no cost argument against
+it, which is why it was left out before.
+
+### Fixed — ⛔⛆ THE LAYERING GATE WAS HALF A GATE, AND HAD BEEN ALL ALONG
+
+`src/render_test.cyr` includes `ui.cyr` ALONE to enforce that the render path never calls up into
+`app.cyr` — the rule the source records being broken five times. **Measured this release:**
+
+| an up-call to an undefined… | compiler | build exit | render_test |
+|---|---|---|---|
+| **constant / enum** | `error:` | **1** | not reached |
+| **function** | `warning:` | **0** | `53 checks, 0 failed` |
+
+So the rule was enforced for enums and **not** for functions — the more likely mistake of the two, and
+the one this release's design would have made. ⇒ `ci.yml` now fails on the warning. Mutation-proven
+both ways: planting `crab_exif_raw_buf()` into `crab_tc_claim` gives exit 1, clean gives exit 0.
+⛔ **And the step had a second hole found while fixing the first**: `cyrius build … | tee` hides the
+build's exit status (a pipeline's status is the last stage's), so a *failed* build ran the **stale**
+binary and reported its old green count. Caught doing exactly that. Both are fixed.
+
+### Tests
+
+**2,384 assertions** (2,345 → 2,384). Five mutations planted and caught, including the two shipping
+bugs: `crab_pv_redraw_due` without the slot (the thumbnail lag), `crab_pvc_claim` not zeroing the
+payload (the stale camera), `crab_pvd_row` drawing nothing for PENDING (the flicker),
+`crab_pv_should_step` ignoring whether the column is on screen, and `crab_pv_state_for` never deriving
+PENDING. ⚠ **A sixth mutation SURVIVED and is recorded at its assertion** — see the short read above.
+
+⭐⭐ **`agnos/scripts/harness/crab-preview-test.py` is new, and MUTATION-PROVEN on iron.** Real PNGs of
+two different known sizes go into the image; the new `crab: pv <name> state <s> <w>x<h>` oracle is
+emitted by the DRAIN and by nothing else, so a line appearing at all proves the tick did the work —
+which a screenshot cannot, since both designs end with numbers in the column.
+
+```
+ARM 1: zzpic1.png -> state 1, 137x42 (want 137x42)      the IDLE TICK read it
+ARM 2: zzpic2.png -> state 1, 320x200 (want 320x200)    its OWN dimensions, not the previous file's
+ARM 3: reads per file: {'zzpic1.png': 1, 'zzpic2.png': 1}
+```
+
+Every file read **exactly once**, and the other 48 entries in `/bin` produced no line at all — the
+non-image gate costs nothing. Run against a planted re-read, ARM 3 reports the spin it exists to
+catch: files read **up to 36 times each**, and both measurement arms unmeasured.
+
+### What the operator sees
+
+The DIMENSIONS row is drawn from the STATE, not the value. PENDING draws `DIMENSIONS: ?`, OK draws the
+numbers, NONE draws no row — so while arrowing over images the row is **always present** and only the
+value settles. ⛔ **A row has no reserved height: its presence IS the layout**, so a row that appeared
+a tick after every selection would shove MODIFIED, CAMERA and SHOT down as it arrived. The `?` is not
+a new affordance — SIZE and MODIFIED already show it on every listing whose stat sweep has not caught
+up. The preview is already a surface that admits it does not know something yet.
+
 ## [0.9.3] — 2026-09-14 — crab can see a symlink, and the write layer stops guessing what one is
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

@@ -78,9 +78,27 @@ jobs:
         # ⚠ ITS EXIT CODE IS THE ASSERTION — it returns the number of failed checks. Verified by
         # injecting a bad check: `54 checks, 1 failed`, exit 1. It also prints its own count, so a
         # run that silently executed zero checks is visible; it used to exit 0 either way.
+        # ⛔⛆ AND THE BUILD'S EXIT CODE IS ONLY HALF THE GATE — MEASURED, 0.9.4. An undefined
+        # **constant** from an up-call is `error:` and fails the build (that is what caught 0.9.3).
+        # An undefined **function** is only `warning:`, and the build exits 0: planting
+        # `crab_exif_raw_buf()` (an app.cyr function) into `crab_tc_claim` in ui.cyr compiled OK and
+        # ran `53 checks, 0 failed`. So for five years the rule this step claims to enforce was
+        # enforced for enums and NOT for functions — the more likely mistake of the two.
+        # ⇒ The warning IS the gate. Fail on it.
         run: |
           set -e
-          cyrius build src/render_test.cyr build/render_test
+          # ⛔ `cmd | tee` HIDES cmd's EXIT STATUS — a pipeline's status is the LAST stage's, so
+          # `set -e` would not fire on a failed build and the step would go on to run a STALE
+          # binary and report its old count as green. Caught doing exactly that while writing this.
+          # ⇒ Redirect to a file and check the status directly.
+          cyrius build src/render_test.cyr build/render_test > /tmp/rt.build 2>&1 || {
+            echo "::error::render_test failed to BUILD"; cat /tmp/rt.build; exit 1; }
+          cat /tmp/rt.build
+          if grep -q "undefined function" /tmp/rt.build; then
+            echo "::error::src/ui.cyr calls UP into src/app.cyr — the render path may not do that."
+            grep "undefined function" /tmp/rt.build
+            exit 1
+          fi
           ./build/render_test
 
       - name: Fuzz

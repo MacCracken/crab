@@ -279,19 +279,13 @@ fn main(): i64 {
     crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-    # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
-    # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
-    # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
-    # the frame after the selection actually moves to a new image pays an open/read/close.
-    # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
-    if (pv_open == 1) {
-        if (acount > 0) {
-            crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
-        } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
-    }
-    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+    # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
+    # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
+    # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
+    # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
+    # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
+    # setters collapse into one call so they cannot drift apart again — they had.
+    crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
 
     # ⭐⭐ THE FACE IS LOADED HERE, EXPLICITLY, BEFORE THE FIRST FRAME (0.9.0) — not left to the
     # argument evaluation below. dhancha 0.10.0 installs `dh_falloc` as sadish's allocation hook for
@@ -2071,19 +2065,13 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
-                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
-                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
-                # the frame after the selection actually moves to a new image pays an open/read/close.
-                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
-                if (pv_open == 1) {
-                    if (acount > 0) {
-                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
-                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
-                }
-                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
+                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
+                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
+                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
+                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
+                # setters collapse into one call so they cannot drift apart again — they had.
+                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
                 var s2 = crab_render(surf, crab_face(), rs);
                 if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else {
@@ -2176,19 +2164,13 @@ fn main(): i64 {
                     crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                    # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
-                    # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
-                    # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
-                    # the frame after the selection actually moves to a new image pays an open/read/close.
-                    # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
-                    if (pv_open == 1) {
-                        if (acount > 0) {
-                            crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
-                        } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
-                    }
-                    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                    crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-                    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                    # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
+                    # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
+                    # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
+                    # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
+                    # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
+                    # setters collapse into one call so they cannot drift apart again — they had.
+                    crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
                     var s3 = crab_render(surf, crab_face(), rs);
                     if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
@@ -2283,19 +2265,13 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
-                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
-                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
-                # the frame after the selection actually moves to a new image pays an open/read/close.
-                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
-                if (pv_open == 1) {
-                    if (acount > 0) {
-                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
-                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
-                }
-                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
+                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
+                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
+                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
+                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
+                # setters collapse into one call so they cannot drift apart again — they had.
+                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
                 var s5 = crab_render(surf, crab_face(), rs);
                 if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
@@ -2383,7 +2359,6 @@ fn main(): i64 {
                     crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                     crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                     crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                    crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
                     # ⛔⛆ THE PREVIEW SHOWS THE **SELECTION**, NOT WHAT THIS WALK JUST DECODED (0.8.2).
                     # `crab_thumb_pixels()` reads `crab_th_slot`, which records what the last STEP was
                     # about — and the step immediately above was about a GALLERY CELL. With the
@@ -2392,10 +2367,11 @@ fn main(): i64 {
                     # when its state CHANGES, and OK -> OK is not a change, so nothing corrected it.
                     # ⇒ Look the selection's slot up directly, which decodes nothing and disturbs
                     # nothing. A -1 slot yields the zeroed scratch and NONE, i.e. "draw no picture".
-                    var qpsl = 0 - 1;
-                    if (qsel < qcnt) { qpsl = crab_thumb_slot_for(qpath, qbuf + qsel * CRAB_REC_SZ, pathscr); }
-                    crab_rs_thumb(rs, crab_thumb_pixels_of(qpsl), crab_tc_state(qpsl));
-                    crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                    # ⭐ 0.9.4 MADE THAT THE RULE EVERYWHERE. This was the ONLY one of eight render
+                    # sites that obeyed it; the other seven asked "what was the last step about" and
+                    # were wrong in exactly the way this comment describes. `crab_pv_publish` is that
+                    # lookup, for the picture AND the dimensions AND the EXIF, in one place.
+                    crab_pv_publish(rs, qpath, qbuf, qsel, qcnt, pv_open, pathscr);
                     var s7 = crab_render(surf, crab_face(), rs);
                     if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                     else { setu_buf_write(buf_id, sd_surface_pixels(s7), nbytes); }
@@ -2436,6 +2412,16 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
+                # ⛔⛆ THE MASCOT WAS THE ONE RENDER SITE THAT PUBLISHED NO PREVIEW STATE AT ALL, and
+                # `crab_rs_reset` is never called inside this loop — so it drew DIMENSIONS, the
+                # thumbnail and CAMERA from whatever the record still held from a frame that could be
+                # minutes old and about a different directory. It fires precisely when the operator
+                # has been idle long enough to be reading the screen.
+                # ⇒ It publishes like every other site now. Since 0.9.4 that is a lookup, so there is
+                # no cost argument against it — which is why it was left out before.
+                var mpath = lpath; var mbuf = lbuf; var msel = sel_l; var mcnt = ln;
+                if (active_pane == 1) { mpath = rpath; mbuf = rbuf; msel = sel_r; mcnt = rn; }
+                crab_pv_publish(rs, mpath, mbuf, msel, mcnt, pv_open, pathscr);
                 var sm = crab_render(surf, crab_face(), rs);
                 if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(sm), nbytes); }
@@ -2446,12 +2432,52 @@ fn main(): i64 {
                 var tpath = lpath; var tbuf = lbuf; var tsel = sel_l; var tcnt = ln;
                 if (active_pane == 1) { tpath = rpath; tbuf = rbuf; tsel = sel_r; tcnt = rn; }
                 if (tcnt > 0) {
-                    var tbefore = crab_thumb_state();
+                    # ⭐⭐ THE DIMENSION READ LIVES HERE NOW (0.9.4) — the whole of
+                    # `0.9.4 · A preview that costs nothing`. It shares this branch with the
+                    # thumbnail decode deliberately rather than opening a sixth idle branch: the two
+                    # are about the SAME FILE at the SAME MOMENT, they inherit the same guards
+                    # (`ev == 0`, `pv_open == 1`, `tcnt > 0`), and a second branch would need its own
+                    # priority argument against the ones already here.
+                    # ⛔ AT MOST ONE FILE PER TICK, and only when `crab_pv_should_step` says the
+                    # answer is PENDING — the `crab_thumb_step` shape. A decided NONE is never
+                    # re-read, or the tick would re-open a file it has already refused, forever.
+                    # ⛔⛆ AND EVERY `before` IS SAMPLED BEFORE ANY STEP RUNS. Sampling after would
+                    # compare an answer with itself and suppress the frame that resolves it — the
+                    # "?" would then never settle into numbers.
+                    var tsbefore = crab_thumb_slot_for(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                    var tbefore = crab_tc_state(tsbefore);
+                    var dbefore = crab_pv_state_for(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                    var dafter = dbefore;
+                    if (crab_pv_should_step(crab_preview_fit(w, pv_open), tcnt, dbefore) == 1) {
+                        dafter = crab_pv_step(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                        # ⭐ THE ONLY WAY TO SEE THIS DRAIN FROM OUTSIDE. The whole claim of 0.9.4 is
+                        # that the read happens HERE and not on the keystroke, and a screenshot cannot
+                        # tell those apart — both end with numbers in the column. One line per file
+                        # actually read, so a harness can count reads against keystrokes.
+                        # ⚠ ONE WRITE, NOT FIVE: the serial console is shared unserialised by three
+                        # processes and a multi-call sequence gets spliced.
+                        var pslot = crab_pv_slot_for(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                        crab_line_reset();
+                        crab_line_s("crab: pv ");
+                        crab_line_s(tbuf + tsel * CRAB_REC_SZ);
+                        crab_line_s(" state ");
+                        crab_line_u(dafter);
+                        crab_line_s(" ");
+                        crab_line_u(crab_pvc_w(pslot));
+                        crab_line_s("x");
+                        crab_line_u(crab_pvc_h(pslot));
+                        crab_line_say();
+                    }
                     var tafter = crab_thumb_step(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
+                    var tsafter = crab_thumb_slot_for(tpath, tbuf + tsel * CRAB_REC_SZ, pathscr);
                     # ⚠ REDRAW ONLY WHEN THE ANSWER CHANGED. A decode that was already cached — the
                     # common case on every subsequent tick — must not repaint the window, or the
                     # idle loop becomes a busy loop drawing the same frame forever.
-                    if (tafter != tbefore) {
+                    # ⛔⛆ BUT THE STATE ALONE IS NOT THE ANSWER, AND THAT WAS A LIVE BUG. `tafter !=
+                    # tbefore` is FALSE when the selection moves between two already-decoded images
+                    # (OK -> OK), so no frame was drawn and the PREVIOUS picture stayed under the new
+                    # name. The slot is part of the answer: see `crab_pv_redraw_due`.
+                    if (crab_pv_redraw_due(tbefore, tafter, tsbefore, tsafter, dbefore, dafter) == 1) {
                         crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
                         crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
                         crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
@@ -2461,9 +2487,7 @@ fn main(): i64 {
                         crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                         crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                         crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                        crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                        crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-                        crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                        crab_pv_publish(rs, tpath, tbuf, tsel, tcnt, pv_open, pathscr);
                         var s6 = crab_render(surf, crab_face(), rs);
                         if (s6 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                         else { setu_buf_write(buf_id, sd_surface_pixels(s6), nbytes); }
@@ -2499,19 +2523,13 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐ THE DIMENSIONS ARE READ HERE, NOT IN THE RENDERER, because the read needs a syscall and
-                # `src/ui.cyr` sits below the layer that owns them. ⚠ `crab_preview_dims` is MEMOISED on
-                # (directory, name) and returns early on a non-image, so this costs nothing per frame — only
-                # the frame after the selection actually moves to a new image pays an open/read/close.
-                # ⚠ AND ONLY WHILE THE PREVIEW IS OPEN. A closed preview reads no files at all.
-                if (pv_open == 1) {
-                    if (acount > 0) {
-                        crab_preview_dims(apath, abuf2 + asel2 * CRAB_REC_SZ, pvdims, pathscr);
-                    } else { store64(pvdims + CRAB_IMG_W, 0); store64(pvdims + CRAB_IMG_H, 0); }
-                }
-                crab_rs_dims(rs, load64(pvdims + CRAB_IMG_W), load64(pvdims + CRAB_IMG_H));
-                crab_rs_thumb(rs, crab_thumb_pixels(), crab_thumb_state());
-                crab_rs_exif(rs, crab_preview_camera(), crab_preview_shot());
+                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
+                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
+                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
+                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
+                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
+                # setters collapse into one call so they cannot drift apart again — they had.
+                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
                 var s4 = crab_render(surf, crab_face(), rs);
                 if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
                 else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }

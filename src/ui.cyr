@@ -216,6 +216,21 @@ enum CrabCol {
     CRAB_TH_TOO_BIG   = 2;       # refused by the per-image budget, BEFORE allocating
     CRAB_TH_SPENT     = 3;       # the session decode budget is exhausted
     CRAB_TH_BAD       = 4;       # a decoder error on a file crab was willing to try
+    # ⭐⭐ THE DIMENSION ROW'S OWN STATES (0.9.4). They live here for the same reason the thumbnail's
+    # do: the RENDER PATH reads them, and this file is the lowest layer that path may touch.
+    # ⛔ PENDING IS NOT STORED, IT IS DERIVED — it is what a LOOKUP returns when no slot holds that
+    # path yet. Nothing ever writes it into a slot. That is the 0.8.2 claim-order lesson one layer
+    # up: a cache that records what crab LOOKED AT rather than what crab READ will evict a real
+    # answer to store a placeholder, and the placeholder cannot be re-derived.
+    CRAB_PVD_NONE     = 0;       # not an image, or a header crab decided it cannot read
+    CRAB_PVD_OK       = 1;       # the slot holds real dimensions
+    CRAB_PVD_PENDING  = 2;       # no slot yet — the idle tick has not reached this file
+    # The three answers `crab_pvd_row` gives the column. ⚠ Separate from the states above because
+    # "what does the operator see" and "what does crab know" are different questions: NONE and a
+    # zero-width OK both draw NO ROW, and conflating them is how a row learns to flicker.
+    CRAB_PVD_ROW_NONE  = 0;      # draw no row at all
+    CRAB_PVD_ROW_WAIT  = 1;      # draw the row with the column's own "?" pending glyph
+    CRAB_PVD_ROW_VALUE = 2;      # draw the row with "<w> x <h>"
     # ⭐⭐ THE VIEW MODE (M5, dhancha 0.9.25's GRID).
     CRAB_VIEW_LIST    = 0;
     CRAB_VIEW_GRID    = 1;
@@ -4458,7 +4473,7 @@ fn crab_pv_field(col, label, value): i64 {
 # keystroke path — the thing M3 *#03* restructured the listing to avoid.
 # ⚠ AN EMPTY PANE GETS THE COLUMN, NOT A HOLE. The header stays and the fields read "—", because a
 # column that vanishes when a directory happens to be empty makes the whole window jump.
-fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, tstate, cam, shot): i64 {
+fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, dstate, thumb, tstate, cam, shot): i64 {
     var col = dh_widget_new(BOX);
     dh_widget_set_layout(col, BOX_V);
     dh_widget_set_pref(col, crab_pv_w(), h);
@@ -4530,20 +4545,39 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, thumb, ts
     # has no dimensions: a "DIMENSIONS: —" under every text file is a promise the preview keeps
     # failing, and a "0 x 0" is worse still because it reads as a measurement. The label appears
     # exactly when there is something to put beside it.
-    if (imgw > 0) {
-        if (imgh > 0) {
-            var db = dh_falloc(48);
-            var dl = crab_u2s(db, imgw);
-            store8(db + dl, 32); store8(db + dl + 1, 120); store8(db + dl + 2, 32);
-            dl = dl + 3 + crab_u2s(db + dl + 3, imgh);
-            store8(db + dl, 0);
-            crab_pv_field(col, "DIMENSIONS", db);
-        }
+    # ⛔⛆ AND SINCE 0.9.4 THE READ IS ASYNCHRONOUS, SO "no answer" AND "no answer YET" ARE DIFFERENT
+    # ROWS. Drawing both as nothing would make the row APPEAR a tick after every selection and shove
+    # MODIFIED, CAMERA and SHOT down as it did — a row has no reserved height, its presence IS the
+    # layout. PENDING therefore draws the row with "?", the column's own pending glyph: `crab_size_str`
+    # renders -2 as byte 63 and SIZE above already shows it on every listing whose stat sweep has not
+    # caught up. The preview is already a surface that admits it does not know something yet.
+    # ⚠ THE DECISION IS `crab_pvd_row`, not an `if` here — three call-sites' worth of flicker rules
+    # in one pure function the suite drives exhaustively.
+    var drow = crab_pvd_row(dstate, imgw, imgh);
+    if (drow == CRAB_PVD_ROW_WAIT) {
+        var qb = dh_falloc(4);
+        store8(qb, 63); store8(qb + 1, 0);
+        crab_pv_field(col, "DIMENSIONS", qb);
+    }
+    if (drow == CRAB_PVD_ROW_VALUE) {
+        var db = dh_falloc(48);
+        var dl = crab_u2s(db, imgw);
+        store8(db + dl, 32); store8(db + dl + 1, 120); store8(db + dl + 2, 32);
+        dl = dl + 3 + crab_u2s(db + dl + 3, imgh);
+        store8(db + dl, 0);
+        crab_pv_field(col, "DIMENSIONS", db);
     }
     # ⭐ CAMERA and SHOT — the other half of the canvas's "real metadata" line.
     # ⛔ ABSENT, NOT EMPTY. A "CAMERA: —" under every screenshot is a promise the preview keeps
     # failing; the label appears exactly when there is something to put beside it. Same rule as
     # DIMENSIONS above, and the same reason.
+    # ⛔⛆ `load8(cam) != 0` IS ONLY SAFE BECAUSE THE POINTER IS THE SELECTION'S. These rows sit
+    # OUTSIDE the `crab_is_image` block above, so their sole draw gate is the first byte of whatever
+    # cstring the record points at. Until 0.9.4 that was a PROCESS-WIDE buffer which
+    # `crab_preview_dims` cleared only AFTER its own `is_image` gate — so arrowing off a photo onto a
+    # text file left `CAMERA: Canon EOS R5` under the text file's name. Measured, not reasoned.
+    # ⇒ The publisher now resolves the SELECTION's cache slot on the frame it draws and passes "" for
+    # a non-image, an empty pane or a closed preview. Do not re-point these at anything process-wide.
     if (cam != 0) {
         if (load8(cam) != 0) { crab_pv_field(col, "CAMERA", cam); }
     }
@@ -4650,6 +4684,200 @@ fn crab_tc_pixels(i): i64 {
     if (i < 0) { return 0; }
     if (i >= CRAB_TC_N) { return 0; }
     return b + i * CRAB_TC_SLOT + CRAB_TC_PIX;
+}
+
+# ⭐⭐ THE PREVIEW'S OWN CACHE (0.9.4) — dimensions, CAMERA and SHOT, keyed by the FULL PATH.
+#
+# ⛔⛔ WHY IT IS A CACHE AND NOT THE THREE GLOBALS IT REPLACES. Until 0.9.4 the answer lived in
+# `crab_pv_have` / `crab_pv_w` / `crab_pv_h` plus two process-wide EXIF buffers — one slot, no
+# eviction, overwritten by whichever file was asked about last. That is not a memo of the preview,
+# it is a memo of THE LAST QUESTION, and the difference produced two defects that were live and
+# measured on the host before this release:
+#   1. Arrowing off an image onto a TEXT FILE left `CAMERA: Canon EOS R5` on screen under the text
+#      file's name — `crab_preview_dims` returned at its `crab_is_image` gate BEFORE clearing the
+#      buffers, and the CAMERA/SHOT rows are drawn outside the column's `is_image` block.
+#   2. The thumbnail lagged ONE FILE behind the selection, permanently while arrowing, because the
+#      render sites asked `crab_thumb_pixels()` — "what the last STEP was about" — instead of asking
+#      for the SELECTION's slot. Same shape, different subsystem.
+# ⇒ Both die by construction here: the column is now a pure function of the SELECTED PATH. Nothing
+# the preview draws is read from "what crab touched most recently", so there is no stale to go
+# stale. ⚠ This is the discipline `crab_thumb_slot_for` already had and only ONE of seven render
+# sites used.
+#
+# ⛔ SLOTS, ALLOCATED ONCE, ROUND-ROBIN — the `crab_tc_*` rules above apply unchanged, and for the
+# same reasons. 128 x 440 B = 56,320 B taken once. ⚠ 128 rather than the thumbnail's 64 because a
+# dims slot is 440 bytes against a thumbnail's 16,648: the eye browses locally, and two arrow
+# directions over 128 files cost nothing where today the second direction costs 3 syscalls a step.
+enum CrabPvCache {
+    CRAB_PVC_N      = 128;
+    CRAB_PVC_PATH   = 0;                # CRAB_PATH_MAX bytes
+    CRAB_PVC_STATE  = 256;              # a CRAB_PVD_* value — never PENDING; see the enum
+    CRAB_PVC_W      = 264;
+    CRAB_PVC_H      = 272;
+    CRAB_PVC_CAM    = 280;              # CRAB_EX_STR_MAX * 2 + 8 = 104, "Make Model"
+    CRAB_PVC_SHOT   = 384;              # CRAB_EX_STR_MAX + 8 = 56
+    CRAB_PVC_SLOT   = 440;
+}
+
+var crab_pvc = 0;
+var crab_pvc_next = 0;
+
+fn crab_pvc_base(): i64 {
+    if (crab_pvc == 0) {
+        crab_pvc = alloc(CRAB_PVC_N * CRAB_PVC_SLOT);
+        if (crab_pvc != 0) {
+            var i = 0;
+            while (i < CRAB_PVC_N) {
+                var sl = crab_pvc + i * CRAB_PVC_SLOT;
+                store8(sl + CRAB_PVC_PATH, 0);
+                store64(sl + CRAB_PVC_STATE, CRAB_PVD_NONE);
+                store64(sl + CRAB_PVC_W, 0);
+                store64(sl + CRAB_PVC_H, 0);
+                store8(sl + CRAB_PVC_CAM, 0);
+                store8(sl + CRAB_PVC_SHOT, 0);
+                i = i + 1;
+            }
+        }
+    }
+    return crab_pvc;
+}
+
+# @public — the slot holding `path`, or -1.
+fn crab_pvc_find(path): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0 - 1; }
+    if (path == 0) { return 0 - 1; }
+    var i = 0;
+    while (i < CRAB_PVC_N) {
+        var sl = b + i * CRAB_PVC_SLOT;
+        if (load8(sl + CRAB_PVC_PATH) != 0) {
+            if (crab_streq_n(sl + CRAB_PVC_PATH, path, CRAB_PATH_MAX) == 1) { return i; }
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# @public — claim a slot for `path`, evicting the next one round-robin. -> the slot index.
+#
+# ⛔⛆ IT ZEROES THE WHOLE PAYLOAD, NOT JUST THE KEY, AND THAT IS THE POINT. `crab_tc_claim` writes
+# only the path and the state because its payload is pixels nothing draws unless the state says OK.
+# This slot's payload is CAMERA and SHOT — two cstrings whose ONLY draw gate is `load8(cam) != 0`.
+# A slot claimed for file B and left holding file A's bytes (any early exit between the claim and
+# the read) would publish A's camera under B's name: the exact defect this cache exists to end,
+# re-created inside the fix. ⇒ The claim leaves the slot saying "I know nothing about this path".
+fn crab_pvc_claim(path): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0 - 1; }
+    var i = crab_pvc_next;
+    crab_pvc_next = crab_pvc_next + 1;
+    if (crab_pvc_next >= CRAB_PVC_N) { crab_pvc_next = 0; }
+    var sl = b + i * CRAB_PVC_SLOT;
+    crab_strcpy_n(sl + CRAB_PVC_PATH, path, CRAB_PATH_MAX);
+    store64(sl + CRAB_PVC_STATE, CRAB_PVD_NONE);
+    store64(sl + CRAB_PVC_W, 0);
+    store64(sl + CRAB_PVC_H, 0);
+    store8(sl + CRAB_PVC_CAM, 0);
+    store8(sl + CRAB_PVC_SHOT, 0);
+    return i;
+}
+
+fn crab_pvc_state(i): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return CRAB_PVD_NONE; }
+    if (i < 0) { return CRAB_PVD_NONE; }
+    if (i >= CRAB_PVC_N) { return CRAB_PVD_NONE; }
+    return load64(b + i * CRAB_PVC_SLOT + CRAB_PVC_STATE);
+}
+
+fn crab_pvc_w(i): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_PVC_N) { return 0; }
+    return load64(b + i * CRAB_PVC_SLOT + CRAB_PVC_W);
+}
+
+fn crab_pvc_h(i): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_PVC_N) { return 0; }
+    return load64(b + i * CRAB_PVC_SLOT + CRAB_PVC_H);
+}
+
+# @public — slot `i`'s CAMERA / SHOT cstring, or 0. ⚠ A pointer INTO the cache, which is
+# process-lifetime: it stays valid until the slot is claimed again, and the only claimer is the idle
+# tick. It must never be handed to `dh_widget_set_text` across a frame boundary for a slot that the
+# tick could re-claim in between — every publisher re-resolves the slot on the frame it draws.
+fn crab_pvc_cam(i): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_PVC_N) { return 0; }
+    return b + i * CRAB_PVC_SLOT + CRAB_PVC_CAM;
+}
+
+fn crab_pvc_shot(i): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_PVC_N) { return 0; }
+    return b + i * CRAB_PVC_SLOT + CRAB_PVC_SHOT;
+}
+
+# @public — record the decided answer for slot `i`.
+fn crab_pvc_set(i, st, w, h): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= CRAB_PVC_N) { return 0; }
+    var sl = b + i * CRAB_PVC_SLOT;
+    store64(sl + CRAB_PVC_STATE, st);
+    store64(sl + CRAB_PVC_W, w);
+    store64(sl + CRAB_PVC_H, h);
+    return 1;
+}
+
+# @public — empty the whole cache. Called from `crab_relist_keep_thumbs` where `crab_pv_forget` was,
+# and for the same reason every other path-keyed cache is cleared there: crab is a program that
+# makes a path mean a different file.
+fn crab_pvc_clear(): i64 {
+    var b = crab_pvc_base();
+    if (b == 0) { return 0; }
+    var i = 0;
+    while (i < CRAB_PVC_N) {
+        var sl = b + i * CRAB_PVC_SLOT;
+        store8(sl + CRAB_PVC_PATH, 0);
+        store64(sl + CRAB_PVC_STATE, CRAB_PVD_NONE);
+        store64(sl + CRAB_PVC_W, 0);
+        store64(sl + CRAB_PVC_H, 0);
+        store8(sl + CRAB_PVC_CAM, 0);
+        store8(sl + CRAB_PVC_SHOT, 0);
+        i = i + 1;
+    }
+    crab_pvc_next = 0;
+    return 0;
+}
+
+# @public — WHAT SHOULD THE DIMENSIONS ROW DO? One of the `CRAB_PVD_ROW_*` answers.
+#
+# ⭐ THE RENDER DECISION, LIFTED (0.9.4). The column used to decide inline with a double-positive
+# `if (w > 0) { if (h > 0) { ... } }`, so "crab has no answer yet" and "crab has decided there is
+# nothing to say" drew the same nothing — which is fine while the read is synchronous and is a
+# FLICKER the moment it is not: the row would appear a tick after every selection and shove every
+# row below it down. ⛔ A ROW HAS NO RESERVED HEIGHT; ITS PRESENCE IS THE LAYOUT. So PENDING draws
+# the row with the column's own "?" — the same glyph SIZE and MODIFIED already show while the stat
+# sweep catches up — and only the VALUE settles. Nothing appears, nothing disappears, nothing moves.
+fn crab_pvd_row(state, w, h): i64 {
+    if (state == CRAB_PVD_PENDING) { return CRAB_PVD_ROW_WAIT; }
+    if (state != CRAB_PVD_OK) { return CRAB_PVD_ROW_NONE; }
+    # ⚠ OK STILL HAS TO CARRY NUMBERS. A slot can only reach OK through `crab_dims_ok`, which
+    # refuses a zero or absurd extent — but the row is what the operator reads, and it asks the
+    # question itself rather than trusting a state set three functions away.
+    if (w <= 0) { return CRAB_PVD_ROW_NONE; }
+    if (h <= 0) { return CRAB_PVD_ROW_NONE; }
+    return CRAB_PVD_ROW_VALUE;
 }
 
 # @public — empty the whole cache. Called from `crab_relist` beside the other invalidations, and for
@@ -4770,7 +4998,11 @@ enum CrabRs {
     # ⚠ THE COLUMN'S TITLE ARRIVES READY-MADE, because deriving it means `crab_leaf_name`, which
     # lives in `src/app.cyr` — and `ui.cyr` is BELOW `app.cyr`; the render path may never call up.
     CRAB_RS_CNAME    = 408;
-    CRAB_RS_SZ       = 416;
+    # ⭐ THE DIMENSION ROW'S STATE (0.9.4). It rides the record beside PVW/PVH rather than arriving
+    # through a second setter, so the arity check catches any publish site that was missed — the
+    # rule `crab_rs_sidebar` records. ⚠ 424 / 8 = 53 exactly; `crab_rs_reset` loops by 8.
+    CRAB_RS_PVDSTATE = 416;
+    CRAB_RS_SZ       = 424;
 }
 
 var crab_rs_rec = 0;
@@ -4887,10 +5119,13 @@ fn crab_rs_preview(rs, want): i64 {
 # ⛔ THE READ THAT PRODUCES THESE LIVES IN `app.cyr` (`crab_preview_dims`) BECAUSE IT NEEDS A
 # SYSCALL, and this file sits below that one. Carrying the answer in the record is what keeps the
 # render path from reaching up for it — the same rule the pane state and the tray follow.
-fn crab_rs_dims(rs, w, h): i64 {
+# ⛔ THE STATE TRAVELS WITH THE NUMBERS (0.9.4), because `w == 0` can no longer mean "no answer":
+# it also means "the tick has not got there yet", and those two draw different things.
+fn crab_rs_dims(rs, w, h, state): i64 {
     if (rs == 0) { return 0; }
     store64(rs + CRAB_RS_PVW, w);
     store64(rs + CRAB_RS_PVH, h);
+    store64(rs + CRAB_RS_PVDSTATE, state);
     return 1;
 }
 
@@ -5008,6 +5243,7 @@ fn crab_render(surf, font, rs): i64 {
     var pvwant   = load64(rs + CRAB_RS_PVOPEN);
     var pvw      = load64(rs + CRAB_RS_PVW);
     var pvh      = load64(rs + CRAB_RS_PVH);
+    var pvdstate = load64(rs + CRAB_RS_PVDSTATE);
     var pvthumb  = load64(rs + CRAB_RS_PVTHUMB);
     var pvtstate = load64(rs + CRAB_RS_PVTSTATE);
     var pvview   = load64(rs + CRAB_RS_VIEW);
@@ -5211,8 +5447,8 @@ fn crab_render(surf, font, rs): i64 {
     # them. ⚠ It is a sibling of the panes rather than a child of one: it describes the ACTIVE
     # pane's selection and the active pane changes, so parenting it to a pane would make it move.
     if (pvon == 1) {
-        crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvthumb,
-          pvtstate, pvcam, pvshot);
+        crab_preview(panes, h - 24 - trayh, abuf, asel, asz, amt, acnt, pvw, pvh, pvdstate,
+          pvthumb, pvtstate, pvcam, pvshot);
     }
     # ⛔ THE BAR IS ADDED BEFORE THE PANES, so it is the first child of `content` and sits at the top
     # of the window — where a menu bar goes. The overlay layer is still the ROOT's last child, so a

@@ -2610,6 +2610,7 @@ fn crab_relist(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
 # path because nothing cheaper than a decode can say the bytes changed — the stat sweep that could
 # is deferred, and a refresh is exactly when it is pending.
 fn crab_relist_keep_thumbs(path, buf, sizes, mtimes, pathscr, statbuf): i64 {
+    crab_pvc_clear();
     crab_pv_forget();
     # ⛔ AND THE COLUMNS VIEW'S CONTEXT LISTING GOES WITH IT (0.8.8) — sited here for exactly the
     # reason `crab_pv_forget` is: every write crab makes and every refresh the operator asks for
@@ -2691,14 +2692,13 @@ fn crab_elf_magic_buf(): i64 {
 # describes. `crab_img_dims` does the parsing and lives in `ui.cyr`; this is the half that needs a
 # syscall and therefore cannot.
 #
-# ⛔⛔ MEMOISED BECAUSE THE RENDER PATH ASKS EVERY FRAME AND THE ANSWER COSTS AN open/read/close.
-# crab re-renders after every handled event, so recomputing per frame would put a file read on the
-# arrow-key path — which is precisely what M3 *#03* restructured the whole listing to remove, and
-# for a much smaller saving than this. The cache key is (directory, name), so moving the selection
-# to a different file invalidates it and moving it back re-reads.
-# ⚠ IT IS A ONE-ENTRY CACHE, DELIBERATELY. The operator looks at one file at a time and the preview
-# describes exactly one; an N-entry cache would need an eviction policy to serve a caller that does
-# not exist. Same reasoning as the single operation record.
+# ⛔⛔ AND THE MEMO WAS NEVER THE FIX — 0.9.4. Until this release the comment here read *"an N-entry
+# cache would need an eviction policy to serve a caller that does not exist"*, and the caller existed
+# the whole time: it is the operator holding the DOWN arrow. A one-entry memo answers "the same file
+# again" and nothing else, so arrowing forward paid 3 syscalls a step and arrowing BACK paid them all
+# again. The memo hid the cost from a reader of the code, not from the operator.
+# ⇒ The storage is now `crab_pvc_*` in `ui.cyr` — 128 slots keyed by full path — and the READ is on
+# the idle tick. What is left here is the syscall and the parse; the decisions moved out.
 #
 # ⛔ THE READ IS CAPPED AT `CRAB_PV_HDR_BUDGET`, AND THE CAP IS THE POINT. PNG, GIF and BMP put
 # their dimensions in the first 26 bytes; only JPEG needs a scan, and its SOF sits past whatever
@@ -2776,50 +2776,46 @@ fn crab_pv_forget(): i64 {
     return 0;
 }
 
-# @public — the selected entry's pixel dimensions, or 0 if it has none crab can read.
-# On 1, width is at `out + CRAB_IMG_W` and height at `out + CRAB_IMG_H`.
-fn crab_preview_dims(dir, name, out, pathscr): i64 {
-    if (out == 0) { return 0; }
-    store64(out + CRAB_IMG_W, 0);
-    store64(out + CRAB_IMG_H, 0);
-    if (dir == 0) { return 0; }
-    if (name == 0) { return 0; }
-    # ⚠ THE EXTENSION IS ONLY A HINT, and it is used here to avoid OPENING every file the operator
-    # arrows past — not to decide what the file is. `crab_img_dims` reads the signature bytes and
-    # has the final say, so a `.png` full of JPEG is reported as the JPEG it is.
-    if (crab_is_image(name) == 0) { return 0; }
-    var key = crab_pv_key_buf();
-    if (key == 0) { return 0; }
-    var scr = pathscr;
-    if (scr == 0) { return 0; }
-    if (crab_fs_path(scr, dir, name) < 0) { return 0; }
-    if (crab_streq_n(key, scr, CRAB_PATH_MAX) == 1) {
-        # A cache hit, including the remembered NEGATIVE answer — re-reading a file crab already
-        # failed to parse costs the same syscalls as reading one it can.
-        if (crab_pv_have == 0) { return 0; }
-        store64(out + CRAB_IMG_W, crab_pv_w);
-        store64(out + CRAB_IMG_H, crab_pv_h);
-        return 1;
-    }
-    crab_strcpy_n(key, scr, CRAB_PATH_MAX);
-    crab_pv_have = 0;
-    crab_pv_w = 0;
-    crab_pv_h = 0;
-    var camb = crab_preview_camera();
-    var shotb = crab_preview_shot();
-    if (camb != 0) { store8(camb, 0); }
-    if (shotb != 0) { store8(shotb, 0); }
+# @public — READ the selected entry's header into its cache slot. -> the resulting CRAB_PVD_* state.
+#
+# ⭐⭐ THIS IS THE IDLE TICK'S FUNCTION AND NOTHING ELSE MAY CALL IT (0.9.4). It is the only thing in
+# the preview that opens a file. Everything the render path needs is answered by `crab_pv_state_for`
+# and `crab_pv_publish`, which are pure lookups — so a keystroke cannot cause a read, which is the
+# whole of `0.9.4 · A preview that costs nothing`.
+#
+# ⛔ THE CLAIM HAPPENS BEFORE THE OPEN, AND THAT IS THE NEGATIVE MEMO. Every exit below the claim
+# leaves a slot keyed to this path holding NONE, so a file crab already failed to parse is never
+# re-opened — re-deciding it every tick would be a spin that also re-reads the file. That property
+# was in the old single-slot memo (the key was copied before the open) and it survives.
+# ⚠ `crab_pvc_claim` zeroes the slot's CAMERA, SHOT, W and H. It must: see its own ⛔.
+fn crab_pv_step(dir, name, pathscr): i64 {
+    if (dir == 0) { return CRAB_PVD_NONE; }
+    if (name == 0) { return CRAB_PVD_NONE; }
+    # ⚠ THE CHEAP GATE STAYS FIRST. The extension is only a hint and `crab_img_dims` has the final
+    # say, but this is what makes arrowing over a directory of source files cost nothing at all —
+    # no slot, no syscall, no eviction of a real answer to record that a .c file is not a photo.
+    if (crab_is_image(name) == 0) { return CRAB_PVD_NONE; }
+    if (pathscr == 0) { return CRAB_PVD_NONE; }
+    if (crab_fs_path(pathscr, dir, name) < 0) { return CRAB_PVD_NONE; }
+    # The cache answers first, INCLUDING a remembered refusal.
+    var hit = crab_pvc_find(pathscr);
+    if (hit >= 0) { return crab_pvc_state(hit); }
+    var slot = crab_pvc_claim(pathscr);
+    if (slot < 0) { return CRAB_PVD_NONE; }
     var buf = crab_pv_hdr_buf();
-    if (buf == 0) { return 0; }
-    var fd = crab_fs_open_r(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
-    if (fd < 0) { return 0; }
-    var got = sys_read(fd, buf, CRAB_PV_HDR_BUDGET);
+    if (buf == 0) { return CRAB_PVD_NONE; }
+    var fd = crab_fs_open_r(pathscr, crab_cstr_len(pathscr, CRAB_PATH_MAX));
+    if (fd < 0) { return CRAB_PVD_NONE; }
+    var got = crab_pv_read_all(fd, buf, CRAB_PV_HDR_BUDGET);
     sys_close(fd);
-    if (got <= 0) { return 0; }
+    if (got <= 0) { return CRAB_PVD_NONE; }
+    var camb = crab_pvc_cam(slot);
+    var shotb = crab_pvc_shot(slot);
     # ⭐ EXIF COMES OUT OF THE SAME BUFFER, BEFORE THE DIMENSION CHECK CAN RETURN. A file whose
     # header crab cannot make dimensions of may still carry a readable Make/Model — and more to the
-    # point, doing it here means one read, one memo, and no way for the two to disagree about which
-    # file they describe.
+    # point, doing it here means one read, one slot, and no way for the two to disagree about which
+    # file they describe. ⚠ Since 0.9.4 they share a SLOT rather than sharing a tick, which is
+    # strictly stronger: eviction takes both or neither.
     if (camb != 0) {
         var mlen = crab_exif_str(buf, got, CRAB_EX_MAKE, camb, CRAB_EX_STR_MAX + 1);
         if (mlen == 1) {
@@ -2851,11 +2847,140 @@ fn crab_preview_dims(dir, name, out, pathscr): i64 {
             crab_exif_when(shotb, raw, CRAB_EX_STR_MAX + 1);
         }
     }
-    if (crab_img_dims(buf, got, out) == 0) { return 0; }
-    crab_pv_have = 1;
-    crab_pv_w = load64(out + CRAB_IMG_W);
-    crab_pv_h = load64(out + CRAB_IMG_H);
+    var out = crab_pv_out_buf();
+    if (out == 0) { return CRAB_PVD_NONE; }
+    if (crab_img_dims(buf, got, out) == 0) { return CRAB_PVD_NONE; }
+    crab_pvc_set(slot, CRAB_PVD_OK, load64(out + CRAB_IMG_W), load64(out + CRAB_IMG_H));
+    return CRAB_PVD_OK;
+}
+
+# @public — read up to `cap` bytes, looping until EOF or the cap. -> bytes read, or negative.
+#
+# ⛔⛆ A BARE `sys_read` MEMOISES A WRONG NEGATIVE ON A SHORT READ. The old code was one
+# `sys_read(fd, buf, CRAB_PV_HDR_BUDGET)` with no loop, and a read is permitted to return fewer
+# bytes than asked for at any time. A JPEG whose SOF sat past the returned prefix was then recorded
+# as "no dimensions crab can read" — a REMEMBERED refusal, so it was never retried and the file
+# stayed dimensionless for the session. Nothing made that visible because a short read on a regular
+# local file is rare; "rare" and "cannot happen" are not the same claim.
+fn crab_pv_read_all(fd, buf, cap): i64 {
+    var got = 0;
+    while (got < cap) {
+        var n = sys_read(fd, buf + got, cap - got);
+        if (n < 0) {
+            if (got > 0) { return got; }
+            return n;
+        }
+        if (n == 0) { return got; }
+        got = got + n;
+    }
+    return got;
+}
+
+# ⚠ The step's own scratch for `crab_img_dims`'s two i64s. Process-lifetime, like every other buffer
+# here; the answer is copied straight into the slot, so nothing outside the step reads it.
+var crab_pv_out = 0;
+
+fn crab_pv_out_buf(): i64 {
+    if (crab_pv_out == 0) { crab_pv_out = alloc(CRAB_IMG_SZ); }
+    return crab_pv_out;
+}
+
+# @public — the cache slot describing (dir, name), or -1. Decodes nothing, opens nothing, claims
+# nothing — the `crab_thumb_slot_for` discipline, and for the same reason.
+fn crab_pv_slot_for(dir, name, pathscr): i64 {
+    if (dir == 0) { return 0 - 1; }
+    if (name == 0) { return 0 - 1; }
+    if (pathscr == 0) { return 0 - 1; }
+    if (crab_is_image(name) == 0) { return 0 - 1; }
+    if (crab_fs_path(pathscr, dir, name) < 0) { return 0 - 1; }
+    return crab_pvc_find(pathscr);
+}
+
+# @public — what state should the column show for (dir, name)? A CRAB_PVD_*.
+#
+# ⛔ PENDING IS DERIVED HERE AND STORED NOWHERE. An IMAGE with no slot is PENDING — the tick has not
+# reached it. A NON-IMAGE is NONE and always will be, with no syscall and no slot. That asymmetry is
+# what stops the cache filling with entries recording that text files are not photographs.
+fn crab_pv_state_for(dir, name, pathscr): i64 {
+    if (name == 0) { return CRAB_PVD_NONE; }
+    if (crab_is_image(name) == 0) { return CRAB_PVD_NONE; }
+    var slot = crab_pv_slot_for(dir, name, pathscr);
+    if (slot < 0) { return CRAB_PVD_PENDING; }
+    return crab_pvc_state(slot);
+}
+
+# @public — should the idle tick spend a read on this entry?
+#
+# ⚠ LIFTED SO THE SUITE CAN DRIVE IT. Everything that calls it is inside main.cyr's agnos `#ifdef`,
+# where no host test reaches — the 0.9.3 lesson. `pvfit` is the EFFECTIVE preview state, not the
+# operator's want: reading a file for a column `crab_render` is not drawing is exactly the cost this
+# release exists to remove, so a window too narrow for the preview now reads nothing at all.
+fn crab_pv_should_step(pvfit, count, state): i64 {
+    if (pvfit != 1) { return 0; }
+    if (count <= 0) { return 0; }
+    # Only PENDING is worth a read. OK is answered; NONE is decided (a non-image, or a header crab
+    # already refused) and re-reading it would be the spin the remembered negative exists to prevent.
+    if (state != CRAB_PVD_PENDING) { return 0; }
     return 1;
+}
+
+# @public — should the tick redraw? -> 1 when any preview answer CHANGED.
+#
+# ⛔⛆ THE STATE ALONE IS NOT ENOUGH, AND 0.8.2 PAID FOR THIS ONCE ALREADY. The shipped gate was
+# `if (tafter != tbefore)`, and arrowing between two ALREADY-DECODED images is OK -> OK: no change,
+# no redraw, and the previous file's picture stays on screen under the new file's name. Measured on
+# the host before this release — two real PNGs, different slots, `redraw fired: 0`.
+# ⇒ The SLOT is part of the answer. A different slot is a different file, whatever its state says.
+fn crab_pv_redraw_due(tbefore, tafter, tslot_before, tslot_after, dbefore, dafter): i64 {
+    if (tafter != tbefore) { return 1; }
+    if (tslot_after != tslot_before) { return 1; }
+    if (dafter != dbefore) { return 1; }
+    return 0;
+}
+
+# @public — publish EVERYTHING the preview column draws, for the SELECTION, from the caches.
+#
+# ⭐⭐ ONE PUBLISHER, EIGHT SITES (0.9.4). This block used to be ten lines repeated at every render
+# site, and they had drifted: one site resolved the thumbnail by the selection's path and six asked
+# `crab_thumb_pixels()` — "what the last STEP was about" — while an eighth (the mascot) published no
+# preview state at all and drew whatever the record still held.
+# ⛔ IT COSTS ZERO SYSCALLS. Every answer is a lookup in a path-keyed cache, so this may be called
+# from the input path, the idle tick, or anywhere else, as often as wanted.
+# ⛔⛆ AND IT CLEARS AS WELL AS SETS — the `crab_cols_sync` rule. `pvwant == 0`, an empty pane and a
+# non-image all publish empty EXIF explicitly. That is what makes the stale `CAMERA: Canon EOS R5`
+# under a text file's name structurally unreachable rather than merely fixed: there is no path
+# through this function that leaves a previous file's strings pointed at.
+fn crab_pv_publish(rs, dir, buf, sel, count, pvwant, pathscr): i64 {
+    if (rs == 0) { return 0; }
+    if (pvwant != 1) { return crab_pv_publish_none(rs); }
+    if (count <= 0) { return crab_pv_publish_none(rs); }
+    if (buf == 0) { return crab_pv_publish_none(rs); }
+    var rec = buf + sel * CRAB_REC_SZ;
+    # ⚠ RE-RESOLVED ON THE FRAME THAT DRAWS, never cached across one: the tick may claim the slot
+    # out from under a pointer held from an earlier frame, and these strings live IN the cache.
+    var dslot = crab_pv_slot_for(dir, rec, pathscr);
+    if (dslot < 0) {
+        var st = CRAB_PVD_NONE;
+        if (crab_is_image(rec) == 1) { st = CRAB_PVD_PENDING; }
+        crab_rs_dims(rs, 0, 0, st);
+        crab_rs_exif(rs, "", "");
+    } else {
+        crab_rs_dims(rs, crab_pvc_w(dslot), crab_pvc_h(dslot), crab_pvc_state(dslot));
+        crab_rs_exif(rs, crab_pvc_cam(dslot), crab_pvc_shot(dslot));
+    }
+    # ⛔ THE THUMBNAIL IS THE SELECTION'S TOO. `crab_thumb_pixels()` answers "what the last step was
+    # about", which is the PREVIOUS entry while arrowing. See `crab_pv_redraw_due`.
+    var tslot = crab_thumb_slot_for(dir, rec, pathscr);
+    crab_rs_thumb(rs, crab_thumb_pixels_of(tslot), crab_tc_state(tslot));
+    return 1;
+}
+
+# ⚠ The empty publication, in one place: three setters that must agree about "nothing to show".
+fn crab_pv_publish_none(rs): i64 {
+    crab_rs_dims(rs, 0, 0, CRAB_PVD_NONE);
+    crab_rs_thumb(rs, 0, CRAB_TH_NONE);
+    crab_rs_exif(rs, "", "");
+    return 0;
 }
 
 # ⭐⭐ THUMBNAILS (M5) — chitra decodes, crab downsamples, and the BUDGET is the whole design.

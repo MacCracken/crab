@@ -18,7 +18,52 @@
 > `h5probe.cyr`, `probe_h7.cyr` in the tree) and two concurrent edits to a cancel path is exactly
 > where that goes wrong.
 >
-> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.3; 0.9.2 released.** ⛔ commit, tag and push are the operator's.
+> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.4; 0.9.3 released (tagged).** ⛔ commit, tag and push are the
+> operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
+> **Next: `0.9.5 · Pointer polish`.**
+>
+> ## 0.9.4 — the preview shows the SELECTION, and costs nothing
+>
+> ⚠ **THE ROADMAP ASKED FOR ONE THING AND THE WORK FOUND THREE**, and they are one change: the column
+> was reading process-wide *"last touched"* state instead of anything derived from the selection.
+> 1. ⛔⛆ **THE THUMBNAIL LAGGED ONE FILE BEHIND, PERMANENTLY.** Measured on the host first — two real
+>    PNGs, `slot(A)=0 slot(B)=1`, `redraw fired: 0`. The keypress frame asked `crab_thumb_pixels()`
+>    ("what the last STEP was about") and the tick's gate `if (tafter != tbefore)` skips on
+>    `OK -> OK`, so **no frame was drawn** and A's picture stayed under B's name. **0.8.2's own bug**,
+>    whose fix comment names the mechanism exactly — obeyed by **1 of 8 render sites**.
+> 2. ⛔⛆ **`CAMERA: Canon EOS R5` UNDER A TEXT FILE'S NAME.** `crab_preview_dims` returned at its
+>    `is_image` gate before clearing the process-wide EXIF buffers; the CAMERA/SHOT rows are drawn
+>    OUTSIDE the column's `is_image` block, gated only on `load8(cam) != 0`.
+> 3. ⭐ **The 64 KiB read left the selection path** — the roadmap item. `crab_pv_step` on the idle
+>    tick, one file per tick, gated on `crab_preview_fit` (the EFFECTIVE state — a too-narrow window
+>    now reads nothing, which it did not before).
+> ⇒ `crab_pvc_*` — 128 path-keyed slots in **ui.cyr**, 56,320 B once — holds dims AND EXIF together;
+> `crab_pv_publish` is the ONE publisher for all eight sites and CLEARS as well as sets;
+> `crab_pv_redraw_due` makes the SLOT part of the redraw answer. ⛔ `crab_pvc_claim` zeroes the whole
+> PAYLOAD, not just the key (unlike `crab_tc_claim`): this slot's payload is two cstrings whose only
+> draw gate is their first byte, so a claimed-but-unfilled slot would re-create bug 2 inside the fix.
+>
+> **MEASURED:** selection path **4 µs/keystroke, identical with an EMPTY cache** — a miss is a lookup,
+> never a read. ⚠ The host number understates agnos by ~100x (the cheaper *stat* sweep is recorded at
+> ~1.1 ms/entry). Arrowing BACK is free; the old memo held ONE entry.
+>
+> **Suite 2384 / 0**, render_test 53 / 0, five mutations caught. ⚠ **A sixth SURVIVED** — replacing
+> `crab_pv_read_all` with the old bare `sys_read` leaves the suite green, because a regular local file
+> never short-reads. Recorded at the assertion, not deleted.
+> ⭐⭐ **QEMU `crab-preview-test.py` PASSES, mutation-proven.** New `crab: pv` oracle, emitted by the
+> DRAIN and nothing else — a screenshot cannot tell "read on the keystroke" from "read on the tick",
+> both end with numbers in the column. 137x42 and 320x200 each correct, every file read **exactly
+> once**, 48 non-images silent. Against a planted re-read: files read **up to 36 times each**.
+>
+> ⛔⛆ **AND THE LAYERING GATE WAS HALF A GATE, ALL ALONG.** `render_test` includes `ui.cyr` alone to
+> stop the render path calling up. An undefined **constant** is `error:` and fails the build — that is
+> what caught 0.9.3. An undefined **function** is only `warning:`: build exits **0**, and the binary
+> runs `53 checks, 0 failed`. So the rule was enforced for enums and **not** for functions, the
+> likelier mistake and the one this release's design would have made. `ci.yml` now fails on the
+> warning; mutation-proven both ways (exit 1 planted, exit 0 clean).
+> ⛔ Its first draft had a second hole: **`cyrius build … | tee` hides the build's exit status**, so a
+> FAILED build ran the STALE binary and reported its old green count. Caught doing exactly that.
+> ⇒ Local runner: build `render_test`, fail on `undefined function`, then run it — never through a pipe.
 >
 > 1. ⭐⭐ **crab CAN SEE A SYMLINK.** ⛔ readdir never could: agnos's `ext2_readdir_at_sys` sets byte
 >    63 with `if (ftype == 2) { t = 1; }` — one bit, DIR or not — so a link arrived indistinguishable
@@ -125,7 +170,8 @@
 >    succeeded, and a refusal only ever reached the status line).
 >
 > **Suite 2314 / 0**, render_test 53 / 0. Host **1,084,744 B** · agnos **1,129,760 B**.
-> ⭐ **Next: `0.9.3 · Symlinks`** — or any of 0.9.3–0.9.5; they are independent.
+> ⭐ **Next: `0.9.4 · A preview that costs nothing`** — or `0.9.5 · Pointer polish`; they are
+> independent and can be reordered freely.
 > ⚠ **The 0.9.1 block below is one release stale but its reasoning is current.**
 
 # Handoff — **0.9.1 cut: the door — the menu row has a second way in.**
