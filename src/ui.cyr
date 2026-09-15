@@ -5777,6 +5777,20 @@ fn crab_render(surf, font, rs): i64 {
     # the only offset it can honestly have is the one that shows where they are standing. Rebuilt at
     # 0 each frame and re-followed, which is what makes it need no app state at all.
     if (crab_ctxlst != 0) { dh_list_scroll_to_sel(crab_ctxlst); }
+    # ⛔⛆ AND THE SIDEBAR HAS NEVER BEEN SCROLLED BY ANYTHING — a live defect, not a gap left for a
+    # feature. `crab_sblst` appears seven times in this file and not one is a scroll call, while the
+    # panes and the context column have been followed for releases.
+    # ⇒ MEASURED on the shipped 380x220: the pane band is 174 px and `CRAB_SB_ROW_H` is 22, so SEVEN
+    # rows fit. An ordinary desktop builds seven places (Home, Desktop, Documents, Downloads,
+    # Pictures, Music, Root) plus two headers plus its volumes = ELEVEN rows. **Four below the fold.**
+    # `crab_sb_step` walks all eleven, so the cursor reaches row 10 while the list still shows 0..6:
+    # the operator arrows onto a volume they cannot see highlighted and presses Enter, and the pane
+    # goes somewhere they never saw selected. That is the wrong-on-screen class, in the one surface
+    # whose whole job is to say where you are about to go.
+    # ⚠ NO SCROLL STATE OF ITS OWN, exactly like the context column above and for the same reason:
+    # the sidebar is not scroll-driven, so the only offset it can honestly have is the one that shows
+    # the cursor. Rebuilt at 0 each frame and re-followed.
+    if (crab_sblst != 0) { dh_list_scroll_to_sel(crab_sblst); }
     store64(scroll_l, dh_widget_scroll_y(llst));
     store64(scroll_r, dh_widget_scroll_y(rlst));
     dh_layout_apply(root, w, h);

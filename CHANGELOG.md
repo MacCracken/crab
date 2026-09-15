@@ -2,6 +2,65 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.1] — 2026-09-14 — the sidebar can reach its own rows
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⚠ **Two defects found while designing M7's smart-folder section, and fixed as their own release
+> rather than bundled into it.** Both are independently correct; one is a live wrong-on-screen bug on
+> the shipped window size, and the other is currently unreachable but blocks the feature that would
+> reach it.
+
+### Fixed — ⛔⛆ four sidebar rows are below the fold, and nothing ever scrolled it
+
+**MEASURED, not read.** `crab_sblst` appears **seven times** in `src/ui.cyr` and **not one is a scroll
+call** — while the panes and the context column have been followed for releases
+(`dh_list_scroll_to_sel(llst)`, `(rlst)`, `(crab_ctxlst)`).
+
+```
+an ordinary desktop: 7 places + 2 headers + 2 volumes  = 11 rows
+the shipped 380x220: 174 px pane band / CRAB_SB_ROW_H 22 =  7 fit
+                                                          --------
+                                                           4 BELOW THE FOLD
+```
+
+⛔ **And the cursor walks there anyway.** `crab_sb_step` is bounded by `crab_sb_rows`, not by what is
+visible — so the operator arrows onto a volume they cannot see highlighted, presses Enter, and the
+pane goes somewhere they never saw selected. That is the wrong-on-screen class in the one surface
+whose whole job is to say where you are about to go.
+
+⚠ **Why it was easy to miss**: `crab_places_build` stat-checks each well-known directory and adds only
+those that exist, so a headless box builds **three** places — 7 rows, which fits *exactly*. A developer
+never sees it; a desktop with Documents, Downloads, Pictures and Music does.
+
+⇒ One line, beside the context column's and carrying its reasoning: the sidebar is not scroll-driven,
+so the only offset it can honestly have is the one that shows the cursor.
+
+### Fixed — ⛔ a sidebar click that did nothing said nothing
+
+The pointer road's `CRAB_PA_PLACE` arm had no `else`. Its **keyboard twin has answered "nothing to go
+to" since 0.9.2**; the pointer arm just returned, leaving the operator unable to tell a click crab
+ignored from one it never received — the exact ambiguity 0.9.5's `crab: press btn <n> no action` was
+added to end, in the same surface.
+⚠ Unreachable today, because every sidebar row has a path and `crab_sidebar_hit` refuses inert rows.
+It becomes reachable the moment any row is pathless — which is what a smart-folder section is. Fixed
+before the feature that would trip it, not after.
+
+### Tests
+
+**2,503 assertions** (2,490 → 2,503) and **render_test 53 → 55 checks**.
+
+⛔⛆ **AND THE FIX WAS UNASSERTED WHEN IT FIRST LANDED — caught by mutation, not by luck.** Deleting
+`dh_list_scroll_to_sel(crab_sblst)` left `cyrius test` at 2503/0 **and** render_test at 53/0. The
+suite proves the *arithmetic* (eleven rows needed, seven fit, `crab_sb_step` walks past the fold) —
+which is the motive, not the fix. Only a laid-out tree can show the list actually **moves**, and that
+tree exists only in `render_test`. ⇒ A sidebar of 7 places in a deliberately short window, last row
+selected, asserting a non-zero scroll offset. **Mutation-proven both ways: exit 1 without the fix,
+exit 0 with it.**
+⚠ The fixture uses a 140 px window rather than the shipped 220 px on purpose: at 220 an 8-row sidebar
+overflows by two pixels, and a two-pixel margin is a poor thing to hang an assertion on. Same defect,
+decisive arithmetic.
+
 ## [0.10.0] — 2026-09-14 — daimon is declared, the deferrals are swept, and duplicates are found
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

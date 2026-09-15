@@ -24,9 +24,35 @@
 
 ## Version
 
-**0.10.0 IS CUT** — `VERSION` reads `0.10.0` and the CHANGELOG header agrees, 2026-09-14.
-⚠ 0.9.7 released (tagged)? Re-run `git log --oneline -3` and `git tag --list` before restating this.
-**Next: the rest of M7 — the local index, tags, smart folders — then `0.11.0` (M8).**
+**0.10.1 IS CUT** — `VERSION` reads `0.10.1` and the CHANGELOG header agrees, 2026-09-14.
+⚠ 0.10.0 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this.
+
+⛔⛔ **M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING — daimon does not build for agnos.** MEASURED:
+`cyrius build --agnos src/main.cyr` on daimon 2.1.3 gives **53 errors, 36 distinct undefined symbols**
+— 50 in `lib/syscalls_linux_common.cyr` (a VENDORED stdlib file being compiled for the wrong target,
+while `lib/syscalls_x86_64_agnos.cyr`'s own header says it is STANDALONE and does not include it) and
+3 in daimon's own `src/agent.cyr` (`SYS_EXECVE`, `SYS_WAIT4`). ⚠ Likely root, not confirmed: daimon
+pins cyrius **6.6.2** to crab's **6.6.4** and the two vendored agnos peers DIFFER. ⇒ Filed at
+`daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md`; the first failure
+class (four `sys_unlink` arity errors) is FIXED there as `daimon_unlink`, prepared and uncommitted —
+daimon's own rule forbids bumping its VERSION. ⛔ crab will not fake an index it cannot back.
+
+**0.10.1 contents — the sidebar can reach its own rows.** Two defects found while designing M7's
+smart-folder section, cut on their own rather than bundled.
+⛔⛆ **(1) FOUR ROWS BELOW THE FOLD, AND NOTHING EVER SCROLLED THE SIDEBAR.** `crab_sblst` appears
+seven times in ui.cyr and not one was a scroll call, while the panes and the context column have been
+followed for releases. MEASURED: an ordinary desktop is 7 places + 2 headers + 2 volumes = **11 rows**
+against **7 that fit** in the shipped 380x220 (174 px band / 22 px rows). `crab_sb_step` walks all
+eleven, so the cursor reaches a row the list never shows and Enter sends the pane somewhere the
+operator never saw selected. ⚠ Invisible on a headless box: `crab_places_build` stat-checks, so this
+box builds THREE places — 7 rows, fitting exactly.
+⛔ **(2) A sidebar click that did nothing said nothing** — the pointer arm had no `else` while its
+keyboard twin has said "nothing to go to" since 0.9.2. Unreachable today (every row has a path);
+reachable the moment one is pathless, which is what a smart folder is. Fixed before the feature.
+**2503 / 0**, render_test **55** checks (53 → 55).
+⛔⛆ **The scroll fix was UNASSERTED when it first landed and mutation caught it**: deleting the line
+left BOTH suites green. The suite proves the arithmetic — the motive — not that the list moves; only a
+laid-out tree can, and that lives in `render_test`. Now mutation-proven both ways (exit 1 / exit 0).
 
 **0.10.0 contents.** ⭐⭐ **THE DAIMON RULING: DECLARED.** `[deps.daimon]` at 2.1.3; `cyrius deps`
 resolves 7, `--verify` 50/50. This was the OLDEST open item in the roadmap and it gated M7 and M8

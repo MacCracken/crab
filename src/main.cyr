@@ -908,6 +908,15 @@ fn main(): i64 {
                             }
                             crab_say("crab: place "); crab_say(pp); crab_say("\n");
                         }
+                        # ⛔⛆ A PRESS THAT DID NOTHING SAYS SO — and this arm was the one place that
+                        # did not. Its KEYBOARD twin has answered "nothing to go to" since 0.9.2
+                        # (`if (sbp != 0) { synth_goto = sbp; } else { ... }`); the pointer road just
+                        # returned, silently, leaving the operator unable to tell a click crab
+                        # ignored from one it never received. That is the exact ambiguity 0.9.5's
+                        # `crab: press btn <n> no action` was added to end, in the same surface.
+                        # ⚠ Reachable the moment ANY sidebar row has no path — which is what a
+                        # smart-folder section would be.
+                        if (pp == 0) { crab_set_notice("nothing to go to"); }
                     }
                     # ⚠ Nested rather than `else if`, which cyrius does not have.
                     if (paneclick == 1) {

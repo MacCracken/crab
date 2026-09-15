@@ -525,6 +525,38 @@ fn main(): i64 {
     # clean run. Now the number is on stdout and a drop is visible without reading the source.
     # ⚠ This is the same discipline as the mutation rule: an assertion you cannot observe FAILING —
     # or, here, cannot observe RUNNING — is not evidence.
+    # ⭐⭐ THE SIDEBAR FOLLOWS ITS CURSOR (0.10.1) — and this is the ONLY gate that can say so.
+    # ⛔⛆ THE FIX WAS UNASSERTED WHEN IT LANDED: deleting `dh_list_scroll_to_sel(crab_sblst)` left
+    # `cyrius test` at 2503/0 AND render_test at 53/0. The suite proves the ARITHMETIC — eleven rows
+    # needed, seven fit, and `crab_sb_step` walks past the fold — which is the MOTIVE. Only a
+    # laid-out tree can prove the list actually MOVES, and that tree exists only here.
+    # ⇒ Seven places and two volumes is the ordinary desktop: 1 + 7 + 1 + 2 = 11 rows at 22 px = 242,
+    # against a 220 px window. Select the LAST row and the offset must be non-zero.
+    # ⚠ A SHORT WINDOW, DELIBERATELY. At the shipped 220 px an 8-row sidebar overflows a 174 px band
+    # by 2 px — real, but a 2 px offset is a marginal thing to assert. 140 px leaves a ~94 px band, so
+    # four rows fit against eight needed and the offset must be large. The DEFECT is the same one; the
+    # fixture just stops depending on a two-pixel margin.
+    var sbsurf = dh_surface_new(380, 140);
+    var sbpl = alloc(8 * CRAB_PLACE_SZ);
+    var pi = 0;
+    while (pi < 7) {
+        var prec = sbpl + pi * CRAB_PLACE_SZ;
+        store8(prec, 80); store8(prec + 1, 49 + pi); store8(prec + 2, 0);      # "P0".."P6"
+        store8(prec + CRAB_PLACE_PATH, 47); store8(prec + CRAB_PLACE_PATH + 1, 0);   # "/"
+        pi = pi + 1;
+    }
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, tbuf, 1, lp, tz, tm, CRAB_PANE_OK, 0, 0, tsl);
+    crab_rs_pane(rs, 1, rbuf, 3, rp, rsizes, rmtimes, CRAB_PANE_OK, 0, 0, tsr);
+    # the LAST row of an 11-row model: 1 header + 7 places + 1 header + 2 volumes -> row 10
+    crab_rs_sidebar(rs, 1, sbpl, 7, 0, 0, crab_sb_rows(7, 0) - 1, 1);
+    var sbs = crab_render(sbsurf, 0, rs);
+    check(sbs != 0, 1);
+    # ⛔ EIGHT ROWS (1 header + 7 places) AT 22 px AGAINST A ~94 px BAND. The selected last row must
+    # have pulled the list down; a zero offset here is exactly the defect this release closed, and
+    # deleting `dh_list_scroll_to_sel(crab_sblst)` from `crab_render` turns this check red.
+    check(dh_widget_scroll_y(crab_sidebar_widget()) > 0, 1);
+
     var cbuf = alloc(64);
     var cl = 0;
     var tag = "crab render_test: ";

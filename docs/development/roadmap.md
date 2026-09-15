@@ -283,9 +283,17 @@ scoped hook and would die at the arena's first reset.
 ⚠ **0.10.0 on the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
 is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the number at the cut.
 
-- **Local index** — `Local · 41,208 files`, `index fresh`, background indexing that
-  `pauses on battery`. **Gate: daimon.**
-- **Tags** — manual and suggested (`SUGGESTED TAGS · src → + toolchain + cyrius + wip`).
+- ⛔⛔ **Local index — BLOCKED, and not in crab.** `Local · 41,208 files`, `index fresh`, background
+  indexing that `pauses on battery`. **daimon does not build for agnos**: `cyrius build --agnos` on
+  daimon 2.1.3 gives 53 errors / 36 undefined symbols — 50 in a VENDORED stdlib file compiled for the
+  wrong target, 3 in daimon's own `src/agent.cyr`. crab runs ON agnos, so a daimon that cannot be
+  built there cannot be talked to. ⇒ Filed in daimon, 2026-09-14; the `sys_unlink` arity class is
+  fixed there and prepared. ⚠ crab will not fake an index it cannot back.
+- ⛔ **Tags — BLOCKED on the same filing.** Manual and suggested (`SUGGESTED TAGS · src → + toolchain
+  + cyrius + wip`). Tags need persistence crab does not have and daimon cannot yet provide on agnos.
+  ⇒ `Untagged` and `Unrated` do not ship in ANY form until it clears — not greyed, not
+  "unavailable": a row that answers identically on every box for every file forever is the probe the
+  VOLUMES entry refused.
 - **Smart folders** — Recent, Duplicates, Untagged, Large & old, Raw only, Unrated.
 - ✅ **Duplicate detection — SHIPPED (0.10.0).** `Shift+D` groups by content and marks all but the
   newest. ⭐ Done WITHOUT daimon, as this row always allowed: size is a free pre-filter (every entry
