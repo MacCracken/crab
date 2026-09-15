@@ -2937,6 +2937,8 @@ fn main() {
     t_preview_dims();
     t_pv_094();
     t_pointer_095();
+    t_drop_096();
+    t_h1_097();
     t_thumbnails();
     t_exif();
     t_gridview();
@@ -3314,6 +3316,110 @@ fn t_preview(): i64 {
 # Every decision below used to live inside `#ifdef CYRIUS_TARGET_AGNOS` in main.cyr, or inline in a
 # render block, where no host test could reach it. Two of them were WRONG and shipping.
 # ⭐⭐ 0.9.5 — THE POINTER POLISH: the middle button, and a highlight that follows the pointer.
+# ⭐⭐ 0.9.6 — A DRAG CANNOT OUTLIVE ITS LISTING.
+# ⭐⭐ 0.9.7 — H1: A CANCELLED COPY DELETES ONLY WHAT CRAB CREATED.
+fn t_h1_097(): i64 {
+    test_group("crab — 0.9.7: H1, a cancel removes only a root crab made");
+
+    # ⛔⛔ THE DEFECT, IN ONE SENTENCE. `crab_walk_reroot_dtree` turns a cancelled copy into a
+    # RECURSIVE DELETE of the destination root. That was safe for exactly as long as
+    # `crab_walk_begin` refused an existing destination with EEXIST — the root was then always one
+    # crab had just made. 0.8.7 relaxed that guard to allow MERGING and did not touch the delete.
+    # ⇒ Cancelling a copy that merged into a folder the operator already had deleted that folder
+    # WHOLESALE, including every file crab never wrote.
+    # ⚠ The function's own comment predicted this word for word: "if that guard is ever relaxed to
+    # allow merging into an existing destination, THIS FUNCTION BECOMES A DATA-LOSS BUG and must be
+    # deleted in the same change." It was relaxed; it was not.
+    assert_eq(crab_cancel_may_remove(0, 12), 0,
+      "⛔⛔ A MERGE'S ROOT IS NEVER REMOVED — it is the operator's folder, full of crab's non-work");
+    assert_eq(crab_cancel_may_remove(1, 12), 1,
+      "⭐ a root CRAB MADE is removed — a cancel undoes crab's own work, which is the whole point");
+
+    # ⚠ Nothing was written under a root that does not exist, whoever made it.
+    assert_eq(crab_cancel_may_remove(1, 0), 0, "an empty destination root removes nothing");
+    assert_eq(crab_cancel_may_remove(0, 0), 0, "...merge or not");
+    assert_eq(crab_cancel_may_remove(1, 0 - 1), 0, "...and a negative length is not a path");
+
+    # ⛔ THE FLAG IS A FLAG, NOT A TRUTHINESS TEST. A stale record could hold anything; only an
+    # explicit 1 written by `crab_walk_begin`'s own `mkdir` authorises a delete. `!= 0` would let a
+    # leftover 2 from some future field authorise removing the operator's folder.
+    assert_eq(crab_cancel_may_remove(2, 12), 0, "⛔ only an explicit 1 authorises the removal");
+    assert_eq(crab_cancel_may_remove(0 - 1, 12), 0, "...not any non-zero value");
+
+    # ---- the cancel REPORTS what it left, rather than implying a clean undo ---------------------
+    # Every other cancelled tree copy takes its tree with it, so a bare "transfer cancelled" would
+    # read as a clean undo of something that is half done — and the half that is done sits inside a
+    # folder full of the operator's own files.
+    assert(crab_fs_msg(CRAB_FS_EMERGED) != 0, "a cancelled merge has a sentence of its own");
+    assert(t_contains(crab_fs_msg(CRAB_FS_EMERGED), "still there"),
+      "⛔ ...and it says what SURVIVED, not merely that the copy stopped");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EMERGED), crab_fs_msg(CRAB_FS_OK)), 0,
+      "...and it does not read as a clean finish");
+    assert_eq(t_streq(crab_fs_msg(CRAB_FS_EMERGED), crab_fs_msg(CRAB_FS_EIO)), 0,
+      "...nor as a part-way failure, which is a different thing that leaves a different mess");
+    return 0;
+}
+
+fn t_drop_096(): i64 {
+    test_group("crab — 0.9.6: the drop verifies the NAME, and a question outranks the drag");
+
+    # ---- ⛔⛆ THE DATA-LOSS PATH THIS RELEASE CLOSES ---------------------------------------------
+    # Press a row and hold; move 4 px; press `d` — the key dispatch is not gated on drag state, so
+    # the prompt asks "delete <name>?"; drag to the other pane; release. The drop MOVED the file,
+    # RELISTED BOTH PANES, cleared every mark and CLAMPED both selections — and the `y` that followed
+    # answered a question about an entry that was no longer there. The prompt named one thing and the
+    # delete took another: 0.8.0 closed that for clicks and 0.8.5 for the wheel; the drop never asked.
+    assert_eq(crab_drop_ok(1, 1, 0, 1, 3, 10, 1), CRAB_DROP_BLOCKED,
+      "⛔⛆ A QUESTION ON THE STATUS LINE OUTRANKS THE DROP — it must not move the ground under one");
+    assert_eq(crab_drop_ok(0, 1, 0, 1, 3, 10, 1), CRAB_DROP_GO,
+      "...and with no question the same drop proceeds");
+
+    # ---- ⛔⛆ THE NAME IS THE IDENTITY, NOT THE INDEX --------------------------------------------
+    # Nothing gates the KEY dispatch on drag state, so Enter or Backspace re-lists the source pane
+    # while the button is still down — and `crab_sort_entries` permutes in place, so a sort key does
+    # it without navigating at all. The row index then names a different file, and the bounds check
+    # passes on any listing long enough.
+    assert_eq(crab_drop_ok(0, 1, 0, 1, 3, 10, 0), CRAB_DROP_MOVED,
+      "⛔⛆ THE ROW NO LONGER HOLDS THE NAME THE PRESS ARMED — refuse, and say so");
+    assert_eq(crab_drop_ok(0, 1, 0, 1, 12, 10, 1), CRAB_DROP_MOVED,
+      "⛔ ...and a listing that SHRANK past the row is the same refusal, not an out-of-bounds read");
+    assert_eq(crab_drop_ok(0, 1, 0, 1, 0, 0, 1), CRAB_DROP_MOVED,
+      "...an emptied source pane too");
+
+    # ---- the ordinary refusals, unchanged ------------------------------------------------------
+    assert_eq(crab_drop_ok(0, 0, 0, 1, 3, 10, 1), CRAB_DROP_NONE, "no drag in flight is not a drop");
+    assert_eq(crab_drop_ok(0, 1, 0, 0, 3, 10, 1), CRAB_DROP_NONE, "a drop back onto the SOURCE pane does nothing");
+    assert_eq(crab_drop_ok(0, 1, 0, 0 - 1, 3, 10, 1), CRAB_DROP_NONE, "...and onto no pane at all");
+    assert_eq(crab_drop_ok(0, 1, 0 - 1, 1, 3, 10, 1), CRAB_DROP_NONE, "an unarmed source pane is not a drop");
+    # ⛔ A pane HEADER answers row -1 with `pane_hit` 1 — `crab_hit` records headers so a header press
+    # focuses its pane. It must never reach the move.
+    assert_eq(crab_drop_ok(0, 1, 0, 1, 0 - 1, 10, 1), CRAB_DROP_NONE,
+      "⛔ a drag armed on a pane HEADER (row -1) drops nothing");
+
+    # ---- ⛔ THE QUESTION IS ASKED BEFORE THE TARGET, AND THE ORDER IS THE POINT -----------------
+    # A drop that is blocked AND aimed nowhere must report BLOCKED: the operator has a question on
+    # screen, and "dropped nowhere" would send them looking in the wrong place for why.
+    assert_eq(crab_drop_ok(1, 1, 0, 0 - 1, 3, 10, 1), CRAB_DROP_BLOCKED,
+      "⛔ blocked-and-aimed-nowhere reports the QUESTION, not the aim");
+    assert_eq(crab_drop_ok(1, 1, 0, 1, 3, 10, 0), CRAB_DROP_BLOCKED,
+      "...and blocked outranks a changed listing too — one sentence, the most urgent one");
+    # ⚠ But `dragging` outranks everything: a release with no drag in flight is not a refusal to
+    # report, it is not a drop at all, and a notice would appear after an ordinary click.
+    assert_eq(crab_drop_ok(1, 0, 0, 1, 3, 10, 1), CRAB_DROP_NONE,
+      "⛔ a plain click while a question is up is SILENT — not a refusal notice");
+
+    # ---- every refusal says something, and they differ -----------------------------------------
+    assert(crab_drop_msg(CRAB_DROP_BLOCKED) != 0, "a blocked drop tells the operator why");
+    assert(crab_drop_msg(CRAB_DROP_MOVED) != 0, "...so does one whose listing moved");
+    assert(crab_drop_msg(CRAB_DROP_NONE) != 0, "...and one aimed nowhere");
+    assert_eq(crab_drop_msg(CRAB_DROP_GO), 0, "⚠ and a drop that PROCEEDS says nothing here");
+    assert_eq(t_streq(crab_drop_msg(CRAB_DROP_BLOCKED), crab_drop_msg(CRAB_DROP_MOVED)), 0,
+      "⛔ the two refusals do not share a sentence — they send the operator to different places");
+    assert(t_contains(crab_drop_msg(CRAB_DROP_MOVED), "changed"),
+      "...and the changed-listing one says the listing changed");
+    return 0;
+}
+
 fn t_pointer_095(): i64 {
     test_group("crab — 0.9.5: the middle button, and a popup highlight that follows the pointer");
     var L = CRAB_BTN_LEFT; var R = CRAB_BTN_RIGHT; var M = CRAB_BTN_MIDDLE;

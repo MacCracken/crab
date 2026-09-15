@@ -340,6 +340,12 @@ enum CrabPointer {
     # dhancha's `DH_DRAG_THRESHOLD`, and the same value — a hand resting on a mouse jitters by a
     # pixel or two, and a drag that triggers on jitter would move files on an intended click.
     CRAB_DRAG_THRESHOLD = 4;
+    # The drop's answers (0.9.6). ⚠ Declared here rather than in `ui.cyr` because the RENDER PATH
+    # never names them — the drop is a main-loop decision, and `crab_drag_*` already live here.
+    CRAB_DROP_NONE    = 0;   # not a drop at all: no drag, or not onto the other pane
+    CRAB_DROP_GO      = 1;   # the row still holds the name the press armed — move it
+    CRAB_DROP_BLOCKED = 2;   # a question is on the status line; it outranks the drag
+    CRAB_DROP_MOVED   = 3;   # the source listing changed under the drag — refuse, out loud
 }
 
 # =================================================================================================
@@ -745,6 +751,55 @@ fn crab_drag_targets(frompane, topane): i64 {
     if (topane < 0) { return 0; }
     if (frompane == topane) { return 0; }
     return 1;
+}
+
+# ⭐⭐ MAY THIS DROP PROCEED? One of the `CRAB_DROP_*` answers. (0.9.6)
+#
+# ⛔⛔ A DRAG IS A CLAIM ABOUT A ROW INDEX, AND NOTHING KEPT THE LISTING STILL. Until 0.9.6 the drop
+# read `drag_row` against whatever the source pane held at RELEASE time, and three things could move
+# it in between — none of which the release arm asked about:
+#
+#   1. ⛔⛆ NO MODAL GATE. The release was gated on the LEFT BUTTON AND NOTHING ELSE: neither
+#      `crab_pointer_blocked` nor `crab_pointer_modal` was asked, though the click has asked since
+#      0.8.0 and the wheel since 0.8.5. ⇒ Press a row and hold; move 4 px; press `d` — the key
+#      dispatch is not gated on drag state either, so the prompt asks *"delete <name>?"*; drag to the
+#      other pane; release. The drop MOVES a file, RELISTS BOTH PANES, clears every mark and CLAMPS
+#      both selections — and the `y` that follows answers a question about an entry that is no longer
+#      there. **The prompt named one thing and the delete took another.** That is exactly the failure
+#      0.8.0 closed for clicks and 0.8.5 for the wheel, arriving one input kind later.
+#   2. ⛔⛆ THE KEYBOARD RE-LISTS THE SOURCE PANE MID-DRAG. Nothing gates the key dispatch on drag
+#      state, so Enter or Backspace descends or ascends the pane being dragged FROM while the button
+#      is still down. `drag_row` then indexes a directory the operator never dragged from — and the
+#      bounds check passes on any listing long enough.
+#   3. ⚠ AND THE INDEX IS NOT IDENTITY EVEN WITHOUT NAVIGATION. `crab_sort_entries` permutes in
+#      place; a sort key pressed mid-drag reorders the rows under the claim.
+#
+# ⇒ **THE NAME IS THE IDENTITY, NOT THE INDEX.** The drop verifies that the row still holds the name
+# the press armed, and refuses OUT LOUD when it does not. That is the discipline the delete queue
+# already states — *"Queuing by name removes that 'only safe because' entirely"* — and the one
+# `crab_goto` names when it clears marks, *"a mark that outlives its listing points at whatever now
+# occupies that index"*. A drag outlives its listing more easily than either.
+fn crab_drop_ok(blocked, dragging, frompane, topane, row, count, name_ok): i64 {
+    if (dragging != 1) { return CRAB_DROP_NONE; }
+    # ⛔ THE QUESTION OUTRANKS THE DROP. A drop while a prompt is up moves the ground under a question
+    # already asked about a specific name — see (1) above. It is REFUSED, not deferred: the operator
+    # answers the question they were asked, and the drag is over.
+    if (blocked != 0) { return CRAB_DROP_BLOCKED; }
+    if (crab_drag_targets(frompane, topane) == 0) { return CRAB_DROP_NONE; }
+    if (row < 0) { return CRAB_DROP_NONE; }
+    # ⚠ The bounds check is kept AND is no longer load-bearing on its own: a shorter listing is
+    # caught here, a REORDERED one only by the name.
+    if (row >= count) { return CRAB_DROP_MOVED; }
+    if (name_ok != 1) { return CRAB_DROP_MOVED; }
+    return CRAB_DROP_GO;
+}
+
+# @public — what the operator is told when a drop is refused. 0 when there is nothing to say.
+fn crab_drop_msg(r): i64 {
+    if (r == CRAB_DROP_BLOCKED) { return "answer the question first — the drag is cancelled"; }
+    if (r == CRAB_DROP_MOVED) { return "that listing changed while you dragged — nothing moved"; }
+    if (r == CRAB_DROP_NONE) { return "dropped nowhere — drag to the other pane"; }
+    return 0;
 }
 
 # @public — what should `d` actually DO to ONE entry? `CRAB_DEL_TREE` or `CRAB_DEL_ONE`.
@@ -1514,6 +1569,11 @@ enum CrabFs {
     CRAB_FS_ELOOP    = -19;    # the destination is inside the source tree
     CRAB_FS_EISDIR   = -20;    # a folder was handed to the single-entry copy, which cannot carry one
     CRAB_FS_ECANCEL  = -22;    # the collision prompt was answered with Esc — cancel the operation
+    # ⛔⛆ NOT A REFUSAL — A REPORT ABOUT WHAT SURVIVED A CANCEL (0.9.7, H1). A cancelled tree copy
+    # normally takes its partial tree with it; one that MERGED into a folder the operator already had
+    # must NOT, because that folder holds files crab never wrote. This code says the copy stopped and
+    # part of it is still there, so the status line can say so instead of implying a clean undo.
+    CRAB_FS_EMERGED  = -23;
     # ⭐ NOT A REFUSAL — "rename cannot do this, so the STEPPED copy must". Returned only by
     # `crab_fs_move_rename`, and the one `CRAB_FS_*` a caller must not print: it is an instruction to
     # the caller, not an answer for the operator. `crab_fs_msg` still gives it a sentence, because a
@@ -3464,7 +3524,13 @@ enum CrabOp {
     # on, so the resume needs to know what was decided about THIS entry, separately from the standing
     # policy — a one-shot `replace` must not become a `replace` for the next one.
     CRAB_OP_OVACT  = 5808;   # a CRAB_OVA_* to apply to the pending entry, or NONE
-    CRAB_OP_SZ     = 5816;
+    # ⛔⛔ DID **CRAB** CREATE THE DESTINATION ROOT? (0.9.7 — H1.) 1 = `crab_walk_begin` called
+    # `crab_fs_mkdir_raw` for it during THIS operation; 0 = it already existed and the copy MERGED
+    # into it. This one bit is the whole of whether a cancel may delete that folder.
+    # ⚠ Appended AFTER `OVACT` so no existing offset moves — the same rule the overwrite state
+    # followed when it was appended after the stack.
+    CRAB_OP_DMADE  = 5816;   # 1 = crab made DROOT; a cancel may remove it. 0 = a MERGE; it may not.
+    CRAB_OP_SZ     = 5824;
     # ⛔ THE DEPTH BOUND IS DERIVED, NOT CHOSEN, AND IT IS PROVABLY UNREACHABLE. `CRAB_PATH_MAX` is
     # 256, root "/" is one character and every level costs at least two more, so `crab_join_n`
     # refuses at depth 127 before this clamp can fire. It exists so that if `CRAB_PATH_MAX` ever
@@ -3610,14 +3676,48 @@ fn crab_copy_cancel(): i64 {
     # ⇒ The rule this function already states for a single file — *"leaving a truncated file wearing
     # the real file's name is the worst outcome available"* — is MORE true of a tree, not less: a
     # half-copied folder is indistinguishable from a whole one without comparing it entry by entry.
+    # ⛔⛔ AND THE TREE CLEANUP IS NOW CONDITIONAL — H1 (0.9.7). `crab_walk_reroot_dtree` removes the
+    # destination root, which is safe ONLY when crab created that root itself. Since 0.8.7 a copy may
+    # MERGE into a folder the operator already had, and rerooting onto that deletes files crab never
+    # wrote. The function checks `CRAB_OP_DMADE` and declines; declining is not a failure.
+    # ⇒ A cancelled MERGE unlinks the one file in flight and LEAVES the rest. That is the honest
+    # outcome: a partial merge the operator can see and undo, rather than a folder silently emptied.
+    var merged = 0;
     if (ck == CRAB_OP_CTREE) {
         crab_op_fds_close(r);
         if (crab_walk_reroot_dtree(r) == 1) { return CRAB_FS_OK; }
+        # The reroot declined. It only ever declines for two reasons: nothing was written yet, or
+        # this was a merge. Only the second needs saying, and only it leaves anything behind.
+        if (load64(r + CRAB_OP_DMADE) != 1) { merged = 1; }
     }
     crab_op_release();
     var dl = crab_cstr_len(r + CRAB_OP_DST, CRAB_PATH_MAX);
     if (dl > 0) { crab_fs_unlink_raw(r + CRAB_OP_DST, dl); }
+    if (merged == 1) { return CRAB_FS_EMERGED; }
     return CRAB_FS_OK;
+}
+
+# @public — MAY A CANCEL REMOVE THE DESTINATION ROOT? 1 = yes. (0.9.7 — H1.)
+#
+# ⛔⛔ THIS IS THE WHOLE OF H1, AND IT IS ONE BIT. `crab_walk_reroot_dtree` turns a cancelled copy into
+# a recursive DELETE of the destination root. That was safe for exactly as long as `crab_walk_begin`
+# refused an existing destination with `EEXIST` — so the root was always one crab had just made, and
+# removing it undid crab's own work and could reach nothing the operator put there.
+# ⛔ 0.8.7 RELAXED THAT GUARD TO ALLOW MERGING, AND DID NOT TOUCH THE DELETE. The comment on
+# `crab_walk_reroot_dtree` had named the consequence in advance — *"if that guard is ever relaxed to
+# allow merging into an existing destination, THIS FUNCTION BECOMES A DATA-LOSS BUG and must be
+# deleted in the same change"* — and it was not. Cancelling a copy that merged into a folder the
+# operator already had deleted that folder **wholesale**, including every file crab never wrote.
+# ⇒ The invariant is CHECKED now instead of assumed, and it is checked HERE so the suite can drive
+# it: everything that calls it is a walk step, and walk steps are not reachable from a host test.
+# ⚠ `dmade` comes from the only place that knows — the `mkdir` in `crab_walk_begin`.
+fn crab_cancel_may_remove(dmade, root_len): i64 {
+    # Nothing was written under a root that does not exist.
+    if (root_len <= 0) { return 0; }
+    # ⛔ ONLY A ROOT CRAB MADE. A merge leaves its partial copy behind and says so; deleting the
+    # operator's folder to tidy up after crab is the failure this project has already paid for once.
+    if (dmade != 1) { return 0; }
+    return 1;
 }
 
 # Turn a live CTREE record into a DTREE that removes what that copy had already written. -> 1 if a
@@ -3636,8 +3736,17 @@ fn crab_copy_cancel(): i64 {
 # with `EBUSY` by the transfer it is cleaning up after.
 fn crab_walk_reroot_dtree(r): i64 {
     if (r == 0) { return 0; }
+    # ⛔⛔ H1, CLOSED (0.9.7) — AND THE COMMENT ABOVE PREDICTED IT WORD FOR WORD. The invariant this
+    # function rested on ("DROOT is ALWAYS a directory crab made during this very operation") was
+    # falsified by 0.8.7's merge, and this function was not touched in that change. A cancelled MERGE
+    # rerooted a RECURSIVE DELETE onto a folder the OPERATOR made, holding files crab never wrote.
+    # ⇒ The invariant is now CHECKED rather than assumed. `CRAB_OP_DMADE` is set at the only place
+    # that knows — the `mkdir` in `crab_walk_begin` — and only a root crab made may be removed.
+    # ⚠ Returning 0 here is not a failure: the caller then unlinks the one file in flight and leaves
+    # the partial merge, which is the honest outcome. The alternative is deleting data the operator
+    # did not name, which is the failure this project has already paid for once (`/bin`, 2026-09-03).
     var dl = crab_cstr_len(r + CRAB_OP_DROOT, CRAB_PATH_MAX);
-    if (dl <= 0) { return 0; }
+    if (crab_cancel_may_remove(load64(r + CRAB_OP_DMADE), dl) == 0) { return 0; }
     # ⚠ SROOT (624) + CRAB_PATH_MAX ends exactly where DROOT (880) begins, and DROOT + CRAB_PATH_MAX
     # ends where CURS (1136) begins — no overlap, so these copies are safe in this order. Read DROOT
     # into both destinations BEFORE clearing it.
@@ -4034,6 +4143,9 @@ fn crab_walk_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
     if (r == 0) { return CRAB_FS_EIO; }
     if (load64(r + CRAB_OP_KIND) != CRAB_OP_IDLE) { return CRAB_FS_EBUSY; }
     if (crab_walk_buf() == 0) { return CRAB_FS_EIO; }
+    # ⚠ ZEROED BEFORE THE CTREE BRANCH CAN SET IT, so a DTREE or MOVEDIR cannot inherit a stale 1
+    # from the copy that ran before it. Only `crab_walk_begin`'s own mkdir may raise this bit.
+    store64(r + CRAB_OP_DMADE, 0);
     var ls = crab_fs_path(scr1, srcdir, name);
     if (ls < 0) { return ls; }
     var ld = 0;
@@ -4056,8 +4168,20 @@ fn crab_walk_begin(kind, srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
         if (rex != 0) {
             if (crab_fs_isdir(scr2, ld, statbuf) == 0) { return CRAB_FS_EEXIST; }
         }
+        # ⛔⛔ AND THIS IS WHERE H1 IS DECIDED. Relaxing the `EEXIST` refusal above (0.8.7) was right —
+        # "copy this folder into one that already has a folder of that name" is the most ordinary
+        # thing an operator does with two panes — but it FALSIFIED the invariant
+        # `crab_walk_reroot_dtree` rested on, which its own comment had spelled out in advance:
+        #   *"`CRAB_OP_DROOT` is ALWAYS a directory crab made during this very operation … if that
+        #    guard is ever relaxed to allow merging, THIS FUNCTION BECOMES A DATA-LOSS BUG."*
+        # It was relaxed here, and that function was not touched. Cancelling a MERGE then rerooted a
+        # recursive DELETE onto a folder the OPERATOR made, holding files crab never wrote.
+        # ⇒ Record which it was. One bit, written at the only place that knows.
         if (rex == 0) {
             if (crab_fs_mkdir_raw(scr2, ld) < 0) { return CRAB_FS_ESYS; }
+            store64(r + CRAB_OP_DMADE, 1);
+        } else {
+            store64(r + CRAB_OP_DMADE, 0);
         }
     }
     store64(r + CRAB_OP_KIND, kind);
@@ -4414,6 +4538,10 @@ fn crab_fs_msg(rc): i64 {
     if (rc == CRAB_FS_EEXIST)   { return "refused: something of that name is already there"; }
     if (rc == CRAB_FS_ESAME)    { return "refused: the source and the destination are the same"; }
     if (rc == CRAB_FS_EIO)      { return "failed part-way: the copy is incomplete"; }
+    # ⛔⛆ IT SAYS WHAT IS STILL THERE, because the operator cancelled and a cancelled copy normally
+    # leaves nothing. A merge is the one case where it does, and "cancelled" alone would read as a
+    # clean undo of something that is half done.
+    if (rc == CRAB_FS_EMERGED)  { return "cancelled — what was already copied into that folder is still there"; }
     # ⚠ Should never reach the status line — `CRAB_FS_EXDEV` is an instruction to the caller, which
     # is expected to start the stepped copy instead of reporting it. Given a sentence anyway, because
     # a code that arrives with no text is a blank status line and no way to tell what happened.

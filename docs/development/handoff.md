@@ -1,57 +1,45 @@
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
-> ⛔⛔⛔ **READ THIS FIRST — H1, CONFIRMED, NOT FIXED.** Cancelling a copy that **merged** into an
-> existing folder deletes that folder wholesale, **including files crab never wrote**. Reproduced by
-> the operator (`tests/zz_h1_repro.tcyr`, since removed):
-> `POST-CANCEL precious.txt exists = 0 *** DELETED BY CRAB ***`.
-> ⇒ **The source predicted it exactly.** `crab_walk_reroot_dtree` says: *"WHY DELETING HERE IS SAFE…
-> rests on one invariant in `crab_walk_begin`: that function REFUSES with `EEXIST` if the destination
-> already exists… If that guard is ever relaxed to allow merging into an existing destination, THIS
-> FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same change."* **0.8.7 relaxed exactly
-> that guard** (`crab_walk_begin`: *"THE ROOT MERGES LIKE ANY OTHER DIRECTORY (0.8.7)"*) and did not
-> delete the function.
-> ⇒ **The fix, named**: a record flag set in `crab_walk_begin` meaning *crab created this root*;
-> `crab_walk_reroot_dtree` reroots only when it is set. A cancelled MERGE then unlinks the in-flight
-> file and leaves the partial merge — the honest outcome, against deleting data the operator did not
-> name, which is the failure this project already paid for once (`/bin`, 2026-09-03).
-> ⚠ **Not fixed in 0.9.3 because the operator was actively probing the same file** (`h3probe.cyr`,
-> `h5probe.cyr`, `probe_h7.cyr` in the tree) and two concurrent edits to a cancel path is exactly
-> where that goes wrong.
+> ⭐⭐⭐ **H1 IS CLOSED (0.9.7) — MEASURED ON IRON, BOTH WAYS.** `crab_walk_reroot_dtree` turned a
+> cancelled tree copy into a RECURSIVE DELETE of the destination root. Its own comment named the
+> invariant that made that safe AND named the consequence of losing it — *"if that guard is ever
+> relaxed to allow merging … THIS FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same
+> change."* 0.8.7 relaxed the guard and did not touch the delete.
+> `crab-h1-test.py`, `debugfs` readback after shutdown:
 >
-> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.5; 0.9.4 released (tagged).** ⛔ commit, tag and push are the
+> | | SHIPPED | FIXED |
+> |---|---|---|
+> | `/zzkeep` on disk | **False** | True |
+> | operator's files | **0/3** | 3/3 |
+> | cancel reported | (nothing) | `crab: transfer cancelled rc 23` |
+>
+> ⇒ `CRAB_OP_DMADE`, written at the only place that knows (the `mkdir` in `crab_walk_begin`), and
+> `crab_cancel_may_remove(dmade, root_len)` as the lifted decision. ⚠ Only an explicit `1` authorises
+> removal. A cancelled merge reports `CRAB_FS_EMERGED` and leaves the partial copy, which is honest.
+>
+> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.6; 0.9.5 released (tagged).** ⛔ commit, tag and push are the
 > operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
-> **0.9.x IS COMPLETE. Next: the daimon ruling, then `0.10.0 · The index` (M7).**
+> **Next: H1 (below), then the daimon ruling, then `0.10.0 · The index` (M7).**
 >
-> ## ⛔⛔ READ THIS FIRST — TWO LIVE DATA-LOSS DEFECTS IN THE DRAG PATH, FOUND IN 0.9.5, NOT FIXED
+> ## 0.9.6 — a drag cannot outlive its listing (TWO DATA-LOSS DEFECTS, FIXED)
 >
-> They are **not** pointer polish and were deliberately left out of that release rather than bundled
-> (CLAUDE.md: *"ONE change at a time"*). Both are confirmed by reading; neither is hypothetical.
-> ⇒ **`dragging` / `drag_pane` are touched in exactly three places** — the motion arm, the press arm
-> and the release arm. **Nothing in the key dispatch consults drag state at all.** That single fact
-> is what both defects rest on.
->
-> 1. ⛔⛆ **THE DROP HAS NO MODAL GATE — the 0.8.5 data-loss path, one input kind over.** The release
->    is gated on the LEFT button and nothing else: neither `crab_pointer_blocked` nor
->    `crab_pointer_modal` is asked, though the click and the wheel both ask. Steps: left-press a row
->    in pane 0 and hold; move 4 px (`dragging = 1`); press `d` — the key dispatch is not gated on
->    drag state, so `confirm_del = 1` and the status line asks *"delete … and everything in it?"*;
->    move into pane 1; release. The drop executes, moves the file, **relists BOTH panes**,
->    `crab_mark_clear`s both and CLAMPS `sel_l`/`sel_r`. Now `y` answers a prompt about an entry that
->    is no longer selected. ⇒ **The prompt names one thing and the delete takes another** — precisely
->    what 0.8.0 closed for clicks and 0.8.5 for the wheel.
->    ⇒ Fix: ask the predicate that already exists. `crab_pointer_blocked(confirm_del, edit_open,
->    crab_op_waiting())` is pure, in ui.cyr, and the suite already drives it.
-> 2. ⛔⛆ **`drag_row` IS INVALIDATED BY THE KEYBOARD MID-DRAG.** Enter or Backspace can descend or
->    ascend the SOURCE pane while the button is held. The drop then indexes `drag_row` against the
->    NEW listing — the bounds check passes on any listing long enough — and captures a name from a
->    directory the operator never dragged from. Same class as the double-click bug the code already
->    fixed by consuming the pair: **a row index is identity only while the listing holds still.**
-> 3. ⚠ **And nothing disarms a drag except a left release, which the compositor may never deliver.**
->    `ae_ptr_forward` re-derives the window per event and drops a release outside the content rect,
->    so dragging onto the titlebar and releasing leaves `dragging = 1` with no button down.
->
-> ⛔ **H1 is still open too** — see below. Two data-loss items and H1 make three; none is mine to
-> schedule.
+> The two items this handoff carried as ⛔⛔ READ THIS FIRST are **closed**. One root cause: a drag is
+> a claim about a ROW INDEX and nothing kept the listing still.
+> 1. ⛔⛆ **A drop could move a file with a DELETE PROMPT on screen.** The release was gated on the
+>    LEFT BUTTON and nothing else — the click has asked `crab_pointer_blocked` since 0.8.0, the wheel
+>    since 0.8.5. The drop moved a file, relisted BOTH panes, cleared marks and CLAMPED both
+>    selections; the `y` then deleted something else. **MEASURED on iron** — `crab: prompt … delete
+>    anuenue?` followed by `crab: drop refused 2`.
+> 2. ⛔⛆ **The keyboard re-listed the source pane mid-drag** (Enter/Backspace), and `crab_sort_entries`
+>    permutes in place even without navigating. ⇒ **THE NAME IS THE IDENTITY, NOT THE INDEX** — the
+>    press captures it, the drop verifies it and refuses out loud.
+> 3. ⚠ **A press on a pane HEADER left the previous drag armed** (arming sat inside `if (hr >= 0)`
+>    with no else; `crab_hit` records headers as row -1), and nothing else ever disarms one — the
+>    compositor drops a release outside the content rect.
+> ⇒ `crab_drop_ok` is the decision, lifted out of the agnos `#ifdef`. **2440 / 0**, five mutations.
+> ⭐⭐ QEMU `crab-drop-test.py` ARM 1 passes twice. ⚠ ARM 2 UNMEASURED and the harness says why: its
+> own Backspace re-lists the pane, so the retry loop does not converge. Nothing moved; the name check
+> is proven in the suite.
 >
 > ## 0.9.5 — the middle button marks, and a popup's highlight follows the pointer
 >
@@ -194,7 +182,7 @@
 > `crab_delete_plan` and `crab_transfer_plan` and proven in the suite; the consequence needed iron.
 > ⚠ **The 0.9.2 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.2**; **0.9.1 released**. ⛔ commit,
 > tag and push are the operator's; `git log --oneline -3` is the authority.
@@ -241,7 +229,7 @@
 > independent and can be reordered freely.
 > ⚠ **The 0.9.1 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.1**; **0.9.0 released**. ⛔ the
 > commit, the tag and the push are the operator's; `git log --oneline -3` is the authority.
@@ -284,7 +272,7 @@
 > keyboard route, capped by `crab_mb_drop_fit`). 0.9.2–0.9.5 are all independent.
 > ⚠ **The 0.9.0 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.0**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits while work is in flight — `git log --oneline -3` is
@@ -333,7 +321,7 @@
 > needed is here. See [the ladder to 1.0](roadmap.md); every entry there is a version.
 > ⚠ **The 0.8.11 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.8.11**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits WHILE work is in flight — `git log --oneline -3` is
@@ -378,7 +366,7 @@
 > 50 / 0. Host **1,071,688 B** · agnos **1,116,632 B**.
 > ⚠ **The 0.8.10 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** ⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED**
 > by the operator (`22f7f53` / `60cc05b` / `eeb6a8b`) — the three-releases-uncommitted backlog that
@@ -439,7 +427,7 @@
 > `#ifdef`.
 > ⚠ **The 0.8.9 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7, 0.8.8 and 0.8.9 are all CUT and none is committed** — `VERSION` reads
@@ -488,7 +476,7 @@
 > itself is now **blocked on agnos and dhancha**. See [the ladder to 1.0](roadmap.md).
 > ⚠ **The 0.8.8 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7 and 0.8.8 are both CUT and neither is committed** — `VERSION` reads 0.8.8,
@@ -545,7 +533,7 @@
 > claim it can make).
 > ⚠ **The 0.8.7 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 is the last release** (`249279f`, on the remote). `[Unreleased]` holds two things and no
@@ -599,7 +587,7 @@
 > the CHANGELOG's harvested-deferral count).
 > ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 IS CUT on operator direction** — `VERSION` = 0.8.6, CHANGELOG `[0.8.6]`, every gate and
@@ -636,7 +624,7 @@
 > milestones name and the manifest declares nowhere.
 > ⚠ **The 0.8.5 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.5 IS CUT on operator direction** — `VERSION` = 0.8.5, CHANGELOG `[0.8.5]`, every gate and
@@ -693,7 +681,7 @@
 > change). ⚠ **The 0.8.3 block below is two releases stale but its reasoning is current**; the
 > `Open` lesson — check the caller's POSITION, not just its logic — is the one to carry.
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **0.8.3, updated 2026-09-09. `Open` WAS DEAD ON BOTH MENU SURFACES, IN EVERY BUILD THAT SHIPPED
 > EITHER.** The context menu and the menu bar both answer Enter by rewriting `u` to the chosen
@@ -719,7 +707,7 @@
 > ⚠ **aethersafha was left exactly as found** — no hand-edited `lib/`, no unverified push. Do not
 > guess a button number either; no repo defines one and X11's order is the wrong default here.
 
-# Handoff — **0.9.5 cut: pointer polish. ⛔ TWO LIVE DATA-LOSS DEFECTS in the drag path, unfixed.**
+# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
 
 > ⭐⭐ **READ THIS FIRST, BECAUSE IT IS THE TRANSFERABLE PART: RECURSIVE COPY AND RECURSIVE DELETE HAD
 > NEVER RUN IN ANY SHIPPED BUILD, AND THE SUITE WAS GREEN THE WHOLE TIME.** `src/main.cyr`'s idle

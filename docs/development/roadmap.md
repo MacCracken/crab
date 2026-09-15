@@ -229,9 +229,14 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
 | | **0.10.0 · The index** (M7) | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
+| ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
+| ✅ | **0.9.7 · H1** | *(a fix release)* cancel a merged copy without losing the folder it merged into | — | **shipped** ⛔⛔⛔ *the oldest confirmed data-loss defect; MEASURED on iron both ways (0/3 → 3/3)* |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
-⭐ **0.9.x IS COMPLETE.** What remains before 1.0 is **the daimon ruling**, then 0.10.0 → 0.11.0. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
+⭐⭐ **0.9.x IS COMPLETE AND ALL THREE KNOWN DATA-LOSS DEFECTS ARE CLOSED** — H1 (0.9.7) and the two
+drag defects (0.9.6), each measured on iron both ways. What remains before 1.0 is **the daimon
+ruling**, then 0.10.0 → 0.11.0. ⛔ The ruling is the operator's and nothing downstream can start
+without it: `0.10.0` and `0.11.0` are both gated on it. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
 chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
 
 ### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day

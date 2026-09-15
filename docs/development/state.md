@@ -24,10 +24,52 @@
 
 ## Version
 
-**0.9.5 IS CUT** — `VERSION` reads `0.9.5` and the CHANGELOG header agrees, 2026-09-14.
-⚠ 0.9.4 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this;
-the operator uses git continuously and this line rots.
-**Next: the daimon ruling, then `0.10.0 · The index` (M7).** 0.9.x is COMPLETE.
+**0.9.7 IS CUT** — `VERSION` reads `0.9.7` and the CHANGELOG header agrees, 2026-09-14.
+⚠ 0.9.6 released (tagged)? Re-run `git log --oneline -3` and `git tag --list` before restating this.
+**⛔⛔⛔ H1 IS CLOSED.** ⇒ **Next: the daimon ruling, then `0.10.0 · The index` (M7).**
+
+**0.9.7 contents — H1.** `crab_walk_reroot_dtree` turns a cancelled tree copy into a RECURSIVE DELETE
+of the destination root. Its own comment named the invariant that made that safe (`crab_walk_begin`
+refused an existing destination, so the root was always one crab had just made) **and named the
+consequence of losing it**: *"if that guard is ever relaxed to allow merging … THIS FUNCTION BECOMES A
+DATA-LOSS BUG and must be deleted in the same change."* 0.8.7 relaxed exactly that guard and did not
+touch the delete. ⇒ Cancelling a copy that MERGED into a folder the operator already had deleted that
+folder wholesale.
+⭐⭐ **MEASURED ON IRON BOTH WAYS** (`crab-h1-test.py`, `debugfs` readback after shutdown): shipped →
+`/zzkeep` GONE, **0/3** of the operator's files survived; fixed → folder intact, **3/3** survived,
+`crab: transfer cancelled rc 23`.
+⇒ `CRAB_OP_DMADE` is written at the only place that knows (the `mkdir` in `crab_walk_begin`) and
+`crab_cancel_may_remove(dmade, root_len)` is the decision, lifted out of the walk so the suite drives
+it. ⚠ Only an explicit `1` authorises removal — truthiness would let a stale record authorise deleting
+the operator's folder. A cancelled merge now reports `CRAB_FS_EMERGED` — *"what was already copied
+into that folder is still there"* — instead of implying a clean undo. **2451 / 0**, four mutations.
+
+**0.9.6 contents — a drag cannot outlive its listing.** Two data-loss defects found during 0.9.5 and
+deliberately not bundled into it. One root cause: **a drag is a claim about a ROW INDEX and nothing
+kept the listing still** — `dragging`/`drag_pane` were touched in exactly three places and NOTHING in
+the key dispatch consulted drag state.
+⛔⛆ **(1) A drop could move a file while a DELETE PROMPT was on screen.** The release was gated on the
+LEFT BUTTON and nothing else — neither `crab_pointer_blocked` nor `crab_pointer_modal`, though the
+click has asked since 0.8.0 and the wheel since 0.8.5. Press-hold, move 4 px, press `d` (the prompt
+asks about entry X), drag across, release: the drop moved a file, RELISTED BOTH PANES, cleared marks
+and CLAMPED both selections — and the `y` deleted something else. **MEASURED on iron**:
+`crab: prompt … delete anuenue?` then `crab: drop refused 2`.
+⛔⛆ **(2) The keyboard could re-list the source pane mid-drag** — Enter/Backspace descend or ascend
+the pane being dragged FROM while the button is down, and `crab_sort_entries` permutes in place even
+without navigating. ⇒ **THE NAME IS THE IDENTITY**: the press captures the row's name, the drop
+verifies it and refuses out loud. Same discipline as the delete queue's *"queue by NAME first"*.
+⚠ **(3) A press on a pane HEADER left the previous drag armed** — arming sat inside `if (hr >= 0)`
+with no else, and `crab_hit` records headers as row -1. Nothing else ever disarms a drag: the
+compositor DROPS a release outside the content rect, so releasing on the titlebar left `dragging = 1`.
+⇒ `crab_drop_ok` is the decision, lifted out of the `#ifdef`. ⛔ The question is asked BEFORE the
+target (an operator with a prompt up must not be told "dropped nowhere"), but `dragging` outranks
+even that so an ordinary click stays silent. **2440 / 0**, five mutations, each the shipped behaviour.
+⭐⭐ **QEMU `crab-drop-test.py` ARM 1 PASSES** (twice, separate runs). ⚠ ARM 2 is honestly UNMEASURED:
+its own Backspace re-lists the pane so each retry starts from a different layout and the loop does not
+converge — it shows nothing moved; the name check is proven in the suite by mutation instead.
+⛔ The drag needed TWO generous moves to promote, not one nudge: `crab_drag_started` needs 4 px but
+promotion happens in the POINTER_MOVE arm, so it needs a motion EVENT delivered while the button is
+down — and aethersafha dedupes motion.
 
 **0.9.5 contents — pointer polish, and the roadmap's premise was wrong.** The item read *"the middle
 mouse button does nothing"*; it has **DISMISSED popups since 0.8.5** — both `CRAB_PA_DISMISS` returns
@@ -96,19 +138,127 @@ functions — the likelier mistake. `ci.yml` now fails on the warning, mutation-
 ⛔ Its first draft had a second hole: `cyrius build … | tee` hides the build's exit status, so a
 FAILED build ran the STALE binary and reported its old green count. Caught doing exactly that.
 
-⛔⛔ **AND A CONFIRMED DATA-LOSS DEFECT IS OPEN — H1, NOT FIXED HERE.** `crab_walk_reroot_dtree`
-carries its own condition: *"WHY DELETING HERE IS SAFE… rests on one invariant in `crab_walk_begin`:
-that function REFUSES with `EEXIST` if the destination already exists… ⇒ If that guard is ever
-relaxed to allow merging into an existing destination, THIS FUNCTION BECOMES A DATA-LOSS BUG and must
-be deleted in the same change."* **0.8.7 relaxed exactly that guard** — `crab_walk_begin` now reads
-*"THE ROOT MERGES LIKE ANY OTHER DIRECTORY (0.8.7)"* — and the function was not deleted. ⇒ Cancelling
-a copy that MERGED into an existing folder deletes that folder wholesale, **including files crab never
-wrote**. Reproduced by the operator (`tests/zz_h1_repro.tcyr`, since removed):
-`POST-CANCEL precious.txt exists = 0 *** DELETED BY CRAB ***`.
-⇒ **The named fix**: a record flag set in `crab_walk_begin` meaning *crab created this root*, and
-`crab_walk_reroot_dtree` reroots only when it is set. A cancelled MERGE then unlinks the in-flight
-file and leaves the partial merge, which is the honest outcome — the alternative is deleting data the
-operator did not name, which is the failure this project has already paid for once (`/bin`, 2026-09-03).
+⭐⭐⭐ **H1 IS CLOSED (0.9.7).** This section carried it as OPEN for four releases; the fix, the
+mutation proofs and the iron measurement are in the 0.9.7 block above. `crab_walk_reroot_dtree` now
+asks `crab_cancel_may_remove`, which authorises removing the destination root only when
+`CRAB_OP_DMADE` says crab's own `mkdir` created it. Reproduced by the operator before the fix
+(`tests/zz_h1_repro.tcyr`, since removed): `POST-CANCEL precious.txt exists = 0 *** DELETED BY
+CRAB ***` — and reproduced again by `crab-h1-test.py` against a planted revert, **0/3 surviving**.
+
+**0.9.7 contents — H1.** `crab_walk_reroot_dtree` turns a cancelled tree copy into a RECURSIVE DELETE
+of the destination root. Its own comment named the invariant that made that safe (`crab_walk_begin`
+refused an existing destination, so the root was always one crab had just made) **and named the
+consequence of losing it**: *"if that guard is ever relaxed to allow merging … THIS FUNCTION BECOMES A
+DATA-LOSS BUG and must be deleted in the same change."* 0.8.7 relaxed exactly that guard and did not
+touch the delete. ⇒ Cancelling a copy that MERGED into a folder the operator already had deleted that
+folder wholesale.
+⭐⭐ **MEASURED ON IRON BOTH WAYS** (`crab-h1-test.py`, `debugfs` readback after shutdown): shipped →
+`/zzkeep` GONE, **0/3** of the operator's files survived; fixed → folder intact, **3/3** survived,
+`crab: transfer cancelled rc 23`.
+⇒ `CRAB_OP_DMADE` is written at the only place that knows (the `mkdir` in `crab_walk_begin`) and
+`crab_cancel_may_remove(dmade, root_len)` is the decision, lifted out of the walk so the suite drives
+it. ⚠ Only an explicit `1` authorises removal — truthiness would let a stale record authorise deleting
+the operator's folder. A cancelled merge now reports `CRAB_FS_EMERGED` — *"what was already copied
+into that folder is still there"* — instead of implying a clean undo. **2451 / 0**, four mutations.
+
+**0.9.6 contents — a drag cannot outlive its listing.** Two data-loss defects found during 0.9.5 and
+deliberately not bundled into it. One root cause: **a drag is a claim about a ROW INDEX and nothing
+kept the listing still** — `dragging`/`drag_pane` were touched in exactly three places and NOTHING in
+the key dispatch consulted drag state.
+⛔⛆ **(1) A drop could move a file while a DELETE PROMPT was on screen.** The release was gated on the
+LEFT BUTTON and nothing else — neither `crab_pointer_blocked` nor `crab_pointer_modal`, though the
+click has asked since 0.8.0 and the wheel since 0.8.5. Press-hold, move 4 px, press `d` (the prompt
+asks about entry X), drag across, release: the drop moved a file, RELISTED BOTH PANES, cleared marks
+and CLAMPED both selections — and the `y` deleted something else. **MEASURED on iron**:
+`crab: prompt … delete anuenue?` then `crab: drop refused 2`.
+⛔⛆ **(2) The keyboard could re-list the source pane mid-drag** — Enter/Backspace descend or ascend
+the pane being dragged FROM while the button is down, and `crab_sort_entries` permutes in place even
+without navigating. ⇒ **THE NAME IS THE IDENTITY**: the press captures the row's name, the drop
+verifies it and refuses out loud. Same discipline as the delete queue's *"queue by NAME first"*.
+⚠ **(3) A press on a pane HEADER left the previous drag armed** — arming sat inside `if (hr >= 0)`
+with no else, and `crab_hit` records headers as row -1. Nothing else ever disarms a drag: the
+compositor DROPS a release outside the content rect, so releasing on the titlebar left `dragging = 1`.
+⇒ `crab_drop_ok` is the decision, lifted out of the `#ifdef`. ⛔ The question is asked BEFORE the
+target (an operator with a prompt up must not be told "dropped nowhere"), but `dragging` outranks
+even that so an ordinary click stays silent. **2440 / 0**, five mutations, each the shipped behaviour.
+⭐⭐ **QEMU `crab-drop-test.py` ARM 1 PASSES** (twice, separate runs). ⚠ ARM 2 is honestly UNMEASURED:
+its own Backspace re-lists the pane so each retry starts from a different layout and the loop does not
+converge — it shows nothing moved; the name check is proven in the suite by mutation instead.
+⛔ The drag needed TWO generous moves to promote, not one nudge: `crab_drag_started` needs 4 px but
+promotion happens in the POINTER_MOVE arm, so it needs a motion EVENT delivered while the button is
+down — and aethersafha dedupes motion.
+
+**0.9.5 contents — pointer polish, and the roadmap's premise was wrong.** The item read *"the middle
+mouse button does nothing"*; it has **DISMISSED popups since 0.8.5** — both `CRAB_PA_DISMISS` returns
+are button-blind and never test `btn` — and three doc sites claimed otherwise while no test pinned the
+one behaviour it had. ⭐⭐ **MIDDLE NOW MARKS the row under the pointer**, an ALIAS of `Space`
+(`crab_pa_accel` answers `0x2C`, the arm synthesises that one key through the one binding table, so
+there is no second `crab_mark_toggle` call site) — and *"middle is Space, not `d`"* is a HOST
+assertion instead of a literal inside the agnos `#ifdef`. ⛔⛔ Deliberately the safest gesture
+available: X11 numbers buttons left/**middle**/right, so X11 muscle memory aims middle where crab's
+RIGHT lives and `Delete` is a row in the menu right opens — a mark is self-inverse and moves nothing.
+Middle stays refused on a popup row, a bar cell, the door, the strip and the sidebar.
+⭐⭐ **THE POPUP HIGHLIGHT FOLLOWS THE POINTER.** ⛔ It does not engage until the pointer has MOVED:
+the popup is placed AT the pointer and `dh_place_at_point` FLIPS it above the anchor when it would
+overhang (which at 380x220 it usually does), so the cursor that opened the menu sits mid-list over a
+row nobody aimed at. ⛔⛆ And `-1` from `dh_list_index_at` means BOTH "inert row" and "outside the
+list": inside-on-inert HOLDS (the keyboard's rule), OUTSIDE RESTORES the open-time choice — otherwise
+sweeping off a menu leaves `Enter` armed on the last row crossed, and the natural exit is
+down-and-right through `Delete`.
+⛔⛆ **Fixed: the context menu opened on an EMPTY pane with NO HIGHLIGHT AT ALL** — `menu_sel = 0` is
+`CRAB_MI_OPEN`, which `crab_menu_enabled` refuses when `count <= 0`, so `dh_list_select` refused the
+inert row and `Enter` did nothing. MEASURED: `enabled(OPEN,0) = 0`, first enabled = 5. `crab_menu_first`
+is the twin `crab_mb_item_first` has had since 0.8.6; fixed at BOTH open sites.
+⛆ Cut four false claims in `crab_mlst`'s comment (all falsified by 0.8.5, left standing four releases)
+and corrected the README. **2421 / 0**, five mutations; one expiry fired and was INVERTED
+(`"a pane, middle: nothing yet"` → `CRAB_PA_MARK`).
+⭐⭐ **QEMU `crab-button-test.py` PASSES, four arms** — and **button 3 is observed for the FIRST TIME
+anywhere in this stack**: mask 4 → `crab: mark by middle click`. The hover trace
+`menu 3→2→1→0→1→2→3→4→5→0` shows the sweep up a flipped menu, back down all six rows, and the final
+`→0` as the pointer leaves and `Enter` means `Open` again.
+⛔ **Three harness lessons, each of which gave a WRONG answer first**: a `-2000` home with 0.3 s
+settles found nothing (needs `-4000` and 0.8 s — the pin needs its own frame) and would have produced
+a false cross-repo blocker; aethersafha's diagnostic is ONE-SHOT so press ORDER decides what it can
+tell you; and a popup left open by one probe decides the next in the wrong branch (middle with a menu
+up is DISMISS, not MARK).
+
+**0.9.4 contents — the preview shows the SELECTION, and costs nothing.** The roadmap asked for one
+thing (*"the 64 KiB dimension+EXIF read is on the idle tick"*) and moving it exposed that the whole
+column was reading process-wide *"last touched"* state instead of anything derived from the selection.
+⛔⛆ **Two of those readers were wrong and shipping, both measured on the host BEFORE any change:**
+(1) the **thumbnail lagged one file behind** — the keypress frame asked `crab_thumb_pixels()` ("what
+the last STEP was about") and the tick's gate `if (tafter != tbefore)` skips on `OK -> OK`, so **no
+frame was drawn at all** and the previous picture stayed under the new name. That is 0.8.2's bug,
+whose own fix comment names the mechanism, obeyed by **1 of 8 render sites**. (2) **`CAMERA: Canon
+EOS R5` stayed under a TEXT FILE's name** — `crab_preview_dims` returned at its `is_image` gate
+before clearing the process-wide EXIF buffers, and the CAMERA/SHOT rows sit outside the column's
+`is_image` block. ⇒ Both die by construction: `crab_pvc_*` (128 path-keyed slots in ui.cyr, 56,320 B
+once) holds dims AND EXIF together, `crab_pv_publish` is the ONE publisher for all eight sites and
+CLEARS as well as sets, and `crab_pv_redraw_due` makes the SLOT part of the redraw answer.
+⭐ **The read is on the tick** (`crab_pv_step`, at most one file per tick, gated on
+`crab_preview_fit` — the EFFECTIVE state, so a too-narrow window now reads nothing). MEASURED:
+selection path **4 µs per keystroke, the SAME with an empty cache as a warm one** — a miss is a
+lookup, never a read. ⚠ The host number understates agnos by ~100x; crab's own recorded figure for
+the cheaper *stat* sweep is ~1.1 ms/entry, which is why that was deferred too. Arrowing BACK is now
+free (the old memo held ONE entry). Also fixed: a bare `sys_read` that memoised a wrong negative on a
+short read, and the **mascot**, the one render site of eight that published no preview state at all.
+**2384 / 0**, five mutations; a sixth SURVIVED and is recorded at its assertion (a regular file never
+short-reads, so the loop is unprovable with a file fixture).
+⭐⭐ **QEMU `crab-preview-test.py` PASSES and is mutation-proven** — new `crab: pv` oracle emitted by
+the DRAIN and nothing else; 137x42 and 320x200 each resolved correctly, every file read **exactly
+once**, and the 48 non-images produced no line. Against a planted re-read it reports files read up to
+**36 times each**.
+⛔⛆ **AND THE LAYERING GATE WAS HALF A GATE.** `render_test` includes `ui.cyr` alone to stop the
+render path calling up — but an undefined **constant** is `error:` (build fails) while an undefined
+**function** is only `warning:` (build exits 0, `53 checks, 0 failed`). Enforced for enums, NOT for
+functions — the likelier mistake. `ci.yml` now fails on the warning, mutation-proven both ways.
+⛔ Its first draft had a second hole: `cyrius build … | tee` hides the build's exit status, so a
+FAILED build ran the STALE binary and reported its old green count. Caught doing exactly that.
+
+⭐⭐⭐ **H1 IS CLOSED (0.9.7)** — this line said OPEN for four releases. `crab_walk_reroot_dtree` now
+asks `crab_cancel_may_remove`, which authorises removing the destination root only when
+`CRAB_OP_DMADE` records that crab's own `mkdir` created it. Measured on iron both ways: shipped →
+0/3 of the operator's files survived and the folder itself was gone; fixed → 3/3 and intact.
 
 **0.9.3 contents**: crab can **see a symlink**. ⛔ readdir never could — agnos's
 `ext2_readdir_at_sys` sets byte 63 with `if (ftype == 2) { t = 1; }`, one bit, so a link arrived

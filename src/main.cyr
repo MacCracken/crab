@@ -379,6 +379,11 @@ fn main(): i64 {
     # never a widget pointer, for the same reason double-click and the wheel do it this way: the
     # tree is rebuilt every frame and the arena rewinds underneath it. See `crab_drag_started`.
     # ⚠ `drag_pane` is -1 when no button is down; that doubles as "nothing to drop".
+    # ⛔⛆ THE NAME THE PRESS ARMED (0.9.6). A row index is identity only while the listing holds
+    # still, and three things move it mid-drag that the drop never asked about: a modal question, a
+    # keyboard re-list of the source pane, and a sort. The drop verifies this name and refuses out
+    # loud when it does not match. Same discipline as the delete queue's "queue by NAME first".
+    var drag_name = alloc(CRAB_NAME_MAX + 1);
     var drag_pane = 0 - 1;
     var drag_row = 0 - 1;
     var drag_x = 0;
@@ -958,12 +963,30 @@ fn main(): i64 {
                             crab_say("crab: click\n");
                             # ⭐ ARM THE DRAG. Recorded on every press on a row; it only becomes a drag
                             # once the pointer travels past the threshold, so this costs a click nothing.
+                            # ⛔⛆ DISARM FIRST, UNCONDITIONALLY (0.9.6). The arming used to sit inside
+                            # `if (hr >= 0)` with no else, so a press on a pane HEADER — which
+                            # `crab_hit` records with row -1 — left the PREVIOUS drag armed and its
+                            # row pointing into a listing the operator had since moved on from. And
+                            # nothing else ever disarms one: the release arm is the only clearer, and
+                            # the compositor DROPS a release delivered outside crab's content rect,
+                            # so releasing on the titlebar leaves `dragging = 1` with no button down.
+                            drag_pane = 0 - 1;
+                            drag_row = 0 - 1;
+                            dragging = 0;
+                            store8(drag_name, 0);
                             if (hr >= 0) {
                                 drag_pane = hp;
                                 drag_row = hr;
                                 drag_x = ptr_x;
                                 drag_y = ptr_y;
-                                dragging = 0;
+                                # ⛔ THE NAME IS CAPTURED HERE AND NOWHERE ELSE. Captured at RELEASE
+                                # it would describe whatever the listing holds then, which is the
+                                # defect rather than the check.
+                                var arec = lbuf; var acnt = ln;
+                                if (hp == 1) { arec = rbuf; acnt = rn; }
+                                if (hr < acnt) {
+                                    crab_strcpy_n(drag_name, arec + hr * CRAB_REC_SZ, CRAB_NAME_MAX);
+                                }
                             }
                         }
                     }
@@ -978,7 +1001,34 @@ fn main(): i64 {
                 if (prel == 1) {
                     if (dragging == 1) {
                         var dropped = 0;
-                        if (crab_hit(ptr_x, ptr_y, hit) == 1) {
+                        # ⛔⛆ THE DROP IS DECIDED BEFORE IT IS PERFORMED (0.9.6), and the decision is
+                        # `crab_drop_ok` — a pure function the suite drives, because every line below
+                        # is inside this file's agnos `#ifdef` where no host test reaches.
+                        # It asks the three questions the release arm never asked: is a QUESTION on
+                        # the status line (the drop would move the ground under it), is the row still
+                        # IN the listing, and does that row still hold THE NAME THE PRESS ARMED.
+                        var dtp = 0 - 1;
+                        if (crab_hit(ptr_x, ptr_y, hit) == 1) { dtp = load64(hit); }
+                        var dsb = lbuf; var dsc = ln;
+                        if (drag_pane == 1) { dsb = rbuf; dsc = rn; }
+                        var dnameok = 0;
+                        if (drag_row >= 0) {
+                            if (drag_row < dsc) {
+                                if (crab_streq_n(dsb + drag_row * CRAB_REC_SZ, drag_name,
+                                    CRAB_NAME_MAX) == 1) { dnameok = 1; }
+                            }
+                        }
+                        var dverdict = crab_drop_ok(
+                          crab_pointer_blocked(confirm_del, edit_open, crab_op_waiting()),
+                          dragging, drag_pane, dtp, drag_row, dsc, dnameok);
+                        if (dverdict != CRAB_DROP_GO) {
+                            crab_set_notice(crab_drop_msg(dverdict));
+                            crab_line_reset();
+                            crab_line_s("crab: drop refused ");
+                            crab_line_u(dverdict);
+                            crab_line_say();
+                        }
+                        if (dverdict == CRAB_DROP_GO) {
                             var tp = load64(hit);
                             # ⛔ THE DESTINATION IS THE OTHER PANE'S DIRECTORY, NOT THE ROW UNDER THE
                             # POINTER. Dropping "onto" a folder row would be a different gesture with
@@ -1067,7 +1117,13 @@ fn main(): i64 {
                                 }
                             }
                         }
-                        if (dropped == 0) { crab_set_notice("dropped nowhere — drag to the other pane"); }
+                        # ⚠ ONLY WHEN THE VERDICT SAID GO. A refusal already put its own, more
+                        # specific, sentence on the status line above — "that listing changed while
+                        # you dragged" must not be overwritten by "dropped nowhere", which would
+                        # describe the wrong failure and send the operator looking in the wrong place.
+                        if (dverdict == CRAB_DROP_GO) {
+                            if (dropped == 0) { crab_set_notice(crab_drop_msg(CRAB_DROP_NONE)); }
+                        }
                         # ⛔ A DRAG IS NOT A CLICK. Consume the double-click pair, or the release that
                         # ended a drag would pair with the next press and descend.
                         last_pane = 0 - 1;
@@ -1076,6 +1132,7 @@ fn main(): i64 {
                     drag_pane = 0 - 1;
                     drag_row = 0 - 1;
                     dragging = 0;
+                    store8(drag_name, 0);
                 }
             }
             # ⛔ TWO ROADS IN, ONE TABLE: a real KEY event, or a key a pointer pick synthesised above.
@@ -1575,7 +1632,7 @@ fn main(): i64 {
                             }
                             if (u == 0x29) {                                       # Esc
                                 if (crab_op_active() == 1) {
-                                    crab_copy_cancel();
+                                    var rcan = crab_copy_cancel();
                                     # ⭐ A CANCELLED **TREE** COPY LEAVES A CLEANUP RUNNING (0.8.2).
                                     # `crab_copy_cancel` re-roots the record as a DTREE over what the
                                     # copy had already written, so the operator is told what is
@@ -1587,8 +1644,18 @@ fn main(): i64 {
                                         crab_set_notice("cancelled — removing the partial copy...");
                                         crab_say("crab: transfer cancelled, removing partial copy\n");
                                     } else {
-                                        crab_set_notice("transfer cancelled");
-                                        crab_say("crab: transfer cancelled\n");
+                                        # ⛔⛆ A CANCELLED **MERGE** LEAVES ITS PARTIAL COPY BEHIND, and
+                                        # the operator has to be told (0.9.7, H1). Every other
+                                        # cancelled tree copy takes its tree with it, so a bare
+                                        # "transfer cancelled" would read as a clean undo of
+                                        # something that is half done — and the half that is done
+                                        # sits inside a folder full of the operator's own files.
+                                        # ⇒ crab does NOT delete that folder; it says what survived.
+                                        crab_set_notice(crab_fs_msg(rcan));
+                                        crab_line_reset();
+                                        crab_line_s("crab: transfer cancelled rc ");
+                                        crab_line_u(0 - rcan);
+                                        crab_line_say();
                                         ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
                                         crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
                                         lstate = crab_pane_state(ln, crab_listing_err());

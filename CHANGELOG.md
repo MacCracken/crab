@@ -2,6 +2,149 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.7] — 2026-09-14 — H1: a cancelled copy deletes only what crab created
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⛔⛔⛔ **The oldest confirmed data-loss defect in this project, and its own code predicted it.**
+
+### Fixed — ⛔⛔⛔ cancelling a MERGED copy deleted the folder it merged into, wholesale
+
+`crab_walk_reroot_dtree` turns a cancelled tree copy into a **recursive delete** of the destination
+root. Its own comment spelled out the invariant that made that safe — `crab_walk_begin` refused an
+existing destination with `EEXIST`, so the root was **always one crab had just made** — and then
+spelled out the consequence of losing it:
+
+> *"If that guard in `crab_walk_begin` is ever relaxed to allow merging into an existing destination,
+> THIS FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same change."*
+
+**0.8.7 relaxed exactly that guard** — to allow "copy this folder into one that already has a folder
+of that name", the most ordinary thing an operator does with two panes — **and the delete was not
+touched.** So cancelling a copy that merged into a folder the operator already had rerooted a
+recursive delete onto **their** folder, taking every file crab never wrote.
+
+**MEASURED ON IRON, BOTH WAYS** — `agnos/scripts/harness/crab-h1-test.py`, the image read back with
+`debugfs` after shutdown, because asking crab whether crab destroyed something is not evidence:
+
+```
+                              SHIPPED                      FIXED
+/zzkeep still on disk:        False                        True
+operator's files surviving:   0/3  []                      3/3  [keep1, keep2, keep3]
+cancel reported:              (nothing)                    crab: transfer cancelled rc 23
+```
+
+⇒ **The invariant is CHECKED now, not assumed.** `CRAB_OP_DMADE` is written at the only place that
+knows — the `mkdir` in `crab_walk_begin` — and `crab_cancel_may_remove(dmade, root_len)` is the whole
+decision, lifted into a pure function because everything that calls it is a walk step and walk steps
+are not reachable from a host test.
+
+⚠ **Only an explicit `1` authorises the removal, not any non-zero value.** A truthiness test would let
+a stale record from some future field authorise deleting the operator's folder.
+
+### Changed — a cancelled merge says what SURVIVED, instead of implying a clean undo
+
+Every other cancelled tree copy takes its tree with it, so a bare *"transfer cancelled"* reads as a
+clean undo of something that is half done — and the half that is done sits inside a folder full of the
+operator's own files. `CRAB_FS_EMERGED` carries its own sentence: **"cancelled — what was already
+copied into that folder is still there."**
+⇒ crab does not delete that folder, and does not pretend it did. A partial merge the operator can see
+and undo is the honest outcome; the alternative is deleting data they did not name, which is the
+failure this project has already paid for once (`/bin`, 2026-09-03).
+
+### Tests
+
+**2,451 assertions** (2,440 → 2,451). Four mutations planted and caught: the shipped behaviour (any
+root removed — H1 itself), truthiness instead of an explicit flag, the root-length check dropped, and
+the cancel reporting `"done"` for a merge it left half-finished.
+
+⭐⭐ **`crab-h1-test.py` is new and needs no pointer aiming at all** — crab's left pane opens on `/bin`
+and sorts directories first, so the source folder is already selected and the whole scenario is two
+keys: `c` then `Esc`. Run against the planted defect it reports the loss above; run against the fix it
+passes.
+
+## [0.9.6] — 2026-09-14 — a drag cannot outlive its listing
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> ⛔⛔ **Two data-loss defects, found in 0.9.5 and deliberately not bundled into it.** They share one
+> root cause: **a drag is a claim about a ROW INDEX, and nothing kept the listing still.**
+> `dragging` / `drag_pane` were touched in exactly three places — the motion arm, the press arm and
+> the release arm — and **nothing in the key dispatch consulted drag state at all.**
+
+### Fixed — ⛔⛆ a drop could move a file while a DELETE PROMPT was on screen
+
+The release arm was gated on the LEFT BUTTON AND NOTHING ELSE. Neither `crab_pointer_blocked` nor
+`crab_pointer_modal` was asked — though **the click has asked since 0.8.0 and the wheel since 0.8.5.**
+
+```
+press a row and hold → move 4 px (dragging = 1) → press `d`  (the prompt asks "delete <name>?")
+                     → drag to the other pane  → release
+```
+
+The drop **moved a file, relisted BOTH panes, cleared every mark and CLAMPED both selections** — and
+the `y` that followed answered a question about an entry that was no longer there. **The prompt named
+one thing and the delete took another.** That is precisely the failure 0.8.0 closed for clicks and
+0.8.5 closed for the wheel, arriving one input kind later and never revisited.
+
+**MEASURED ON IRON, `crab-drop-test.py` ARM 1:**
+
+```
+crab: click
+crab: prompt SYSTEM DIR! delete anuenue?  y = yes, any other key = no
+crab: drop refused 2                       <- CRAB_DROP_BLOCKED
+```
+
+### Fixed — ⛔⛆ the keyboard could re-list the source pane mid-drag
+
+Nothing gates the key dispatch on drag state, so **Enter or Backspace descends or ascends the pane
+being dragged FROM while the button is still down.** `drag_row` then indexed a directory the operator
+never dragged from — and the bounds check passed on any listing long enough.
+⚠ **And the index is not identity even without navigating**: `crab_sort_entries` permutes in place, so
+a sort key pressed mid-drag reorders the rows under the claim.
+
+⇒ **THE NAME IS THE IDENTITY, NOT THE INDEX.** The press captures the row's name; the drop verifies
+the row still holds it and refuses **out loud** when it does not. That is the discipline the delete
+queue already states — *"Queuing by name removes that 'only safe because' entirely"* — and the one
+`crab_goto` names when it clears marks: *"a mark that outlives its listing points at whatever now
+occupies that index."* A drag outlives its listing more easily than either.
+
+### Fixed — ⚠ a press on a pane HEADER left the previous drag armed
+
+The arming sat inside `if (hr >= 0)` with no `else`, and `crab_hit` records **headers** (row `-1`) so
+a header press focuses its pane. So a header press left the PREVIOUS drag armed, its row pointing
+into a listing the operator had since moved on from. ⛔ And nothing else ever disarms one: the release
+arm is the only clearer, and the compositor **drops a release delivered outside crab's content rect**
+— so releasing on the titlebar leaves `dragging = 1` with no button down. The arm now disarms
+unconditionally before it re-arms.
+
+### Changed — the decision is one pure function, and the refusals differ
+
+`crab_drop_ok(blocked, dragging, frompane, topane, row, count, name_ok)` answers `CRAB_DROP_GO` /
+`_BLOCKED` / `_MOVED` / `_NONE`. Every line of the release arm is inside main.cyr's agnos `#ifdef`
+where no host test reaches — the 0.9.3/0.9.4/0.9.5 lifting rule — so the decision moved out and the
+suite drives it exhaustively.
+⛔ **The question is asked BEFORE the target, and the order is the contract**: an operator with a
+prompt on screen must not be told *"dropped nowhere"* and sent looking in the wrong place. ⚠ But
+`dragging` outranks even that, so an ordinary click while a prompt is up stays **silent** rather than
+raising a refusal notice.
+
+### Tests
+
+**2,440 assertions** (2,421 → 2,440). Five mutations planted and caught, each one the shipped
+behaviour: no modal gate; trusting `drag_row` without the name; no bounds check; a header row allowed
+to drop; and the target asked before the question.
+
+⭐⭐ **`agnos/scripts/harness/crab-drop-test.py` is new.** ARM 1 — the data-loss path — **passes on
+iron**, twice in separate runs.
+⚠ **ARM 2 is honestly UNMEASURED and the harness says why**: its own Backspace re-lists the pane, so
+every retry starts from a different layout and the loop does not converge. It reliably shows that
+**nothing moved**; it does not reliably reach the name check. That half is proven in the suite by
+mutation instead.
+⛔ **And the drag had to be promoted with two generous moves, not one nudge.** A single 20 px move
+armed the drag on some runs and not others from identical code: `crab_drag_started` needs only 4 px,
+but the promotion happens in the POINTER_MOVE arm, so it needs a motion EVENT delivered while the
+button is down — and aethersafha dedupes motion.
+
 ## [0.9.5] — 2026-09-14 — the middle button marks, and a popup's highlight follows the pointer
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
