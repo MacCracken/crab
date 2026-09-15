@@ -2,6 +2,93 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] — 2026-09-14 — daimon is declared, the deferrals are swept, and duplicates are found
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+
+### Decided — ⭐⭐ THE DAIMON RULING: DECLARED
+
+`cyrius.cyml` carries `[deps.daimon]` pinned at **2.1.3**. `cyrius deps` resolves 7 deps; `--verify`
+reports 50/50. **This was the oldest open item in the roadmap** and it gated M7 and M8 entirely.
+
+⛔ **Declared, NOT linked, and that is the shape of the dependency.** daimon is a BINARY
+(`[build] output = "build/daimon"`) and ships no `dist/` — there is no module to fold in, and there
+must not be: linking an agent orchestrator into a file manager would put its HTTP server, its
+scheduler and its federation code in crab's address space for the sake of a query. crab talks to the
+**AF_UNIX socket daimon binds per agent** (`agent_ipc_new(agent_id, socket_dir)`), and agnos carries
+the surface: `sock_connect` #47, `sock_listen` #56, `sock_accept` #57.
+⚠ **No `modules` key**, deliberately — it would make `cyrius deps` fold a file that does not exist.
+⛔ **And crab still runs without it.** The index is an enrichment, not a precondition: a box with no
+daimon lists, copies, moves and deletes exactly as before, and the M7 surfaces must report that the
+index is unavailable rather than failing — the rule the preview already follows for a file it cannot
+decode: *say which kind of nothing this is.*
+
+### Added — ⭐⭐ DUPLICATE DETECTION (M7), which crab does alone
+
+The roadmap gated this on daimon and it never fully was — the gate row itself said *"daimon, **or a
+content hash crab could do alone**"*. This is that half, and it is the half that still works on a box
+with no daimon, which is exactly what the declaration commits crab to.
+
+**`Shift+D`** scans the active listing and marks every duplicate **except the newest of each group**.
+
+⛔ **IT MARKS. IT DOES NOT DELETE.** `Keep newest` names what *survives*; the rest get a mark and the
+operator presses the verb — and the delete prompt then counts the set, names the first three and warns
+about system directories, exactly as it does for a set marked by hand. A duplicate finder that deleted
+would be the `/bin` incident with a better excuse.
+⛔ **Not `d`.** `d` is delete, and putting a scan one un-shifted keypress from an irreversible verb is
+the kind of adjacency that gets pressed by accident. The shifted row has existed since 0.8.9.
+
+⭐ **The size pass is the pre-filter and it costs ZERO syscalls.** Two files of different lengths
+cannot be byte-identical, and every entry is already `stat`ed by the deferred sweep — so only a size
+*collision* is ever opened and read. Hashing all 1024 entries at the listing cap would be ~1.1 s of
+I/O on the target.
+⚠ **A size collision is a CANDIDATE, not a duplicate** — the hash decides. And **a hash match is not a
+guarantee**: FNV-1a is 64 bits and not collision-resistant by design, so `crab_dup_same` requires the
+size to match too (free, and independent of the hash), the read is bounded at 64 KiB, and the word
+crab uses is **"duplicate"**, never "identical". The honest full answer is a byte-for-byte compare of
+the candidates; the code says where it goes.
+
+### Fixed — ⛆ the deferral sweep: `net` removed, four stale comments cut
+
+- ⭐ **`net` is gone from `stdlib`.** setu dropped TCP at 0.8.4 and crab has pinned past it since
+  0.4.5 — the leaf was dead for six minor versions while a comment said so and carried it anyway,
+  "queued as its own change". This is that change.
+  ⚠ **And the note was loose**: it said "measured clean"; the binaries are **not** byte-identical —
+  both grew 16 bytes and 182,246 bytes differ, because dropping a leaf from the middle of the list
+  changes the fold order. What is clean is what matters: no undefined symbol on either target, deps
+  resolve, `deny` 0 violations, suite unchanged. *"Measured clean" and "byte-identical" are different
+  claims and that comment blurred them.*
+- ⛔⛆ **The A/B strip's comment said it "has no caller in `src/` and is NOT hit-tested"** — both halves
+  false since 0.8.5, the release named two lines below it in the same comment. It has had its own hit
+  test, its own `CRAB_PA_SWITCH` action and a press arm for five releases.
+- ⛔ **`CRAB_COL_CHARW`'s "the day crab stops passing `font = 0`"** — that day was **0.9.0**, five
+  releases back. The design held (every width followed `crab_char_w()` without being found); the
+  comment just never noticed.
+- ⛔⛆ **The 🦀 button's deferral named a gate that has since shipped without unblocking it.** It said
+  *"it needs an icon path or proportional text, which is the M5 gate"* — 0.9.0 shipped proportional
+  text and the button is still undrawable, for three reasons the old text did not name:
+  `dh_draw_text_ink` walks one BYTE per glyph in **both** branches, `rekha_char_to_glyph` is BMP-only
+  (U+1F980 is far past it), and Liberation Sans has no crab glyph. **The real gate is an icon path —
+  a drawn shape, not a character.** Naming the wrong gate is worse than naming none: it made this look
+  like it would fall out of work that has now been done twice.
+
+### Tests
+
+**2,490 assertions** (2,451 → 2,490). Three mutations planted and caught: the hash trusted without the
+independent size check, unstattable entries grouping with each other, and `Keep newest` inverted.
+
+⚠⚠ **TWO MUTATIONS SURVIVED AND ARE RECORDED AT THE ASSERTIONS, NOT HIDDEN.** Both are inside
+`crab_dup_scan` and both survive for the same honest reason — they change what crab **opens**, not
+what it **marks**:
+1. Bypassing the size pre-filter (hash every entry) leaves the suite green. It is an optimisation, not
+   a correctness property; the marks are identical either way.
+2. Bypassing the `CRAB_KIND_FILE` guard leaves it green **even with two same-sized directories added
+   to the fixture to catch it** — a directory opens and then fails to READ, so its hash stays 0 and it
+   is never grouped. The guard is defence-in-depth; claiming otherwise would claim a proof the suite
+   has not got.
+⇒ Both predicates are pinned exhaustively; their *use* inside the scan is not. An I/O-count assertion
+would need a syscall counter crab does not have.
+
 ## [0.9.7] — 2026-09-14 — H1: a cancelled copy deletes only what crab created
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

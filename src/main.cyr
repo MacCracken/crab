@@ -1855,6 +1855,34 @@ fn main(): i64 {
                                 hover_y = ptr_y;
                                 menu_open_sel = menu_sel;
                             }
+                            # ⭐⭐ `D` — FIND DUPLICATES IN THIS LISTING (M7 · 0.10.0).
+                            # ⛔ SHIFT+D, NOT `d`. `d` is DELETE, and putting a scan one un-shifted
+                            # keypress from an irreversible verb is the kind of adjacency that gets
+                            # pressed by accident. The shifted row exists since 0.8.9.
+                            # ⛔⛆ IT MARKS, IT DOES NOT DELETE. `Keep newest` names what SURVIVES;
+                            # the rest get a MARK and the operator presses the verb. The delete
+                            # prompt then counts the set and names the first three, exactly as it
+                            # does for a set marked by hand — a duplicate finder that deleted would
+                            # be the `/bin` incident with a better excuse.
+                            if (u == 0x07) {
+                                if (crab_shift_held() == 1) {
+                                    var upath = lpath; var ubuf = lbuf; var ucnt = ln;
+                                    var usz = lsizes; var umt = lmtimes; var umk = lmarks;
+                                    if (active_pane == 1) {
+                                        upath = rpath; ubuf = rbuf; ucnt = rn;
+                                        usz = rsizes; umt = rmtimes; umk = rmarks;
+                                    }
+                                    var dupn = crab_dup_scan(upath, ubuf, ucnt, usz, umt, umk, pathscr);
+                                    var dmsg = crab_dup_msg(dupn);
+                                    if (dmsg != 0) { crab_set_notice(dmsg); }
+                                    else { crab_set_notice("duplicates marked — the newest of each is left alone"); }
+                                    crab_line_reset();
+                                    crab_line_s("crab: duplicates ");
+                                    crab_line_u(dupn);
+                                    crab_line_say();
+                                    u = 0;
+                                }
+                            }
                             if (u == 0x07) {                                       # d — delete, with a confirmation
                                 var qcnt = ln; if (active_pane == 1) { qcnt = rn; }
                                 var qmk = lmarks; if (active_pane == 1) { qmk = rmarks; }
@@ -2136,11 +2164,11 @@ fn main(): i64 {
                                 } else { crab_clear_notice(); crab_say("crab: preview off\n"); }
                             }
                             # ⭐⭐ THE MENU BAR (canvas turn 2). ⛔ THE CANVAS ASKS FOR A 🦀 BUTTON
-                            # AND crab CANNOT DRAW ONE: `font = 0` is kashi's CP437 8x16 bitmap and
-                            # `dh_draw_text` walks one BYTE per glyph, so there is no crab glyph and
-                            # no UTF-8 path to one — the same limit that made the truncation marker
-                            # `~` rather than `…`. ⇒ `F10` is the door, and the crab button is
-                            # deferred with its reason recorded rather than faked with ASCII.
+                            # AND crab CANNOT DRAW ONE — still, with a real face. `dh_draw_text_ink`
+                            # walks one BYTE per glyph in BOTH branches, `rekha_char_to_glyph` is
+                            # BMP-only (U+1F980 is past it) and Liberation Sans has no crab anyway.
+                            # ⇒ `F10` is the door; the button needs an ICON path, not a font. See
+                            # `crab_door`'s ⛔, which names why 0.9.0 did not unblock this.
                             # ⚠ F10 is the universal menu-bar key, so the affordance is conventional
                             # even without the chrome the canvas draws.
                             if (u == 0x43) {                                       # F10 — the menu bar

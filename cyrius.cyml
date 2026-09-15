@@ -17,9 +17,15 @@ output = "crab"
 [deps]
 # ⚠ `chrono` is load-bearing: setu's agnos read path needs it, and `cyrius deps`' own validation
 # cannot catch its absence when a sidecar under-reports.
-# ⚠ `net` is REDUNDANT — setu dropped TCP at 0.8.4 and crab has pinned past it since 0.4.5.
-# Removal is measured clean; it is queued as its own change, not bundled. See the roadmap.
-stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "net", "chrono"]
+# ⭐ `net` IS GONE (0.10.0). setu dropped TCP at 0.8.4 and crab has pinned past it since 0.4.5, so
+# the leaf had been dead for six minor versions while this comment said so and carried it anyway.
+# ⚠ RE-MEASURED AT THE CUT RATHER THAN TRUSTED FROM THE NOTE, AND THE NOTE WAS LOOSE. It said
+# "measured clean"; the binaries are NOT byte-identical — both grew 16 bytes and 182,246 bytes
+# differ, because dropping a leaf from the middle of the list changes the FOLD ORDER and everything
+# after it shifts. What IS clean is what matters: no undefined symbol on either target, `cyrius deps`
+# resolves, `deny` 0 violations, the suite unchanged at 2451/0.
+# ⇒ "Measured clean" and "byte-identical" are different claims and this comment used to blur them.
+stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "assert", "bench", "hashmap", "fnptr", "tagged", "result", "chrono"]
 
 # ⛔ ORDER MATTERS: sadish (2D vector) THEN rekha (text; references sd_*) THEN dhancha (widgets;
 # references both). dhancha's dist references sd_*/rekha_* rather than bundling them, so crab must
@@ -105,3 +111,25 @@ modules = ["dist/setu.cyr"]
 git = "https://github.com/MacCracken/chitra.git"
 tag = "1.0.3"
 modules = ["dist/chitra.cyr"]
+
+# daimon (δαίμων) — the AGNOS agent orchestrator, and the back end for crab's M7/M8 arc: the local
+# index, tags, smart folders, duplicate detection (0.10.0) and assisted search (0.11.0).
+#
+# ⛔⛔ DECLARED, NOT LINKED, AND THAT IS THE WHOLE SHAPE OF THIS DEPENDENCY. daimon is a BINARY —
+# `[build] output = "build/daimon"` — and ships no `dist/`. There is no module for crab to fold in,
+# and there must not be: linking an agent orchestrator into a file manager would put its HTTP
+# server, its scheduler and its federation code in crab's address space for the sake of a query.
+# ⇒ crab TALKS to it. daimon binds an AF_UNIX socket per agent (`agent_ipc_new(agent_id, socket_dir)`
+# → `<socket_dir>/<agent>.sock`), and agnos carries the surface crab needs: `sock_connect` #47,
+# `sock_listen` #56, `sock_accept` #57.
+# ⚠ NO `modules` KEY, DELIBERATELY. A `modules` entry here would make `cyrius deps` try to fold a
+# file that does not exist. The pin records WHICH daimon crab's protocol is written against, which
+# is what a version pin is for whether or not a linker ever reads it.
+# ⛔ AND crab STILL RUNS WITHOUT IT. The index is an enrichment, not a precondition: a crab on a box
+# with no daimon lists, copies, moves and deletes exactly as it does today, and the M7 surfaces
+# report that the index is unavailable rather than failing. That is the same rule the preview
+# follows for a file it cannot decode — say which kind of nothing this is.
+[deps.daimon]
+git = "https://github.com/MacCracken/daimon.git"
+path = "../daimon"
+tag = "2.1.3"

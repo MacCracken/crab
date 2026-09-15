@@ -1,25 +1,39 @@
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
-> ⭐⭐⭐ **H1 IS CLOSED (0.9.7) — MEASURED ON IRON, BOTH WAYS.** `crab_walk_reroot_dtree` turned a
-> cancelled tree copy into a RECURSIVE DELETE of the destination root. Its own comment named the
-> invariant that made that safe AND named the consequence of losing it — *"if that guard is ever
-> relaxed to allow merging … THIS FUNCTION BECOMES A DATA-LOSS BUG and must be deleted in the same
-> change."* 0.8.7 relaxed the guard and did not touch the delete.
-> `crab-h1-test.py`, `debugfs` readback after shutdown:
+> ⭐⭐ **2026-09-14. `VERSION` reads 0.10.0; 0.9.7 released.** ⛔ commit/tag/push are the operator's;
+> re-run `git log --oneline -3` and `git tag --list` before restating this.
+> **Next: the rest of M7 — the local index, tags, smart folders — then 0.11.0 (M8).**
 >
-> | | SHIPPED | FIXED |
-> |---|---|---|
-> | `/zzkeep` on disk | **False** | True |
-> | operator's files | **0/3** | 3/3 |
-> | cancel reported | (nothing) | `crab: transfer cancelled rc 23` |
+> ## 0.10.0 — daimon declared, deferrals swept, duplicates found
 >
-> ⇒ `CRAB_OP_DMADE`, written at the only place that knows (the `mkdir` in `crab_walk_begin`), and
-> `crab_cancel_may_remove(dmade, root_len)` as the lifted decision. ⚠ Only an explicit `1` authorises
-> removal. A cancelled merge reports `CRAB_FS_EMERGED` and leaves the partial copy, which is honest.
+> ⭐⭐ **THE DAIMON RULING: DECLARED.** `[deps.daimon]` 2.1.3. The oldest open item in the roadmap; it
+> gated M7 and M8 entirely. ⛔ **Declared, NOT linked** — daimon is a binary with no `dist/`, so crab
+> talks to the AF_UNIX socket it binds (`agent_ipc_new`), over agnos `sock_connect` #47 /
+> `sock_listen` #56 / `sock_accept` #57. **No `modules` key**, deliberately: it would fold a file that
+> does not exist. ⛔ **crab must still run WITHOUT it** — the index is an enrichment, not a
+> precondition, and the M7 surfaces report it unavailable rather than failing.
+> ⭐⭐ **DUPLICATES (`Shift+D`)** — the half the roadmap always allowed crab to do alone. ⛔ IT MARKS,
+> IT DOES NOT DELETE. ⭐ Size is a free pre-filter (the deferred sweep already stat'ed everything), so
+> only a size collision is opened. ⚠ 64-bit hash + 64 KiB bounded read ⇒ `crab_dup_same` also requires
+> equal sizes, and the word is "duplicate", never "identical". Byte-for-byte compare is the next
+> increment and the code says where it goes.
+> ⛆ **Deferral sweep**: `net` removed (dead six minor versions); four stale comments cut — the A/B
+> strip's "no caller, not hit-tested" (false since 0.8.5), `CRAB_COL_CHARW`'s "the day crab stops
+> passing font = 0" (that day was 0.9.0), and the 🦀 button's gate, which named M5 proportional text —
+> **0.9.0 shipped it and the button is still undrawable**. The real gate is an ICON PATH.
+> **2490 / 0**, three mutations caught.
+> ⚠⚠ **TWO MUTATIONS SURVIVED, recorded at the assertions**: bypassing the size pre-filter and
+> bypassing the `CRAB_KIND_FILE` guard. Both change what crab OPENS, not what it MARKS — and a
+> directory opens then fails to READ, so its hash is 0 either way. Their predicates are pinned; their
+> USE in `crab_dup_scan` is not. An I/O-count assertion needs a syscall counter crab has not got.
 >
-> ⭐⭐ **2026-09-14. `VERSION` reads 0.9.6; 0.9.5 released (tagged).** ⛔ commit, tag and push are the
-> operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
-> **Next: H1 (below), then the daimon ruling, then `0.10.0 · The index` (M7).**
+> ## 0.9.7 — H1 (CLOSED)
+>
+> `crab_walk_reroot_dtree` turned a cancelled tree copy into a RECURSIVE DELETE of the destination
+> root. Its own comment named the invariant AND the consequence of losing it; 0.8.7 relaxed the guard
+> and did not touch the delete. Measured on iron both ways: shipped → `/zzkeep` gone, **0/3** of the
+> operator's files survived; fixed → intact, 3/3, `crab: transfer cancelled rc 23`.
+> ⇒ `CRAB_OP_DMADE` + `crab_cancel_may_remove(dmade, root_len)`. Only an explicit `1` authorises.
 >
 > ## 0.9.6 — a drag cannot outlive its listing (TWO DATA-LOSS DEFECTS, FIXED)
 >
@@ -182,7 +196,7 @@
 > `crab_delete_plan` and `crab_transfer_plan` and proven in the suite; the consequence needed iron.
 > ⚠ **The 0.9.2 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.2**; **0.9.1 released**. ⛔ commit,
 > tag and push are the operator's; `git log --oneline -3` is the authority.
@@ -229,7 +243,7 @@
 > independent and can be reordered freely.
 > ⚠ **The 0.9.1 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.1**; **0.9.0 released**. ⛔ the
 > commit, the tag and the push are the operator's; `git log --oneline -3` is the authority.
@@ -272,7 +286,7 @@
 > keyboard route, capped by `crab_mb_drop_fit`). 0.9.2–0.9.5 are all independent.
 > ⚠ **The 0.9.0 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.9.0**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits while work is in flight — `git log --oneline -3` is
@@ -321,7 +335,7 @@
 > needed is here. See [the ladder to 1.0](roadmap.md); every entry there is a version.
 > ⚠ **The 0.8.11 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-14, READ THIS BLOCK FIRST.** `VERSION` reads **0.8.11**; ⛔ the commit, the tag and the
 > push are the operator's. ⚠ The operator commits WHILE work is in flight — `git log --oneline -3` is
@@ -366,7 +380,7 @@
 > 50 / 0. Host **1,071,688 B** · agnos **1,116,632 B**.
 > ⚠ **The 0.8.10 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** ⭐ **0.8.7, 0.8.8 and 0.8.9 are COMMITTED AND TAGGED**
 > by the operator (`22f7f53` / `60cc05b` / `eeb6a8b`) — the three-releases-uncommitted backlog that
@@ -427,7 +441,7 @@
 > `#ifdef`.
 > ⚠ **The 0.8.9 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7, 0.8.8 and 0.8.9 are all CUT and none is committed** — `VERSION` reads
@@ -476,7 +490,7 @@
 > itself is now **blocked on agnos and dhancha**. See [the ladder to 1.0](roadmap.md).
 > ⚠ **The 0.8.8 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FIRST.** **0.8.6 is still the last RELEASED version** (`249279f`,
 > on the remote). **0.8.7 and 0.8.8 are both CUT and neither is committed** — `VERSION` reads 0.8.8,
@@ -533,7 +547,7 @@
 > claim it can make).
 > ⚠ **The 0.8.7 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 is the last release** (`249279f`, on the remote). `[Unreleased]` holds two things and no
@@ -587,7 +601,7 @@
 > the CHANGELOG's harvested-deferral count).
 > ⚠ **The 0.8.6 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.6 IS CUT on operator direction** — `VERSION` = 0.8.6, CHANGELOG `[0.8.6]`, every gate and
@@ -624,7 +638,7 @@
 > milestones name and the manifest declares nowhere.
 > ⚠ **The 0.8.5 block below is one release stale but its reasoning is current.**
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **2026-09-13, READ THIS BLOCK FOR THE CURRENT NUMBERS AND THE ONES BELOW IT FOR THE REASONING.**
 > **0.8.5 IS CUT on operator direction** — `VERSION` = 0.8.5, CHANGELOG `[0.8.5]`, every gate and
@@ -681,7 +695,7 @@
 > change). ⚠ **The 0.8.3 block below is two releases stale but its reasoning is current**; the
 > `Open` lesson — check the caller's POSITION, not just its logic — is the one to carry.
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **0.8.3, updated 2026-09-09. `Open` WAS DEAD ON BOTH MENU SURFACES, IN EVERY BUILD THAT SHIPPED
 > EITHER.** The context menu and the menu bar both answer Enter by rewriting `u` to the chosen
@@ -707,7 +721,7 @@
 > ⚠ **aethersafha was left exactly as found** — no hand-edited `lib/`, no unverified push. Do not
 > guess a button number either; no repo defines one and X11's order is the wrong default here.
 
-# Handoff — **0.9.7 cut. ⭐⭐⭐ ALL THREE DATA-LOSS DEFECTS ARE CLOSED. Next: the daimon ruling.**
+# Handoff — **0.10.0 cut: daimon DECLARED, deferrals swept, duplicates shipped. M7 continues.**
 
 > ⭐⭐ **READ THIS FIRST, BECAUSE IT IS THE TRANSFERABLE PART: RECURSIVE COPY AND RECURSIVE DELETE HAD
 > NEVER RUN IN ANY SHIPPED BUILD, AND THE SUITE WAS GREEN THE WHOLE TIME.** `src/main.cyr`'s idle

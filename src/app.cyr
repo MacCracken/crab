@@ -36,6 +36,11 @@ fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 # because `#101 readdir_at` lets the walk continue past the buffer without storing.
 enum CrabDir {
     CRAB_MAX_ENTRIES = 1024;
+    # ⚠ 64 KiB per file for the duplicate hash — the same budget the preview header read uses, and
+    # for the same reason: bounded work with an honest limit rather than "every byte, at the cost of
+    # reading a 4 GB video on a keypress". ⛔ Two files differing only PAST this bound hash alike,
+    # which is why `crab_dup_same` also requires equal sizes and why crab says "duplicate".
+    CRAB_DUP_READ_MAX = 65536;
     # ⚠ Records per `readdir_at` call. Bounds the syscall's write to the pane buffer; it is not the
     # pane cap. 64 records = 4 KB, which is also the counting scratch below.
     CRAB_READDIR_BATCH = 64;
@@ -2833,6 +2838,120 @@ fn crab_pv_forget(): i64 {
     if (sb != 0) { store8(sb, 0); }
     var k = crab_pv_key_buf();
     if (k != 0) { store8(k, 0); }
+    return 0;
+}
+
+# ⭐⭐ THE DUPLICATE SCAN (M7 · 0.10.0). Marks every duplicate EXCEPT the newest of each group.
+# -> the number of entries marked, or -1 if it could not run.
+#
+# ⛔⛔ IT MARKS. IT DOES NOT DELETE. `Keep newest` names what SURVIVES, and what crab does about the
+# rest is put a mark on them and hand the keyboard back. The operator presses the verb — and the
+# delete prompt then names the set, counts it, and warns about system directories, exactly as it does
+# for a set marked by hand. A duplicate finder that deleted would be the `/bin` incident with a
+# better excuse.
+#
+# ⛔ THE SIZE PASS COMES FIRST AND COSTS NOTHING. Every entry is already stat'ed by the deferred
+# sweep, so grouping by size is pure arithmetic; only a size COLLISION is ever opened. ⚠ Entries the
+# sweep has not reached yet (-2) and entries whose stat FAILED (-1) are skipped, not guessed at.
+#
+# ⚠ BOUNDED READ. `CRAB_DUP_READ_MAX` bytes per file, so a directory of 4 GB videos does not stall
+# the loop — and because the read is bounded, two files that differ only PAST the bound hash alike.
+# That is why `crab_dup_same` also requires equal sizes and why the word is "duplicate", not
+# "identical". ⛔ The honest full answer is a byte-for-byte compare; this is the cheap first pass.
+fn crab_dup_scan(dir, buf, count, sizes, mtimes, marks, pathscr): i64 {
+    if (dir == 0) { return 0 - 1; }
+    if (buf == 0) { return 0 - 1; }
+    if (marks == 0) { return 0 - 1; }
+    if (pathscr == 0) { return 0 - 1; }
+    if (count <= 0) { return 0; }
+    if (count > CRAB_MAX_ENTRIES) { return 0 - 1; }
+    var hbuf = crab_dup_buf();
+    if (hbuf == 0) { return 0 - 1; }
+    var hashes = crab_dup_hashes();
+    if (hashes == 0) { return 0 - 1; }
+    # --- pass 1: hash only the entries whose size collides with another's ---
+    var i = 0;
+    while (i < count) {
+        store64(hashes + i * 8, 0);
+        # ⛔ DIRECTORIES ARE NOT CANDIDATES. A directory's "size" is not its contents and two folders
+        # are never byte-identical in any sense crab can act on.
+        if (load8(buf + i * CRAB_REC_SZ + CRAB_REC_TYPE) == CRAB_KIND_FILE) {
+            if (crab_dup_candidate(sizes, count, i) == 1) {
+                if (crab_fs_path(pathscr, dir, buf + i * CRAB_REC_SZ) >= 0) {
+                    var fd = crab_fs_open_r(pathscr, crab_cstr_len(pathscr, CRAB_PATH_MAX));
+                    if (fd >= 0) {
+                        var got = crab_pv_read_all(fd, hbuf, CRAB_DUP_READ_MAX);
+                        sys_close(fd);
+                        # ⚠ A file crab cannot read keeps hash 0 and is never grouped — `crab_dup_same`
+                        # would pair it with every other unreadable file otherwise.
+                        if (got > 0) { store64(hashes + i * 8, crab_hash64(hbuf, got)); }
+                        else { store64(hashes + i * 8, 0); }
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    # --- pass 2: mark every duplicate except the newest of its group ---
+    var marked = 0;
+    i = 0;
+    while (i < count) {
+        var hi = load64(hashes + i * 8);
+        if (hi != 0) {
+            # ⚠ Is there another entry this one is a duplicate OF, which is NEWER? Then mark THIS one.
+            # Asked pairwise rather than by building groups: the answer for one entry never depends on
+            # what was decided about another, so there is no order to get wrong and no group state to
+            # keep. ⛔ `crab_dup_keep_newer` breaks an mtime TIE toward the earlier INDEX, so exactly
+            # one entry of a tied pair survives — a rule that flipped on tie would mark both.
+            var j = 0;
+            var keep = 1;
+            while (j < count) {
+                if (j != i) {
+                    if (crab_dup_same(load64(sizes + i * 8), load64(sizes + j * 8),
+                        hi, load64(hashes + j * 8)) == 1) {
+                        var mi = load64(mtimes + i * 8);
+                        var mj = load64(mtimes + j * 8);
+                        if (mi == mj) {
+                            # tie: the earlier index is the keeper
+                            if (j < i) { keep = 0; }
+                        } else {
+                            if (crab_dup_keep_newer(mi, mj) == 0) { keep = 0; }
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+            if (keep == 0) {
+                if (crab_marked(marks, i, count) == 0) {
+                    crab_mark_toggle(marks, i, count);
+                    marked = marked + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return marked;
+}
+
+# ⚠ Process-lifetime, like every other scratch here — `alloc` has no `free()`, so a buffer minted per
+# scan would be a 64 KiB leak per keypress.
+var crab_dupbuf = 0;
+var crab_duphash = 0;
+
+fn crab_dup_buf(): i64 {
+    if (crab_dupbuf == 0) { crab_dupbuf = alloc(CRAB_DUP_READ_MAX); }
+    return crab_dupbuf;
+}
+
+fn crab_dup_hashes(): i64 {
+    if (crab_duphash == 0) { crab_duphash = alloc(CRAB_MAX_ENTRIES * 8); }
+    return crab_duphash;
+}
+
+# @public — what the status line says after a scan.
+fn crab_dup_msg(n): i64 {
+    if (n < 0) { return "crab could not scan this listing for duplicates"; }
+    if (n == 0) { return "no duplicates found here"; }
     return 0;
 }
 

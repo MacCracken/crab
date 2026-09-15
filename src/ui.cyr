@@ -175,9 +175,12 @@ enum CrabCol {
     # ⛔⛆ NINE IS KASHI'S NUMBER, NOT A LAYOUT CHOICE, AND IT IS ONLY TRUE OF KASHI. It is the CP437
     # 8x16 cell's advance — 8 px of glyph and 1 px of gap — exact for `font = 0` and wrong for every
     # proportional face. ⇒ **Nothing may divide by this constant directly.** `crab_char_w()` is the
-    # one reader; it answers 9 for the bitmap font and the FONT's own advance for anything else, so
-    # the day crab stops passing `font = 0` every width derived from it follows without being found.
-    # ⚠ The remaining half of the proportional-text item is exactly that day — see the roadmap.
+    # one reader; it answers 9 for the bitmap font and the FONT's own advance for anything else.
+    # ⭐ THAT DAY CAME AT 0.9.0 and this comment outlived it by five releases. crab passes
+    # `crab_face()` — Liberation Sans from the kernel's `/fonts/default.ttf` — at every render site,
+    # so 9 is now the FALLBACK path (no face loaded), not the normal one. The design held: every
+    # width followed `crab_char_w()` without being found, which is what the rule was for.
+    # ⚠ It is still load-bearing, so it stays: a box with no `/fonts/default.ttf` renders here.
     CRAB_COL_CHARW    = 9;      # kashi CP437 8x16 advance: 8 px glyph + 1 px gap
     # ⚠ THE EM HEIGHT THE ADVANCE IS ASKED AT. `rekha_char_advance_px` scales by the pixel em, and
     # kashi's cell is 8x16 — so 16 is the height the 9 above is the advance FOR, and asking a
@@ -1696,9 +1699,19 @@ fn crab_sidebar_hit(x, y): i64 {
 # no UTF-8 path to reach one. This is the same limit already recorded at `crab_name_trunc`: *"'~'
 # (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph."*
 # ⇒ **The door is `F10`, and the crab button is DEFERRED with its reason stated** rather than
-# substituted with an ASCII stand-in that would read as a placeholder nobody removed. It needs an
-# icon path or proportional text, which is the M5 gate. ⚠ The chevron the canvas also names IS
-# drawable — CP437 30/31 — and the bar uses it to say which way the toggle goes.
+# substituted with an ASCII stand-in that would read as a placeholder nobody removed.
+# ⛔⛆ AND ITS STATED GATE HAS SINCE SHIPPED WITHOUT UNBLOCKING IT — re-checked at 0.10.0. This said
+# "it needs an icon path or proportional text, which is the M5 gate"; **0.9.0 shipped proportional
+# text** and the button is still not drawable, for a reason the old text did not name:
+#   1. `dh_draw_text_ink` walks ONE BYTE per glyph in BOTH branches — the scalable path too, not
+#      just the bitmap one — so there is no UTF-8 road to a codepoint above 255 either way.
+#   2. `rekha_char_to_glyph` returns 0 for any codepoint > 65535 ("format 4 is BMP-only"), and
+#      U+1F980 🦀 is far past it.
+#   3. Liberation Sans carries no crab glyph regardless.
+# ⇒ The real gate is an ICON PATH — a drawn shape, not a character — which is a dhancha question,
+# not a font one. Naming the wrong gate is worse than naming none: it made this look like it would
+# fall out of work that has now been done twice.
+# ⚠ The chevron the canvas also names IS drawable — CP437 30/31 — and the bar uses it.
 #
 # ⭐ COLLAPSED IS THE DEFAULT, AND THAT IS WHAT MAKES IT AFFORDABLE. At the shipped 380x220 every
 # row is contended: the status line owns 22 px, a pane header 28, the tray up to 45. A bar that were
@@ -2308,6 +2321,94 @@ fn crab_marked(marks, i, count): i64 {
     if (i < 0) { return 0; }
     if (i >= count) { return 0; }
     return load8(marks + i);
+}
+
+# ⭐⭐ DUPLICATE DETECTION (M7 · 0.10.0) — "byte-identical grouping, Keep newest".
+#
+# ⛔⛔ THE ROADMAP GATED THIS ON daimon AND IT NEVER FULLY WAS: the gate row itself said
+# *"daimon, **or a content hash crab could do alone**"*. This is that half — and it is the half that
+# still works on a box with no daimon, which is the rule the declaration commits crab to: the index
+# is an enrichment, not a precondition.
+#
+# ⛔ SIZE IS THE PRE-FILTER AND IT IS NOT AN OPTIMISATION, IT IS WHAT MAKES THIS AFFORDABLE. Two
+# files of different lengths cannot be byte-identical, and a `stat` is already done for every entry
+# by the deferred sweep — so the size pass costs ZERO syscalls. Only entries whose size collides
+# with another entry's are ever opened and read. On an ordinary directory that is a handful of files
+# out of a thousand; hashing all 1024 would be ~1.1 s of I/O on the target at the listing cap.
+# ⚠ A SIZE COLLISION IS NOT A DUPLICATE. It is a CANDIDATE. The hash decides, and even the hash is
+# not proof — see `crab_dup_same`.
+
+# @public — FNV-1a over `len` bytes. The content hash, and it is deliberately not a cryptographic one.
+#
+# ⚠ WHY FNV-1a: crab already carries three copies of it (`lib/hashmap.cyr`, `lib/hashmap_fast.cyr`,
+# `lib/hashseed.cyr`) for string keys, so the constants are already in the binary and already
+# exercised. A stronger digest would be a new dependency for a question that is answered by a
+# byte-for-byte comparison anyway.
+fn crab_hash64(buf, len): i64 {
+    if (buf == 0) { return 0; }
+    if (len <= 0) { return 0; }
+    # 1469598103934665603 (offset basis), 1099511628211 (prime) — FNV-1a 64.
+    var h = 1469598103934665603;
+    var i = 0;
+    while (i < len) {
+        h = h ^ load8(buf + i);
+        h = h * 1099511628211;
+        i = i + 1;
+    }
+    return h;
+}
+
+# @public — are these two entries the same file's content, as far as crab has looked? 1 = yes.
+#
+# ⛔⛆ A HASH MATCH IS NOT A GUARANTEE AND crab MUST NOT SAY IT IS. FNV-1a is 64 bits and not
+# collision-resistant by design; two different files CAN hash alike. crab's duplicate surface marks
+# entries for the operator to act on, and the next thing they press might be `d`.
+# ⇒ The size must match too — it is free and it is independent of the hash — and the WORD crab uses
+# is "duplicate", never "identical". ⚠ The honest full answer is a byte-for-byte compare of the
+# candidates, which is a second read of both files; it is not done here and this is where to add it.
+fn crab_dup_same(size_a, size_b, hash_a, hash_b): i64 {
+    # ⛔ AN UNSTATTED OR UNREADABLE ENTRY IS NEVER A DUPLICATE. -2 is the deferred sweep's "not yet",
+    # -1 is a stat that FAILED, and a directory has no size crab can compare. Treating any of them as
+    # "equal because both are -1" would group every unreadable file into one duplicate set.
+    if (size_a < 0) { return 0; }
+    if (size_b < 0) { return 0; }
+    if (size_a != size_b) { return 0; }
+    # ⚠ A zero-length file has no bytes to hash, so every empty file hashes alike — which is CORRECT:
+    # they ARE byte-identical. `crab_hash64` answers 0 for them and the sizes agree.
+    if (hash_a != hash_b) { return 0; }
+    return 1;
+}
+
+# @public — is entry `i`'s size shared with any OTHER entry? 1 = it is worth hashing.
+#
+# ⚠ O(n²) over a listing capped at `CRAB_MAX_ENTRIES` = 1024, so at most ~524k integer comparisons
+# and no syscalls at all. The alternative — sorting a parallel index by size — is a second array and
+# a second ordering to keep in step for a pass that already costs nothing measurable.
+fn crab_dup_candidate(sizes, count, i): i64 {
+    if (sizes == 0) { return 0; }
+    if (i < 0) { return 0; }
+    if (i >= count) { return 0; }
+    var sz = load64(sizes + i * 8);
+    if (sz < 0) { return 0; }
+    var j = 0;
+    while (j < count) {
+        if (j != i) {
+            if (load64(sizes + j * 8) == sz) { return 1; }
+        }
+        j = j + 1;
+    }
+    return 0;
+}
+
+# @public — of two entries known to be duplicates, which does `Keep newest` KEEP? -> 1 = keep a.
+#
+# ⛔ THE NEWEST IS KEPT AND THE REST ARE MARKED, NOT DELETED. Marking is what crab does here; the
+# operator presses the verb. That is the whole difference between a tool and an accident.
+# ⚠ EQUAL MTIMES KEEP THE FIRST, deterministically — two copies written in the same second are
+# common (an unpacked archive) and a rule that flipped on tie would mark a different file each run.
+fn crab_dup_keep_newer(mtime_a, mtime_b): i64 {
+    if (mtime_a >= mtime_b) { return 1; }
+    return 0;
 }
 
 # @public — how many entries are marked.
@@ -3310,9 +3411,13 @@ fn crab_hit_root(): i64 { return crab_root; }
 fn crab_sheet_widget(): i64 { return crab_shlst; }
 var crab_llst = 0;
 var crab_rlst = 0;
-# ⚠ The A/B strip, exposed for the SUITE — it has no caller in `src/` and is NOT hit-tested.
-# `crab_hit` walks only `crab_llst` / `crab_rlst`, deliberately: the strip is a display, and giving
-# it a pointer path means giving it its own hit function rather than widening the pane index.
+# ⚠ The A/B strip's list. ⛔⛆ THIS SAID "no caller in `src/` and is NOT hit-tested" AND BOTH HALVES
+# WERE FALSE SINCE 0.8.5 — the release directly below it in this very comment. `crab_switcher_widget`
+# is called at `src/main.cyr:694`, `crab_pointer_action` has an `sw_cell` branch returning
+# `CRAB_PA_SWITCH`, and the press arm focuses that pane. The strip got its own hit test, which is
+# exactly what the old text said it would need and then never noticed it had been given.
+# ⚠ `crab_hit` still walks only `crab_llst` / `crab_rlst` — that half is true, and it is WHY the
+# strip is asked separately rather than through the pane index.
 # ⛔ Set in `crab_pane` and cleared to 0 in `crab_render` before the panes are built, so it can
 # never outlive its frame or report a strip from a layout that is no longer on screen. That is the
 # same discipline `crab_mlst` follows — and the reason its own comment once claimed hit-testing it

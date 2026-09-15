@@ -24,9 +24,38 @@
 
 ## Version
 
-**0.9.7 IS CUT** — `VERSION` reads `0.9.7` and the CHANGELOG header agrees, 2026-09-14.
-⚠ 0.9.6 released (tagged)? Re-run `git log --oneline -3` and `git tag --list` before restating this.
-**⛔⛔⛔ H1 IS CLOSED.** ⇒ **Next: the daimon ruling, then `0.10.0 · The index` (M7).**
+**0.10.0 IS CUT** — `VERSION` reads `0.10.0` and the CHANGELOG header agrees, 2026-09-14.
+⚠ 0.9.7 released (tagged)? Re-run `git log --oneline -3` and `git tag --list` before restating this.
+**Next: the rest of M7 — the local index, tags, smart folders — then `0.11.0` (M8).**
+
+**0.10.0 contents.** ⭐⭐ **THE DAIMON RULING: DECLARED.** `[deps.daimon]` at 2.1.3; `cyrius deps`
+resolves 7, `--verify` 50/50. This was the OLDEST open item in the roadmap and it gated M7 and M8
+entirely. ⛔ **Declared, NOT linked**: daimon is a binary with no `dist/`, so there is no module to
+fold and there must not be — crab talks to the AF_UNIX socket it binds per agent, over agnos's
+`sock_connect` #47 / `sock_listen` #56 / `sock_accept` #57. No `modules` key, deliberately.
+⛔ **crab still runs without it** — the index is an enrichment, not a precondition; the M7 surfaces
+report the index unavailable rather than failing.
+⭐⭐ **DUPLICATE DETECTION (`Shift+D`)** — the half the roadmap said crab could do alone ("daimon, **or
+a content hash crab could do alone**"), and the half that works with no daimon on the box. Marks every
+duplicate except the newest of each group. ⛔ **IT MARKS, IT DOES NOT DELETE** — the operator presses
+the verb, and the delete prompt then counts and names the set as it does for any hand-marked one.
+⛔ Not `d`: a scan one un-shifted key from an irreversible verb gets pressed by accident.
+⭐ The size pass is the pre-filter and costs ZERO syscalls (every entry is already stat'ed by the
+deferred sweep), so only a size COLLISION is opened. ⚠ A hash match is NOT a guarantee — FNV-1a is 64
+bits — so `crab_dup_same` requires equal sizes too, the read is bounded at 64 KiB, and the word is
+"duplicate", never "identical".
+⛆ **The deferral sweep**: `net` removed from `stdlib` (dead for six minor versions, explicitly queued
+as its own change) — ⚠ and the note was loose: NOT byte-identical, both binaries grew 16 bytes and
+182,246 differ from the fold-order shift; what is clean is no undefined symbols, deps, deny and the
+suite. Four stale comments cut: the A/B strip's "no caller, not hit-tested" (false since 0.8.5),
+`CRAB_COL_CHARW`'s "the day crab stops passing font = 0" (that day was 0.9.0), and the 🦀 button's
+gate — which said M5 proportional text and **0.9.0 shipped it without unblocking the button**; the
+real gate is an ICON PATH, because `dh_draw_text_ink` walks one byte per glyph in BOTH branches,
+`rekha_char_to_glyph` is BMP-only and Liberation Sans has no crab.
+**2490 / 0**, three mutations. ⚠⚠ **TWO SURVIVED and are recorded at the assertions**: bypassing the
+size pre-filter, and bypassing the `CRAB_KIND_FILE` guard — both change what crab OPENS, not what it
+MARKS, so no mark-based assertion can see them. A directory opens and then fails to READ, so its hash
+stays 0 either way. Both predicates are pinned exhaustively; their USE in the scan is not.
 
 **0.9.7 contents — H1.** `crab_walk_reroot_dtree` turns a cancelled tree copy into a RECURSIVE DELETE
 of the destination root. Its own comment named the invariant that made that safe (`crab_walk_begin`

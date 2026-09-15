@@ -226,8 +226,8 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.3 · Symlinks** | **see that a link is a link** — marked `@`, KIND says Link — and know what each verb does with one | — | **shipped** ([ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)) |
 | ✅ | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry — and see the picture of the file you are actually on | — | **shipped** ⛔ *and it found TWO live wrong-on-screen defects: the thumbnail lagged one file behind, and CAMERA persisted onto text files* |
 | ✅ | **0.9.5 · Pointer polish** | **mark a row with the middle button**, and see a popup's highlight follow the pointer | — | **shipped** ⛔ *and the premise was wrong: middle had DISMISSED popups since 0.8.5, in three doc sites' teeth* |
-| ⛔ | **the daimon decision** | *(not a release — a ruling)* | **the operator's** | `cyrius.cyml` declares daimon, **or** the package description, the `[deps]` comment and the README stop promising the AI arc |
-| | **0.10.0 · The index** (M7) | find a file by tag, by smart folder, or as a duplicate | **daimon**, declared | the index is local, background, battery-aware, and the four smart folders are real |
+| ✅ | **the daimon decision** | *(not a release — a ruling)* | — | **RULED 2026-09-14: DECLARED.** `cyrius.cyml` carries `[deps.daimon]` at 2.1.3. ⛔ Declared, NOT linked — daimon is a binary with no `dist/`; crab talks to its AF_UNIX socket. 0.10.0 and 0.11.0 are unblocked. |
+| ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ **daimon DECLARED 2.1.3** | the index is local, background, battery-aware, and the four smart folders are real |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
 | ✅ | **0.9.7 · H1** | *(a fix release)* cancel a merged copy without losing the folder it merged into | — | **shipped** ⛔⛔⛔ *the oldest confirmed data-loss defect; MEASURED on iron both ways (0/3 → 3/3)* |
@@ -287,10 +287,26 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
   `pauses on battery`. **Gate: daimon.**
 - **Tags** — manual and suggested (`SUGGESTED TAGS · src → + toolchain + cyrius + wip`).
 - **Smart folders** — Recent, Duplicates, Untagged, Large & old, Raw only, Unrated.
-- **Duplicate detection** — byte-identical grouping, `Keep newest`.
-- ⛔ **Declare the daimon dependency or stop promising the AI arc.** The package description, the
-  `[deps]` comment and the README all commit to it; `cyrius.cyml` declares no daimon dep. **daimon
-  2.1.2 exists locally** with vector/RAG stores. ⚠ This is the oldest open item in the file.
+- ✅ **Duplicate detection — SHIPPED (0.10.0).** `Shift+D` groups by content and marks all but the
+  newest. ⭐ Done WITHOUT daimon, as this row always allowed: size is a free pre-filter (every entry
+  is already stat'ed), so only a size collision is opened and hashed. ⛔ It MARKS; it does not delete.
+  ⚠ Bounded 64 KiB read and a 64-bit hash, so `crab_dup_same` also requires equal sizes and crab says
+  "duplicate", not "identical". The byte-for-byte compare is the honest next increment.
+- ✅ **DECLARED — 2026-09-14, the operator's ruling, and the oldest open item in this file is now
+  closed.** `cyrius.cyml` carries `[deps.daimon]` pinned at **2.1.3**; `cyrius deps` resolves 7 deps
+  and `--verify` reports 50/50.
+  ⛔ **Declared, NOT linked, and that is the shape of the dependency.** daimon is a BINARY
+  (`[build] output = "build/daimon"`) and ships no `dist/` — there is no module to fold in, and
+  there must not be: linking an agent orchestrator would put its HTTP server, scheduler and
+  federation code in crab's address space for the sake of a query. crab talks to the **AF_UNIX
+  socket daimon binds per agent** (`agent_ipc_new(agent_id, socket_dir)`), and agnos carries the
+  surface: `sock_connect` #47, `sock_listen` #56, `sock_accept` #57.
+  ⚠ **No `modules` key**, deliberately — it would make `cyrius deps` fold a file that does not exist.
+  The pin records which daimon crab's protocol is written against, which is what a pin is for.
+  ⛔ **And crab still runs without it.** The index is an enrichment, not a precondition: a box with no
+  daimon lists, copies, moves and deletes exactly as today, and the M7 surfaces must report that the
+  index is unavailable rather than failing — the rule the preview already follows for a file it
+  cannot decode: say which kind of nothing this is.
 
 ### M8 — Assisted search (the v1.0 surface)
 
@@ -329,10 +345,10 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 |---|---|---|---|
 | ✅ Proportional text | M5 → **0.9.0, SHIPPED** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
 | The 🦀 **glyph** | M6 → later | ⛔⛆ **STILL CLOSED, AND 0.9.0 DID NOT OPEN IT — this row said the face would.** Three independent walls: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code (*"format 4 is BMP-only"*), the shipped face carries no format-12 subtable, and `dh_draw_text_ink` walks ONE BYTE per glyph in **both** branches. U+1F980 is 128,896. ⭐ **The open road is CANVAS**, which crab already ships for thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`) — an icon is a glyph with no font. **0.9.1 shipped the DOOR** (three filled boxes) and left the crab for whoever wants to bake a bitmap. | 2026-09-14 ⛔ **re-derived — the 0.9.0 claim was wrong** |
-| Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | **daimon**, like the rest of the AI arc. crab declares no daimon dep. | 2026-08-31 |
-| Local index · tags · smart folders | M7 → **0.10.0** | **daimon** — and crab declares no daimon dep at all | 2026-08-31 |
-| Duplicate detection | M7 → **0.10.0** | **daimon**, or a content hash crab could do alone | 2026-08-31 |
-| Assisted search | M8 → **0.11.0** | **daimon** local-only embedding | 2026-08-31 |
+| Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | ✅ **UNGATED — `[deps.daimon]` 2.1.3 is declared (0.10.0).** Declared, NOT linked: daimon is a binary with no `dist/`, so crab talks to the AF_UNIX socket it binds. | 2026-09-14 |
+| Local index · tags · smart folders | M7 → **0.10.0** | ✅ **UNGATED — daimon declared (0.10.0).** ⚠ crab must still run WITHOUT it: the index is an enrichment, not a precondition. | 2026-09-14 |
+| Duplicate detection | M7 → **0.10.0** | ✅ **UNGATED — daimon declared.** ⚠ And it was never fully gated: a content hash is something crab could do alone, which is the cheaper first half. | 2026-09-14 |
+| Assisted search | M8 → **0.11.0** | ✅ **UNGATED — daimon declared (0.10.0).** The embedding is daimon's; the query bar and the WHY column are crab's. | 2026-09-14 |
 
 ⭐ **Closed gates are not listed.** GRID (dhancha 0.9.25), the menu bar's strip (0.9.26), thumbnails
 (chitra, an operator ruling on price), sidebar PLACES and VOLUMES (agnos `mountlist`#104, minted

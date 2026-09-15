@@ -2939,6 +2939,7 @@ fn main() {
     t_pointer_095();
     t_drop_096();
     t_h1_097();
+    t_dup_0100();
     t_thumbnails();
     t_exif();
     t_gridview();
@@ -3318,6 +3319,138 @@ fn t_preview(): i64 {
 # ⭐⭐ 0.9.5 — THE POINTER POLISH: the middle button, and a highlight that follows the pointer.
 # ⭐⭐ 0.9.6 — A DRAG CANNOT OUTLIVE ITS LISTING.
 # ⭐⭐ 0.9.7 — H1: A CANCELLED COPY DELETES ONLY WHAT CRAB CREATED.
+# ⭐⭐ 0.10.0 — M7's first surface: DUPLICATE DETECTION, which crab does alone.
+fn t_dup_0100(): i64 {
+    test_group("crab — 0.10.0: duplicates by content hash, Keep newest");
+
+    # ---- crab_hash64 — the content hash ---------------------------------------------------------
+    var a = alloc(64); var b = alloc(64);
+    var i = 0;
+    while (i < 64) { store8(a + i, 65); store8(b + i, 65); i = i + 1; }
+    assert_eq(crab_hash64(a, 16), crab_hash64(b, 16), "identical bytes hash alike");
+    store8(b + 7, 66);
+    assert(crab_hash64(a, 16) != crab_hash64(b, 16), "⛔ one differing byte changes the hash");
+    assert(crab_hash64(a, 8) != crab_hash64(a, 16), "⛔ LENGTH IS PART OF THE ANSWER — a prefix is not the file");
+    assert_eq(crab_hash64(0, 16), 0, "a null buffer hashes to nothing");
+    assert_eq(crab_hash64(a, 0), 0, "...and so does an empty read");
+    assert_eq(crab_hash64(a, 0 - 4), 0, "...and a negative length is not a length");
+
+    # ---- crab_dup_same — ⛔⛆ A HASH MATCH IS NOT A GUARANTEE ------------------------------------
+    # FNV-1a is 64 bits and not collision-resistant by design. crab marks entries for an operator
+    # whose next keypress may be `d`, so the SIZE must agree too — it is free and independent.
+    assert_eq(crab_dup_same(100, 100, 7, 7), 1, "same size, same hash: a duplicate");
+    assert_eq(crab_dup_same(100, 101, 7, 7), 0,
+      "⛔ SAME HASH, DIFFERENT SIZE: NOT a duplicate — the size is the independent check");
+    assert_eq(crab_dup_same(100, 100, 7, 8), 0, "same size, different hash: not a duplicate");
+    # ⛔ An unstatted (-2) or failed (-1) entry is never a duplicate. Treating "both are -1" as equal
+    # would group every unreadable file in the listing into one set — and then mark all but one.
+    assert_eq(crab_dup_same(0 - 1, 0 - 1, 7, 7), 0,
+      "⛔⛆ TWO UNREADABLE ENTRIES ARE NOT DUPLICATES OF EACH OTHER");
+    assert_eq(crab_dup_same(0 - 2, 0 - 2, 7, 7), 0, "...nor two the stat sweep has not reached");
+    assert_eq(crab_dup_same(0 - 2, 100, 7, 7), 0, "...nor one of each");
+    assert_eq(crab_dup_same(0, 0, 0, 0), 1, "⚠ two EMPTY files ARE byte-identical, and group");
+
+    # ---- crab_dup_candidate — the free pre-filter ----------------------------------------------
+    var sz = alloc(8 * 8);
+    store64(sz + 0 * 8, 100); store64(sz + 1 * 8, 200); store64(sz + 2 * 8, 100);
+    store64(sz + 3 * 8, 300); store64(sz + 4 * 8, 0 - 1); store64(sz + 5 * 8, 0 - 1);
+    assert_eq(crab_dup_candidate(sz, 6, 0), 1, "a size shared with another entry is worth hashing");
+    assert_eq(crab_dup_candidate(sz, 6, 2), 1, "...from either side");
+    assert_eq(crab_dup_candidate(sz, 6, 1), 0, "⭐ A UNIQUE SIZE IS NEVER OPENED — the pre-filter's whole point");
+    assert_eq(crab_dup_candidate(sz, 6, 3), 0, "...nor another");
+    assert_eq(crab_dup_candidate(sz, 6, 4), 0,
+      "⛔ AND TWO UNREADABLE ENTRIES DO NOT 'SHARE A SIZE' — -1 is not a length");
+    assert_eq(crab_dup_candidate(sz, 6, 0 - 1), 0, "an out-of-range index is not a candidate");
+    assert_eq(crab_dup_candidate(sz, 6, 6), 0, "...at either end");
+    assert_eq(crab_dup_candidate(0, 6, 0), 0, "...and a null sizes array answers rather than faulting");
+    # ⚠⚠ TWO SURVIVING MUTATIONS, RECORDED RATHER THAN HIDDEN — both inside `crab_dup_scan`, and
+    # both surviving for the SAME honest reason: they change what crab OPENS, not what it MARKS.
+    #   1. Bypassing this size pre-filter (hash every entry, not just size collisions) leaves the
+    #      suite green. The pre-filter is an OPTIMISATION, not a correctness property — the marks are
+    #      identical either way. It changes how many files are opened, which no mark can show.
+    #   2. Bypassing the `CRAB_KIND_FILE` guard (hash directories too) ALSO leaves it green — even
+    #      with the two same-sized directories in the fixture below, added specifically to catch it.
+    #      A directory opens but READ fails, so its hash stays 0 and it is never grouped. The guard
+    #      is defence-in-depth, and saying otherwise would be claiming a proof this suite has not got.
+    # ⇒ Both predicates are pinned exhaustively here; their USE inside the scan is not. The cost
+    # claim ("a unique size is never opened", "a directory is never opened") rests on READING
+    # `crab_dup_scan` — an I/O-count assertion would need a syscall counter crab does not have.
+
+    # ---- crab_dup_keep_newer — what `Keep newest` KEEPS -----------------------------------------
+    assert_eq(crab_dup_keep_newer(200, 100), 1, "the newer of two is kept");
+    assert_eq(crab_dup_keep_newer(100, 200), 0, "...and the older is the one marked");
+    # ⚠ An unpacked archive writes many files in one second, and a rule that flipped on tie would
+    # mark a different file every run.
+    assert_eq(crab_dup_keep_newer(100, 100), 1, "⚠ EQUAL MTIMES KEEP THE FIRST, deterministically");
+
+    # ---- the scan, against REAL files on disk ---------------------------------------------------
+    # ⛔ IT MARKS, IT DOES NOT DELETE. That is the whole difference between a tool and an accident.
+    var scr = alloc(CRAB_PATH_MAX);
+    var dir = "build";
+    var payload = alloc(64);
+    var k = 0;
+    while (k < 64) { store8(payload + k, 88); k = k + 1; }
+    # three files: two identical, one different
+    var names = alloc(4 * 32);
+    crab_fs_path(scr, dir, "dupA.bin");
+    var f1 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    assert(f1 >= 0, "the first duplicate fixture is created");
+    sys_write(f1, payload, 32); sys_close(f1);
+    crab_fs_path(scr, dir, "dupB.bin");
+    var f2 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    sys_write(f2, payload, 32); sys_close(f2);
+    crab_fs_path(scr, dir, "dupC.bin");
+    var f3 = crab_fs_open_w(scr, crab_cstr_len(scr, CRAB_PATH_MAX));
+    store8(payload, 89);
+    sys_write(f3, payload, 32); sys_close(f3);
+
+    var dbuf = alloc(8 * CRAB_REC_SZ);
+    t_entry(dbuf, 0, "dupA.bin", CRAB_KIND_FILE);
+    t_entry(dbuf, 1, "dupB.bin", CRAB_KIND_FILE);
+    t_entry(dbuf, 2, "dupC.bin", CRAB_KIND_FILE);
+    # ⛔ TWO DIRECTORIES WITH THE SAME REPORTED SIZE, so the size pre-filter would make them
+    # candidates. They pin the OUTCOME — a directory is never marked as a duplicate — which is what
+    # the operator experiences. ⚠ They do NOT pin the `CRAB_KIND_FILE` guard itself: removing it
+    # still passes, because a directory opens and then fails to READ, so its hash stays 0. See the
+    # surviving-mutation note above. The guard saves a pointless open per directory; it is not what
+    # makes the answer right.
+    t_entry(dbuf, 3, "adir", CRAB_KIND_DIR);
+    t_entry(dbuf, 4, "bdir", CRAB_KIND_DIR);
+    var dsz = alloc(8 * 8); var dmt = alloc(8 * 8); var dmk = alloc(8);
+    store64(dsz + 0 * 8, 32); store64(dsz + 1 * 8, 32); store64(dsz + 2 * 8, 32);
+    store64(dsz + 3 * 8, 4096); store64(dsz + 4 * 8, 4096);
+    store64(dmt + 0 * 8, 100); store64(dmt + 1 * 8, 200); store64(dmt + 2 * 8, 300);
+    store64(dmt + 3 * 8, 400); store64(dmt + 4 * 8, 500);
+    crab_mark_clear(dmk, 5);
+    var got = crab_dup_scan(dir, dbuf, 5, dsz, dmt, dmk, scr);
+    assert_eq(got, 1, "⭐ ONE of the two identical files is marked — the older");
+    assert_eq(crab_marked(dmk, 0, 5), 1, "⛔ dupA (mtime 100) is marked: it is the OLDER duplicate");
+    assert_eq(crab_marked(dmk, 1, 5), 0, "⭐ dupB (mtime 200) is KEPT — `Keep newest`");
+    # ⛔⛆ dupC has the same SIZE as the other two and different CONTENT. The size pre-filter made it
+    # a candidate; the HASH is what cleared it. This is the assertion that proves the hash runs.
+    assert_eq(crab_marked(dmk, 2, 5), 0, "⛔⛆ AND dupC IS NEVER MARKED — same size, different bytes");
+    assert_eq(crab_marked(dmk, 3, 5), 0,
+      "⛔ A DIRECTORY IS NEVER A DUPLICATE, even sharing a size with another directory");
+    assert_eq(crab_marked(dmk, 4, 5), 0, "...nor the one it shares that size with");
+
+    # ⚠ Null and bounds, as everywhere else.
+    assert_eq(crab_dup_scan(0, dbuf, 3, dsz, dmt, dmk, scr), 0 - 1, "a null directory is refused");
+    assert_eq(crab_dup_scan(dir, 0, 3, dsz, dmt, dmk, scr), 0 - 1, "a null buffer is refused");
+    assert_eq(crab_dup_scan(dir, dbuf, 3, dsz, dmt, 0, scr), 0 - 1, "a null marks array is refused");
+    assert_eq(crab_dup_scan(dir, dbuf, 0, dsz, dmt, dmk, scr), 0, "an empty listing marks nothing");
+    assert_eq(crab_dup_scan(dir, dbuf, CRAB_MAX_ENTRIES + 1, dsz, dmt, dmk, scr), 0 - 1,
+      "⛔ a count past the listing cap is refused, not walked");
+
+    assert(crab_dup_msg(0 - 1) != 0, "a failed scan says so");
+    assert(crab_dup_msg(0) != 0, "...and so does one that found nothing");
+    assert_eq(crab_dup_msg(3), 0, "⚠ a scan that DID mark says nothing here — the caller names the count");
+
+    crab_fs_delete(dir, "dupA.bin", 0, scr);
+    crab_fs_delete(dir, "dupB.bin", 0, scr);
+    crab_fs_delete(dir, "dupC.bin", 0, scr);
+    return 0;
+}
+
 fn t_h1_097(): i64 {
     test_group("crab — 0.9.7: H1, a cancel removes only a root crab made");
 

@@ -76,6 +76,7 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   dhancha font plumbing**. It is not what ships.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
+  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.1.3); the surfaces below are the work.
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to
   mneme's *notes-as-memory*. It reads the shared index; it does not silo its own.
 - **Local-first, no external service** — the whole point of a sovereign store.
@@ -223,10 +224,14 @@ happened rather than showing a blank square.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
   but crab says by how much (`showing 1024 of 1200`), because agnos's resumable `readdir_at` lets it
   keep counting past its own buffer.
-- **Text is a bitmap font, not proportional.** crab draws with `kashi`'s CP437 8x16 glyphs; the
-  `rekha` TrueType path is not wired. (Roadmap M5.)
-- **None of the AI arc exists.** No index, no tags, no semantic find, no dedup — and `cyrius.cyml`
-  declares no daimon dependency. (Roadmap M7–M8.)
+- ~~**Text is a bitmap font, not proportional.**~~ **CLOSED at 0.9.0** — crab reads in Liberation
+  Sans from the kernel's own `/fonts/default.ttf` through `rekha`, and every width it computes is
+  derived from the face. The bitmap path remains as the fallback when no face loads.
+- **None of the AI arc exists YET — but daimon is declared (0.10.0).** No index, no tags, no semantic
+  find, no dedup. `cyrius.cyml` now carries `[deps.daimon]` pinned at 2.1.3, which is the ruling that
+  unblocks M7. ⛔ **Declared, not linked**: daimon is a binary with no `dist/`, so crab talks to it
+  over the AF_UNIX socket it binds rather than folding an agent orchestrator into a file manager.
+  ⚠ And crab runs without it — the index is an enrichment, not a precondition. (Roadmap M7–M8.)
 
 Roadmap **Priority 1 — ship before beta** (agnosticos
 `docs/development/planning/roadmap.md` § File Manager). Retires the third-party
