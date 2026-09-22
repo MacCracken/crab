@@ -24,9 +24,10 @@
 
 ## Version
 
-**0.10.2 IS CUT** — `VERSION` reads `0.10.2` and the CHANGELOG header agrees, 2026-09-21.
-⚠ 0.10.1 is released (tag on the remote). Re-run `git log --oneline -3` and `git tag --list` before
-restating this; the commit, the tag and the push are the operator's.
+**0.10.3 IS CUT** — `VERSION` reads `0.10.3` and the CHANGELOG header agrees, 2026-09-21.
+⚠ 0.10.1 is released (tag on the remote); 0.10.2 and 0.10.3 are cut in one session and not yet
+tagged as this is written. Re-run `git log --oneline -3` and `git tag --list` before restating this;
+the commit, the tag and the push are the operator's.
 
 ⛔⛔ **M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING — daimon does not build for agnos, and the root
 is UPSTREAM of daimon.** MEASURED three times now: daimon 2.1.3 under 6.6.2 (**53 errors, 36
@@ -39,6 +40,22 @@ so the Linux-internal peer lands beside the standalone agnos peer. ⇒ The fix i
 and/or bote's sidecar; **a pin move is not it**. Filed at
 `daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md` (the `sys_unlink`
 arity class is fixed there, 2.1.4). ⛔ crab will not fake an index it cannot back.
+
+**0.10.3 contents — names are measured by CHARACTER, and the release ships under DCE.**
+⭐ `crab_char_adv(s, at, n, lenp)` — `dh_text_decode` (dhancha 0.10.4's own decoder) plus the per-arm
+advance the draw uses — is the one reader both `crab_text_w` and `crab_name_cell_px` walk by. `Über.txt`
+measures eight cells not nine and fits an eight-cell column unmarked; `—` is one cell; a cut lands on
+a character boundary (`C3 9C 7E`, never `C3 7E`); the scalable arm prices the SCALAR (`Ü` 12 in the
+fixture face, not its lead byte's 8, not the two bytes' 16). ⛔ The bound is a LENGTH, not a NUL, so
+within four bytes of it the decoder is fed a NUL-terminated copy and a crossing length is clamped —
+⚠ both guards are UNOBSERVABLE by any width and are held by review, recorded at the assertion.
+**2543 / 0** (+40), `t_utf8_0103` in its own function; the fixture face gained a mapped `Ü` because an
+all-`.notdef` face could not tell "decoded, then asked" from "asked about a byte" — the lead-byte
+mutation SURVIVED until it could. Six mutations caught (21 / 7 / 12 / 1 / 2 and the 0.9.0 expiry
+inverted); the render dump is byte-identical to 0.10.2's. ⭐ **`CYRIUS_DCE=1` on `release.yml` AND
+`ci.yml`'s two target builds** (operator ruling): host **608,040 B**, agnos **878,376 B**; every gate
+re-run against the DCE binaries. Three stale "the draw walks one byte per glyph" comments cut (the
+🦀 glyph is closed at TWO levels now, not three).
 
 **0.10.2 contents — toolchain 6.6.6, and the draw-path deps taken to their tags.** A pin-only
 release; no byte of `src/` moved. cyrius **6.6.4 → 6.6.6**; sadish 0.5.5 → **0.11.2**, rekha
@@ -54,18 +71,18 @@ fires nothing, the hover follows, F10/View/Esc/Tab answer); the red verdicts in 
 runs were press DELIVERY misses the 0.10.1 binary also hit — see *Proven*.
 ⚠ **The binary is +49 %**: host 1,097,664 → **1,636,136 B**, agnos 1,146,920 → **1,681,192 B** — a
 third from the toolchain's stdlib (sankoch 2.7.15 → 2.8.0, +279 KB of Brotli), the rest from the
-sadish (471 KB) and rekha (551 KB) bundles, all linked whole because crab builds without DCE.
-`CYRIUS_DCE=1` returns **608,040 / 874,280 B**, `render_test` 55/0 under it. The release decision
-is the operator's. ⚠ New advisory on every build: `large static data (143024 bytes)` — the
+sadish (471 KB) and rekha (551 KB) bundles, all linked whole because 0.10.2 built without DCE.
+`CYRIUS_DCE=1` returned **608,040 / 874,280 B**, `render_test` 55/0 under it — and 0.10.3 turned it
+on for CI and the release, on the operator's ruling. ⚠ New advisory on every build: `large static data (143024 bytes)` — the
 compiler's 128 KiB threshold, crossed by the bundles' tables (crab declares no top-level array).
 ⛔⛆ **The committed 0.10.1 tree did not build on this box**: `../dhancha` had moved to 0.10.4 and
 `path` won — 3 undefined `sd_flatten_*` against the pinned sadish 0.5.5. The converse of the
 manifest's hazard, now written into it. The 0.10.1 baseline was rebuilt from its TAGS and reproduces
 the shipped artifacts byte-identical (`7ee03c10…` / `a5ba0476…`).
-⚠ **Inherited from dhancha 0.10.4 — one glyph per CHARACTER, while crab still MEASURES per byte**
-(`crab_text_w`, `crab_name_cell_px`): a non-ASCII name is over-measured and a cut can land inside a
-UTF-8 sequence. Strictly less wrong than the mojibake it replaces; **the next crab item**, not this
-release's — `dh_text_decode` is the tool. **2503 / 0**, render_test 55, all gates green.
+⚠ **Inherited from dhancha 0.10.4 — one glyph per CHARACTER, while crab still MEASURED per byte**
+(`crab_text_w`, `crab_name_cell_px`): a non-ASCII name was over-measured and a cut could land inside
+a UTF-8 sequence. Deliberately not bundled into the pin bump; **closed by 0.10.3 above**. **2503 / 0**,
+render_test 55, all gates green.
 
 **0.10.1 contents — the sidebar can reach its own rows.** Two defects found while designing M7's
 smart-folder section, cut on their own rather than bundled.
@@ -671,9 +688,8 @@ demands and the one this file broke twice.
 
 ## Source
 
-**14,257 lines** across **five** files, plus **8,406** in `tests/` *(0.10.2, `wc -l`; 8,092 / 4,486
-at 0.7.7, 7,915 at 0.7.6, 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*. ⚠ Unchanged from 0.10.1 — 0.10.2
-moved no source line.
+**14,311 lines** across **five** files, plus **8,557** in `tests/` *(0.10.3, `wc -l`; 14,257 / 8,406 at
+0.10.1–0.10.2, 8,092 / 4,486 at 0.7.7, 7,915 at 0.7.6, 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*.
 ⛔ **THE PER-FILE COUNTS THAT USED TO SIT IN THE HEADINGS BELOW ARE DELETED, NOT UPDATED.** They were
 `main.cyr (1,287)` against a real 1,494 and `app.cyr (2,484)` against a real 3,007 — understated by
 523 lines in the largest file in the project — while this very section warned three lines down never
@@ -756,10 +772,12 @@ the render call sites the deferred-stat drain added.
 
 ### ⭐⭐ As of 2026-09-21 — the 0.10.2 binary (cyrius 6.6.6, sadish 0.11.2, rekha 0.9.0, dhancha 0.10.4) under QEMU, agnos 1.57.5, aethersafha 0.16.25
 
-- `crab-face-test.py` **PASS**: `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13`
-  — the face loads through rekha 0.9.0 and measures proportionally; one `font` line; navigations 1,
-  view changes 2; **no fault, no allocator-failure text**. The scalable draw path and the frame arena,
-  on the target, with every draw-path dep moved.
+- `crab-face-test.py` **PASS**, twice: on the 0.10.2 plain binary (1,681,192 B) and on the **0.10.3
+  DCE binary (878,376 B) — the artifact shape the release publishes from 0.10.3 on**:
+  `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13` — the face loads through
+  rekha 0.9.0 and measures proportionally; one `font` line; navigations 1, view changes 2; **no
+  fault, no allocator-failure text**. The scalable draw path and the frame arena, on the target,
+  with every draw-path dep moved and the unreachable half of the binary NOPed.
 - `crab-button-test.py`, three runs: **run 3 landed every button** — middle → `crab: mark by middle
   click` (wire 3), left → `crab: click`, right → `crab: context menu opened by pointer`, ARM 2
   (middle on a pane) **marks**, ARM 3 (middle on a popup row) **fires nothing**; run 1 measured the
@@ -1004,7 +1022,8 @@ chitra — are `modules = ["dist/<name>.cyr"]`, so a fix reaches crab only after
 `modules = ["src/font_data.cyr"]`, the freestanding core, deliberately — the library face costs
 +183,360 B (+50 %) for a runtime font registry crab never calls, and `CYRIUS_DCE=1` reclaims none of
 it. **daimon is the other**: no `modules` at all. ⚠ The sadish and rekha bundles are 471 KB and 551 KB
-of source at 0.11.2 / 0.9.0 (86 KB and 41 KB before), and crab links without DCE — see *Targets*.
+of source at 0.11.2 / 0.9.0 (86 KB and 41 KB before); CI and the release link them under
+`CYRIUS_DCE=1` since 0.10.3 — see *Targets*.
 
 ✅ **The `net` stdlib declaration is GONE (0.10.0).** This paragraph carried it as a queued cleanup
 from 2026-08-26; `lib/net.cyr` still lands, transitively, from setu's `dist/setu.deps` sidecar
@@ -1012,8 +1031,8 @@ from 2026-08-26; `lib/net.cyr` still lands, transitively, from setu's `dist/setu
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **2,503 passed / 0 failed**
-  *(0.10.1 and 0.10.2; 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **2,543 passed / 0 failed**
+  *(0.10.3; 2,503 at 0.10.1 and 0.10.2, 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
   0.9.4, 2,345 at 0.9.3, 2,012 at 0.8.7, 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230
   at 0.7.7, 253 at 0.7.0)*. ⚠ This line said 2,012 from 0.8.7 to 0.10.1 while the *Version* section
   above carried the live count — two numbers in one file, one of them stale. `render_test` is **55**
@@ -1094,8 +1113,8 @@ from 2026-08-26; `lib/net.cyr` still lands, transitively, from setu's `dist/setu
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,636,136 B** *(0.10.2; 1,097,664 at 0.10.1, 1,084,832 at 0.9.3)* — ⚠ **+49.1 % in one pin-only release**: +180,256 from 6.6.6's stdlib (sankoch 2.8.0), +358,216 from the sadish 0.11.2 / rekha 0.9.0 bundles, linked whole because CI and the release build **without DCE**. `CYRIUS_DCE=1`: **608,040 B**. ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,681,192 B** *(0.10.2; 1,146,920 at 0.10.1, 1,129,864 at 0.9.3)*, `CYRIUS_DCE=1`: **874,280 B** — ⭐ **and it draws in Liberation Sans on a real kernel with the new stack** (`crab-face-test.py` PASS, 2026-09-21: rekha 0.9.0 loads the face, sadish 0.11.2 draws it, dhancha 0.10.4's arena carries it, no fault) — the real target, **CI builds it**. ⚠ 2,149 unreachable functions (1,027,854 B) ride in the shipped artifact; DCE for the release is the operator's call, measured above so it is not made blind |
+| x86_64 linux | ✅ builds, **608,040 B under `CYRIUS_DCE=1`** *(0.10.3 — CI and the release build with DCE since 0.10.3; plain it is 1,636,136, which 0.10.2 shipped: +49.1 % in one pin-only release, +180,256 from 6.6.6's stdlib (sankoch 2.8.0) and +358,216 from the sadish 0.11.2 / rekha 0.9.0 bundles)*. ⚠ 0.10.3's DCE host binary is the SAME SIZE as 0.10.2's DCE probe with 94,327 bytes differing — `cmp`, never `ls -l` (0.8.5 taught the same lesson) |
+| `--agnos`    | ✅ builds, **878,376 B under `CYRIUS_DCE=1`** *(0.10.3; plain 1,685,288; 0.10.2 shipped 1,681,192 plain)* — ⭐ **and it draws in Liberation Sans on a real kernel with the new stack** (`crab-face-test.py` PASS on the 0.10.2 plain binary and **PASS again on the 0.10.3 DCE binary**: rekha 0.9.0 loads the face, sadish 0.11.2 draws it, dhancha 0.10.4's arena carries it, no fault) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. ⚠ DCE keeps `.bss`, so the `large static data` advisory stays |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1187,17 +1206,12 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   carries that warning itself.
 - ⚠ **Focusing a pane by its header does not work** — the header is a sibling of the list, so
   `crab_hit` resolves a header click to no pane. Clicking a row is correct.
-- ⚠⚠ **NEW at 0.10.2, inherited from dhancha 0.10.4: crab MEASURES text per BYTE while the toolkit
-  now DRAWS it per CHARACTER.** `crab_text_w` and `crab_name_cell_px` (`src/ui.cyr`) hand
-  `load8(s + i)` to `dh_text_advance` one byte at a time; `dh_draw_text_ink` decodes UTF-8. For
-  ASCII the two agree exactly. For a non-ASCII name — `Über.txt` — crab sums five advances where
-  four glyphs are drawn, so the name is **over-measured** and cut early, and the cut is
-  byte-granular: it can land between C3 and 9C and leave a lead byte that 0.10.4 draws as its raw
-  cell before the `~`. Strictly less wrong than the mojibake it replaces (every byte was a glyph
-  before), but a new kind of wrong at the cut. ⇒ **The next crab item**: walk both loops by
-  `dh_text_decode(s, at, cpp)` (dhancha 0.10.4 exports it — bytes consumed, scalar stored) and let
-  the cut land on a character boundary; pin it with a name that holds a two-byte character at the
-  edge. Not bundled into the pin bump on purpose.
+- ✅ **CLOSED at 0.10.3 — crab measures text by CHARACTER, as dhancha 0.10.4 draws it.** Opened at
+  0.10.2 (the pin bump that brought 0.10.4 in), closed one release later by `crab_char_adv`, the one
+  reader both measuring loops share. ⚠ What remains true: a name with a character NEITHER face
+  carries draws `?` under kashi and `.notdef` under the face — one cell either way, measured as one.
+  ⚠⚠ **Two bound guards in `crab_char_adv` are held by review** — the NUL-terminated tail copy and
+  the crossing-length clamp protect a READ, and no width can witness a read. Recorded at the test.
 - ⛔⛔ **`crab_fs_open_w` BEHAVES DIFFERENTLY ON THE TWO TARGETS, AND THE TARGET THAT SHIPS IS THE
   PERMISSIVE ONE.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, which refuses
   an existing file and returns `EEXIST` — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with
@@ -1274,16 +1288,13 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.10.2 (2026-09-21), in the order the roadmap's ladder gives them:**
-1. **`0.10.3 · Names measured by character`** — `crab_text_w` / `crab_name_cell_px` walk by
-   `dh_text_decode` and the cut lands on a character boundary (see *Known gaps*). Small, unblocked,
-   crab's alone.
-2. **The two decisions this release put numbers under, both the operator's**: whether `release.yml`
-   builds with `CYRIUS_DCE=1` (1,681,192 → 874,280 B on the target; `render_test` 55/0 under it),
-   and whether crab adopts dhancha 0.10.3's dormant-`path` convention so a sibling moving ahead
-   cannot break an unchanged tree (it did, 2026-09-21).
+⭐ **As of 0.10.3 (2026-09-21), in the order the roadmap's ladder gives them:**
+1. ✅ `0.10.3 · Names measured by character` — shipped. ✅ DCE on the release build — ruled and
+   shipped in the same cut.
+2. **One decision still open, the operator's**: whether crab adopts dhancha 0.10.3's dormant-`path`
+   convention so a sibling moving ahead cannot break an unchanged tree (it did, 2026-09-21).
 3. **M7's index and tags** — blocked upstream of daimon (bote's sidecar / cyrius distlib), re-measured
-   under 6.6.6. Nothing for crab to do but not fake it.
+   under 6.6.6. The operator has taken this one; crab does not fake it meanwhile.
 4. **`0.11.0 · Assisted search`** — behind 3.
 
 Everything below this line is the record of how the earlier queue was carried, kept because its

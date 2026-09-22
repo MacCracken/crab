@@ -57,11 +57,19 @@ jobs:
         # ⛔ THE AGNOS ARTIFACT IS THE POINT OF THE RELEASE. The host build is kept because it is what
         # the test suite runs against (`tests/crab.tcyr` hard-codes `build/crab`) and it is useful for
         # development, not because it is the thing being shipped.
+        # ⭐ `CYRIUS_DCE=1` — operator ruling 2026-09-21 (0.10.3), taken with the 0.10.2 measurements in
+        # hand: the 6.6.6 stack links the sadish 0.11.2 / rekha 0.9.0 bundles and sankoch 2.8.0 whole,
+        # and 2,149 unreachable functions (1,027,854 B) rode in the shipped artifact. Under DCE the
+        # agnos binary is 1,681,192 → ~874 KB and the host 1,636,136 → ~608 KB. ⚠ DCE NOPs the CODE
+        # of unreachable functions and keeps their `.bss`, so the `large static data` advisory stays.
+        # ⛔ ci.yml builds BOTH targets under the same flag, so the binary the suite and the QEMU
+        # harnesses see is the one this step ships — a gate that tests a different binary than the
+        # release publishes is the 0.7.7 lesson (two compilers, one green) in a new coat.
         run: |
           set -e
           mkdir -p build
-          cyrius build src/main.cyr build/${{ github.event.repository.name }}
-          cyrius build --agnos src/main.cyr build/${{ github.event.repository.name }}-agnos
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/${{ github.event.repository.name }}
+          CYRIUS_DCE=1 cyrius build --agnos src/main.cyr build/${{ github.event.repository.name }}-agnos
 
       - name: Extract changelog
         # Pull the tagged section out of CHANGELOG.md for the release body.

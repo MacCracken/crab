@@ -43,9 +43,14 @@ jobs:
           cyrius deps --verify
 
       - name: Build (host)
+        # ⭐ `CYRIUS_DCE=1` on both target builds since 0.10.3 (operator ruling 2026-09-21), because
+        # `release.yml` ships DCE binaries and this workflow is its gate: the `build/crab` the suite
+        # spawns and the `--agnos` binary the QEMU harnesses take must be the artifact that ships,
+        # not a plain twin of it. `render_test` below stays plain — it is a harness, not the artifact
+        # (measured under DCE too: 55 checks, 0 failed).
         run: |
           mkdir -p build
-          cyrius build src/main.cyr build/${{ github.event.repository.name }}
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
       - name: Build (--agnos — the target that actually ships)
         # ⛔⛔ THIS STEP IS NOT A TIDINESS ITEM. `src/main.cyr` wraps lines 263–1484 in a
@@ -57,7 +62,7 @@ jobs:
         # ⛔ THE FLAG IS `--agnos`. `CYRIUS_TARGET=agnos` is SILENTLY IGNORED — measured: it builds a
         # byte-identical HOST binary and exits 0, with no warning, even for a garbage value. A step
         # written that way would look like this gate and be the host build twice.
-        run: cyrius build --agnos src/main.cyr build/crab-agnos
+        run: CYRIUS_DCE=1 cyrius build --agnos src/main.cyr build/crab-agnos
 
       - name: Test
         # ⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY — it auto-discovers `tests/*.tcyr`

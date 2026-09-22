@@ -56,8 +56,13 @@ include "src/app.cyr"
 #     gid 0 (.notdef, and every unmapped codepoint)  adv  500  ->  8 px
 #     gid 1  'm' (0x6D)                              adv 1000  -> 16 px
 #     gid 2  'n' (0x6E)                              adv  750  -> 12 px
+#     gid 2  'Ü' (U+00DC) — a second cmap segment onto the SAME glyph (0.10.3)     -> 12 px
 # ⛔ `n` IS THE GLYPH `crab_char_w` ASKS ABOUT, so this face's representative advance is **12**, not
 # 9 — every derived width below must move by exactly that ratio or the derivation is not real.
+# ⛔ `Ü` IS MAPPED SO THAT THE SCALAR AND ITS LEAD BYTE PRICE DIFFERENTLY (0.10.3). `Ü` is C3 9C in
+# UTF-8; the lead byte read as a codepoint is U+00C3, unmapped, 8 px; the scalar U+00DC is 12 px;
+# the two bytes summed are 16 px. A measure that asks about the scalar answers 12 and nothing else
+# does — which is the only way the suite can tell "decoded, then asked" from "asked about a byte".
 fn t_put_u16(buf, off, v): i64 {
     store8(buf + off, (v >> 8) & 255);
     store8(buf + off + 1, v & 255);
@@ -80,7 +85,7 @@ fn t_prop_face(buf, len): i64 {
     t_put_u32(buf, 28, 0x6D617870); t_put_u32(buf, 28 + 8, 148); t_put_u32(buf, 28 + 12, 32);   # maxp
     t_put_u32(buf, 44, 0x68686561); t_put_u32(buf, 44 + 8, 180); t_put_u32(buf, 44 + 12, 36);   # hhea
     t_put_u32(buf, 60, 0x686D7478); t_put_u32(buf, 60 + 8, 216); t_put_u32(buf, 60 + 12, 16);   # hmtx
-    t_put_u32(buf, 76, 0x636D6170); t_put_u32(buf, 76 + 8, 232); t_put_u32(buf, 76 + 12, 44);   # cmap
+    t_put_u32(buf, 76, 0x636D6170); t_put_u32(buf, 76 + 8, 232); t_put_u32(buf, 76 + 12, 52);   # cmap (3 segments, 0.10.3)
     t_put_u16(buf, 92 + 18, 1000);          # head.unitsPerEm — a round em, so the px maths is checkable by hand
     t_put_u16(buf, 148 + 4, 3);             # maxp.numGlyphs
     t_put_u16(buf, 180 + 4, 800);           # hhea.ascender
@@ -90,7 +95,9 @@ fn t_prop_face(buf, len): i64 {
     t_put_u16(buf, 216 + 0, 500);  t_put_u16(buf, 216 + 2, 10);    # gid 0 .notdef  adv 500
     t_put_u16(buf, 216 + 4, 1000); t_put_u16(buf, 216 + 6, 20);    # gid 1 'm'      adv 1000
     t_put_u16(buf, 216 + 8, 750);  t_put_u16(buf, 216 + 10, 30);   # gid 2 'n'      adv 750
-    # cmap: format 4, one segment 0x6D..0x6E ('m'..'n') plus the mandatory terminator.
+    # cmap: format 4, segment 0x6D..0x6E ('m'..'n'), segment 0xDC..0xDC ('Ü' -> gid 2, 0.10.3), plus
+    # the mandatory terminator. Segments are sorted by endCode, which is what rekha's search needs;
+    # the searchRange/entrySelector/rangeShift hints are written for a 3-segment table and unused.
     # ⚠ A format-4 segment maps CONSECUTIVE codes to CONSECUTIVE gids, so 'm' takes gid 1 and 'n'
     # gid 2 — which is why the advances above are ordered the way they are rather than by size.
     var cm = 232;
@@ -101,21 +108,25 @@ fn t_prop_face(buf, len): i64 {
     t_put_u32(buf, cm + 8, 12);             # offset from the cmap table to the subtable
     var sub = cm + 12;
     t_put_u16(buf, sub + 0, 4);             # format
-    t_put_u16(buf, sub + 2, 28);            # length
+    t_put_u16(buf, sub + 2, 40);            # length: 16 + 4 arrays x 3 segments x 2 bytes
     t_put_u16(buf, sub + 4, 0);             # language
-    t_put_u16(buf, sub + 6, 4);             # segCountX2 -> segCount 2
-    t_put_u16(buf, sub + 8, 4);             # searchRange
-    t_put_u16(buf, sub + 10, 1);            # entrySelector
-    t_put_u16(buf, sub + 12, 0);            # rangeShift
+    t_put_u16(buf, sub + 6, 6);             # segCountX2 -> segCount 3
+    t_put_u16(buf, sub + 8, 4);             # searchRange   (2 x 2^floor(log2 3))
+    t_put_u16(buf, sub + 10, 1);            # entrySelector (floor(log2 3))
+    t_put_u16(buf, sub + 12, 2);            # rangeShift    (6 - 4)
     t_put_u16(buf, sub + 14, 0x6E);         # endCode[0]   = 'n'
-    t_put_u16(buf, sub + 16, 65535);        # endCode[1]   = terminator
-    t_put_u16(buf, sub + 18, 0);            # reservedPad
-    t_put_u16(buf, sub + 20, 0x6D);         # startCode[0] = 'm'
-    t_put_u16(buf, sub + 22, 65535);        # startCode[1]
-    t_put_u16(buf, sub + 24, 65536 - 108);  # idDelta[0] = -108 -> 'm'(109) = gid 1, 'n'(110) = gid 2
-    t_put_u16(buf, sub + 26, 1);            # idDelta[1]
-    t_put_u16(buf, sub + 28, 0);            # idRangeOffset[0]
-    t_put_u16(buf, sub + 30, 0);            # idRangeOffset[1]
+    t_put_u16(buf, sub + 16, 0xDC);         # endCode[1]   = 'Ü'
+    t_put_u16(buf, sub + 18, 65535);        # endCode[2]   = terminator
+    t_put_u16(buf, sub + 20, 0);            # reservedPad
+    t_put_u16(buf, sub + 22, 0x6D);         # startCode[0] = 'm'
+    t_put_u16(buf, sub + 24, 0xDC);         # startCode[1] = 'Ü'
+    t_put_u16(buf, sub + 26, 65535);        # startCode[2]
+    t_put_u16(buf, sub + 28, 65536 - 108);  # idDelta[0] = -108 -> 'm'(109) = gid 1, 'n'(110) = gid 2
+    t_put_u16(buf, sub + 30, 65536 - 218);  # idDelta[1] = -218 -> 'Ü'(220) = gid 2, the 'n' glyph
+    t_put_u16(buf, sub + 32, 1);            # idDelta[2]
+    t_put_u16(buf, sub + 34, 0);            # idRangeOffset[0]
+    t_put_u16(buf, sub + 36, 0);            # idRangeOffset[1]
+    t_put_u16(buf, sub + 38, 0);            # idRangeOffset[2]
     return rekha_font_open(buf, len);
 }
 
@@ -2941,6 +2952,7 @@ fn main() {
     t_h1_097();
     t_dup_0100();
     t_sidebar_fold_0101();
+    t_utf8_0103();
     t_thumbnails();
     t_exif();
     t_gridview();
@@ -3322,6 +3334,145 @@ fn t_preview(): i64 {
 # ⭐⭐ 0.9.7 — H1: A CANCELLED COPY DELETES ONLY WHAT CRAB CREATED.
 # ⭐⭐ 0.10.0 — M7's first surface: DUPLICATE DETECTION, which crab does alone.
 # ⭐⭐ 0.10.1 — THE SIDEBAR CAN REACH ITS OWN ROWS.
+fn t_utf8_0103(): i64 {
+    test_group("crab — 0.10.3: names are measured by CHARACTER, as dhancha 0.10.4 draws them");
+
+    # ⛔⛆ THE DEFECT, STATED AS THE NUMBERS THAT EXPOSE IT. dhancha 0.10.4 decodes UTF-8 in every
+    # text walk and draws one glyph per CHARACTER; through 0.10.2 crab summed one advance per BYTE.
+    # For ASCII the two never disagreed. For `Über.txt` — nine bytes, eight characters — crab priced
+    # nine cells where the toolkit drew eight, so the name was OVER-MEASURED: a column that held it
+    # whole got a `~` claiming it was cut. And because the cut loop accepted bytes, a column with
+    # room for the lead of `Ü` and not its continuation wrote `C3 7E` — a lone lead byte the toolkit
+    # draws as its raw cell, then the marker. Both are fixed by ONE reader, `crab_char_adv`, which
+    # is `dh_text_decode` — the toolkit's own decoder — plus the per-arm advance the draw uses.
+    crab_set_frame_font(0);
+    assert_eq(crab_char_w(), CRAB_COL_CHARW, "the bitmap face is installed — every character is one 9 px cell");
+
+    # --- the bitmap arm: one cell per CHARACTER, `?` and a raw byte included, nothing for a stray --
+    var u8 = alloc(64);
+    store8(u8 + 0, 0xC3); store8(u8 + 1, 0x9C);                          # Ü
+    store8(u8 + 2, 98); store8(u8 + 3, 101); store8(u8 + 4, 114);         # b e r
+    store8(u8 + 5, 46); store8(u8 + 6, 116); store8(u8 + 7, 120); store8(u8 + 8, 116); store8(u8 + 9, 0);   # .txt
+    assert_eq(crab_text_w(u8), 8 * CRAB_COL_CHARW,
+      "⭐ `Über.txt` — nine bytes, EIGHT characters — measures eight cells, as the toolkit draws it");
+    assert(crab_text_w(u8) != 9 * CRAB_COL_CHARW, "⛔ ...and NOT nine — the per-byte figure of 0.10.2");
+
+    var dash = alloc(8);
+    store8(dash + 0, 0xE2); store8(dash + 1, 0x80); store8(dash + 2, 0x94); store8(dash + 3, 0);   # — (U+2014)
+    # ⚠ CP437 has no em dash, so the bitmap arm draws `?` — ONE cell — which is what crab's notices
+    # have carried since 0.8.x; under kashi it used to be three cells of box-drawing garbage.
+    assert_eq(crab_text_w(dash), CRAB_COL_CHARW, "⭐ `—` (three bytes) is one cell wide — `?` on the CP437 page");
+
+    var stray = alloc(8);
+    store8(stray + 0, 97); store8(stray + 1, 0x80); store8(stray + 2, 98); store8(stray + 3, 0);   # a <cont> b
+    assert_eq(crab_text_w(stray), 2 * CRAB_COL_CHARW,
+      "⭐ a stray continuation byte is nobody's — the toolkit draws nothing for it, so it measures nothing");
+
+    var lead = alloc(8);
+    store8(lead + 0, 0xC3); store8(lead + 1, 97); store8(lead + 2, 0);   # an invalid lead (no continuation), then 'a'
+    assert_eq(crab_text_w(lead), 2 * CRAB_COL_CHARW,
+      "an invalid lead is its own raw cell, one byte long — as it always was, by construction");
+
+    var crab4 = alloc(8);
+    store8(crab4 + 0, 0xF0); store8(crab4 + 1, 0x9F); store8(crab4 + 2, 0xA6); store8(crab4 + 3, 0x80); store8(crab4 + 4, 0);   # 🦀 U+1F980
+    assert_eq(crab_text_w(crab4), CRAB_COL_CHARW,
+      "⭐ a four-byte character is ONE cell (`?` — no crab on the CP437 page), not four");
+
+    # --- the cut: a name that FITS is not marked, and a cut lands on a character boundary -----------
+    var dst = alloc(CRAB_NAME_MAX + 8);
+    var fit8 = crab_name_cell_px(dst, u8, 8 * CRAB_COL_CHARW);
+    assert_eq(fit8, 9, "⭐ `Über.txt` in an eight-cell column comes back WHOLE — nine bytes, no marker");
+    assert(t_streq(dst, u8), "...byte for byte the name, unmarked, because nothing was cut");
+    # ⛔⛆ 0.10.2 priced it at nine cells, cut it to seven bytes and wrote `Über.t~` — a `~` on a name
+    # that fitted, which is the lie `crab_name_cell`'s marker exists to prevent.
+    var fit9 = crab_name_cell_px(dst, u8, (9 * CRAB_COL_CHARW) - 1);
+    assert_eq(fit9, 9, "...and one px short of NINE cells still holds all eight characters");
+
+    # ⛔⛔ THE CUT LANDS ON A CHARACTER BOUNDARY. One cell of room plus the marker's own cell: `Ü`
+    # fits, `b` does not — so `Ü~`, THREE bytes, with the continuation byte travelling with its lead.
+    var cut = crab_name_cell_px(dst, u8, CRAB_COL_CHARW + CRAB_COL_CHARW);
+    assert_eq(cut, 3, "⛔ one cell of room holds `Ü` whole: two bytes plus the marker");
+    assert_eq(load8(dst + 0), 0xC3, "...the lead byte");
+    assert_eq(load8(dst + 1), 0x9C, "⛔⛔ ...AND ITS CONTINUATION — 0.10.2 stopped between them and wrote `C3 7E`");
+    assert_eq(load8(dst + 2), 126, "...then the marker");
+    assert_eq(load8(dst + 3), 0, "...then the terminator");
+    assert(crab_text_w(dst) <= CRAB_COL_CHARW + CRAB_COL_CHARW, "⛔ and the result really fits the column");
+    # ⚠ And where the whole character does NOT fit, none of it is taken: room for nothing but the
+    # marker cuts BEFORE `Ü`, never inside it.
+    var cut0 = crab_name_cell_px(dst, u8, CRAB_COL_CHARW);
+    assert_eq(cut0, 1, "no room for any character: the marker alone");
+    assert(t_streq(dst, "~"), "...and no stranded lead byte in front of it");
+
+    # --- the bound is the bound: a name the kernel failed to terminate ---------------------------------
+    # ⛔⛔ `name` IS KERNEL DATA and the scan stops at `CRAB_REC_TYPE` (63) because byte 63 is the
+    # record's TYPE. A decoder fed the record directly would read a lead at byte 62 and look at byte
+    # 63 for its continuation — so within four bytes of the bound `crab_char_adv` decodes a
+    # NUL-terminated COPY of what remains, and a sequence the bound cuts is its raw lead byte. Here
+    # byte 63 is planted as a CONTINUATION byte (the shape a type byte can never take — 0, 1 or 2 —
+    # which is exactly why the test plants it): the copy must not carry it, and the width must be
+    # 63 cells — 62 `a`s and one raw cell — not 62 with byte 63 folded into an `é`.
+    var rec = alloc(CRAB_NAME_MAX + 8);
+    var ri = 0;
+    while (ri < 62) { store8(rec + ri, 97); ri = ri + 1; }
+    store8(rec + 62, 0xC3);                              # a lead, at the last byte the scan may read
+    store8(rec + 63, 0xA9);                              # ⛔ planted: a continuation byte where the TYPE lives
+    store8(rec + 64, 0);
+    var recw = crab_name_cell_px(dst, rec, 100000);
+    assert_eq(recw, 63, "⛔ an unterminated name is copied to the record's name bound — 63 bytes — and stops");
+    assert_eq(load8(dst + 62), 0xC3, "...the lead byte at the bound travels as the raw byte it is");
+    assert_eq(load8(dst + 63), 0, "⛔⛔ ...and byte 63 — the TYPE slot — is NOT copied, whatever it holds");
+    assert_eq(crab_text_w(dst), 63 * CRAB_COL_CHARW, "...and the copy measures 63 cells: the raw lead is its own cell");
+    # ⚠⚠ TWO GUARDS HOLD THIS AND NEITHER IS OBSERVABLE HERE — RECORDED, NOT HIDDEN. `crab_char_adv`
+    # (1) decodes a NUL-terminated COPY within four bytes of the bound and (2) clamps a length that
+    # would cross it. Deleting either, or BOTH, leaves this group green: the whole-name path copies
+    # `n` bytes without consulting the decoder, the greedy path can never accept the last
+    # character (if everything fits, the other path is taken), and a lead cut at the bound prices
+    # the same as the character it would have become — one cell under kashi, .notdef under this
+    # face. What the guards protect is that the decoder never READS past the bound, and a read is
+    # not something a width can witness. Held by review and by the ⛔ at the function.
+
+    # --- the proportional face: the same reader, the face's advances -----------------------------------
+    var pfbuf = alloc(512);
+    var pf = t_prop_face(pfbuf, 512);
+    assert(pf != 0, "the synthetic proportional face opens");
+    crab_set_frame_font(pf);
+    assert_eq(crab_char_w(), 12, "...and is installed for the frame");
+    # ⛔⛔ THE SCALAR IS WHAT IS ASKED ABOUT, NOT ITS LEAD BYTE — the one assertion an all-.notdef face
+    # cannot make, which is why the fixture maps `Ü`. Three answers, three implementations: the
+    # scalar U+00DC is the 'n' glyph, 12 px; the lead byte U+00C3 is unmapped, 8; the two bytes
+    # summed (0.10.2) are 16. Only the first is what the toolkit draws.
+    assert_eq(rekha_char_advance_px(pf, 0xDC, CRAB_TEXT_EM), 12, "the fixture maps 'Ü' to the 12 px glyph");
+    assert_eq(rekha_char_advance_px(pf, 0xC3, CRAB_TEXT_EM), 8, "...and leaves its lead byte's codepoint unmapped");
+    var ue = alloc(8);
+    store8(ue + 0, 0xC3); store8(ue + 1, 0x9C); store8(ue + 2, 0);   # Ü
+    assert_eq(crab_text_w(ue), 12, "⭐ `Ü` measures the SCALAR's advance — 12");
+    assert(crab_text_w(ue) != 8, "⛔ ...not the lead byte's 8 — the decoder's answer is what is priced");
+    assert(crab_text_w(ue) != 16, "⛔ ...and not the two bytes' 16 — the 0.10.2 figure");
+    # `n` 12, `Ä` unmapped → .notdef 8, `m` 16. Per byte 0.10.2 answered 12 + 8 + 8 + 16 = 44.
+    var nam = alloc(8);
+    store8(nam + 0, 110); store8(nam + 1, 0xC3); store8(nam + 2, 0x84); store8(nam + 3, 109); store8(nam + 4, 0);   # n Ä m
+    assert_eq(crab_text_w(nam), 12 + 8 + 16, "⭐ `nÄm` under the face: 'n', ONE .notdef, 'm' — 36 px");
+    assert(crab_text_w(nam) != 12 + 8 + 8 + 16, "⛔ ...not 44, the per-byte figure");
+    # Room for `m` (16) and `Ä` (8) but not the next `m`: the cut lands after the whole `Ä`.
+    var mam = alloc(16);
+    store8(mam + 0, 109); store8(mam + 1, 0xC3); store8(mam + 2, 0x84);
+    store8(mam + 3, 109); store8(mam + 4, 109); store8(mam + 5, 109); store8(mam + 6, 0);   # m Ä m m m
+    var pcut = crab_name_cell_px(dst, mam, 16 + 8 + 8);
+    assert_eq(pcut, 4, "⛔ `m`, whole `Ä`, marker: three bytes of name plus `~` — 0.10.2 answered 3: `6D C3 7E`");
+    assert_eq(load8(dst + 1), 0xC3, "...the lead");
+    assert_eq(load8(dst + 2), 0x84, "⛔⛔ ...and its continuation — 0.10.2 wrote `6D C3 7E` here");
+    assert_eq(load8(dst + 3), 126, "...then the marker");
+    assert(crab_text_w(dst) <= 16 + 8 + 8, "⛔ and the claim the marker makes is true — it fits");
+    var pcut2 = crab_name_cell_px(dst, mam, 16 + 8);
+    assert_eq(pcut2, 2, "room for `m` and the marker only: `m~`, with no half of an `Ä` between them");
+    assert(t_streq(dst, "m~"), "...exactly");
+
+    # ⚠ AND EVERYTHING GOES BACK. The face is module state.
+    crab_set_frame_font(0);
+    assert_eq(crab_char_w(), CRAB_COL_CHARW, "the bitmap advance is restored");
+    return 0;
+}
+
 fn t_sidebar_fold_0101(): i64 {
     test_group("crab — 0.10.1: the sidebar overflows at the shipped size, and follows its cursor");
 
@@ -5006,19 +5157,19 @@ fn t_gridview(): i64 {
     assert_eq(crab_cols_for_width(191), 1, "...and one px below it only the NAME survives");
     assert_eq(crab_col_chars(120), 10, "a 120 px column holds ten of this face's characters");
 
-    # --- 0.9.0: THE LATIN-1 LIMIT, WRITTEN DOWN BECAUSE IT CANNOT HONESTLY BE CLOSED HERE ---------
-    # ⛔⛆ THE SCALABLE PATH WALKS ONE **BYTE** PER GLYPH. dhancha's `dh_draw_text_ink` reads
-    # `load8(text + i)` and hands that byte to rekha as a CODEPOINT, so byte 0xC3 is drawn as U+00C3
-    # rather than as the first half of a two-byte sequence. There is no UTF-8 decode anywhere in
-    # dhancha or rekha. `crab_text_w` matches it byte-for-byte, deliberately: a measurer that decoded
-    # UTF-8 while the drawer did not would put the caret and the truncation in places the ink is not.
-    # ⚠ crab CANNOT TYPE SUCH A BYTE — `crab_key_char` maps US QWERTY and tops out at '~' (126), as
-    # the assertions below hold it to. ⛔ BUT crab CAN DISPLAY ONE: a name comes from a readdir
-    # record the kernel filled, and a UTF-8 filename on an ext2 volume is an ordinary thing to find.
-    # ⇒ **The limit is a DISPLAY limit, not an input limit**, it belongs to dhancha and rekha rather
-    # than to crab, and it is recorded rather than papered over. Under the bitmap face the same byte
-    # indexes CP437 and draws a different wrong glyph — so this is not a regression the face
-    # introduces, it is a limit the face makes legible.
+    # --- 0.9.0 → 0.10.3: THE LATIN-1 LIMIT, AND ITS EXPIRY ---------------------------------------
+    # ⛔⛆ THROUGH dhancha 0.10.3 THE SCALABLE PATH WALKED ONE **BYTE** PER GLYPH — `load8(text + i)`
+    # handed to rekha as a CODEPOINT, so byte 0xC3 drew as U+00C3 rather than as the first half of a
+    # two-byte sequence — and `crab_text_w` matched it byte for byte, deliberately: a measurer that
+    # decoded UTF-8 while the drawer did not would put the truncation where the ink is not. The
+    # assertion below pinned "é" at TWO .notdef glyphs for that reason, and said the limit belonged
+    # to dhancha and rekha. ⭐ **dhancha 0.10.4 closed it** — every text walk decodes UTF-8 — and
+    # crab 0.10.3 walks `crab_text_w` and `crab_name_cell_px` by the same decoder, so the assertion
+    # is INVERTED here rather than deleted: the number it pins is now the one glyph the toolkit draws.
+    # ⚠ crab still CANNOT TYPE SUCH A BYTE — `crab_key_char` maps US QWERTY and tops out at '~'
+    # (126), as the assertions below hold it to. ⛔ BUT crab CAN DISPLAY ONE: a name comes from a
+    # readdir record the kernel filled, and a UTF-8 filename on an ext2 volume is an ordinary thing
+    # to find. The rest of 0.10.3's proof is in `t_utf8_0103`.
     var l1i = 0;
     var l1max = 0;
     while (l1i < 256) {
@@ -5033,17 +5184,17 @@ fn t_gridview(): i64 {
     # ⚠ `~` (126) IS HIGHER STILL AND crab WRITES IT, but no key types it: it is `crab_name_cell`'s
     # truncation marker, chosen in 0.5.0 precisely because the CP437 bitmap face has no ellipsis.
     assert_eq(crab_key_char(0x35, 1), 0, "no key on the map produces '~' — crab writes it, you cannot type it");
-    # ⚠ AND A HIGH BYTE MEASURES AS ONE GLYPH, which is the honest statement of the limit: crab
-    # prices it exactly as dhancha will draw it, so the width is wrong in the same direction as the
-    # ink rather than in a different one.
+    # ⭐ A TWO-BYTE CHARACTER MEASURES AS ONE GLYPH (0.10.3; it was pinned at TWO from 0.9.0 to
+    # 0.10.2). `é` is unmapped in this face, so it falls to `.notdef` and advances 8 — not 16 for
+    # its two bytes, and not the 12 of the representative glyph `crab_char_w()` reports. A per-byte
+    # measure answers 16 and a `length x advance` one 24; measuring by character answers what
+    # dhancha 0.10.4 actually draws.
     var l1b = alloc(8);
     store8(l1b + 0, 0xC3); store8(l1b + 1, 0xA9); store8(l1b + 2, 0);   # "é" in UTF-8, two bytes
-    # ⭐ AND THE ANSWER IS **16, NOT 24**, WHICH IS MEASUREMENT WORKING RATHER THAN A DISCREPANCY.
-    # Both bytes are unmapped in this face, so each falls to `.notdef` and advances 8 — not the 12
-    # of the representative glyph `crab_char_w()` reports. A `length x advance` implementation would
-    # answer 24 and be wrong by half a character; measuring answers what will actually be drawn.
-    assert_eq(crab_text_w(l1b), 16,
-      "a two-byte UTF-8 character measures as TWO .notdef glyphs — exactly the two dhancha would draw");
+    assert_eq(crab_text_w(l1b), 8,
+      "⭐ a two-byte UTF-8 character measures as ONE .notdef glyph — the one dhancha 0.10.4 draws");
+    assert(crab_text_w(l1b) != 16,
+      "⛔ ...and NOT two — the per-byte figure this assertion pinned for three releases");
     assert(crab_text_w(l1b) != 2 * crab_char_w(),
       "⛔ ...and NOT two representative advances — which is the difference measuring makes");
 

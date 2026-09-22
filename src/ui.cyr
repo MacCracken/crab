@@ -272,13 +272,14 @@ enum CrabCol {
     # path or proportional text"*, and 0.9.0 shipped proportional text — so a line was added saying
     # the face unblocked it. **That line was wrong, and it was written here one release ago.**
     # U+1F980 is 128,896: `rekha_char_to_glyph` returns 0 for any codepoint above 65,535 in its own
-    # code (*"format 4 is BMP-only"*), the shipped face carries no format-12 subtable, and dhancha
-    # walks ONE BYTE per glyph in both branches — so the crab is three independent steps away from
-    # drawable, and no font fixes any of them. ⇒ **The icon path, which is what the gate always said.**
-    # ⚠ AND IT USES NO FONT AT ALL, which is the point: three filled boxes. That sidesteps something
-    # 0.9.0 made live — the same byte draws a DIFFERENT character on the two faces (byte 0xF0 is
-    # CP437 `≡` through kashi and U+00F0 `ð` through rekha), so any mark made of text would render
-    # one way on the host build and another on the target.
+    # code (*"format 4 is BMP-only"*) and the shipped face carries no format-12 subtable — so the
+    # crab is two independent steps away from drawable, and no font fixes either. ⚠ It was THREE
+    # until dhancha 0.10.4: the draw walked one BYTE per glyph, and now decodes UTF-8 (a four-byte
+    # 🦀 reaches the cmap as U+1F980 — and the cmap has nothing for it). ⇒ **The icon path, which is
+    # what the gate always said.**
+    # ⚠ AND IT USES NO FONT AT ALL, which is the point: three filled boxes. A mark made of text
+    # would still have to be a character BOTH faces carry — kashi's page is CP437 through
+    # `dh_text_cp437`, and it has no crab.
     CRAB_DOOR_W       = 22;     # = CRAB_STATUS_H — square in the row it lives in
     CRAB_DOOR_BAR_H   = 2;      # one stroke
     CRAB_DOOR_PAD     = 4;
@@ -416,11 +417,55 @@ fn crab_char_w(): i64 {
     return a;
 }
 
+# @public — the CHARACTER that starts at `s + at`, read the way dhancha 0.10.4 DRAWS it: its advance
+# under the frame's font is returned, and the bytes it occupies (>= 1) are stored at `lenp`, an
+# 8-byte slot the caller owns. `n` is the scan bound — the character may not extend past `s + n`.
+#
+# ⛔⛔ ONE READING OF "A CHARACTER", SHARED WITH THE DRAW (0.10.3). dhancha 0.10.4 made
+# `dh_draw_text_ink` decode UTF-8 and draw one glyph per CHARACTER — a stray continuation byte draws
+# nothing, an invalid lead draws as its raw byte, everything else as its scalar. Through 0.10.2 crab
+# still measured per BYTE, so for `Über.txt` it summed five advances where the toolkit drew four:
+# the name was over-measured and cut early, and the cut could land INSIDE the two-byte `Ü`, leaving
+# a lone C3 that the draw rendered as its raw cell before the `~`. `dh_text_decode` is the toolkit's
+# own decoder, so measure and draw cannot disagree about where a character starts or what it is.
+# ⚠ THE PER-CHARACTER WIDTH IS EXACTLY THE DRAW'S: the bitmap arm advances one cell (`CRAB_COL_CHARW`)
+# for every character with a scalar — a scalar CP437 has no cell for draws `?`, one cell, and a raw
+# byte is its own cell — and nothing for a stray continuation byte; the scalable arm asks
+# `dh_text_advance` for the scalar and nothing for a stray byte. Mirrored here, arm for arm.
+# ⛔ THE BOUND IS THE BOUND. `dh_text_decode` reads a lead's continuation bytes until one is not a
+# continuation byte, and a bound is a LENGTH, not a NUL — so within four bytes of it the decoder is
+# fed a NUL-terminated COPY of what remains and cannot read past `s + n`. A sequence the bound cuts
+# is therefore its raw lead byte, one byte long — a wrong width, never a walk; the same rule the
+# scans below have kept since 0.5.0, and the reason a name's bound is `CRAB_REC_TYPE`: byte 63 of
+# a record is its TYPE, and a decoder that reached it would price a type byte as a character.
+fn crab_char_adv(s, at, n, lenp): i64 {
+    var cpv[8];
+    var tail[8];
+    var k = 0;
+    if ((n - at) >= 4) { k = dh_text_decode(s, at, &cpv); }
+    else {
+        var tp = &tail;
+        var m = 0;
+        while (m < (n - at)) { store8(tp + m, load8(s + at + m)); m = m + 1; }
+        store8(tp + m, 0);
+        k = dh_text_decode(tp, 0, &cpv);
+    }
+    if (k < 1) { k = 1; }
+    if ((at + k) > n) { k = n - at; }
+    store64(lenp, k);
+    var cp = load64(&cpv);
+    if (cp < 0) { return 0; }                              # a stray continuation byte: nobody's, drawn as nothing
+    if (crab_font == 0) { return CRAB_COL_CHARW; }         # one cell per character — `?` and a raw byte included
+    return dh_text_advance(crab_font, cp, CRAB_TEXT_EM);
+}
+
 # @public — the MEASURED pixel width of the cstring `s` under the frame's font.
 #
-# ⛔ MEASURED, NOT `length * advance`, WHICH IS THE WHOLE DIFFERENCE. For the bitmap font the two
-# agree exactly and this costs one multiply; for a proportional face they do not, and every place
-# that asks "does this string fit" has to be the second one.
+# ⛔ MEASURED, NOT `length * advance`, WHICH IS THE WHOLE DIFFERENCE. For the bitmap font and ASCII
+# the two agree exactly; for a proportional face — or any non-ASCII character under either face —
+# they do not, and every place that asks "does this string fit" has to be the second one.
+# ⭐ WALKED BY CHARACTER, NOT BY BYTE (0.10.3): `crab_char_adv` above is the one reader, so `—` in a
+# notice is one dash wide and `Ü` is one glyph, as the toolkit draws them.
 # ⛔ THE SCAN IS BOUNDED, because some of the strings it will be asked about are readdir names —
 # kernel data, untrusted by crab's own rule, and the exact shape that caused the 0.5.0 P-1 that made
 # `src/path.cyr` a file. A missing NUL must cost a wrong width, never a walk off the buffer.
@@ -432,10 +477,13 @@ fn crab_text_w(s): i64 {
     if (s == 0) { return 0; }
     var n = 0;
     while ((n < CRAB_TEXT_SCAN_MAX) && (load8(s + n) != 0)) { n = n + 1; }
-    if (crab_font == 0) { return n * CRAB_COL_CHARW; }
     var w = 0;
     var i = 0;
-    while (i < n) { w = w + dh_text_advance(crab_font, load8(s + i), CRAB_TEXT_EM); i = i + 1; }
+    var kl[8];
+    while (i < n) {
+        w = w + crab_char_adv(s, i, n, &kl);
+        i = i + load64(&kl);
+    }
     return w;
 }
 
@@ -547,26 +595,28 @@ fn crab_name_cell(dst, name, chars): i64 {
 # P-1 that made `src/path.cyr` a file. The bound is `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, and the
 # one-byte difference is the point: byte 63 is the record's TYPE, and scanning it would render a type
 # byte as a character.
-# ⚠ MEASURED GREEDILY, ONE GLYPH AT A TIME, because that is the only way to know where a
-# proportional run crosses a pixel edge. At `font = 0` every advance is `CRAB_COL_CHARW`, so this
-# reduces exactly to the character arithmetic it replaced — the bitmap build is unchanged.
+# ⚠ MEASURED GREEDILY, ONE CHARACTER AT A TIME, because that is the only way to know where a
+# proportional run crosses a pixel edge. At `font = 0` every ASCII advance is `CRAB_COL_CHARW`, so
+# for the names crab has always drawn this reduces exactly to the character arithmetic it replaced.
+# ⛔⛔ THE CUT LANDS ON A CHARACTER BOUNDARY (0.10.3). Through 0.10.2 this loop accepted BYTES, so a
+# column that had room for the lead of a two-byte `Ü` and not its continuation wrote `C3 7E` — a
+# lone lead byte the toolkit (0.10.4) draws as its raw cell, and then the marker. A character is
+# accepted whole or not at all, through the same reader the draw uses.
 fn crab_name_cell_px(dst, name, px): i64 {
     if (px <= 0) { store8(dst, 0); return 0; }
     var n = 0;
     while ((n < CRAB_REC_TYPE) && (load8(name + n) != 0)) { n = n + 1; }
     # ⚠ The whole name first: if it fits, nothing is cut and no marker is written.
-    # ⛔⛆ THE FONT CHECK COMES FIRST, NOT AFTERWARDS. A first draft summed `dh_text_advance` and THEN
-    # overwrote the total when `crab_font == 0` — but `dh_text_advance(0, ...)` reaches
-    # `rekha_units_per_em(0)`, which is a `load64` off a null pointer. It crashed before it could be
-    # corrected. The bitmap face is not a fallback VALUE here; it is a different branch.
+    # ⛔⛆ THE FONT CHECK IS INSIDE `crab_char_adv`, AND IT COMES FIRST. A first draft of 0.9.0 summed
+    # `dh_text_advance` and THEN overwrote the total when `crab_font == 0` — but `dh_text_advance(0,
+    # ...)` reaches `rekha_units_per_em(0)`, a `load64` off a null pointer. It crashed before it could
+    # be corrected. The bitmap face is not a fallback VALUE; it is a different branch, taken once.
+    var kl[8];
     var full = 0;
-    if (crab_font == 0) { full = n * CRAB_COL_CHARW; }
-    else {
-        var k = 0;
-        while (k < n) {
-            full = full + dh_text_advance(crab_font, load8(name + k), CRAB_TEXT_EM);
-            k = k + 1;
-        }
+    var k = 0;
+    while (k < n) {
+        full = full + crab_char_adv(name, k, n, &kl);
+        k = k + load64(&kl);
     }
     if (full <= px) {
         var i = 0;
@@ -583,20 +633,22 @@ fn crab_name_cell_px(dst, name, px): i64 {
     # ⚠ `fit` IS ITS OWN COUNTER, NOT THE LOOP INDEX. A first draft exited by assigning `j = n`,
     # which ended the walk and destroyed the count in the same statement — the marker was then placed
     # by re-scanning `dst` for a NUL nothing had written yet, and the scan walked off the buffer.
-    # SIGSEGV, immediately. Two variables, one job each.
+    # SIGSEGV, immediately. Two variables, one job each. `fit` counts BYTES written, which is what
+    # the caller is told and where the marker goes; `j` walks the name by CHARACTER.
     var w = 0;
     var fit = 0;
     var j = 0;
     var stop = 0;
     while ((j < n) && (stop == 0)) {
-        var a = CRAB_COL_CHARW;
-        if (crab_font != 0) { a = dh_text_advance(crab_font, load8(name + j), CRAB_TEXT_EM); }
+        var a = crab_char_adv(name, j, n, &kl);
+        var len = load64(&kl);
         if ((w + a) > room) { stop = 1; }
         else {
-            store8(dst + fit, load8(name + j));
+            var c = 0;
+            while (c < len) { store8(dst + fit + c, load8(name + j + c)); c = c + 1; }
             w = w + a;
-            fit = fit + 1;
-            j = j + 1;
+            fit = fit + len;
+            j = j + len;
         }
     }
     store8(dst + fit, 126);                            # '~' — this name was cut
@@ -614,9 +666,10 @@ fn crab_name_cell_px(dst, name, px): i64 {
 # directory**: a trailing `/` on the name and a `-` where its size goes. A widened field is only
 # widened where every reader agrees, so the marker is one function now and the size column asks
 # `== 1` rather than "not a file".
-# ⚠ `@` IS ASCII, WHICH IS NOT A STYLE CHOICE HERE. 0.9.0 made the two faces disagree about every
-# byte >= 128 (CP437 through kashi, Latin-1 through rekha), so a non-ASCII marker would render one
-# way on the host build and another on the target. `@` is also what `ls -F` has used for forty years.
+# ⚠ `@` IS ASCII, WHICH IS NOT A STYLE CHOICE HERE. From 0.9.0 to dhancha 0.10.3 the two faces
+# disagreed about every byte >= 128 (CP437 through kashi, Latin-1 through rekha); since 0.10.4 both
+# read UTF-8, but a marker still has to be a character BOTH faces carry, and kashi's page is CP437.
+# `@` is also what `ls -F` has used for forty years.
 fn crab_kind_mark(kind): i64 {
     if (kind == CRAB_KIND_DIR) { return 47; }          # '/'
     if (kind == CRAB_KIND_LINK) { return 64; }         # '@'
@@ -1694,20 +1747,21 @@ fn crab_sidebar_hit(x, y): i64 {
 #
 # ⛔⛔ THE CANVAS ASKS FOR A 🦀 BUTTON AND crab CANNOT DRAW ONE. Turn 2 reads *"Clicking 🦀 toggles
 # the File / Edit / Go menu row… the crab earns its place in the chrome by being the door to it."*
-# crab draws with `font = 0` — kashi's **CP437 8x16 bitmap** — and `dh_draw_text` walks the string
-# one BYTE per glyph (`load8(text + i)`). CP437 has 256 glyphs and no emoji; there is no crab, and
-# no UTF-8 path to reach one. This is the same limit already recorded at `crab_name_trunc`: *"'~'
-# (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph."*
+# The bitmap face is kashi's **CP437 8x16** — 256 cells and no emoji; there is no crab on the page,
+# so a 🦀 in a label draws as `?` (dhancha 0.10.4 decodes it and finds no cell). This is the same
+# limit already recorded at `crab_name_trunc`: *"'~' (126), not '…' — the kashi system font is CP437
+# 8x16 and has no ellipsis glyph."*
 # ⇒ **The door is `F10`, and the crab button is DEFERRED with its reason stated** rather than
 # substituted with an ASCII stand-in that would read as a placeholder nobody removed.
 # ⛔⛆ AND ITS STATED GATE HAS SINCE SHIPPED WITHOUT UNBLOCKING IT — re-checked at 0.10.0. This said
 # "it needs an icon path or proportional text, which is the M5 gate"; **0.9.0 shipped proportional
 # text** and the button is still not drawable, for a reason the old text did not name:
-#   1. `dh_draw_text_ink` walks ONE BYTE per glyph in BOTH branches — the scalable path too, not
-#      just the bitmap one — so there is no UTF-8 road to a codepoint above 255 either way.
-#   2. `rekha_char_to_glyph` returns 0 for any codepoint > 65535 ("format 4 is BMP-only"), and
+#   1. `rekha_char_to_glyph` returns 0 for any codepoint > 65535 ("format 4 is BMP-only"), and
 #      U+1F980 🦀 is far past it.
-#   3. Liberation Sans carries no crab glyph regardless.
+#   2. Liberation Sans carries no crab glyph regardless.
+#   ⚠ A third — the draw walking one BYTE per glyph, so no UTF-8 road reached a codepoint above
+#   255 — CLOSED with dhancha 0.10.4 (crab 0.10.2/0.10.3): every walk decodes UTF-8 now, and a
+#   four-byte 🦀 reaches the cmap as U+1F980. Either of the two above is enough on its own.
 # ⇒ The real gate is an ICON PATH — a drawn shape, not a character — which is a dhancha question,
 # not a font one. Naming the wrong gate is worse than naming none: it made this look like it would
 # fall out of work that has now been done twice.

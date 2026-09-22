@@ -171,20 +171,21 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
   face `px / advance` over-reports and the marker stops being honest.
   ⚠ `CRAB_COL_NAME_MIN`, `CRAB_COL_SIZE_W`, `CRAB_COL_MTIME_W`, `CRAB_PV_W`, `CRAB_GRID_CELL_W` and
   `CRAB_GAL_CELL_W` all encode character counts at 9 px, and they pick the **wrong layout** rather
-  than failing honestly. ⚠ It also invalidates the caret arithmetic (`dh_draw_widget_ink` advances a
-  fixed 9 px) and the scalable path is Latin-1 only (`load8(text + i)`).
+  than failing honestly. ⚠ It also invalidated the caret arithmetic (`dh_draw_widget_ink` advanced a
+  fixed 9 px) — and the scalable path was Latin-1 only (`load8(text + i)`) until dhancha 0.10.4
+  decoded UTF-8, which crab's measure followed at 0.10.3.
 - ✅ **The door — CLOSED (0.9.1); the 🦀 GLYPH is not.** A mark in the status line opens the menu
   row, so `F10` is no longer the only way in — and for seven releases it was no way at all, because
   aethersafha claimed that key until 0.16.25. ⛔ It costs **zero rows**: the status line became a
   `BOX_H` of [door][text], the shape `crab_pane` already uses for the A/B strip. It uses **no font**
-  — three filled boxes — which also sidesteps something 0.9.0 made live: the same byte draws CP437
-  through kashi and Latin-1 through rekha, so a mark made of characters renders differently on the
-  host build and the target.
+  — three filled boxes — so it needs no character both faces carry (kashi's page is CP437, and it
+  has no crab).
   ⛔⛆ **AND THE GLYPH IS STILL CLOSED — this bullet said proportional text would open it, and 0.9.0
-  shipped proportional text.** That was wrong three times over: `rekha_char_to_glyph` returns 0 above
-  U+FFFF, the face has no format-12 cmap, and the draw loop walks one byte per glyph. ⭐ **CANVAS is
-  the open road** — crab already draws thumbnails through `dh_canvas_new`, and an icon is a glyph
-  with no font.
+  shipped proportional text.** That was wrong: `rekha_char_to_glyph` returns 0 above U+FFFF and the
+  face has no format-12 cmap — either alone is enough. (A third wall, the draw walking one byte per
+  glyph, fell with dhancha 0.10.4; a four-byte 🦀 reaches the cmap now and the cmap has nothing.)
+  ⭐ **CANVAS is the open road** — crab already draws thumbnails through `dh_canvas_new`, and an
+  icon is a glyph with no font.
 - **Three key spaces, four repos, and crab reads raw wire numbers.** aethersafha forwards
   `bhumi_key_usage(ev)` — an **HID usage** — unchanged. dhancha's `DhKey` constants are puka's
   **ASCII/Unicode sym** space, not evdev (`dhancha/src/event.cyr:61-62`; the word *evdev* appears
@@ -229,7 +230,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **the daimon decision** | *(not a release — a ruling)* | — | **RULED 2026-09-14: DECLARED.** `cyrius.cyml` carries `[deps.daimon]` at 2.1.3. ⛔ Declared, NOT linked — daimon is a binary with no `dist/`; crab talks to its AF_UNIX socket. 0.10.0 and 0.11.0 are unblocked. |
 | ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ **daimon DECLARED** (2.1.4) · ⛔ **daimon does not build for agnos** — root upstream of daimon (bote's sidecar / cyrius distlib), re-measured under 6.6.6 | the index is local, background, battery-aware, and the four smart folders are real |
 | ✅ | **0.10.2 · The 6.6.6 stack** | *(a pin release)* nothing new to do — the same crab on cyrius 6.6.6, sadish 0.11.2, rekha 0.9.0, kashi 1.0.10, dhancha 0.10.4, daimon 2.1.4; a `—` in a notice is one dash now (dhancha 0.10.4) | — | **shipped** ⚠ *+49 % binary, measured and pulled apart; DCE is the operator's call* |
-| | **0.10.3 · Names measured by character** | **see a non-ASCII name cut where it should be** — crab measures per byte (`crab_text_w`, `crab_name_cell_px`) while dhancha 0.10.4 draws per character, so `Über.txt` is over-measured and a cut can strand a lead byte before the `~` | — (`dh_text_decode` is in dhancha 0.10.4) | both loops walk by `dh_text_decode`, the cut lands on a character boundary, and a name with a two-byte character at the edge is pinned in the suite |
+| ✅ | **0.10.3 · Names measured by character** | **see a non-ASCII name cut where it should be** — `Über.txt` fits an eight-cell column unmarked, `—` is one cell, and a cut never strands half a character before the `~` | — | **shipped** ⭐ *one reader (`crab_char_adv` = `dh_text_decode` + the draw's per-arm advance) for both loops; the fixture face grew a mapped `Ü` because an all-`.notdef` face could not tell the scalar from its lead byte* · ⭐ *and the release ships under `CYRIUS_DCE=1` — 878,376 B on the target* |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
 | ✅ | **0.9.7 · H1** | *(a fix release)* cancel a merged copy without losing the folder it merged into | — | **shipped** ⛔⛔⛔ *the oldest confirmed data-loss defect; MEASURED on iron both ways (0/3 → 3/3)* |
@@ -358,7 +359,7 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 | item | milestone | gated on | verified |
 |---|---|---|---|
 | ✅ Proportional text | M5 → **0.9.0, SHIPPED** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
-| The 🦀 **glyph** | M6 → later | ⛔⛆ **STILL CLOSED, AND 0.9.0 DID NOT OPEN IT — this row said the face would.** Three independent walls: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code (*"format 4 is BMP-only"*), the shipped face carries no format-12 subtable, and `dh_draw_text_ink` walks ONE BYTE per glyph in **both** branches. U+1F980 is 128,896. ⭐ **The open road is CANVAS**, which crab already ships for thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`) — an icon is a glyph with no font. **0.9.1 shipped the DOOR** (three filled boxes) and left the crab for whoever wants to bake a bitmap. | 2026-09-14 ⛔ **re-derived — the 0.9.0 claim was wrong** |
+| The 🦀 **glyph** | M6 → later | ⛔⛆ **STILL CLOSED, AND 0.9.0 DID NOT OPEN IT — this row said the face would.** Two independent walls: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code (*"format 4 is BMP-only"*) and the shipped face carries no format-12 subtable. U+1F980 is 128,896. ⚠ A third — `dh_draw_text_ink` walking ONE BYTE per glyph — fell with dhancha 0.10.4 (crab 0.10.2/0.10.3): the draw decodes UTF-8 now, so the crab reaches the cmap and the cmap has nothing; under kashi it draws `?`. ⭐ **The open road is CANVAS**, which crab already ships for thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`) — an icon is a glyph with no font. **0.9.1 shipped the DOOR** (three filled boxes) and left the crab for whoever wants to bake a bitmap. | 2026-09-21 ⛔ **re-derived again — one of three walls fell, two stand** |
 | Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | ✅ **UNGATED — `[deps.daimon]` 2.1.3 is declared (0.10.0).** Declared, NOT linked: daimon is a binary with no `dist/`, so crab talks to the AF_UNIX socket it binds. | 2026-09-14 |
 | Local index · tags · smart folders | M7 → **0.10.0** | ✅ **UNGATED — daimon declared (0.10.0).** ⚠ crab must still run WITHOUT it: the index is an enrichment, not a precondition. | 2026-09-14 |
 | Duplicate detection | M7 → **0.10.0** | ✅ **UNGATED — daimon declared.** ⚠ And it was never fully gated: a content hash is something crab could do alone, which is the cheaper first half. | 2026-09-14 |

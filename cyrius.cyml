@@ -44,8 +44,9 @@ stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "ass
 # (`sd_alloc_set`, `sd_canvas_blit_at`) stands beneath it.
 # ⛔ MOVE sadish AND rekha TOGETHER. rekha 0.9.0 pins sadish 0.11.2 EXACTLY and its dist is cut
 # against sadish's inline-point `SdPath`; two bundles on two sadishes is a link error at best.
-# ⚠ The bundle is 471,512 B of source (85,815 at 0.5.5) and crab links without DCE — see the 0.10.2
-# CHANGELOG for what that costs and what `CYRIUS_DCE=1` returns.
+# ⚠ The bundle is 471,512 B of source (85,815 at 0.5.5). Linked whole it cost +49 % of the binary
+# (0.10.2); since 0.10.3 CI and the release build under `CYRIUS_DCE=1` (operator ruling) and the
+# unreachable four fifths of it are NOPed — 878,376 B on the target against 1,685,288 plain.
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
 tag = "0.11.2"

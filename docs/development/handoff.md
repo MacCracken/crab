@@ -1,7 +1,39 @@
-# Handoff — **0.10.2 cut: the 6.6.6 stack. ⛔⛔ M7 index/tags still BLOCKED — daimon does not build for agnos, and the root is upstream of daimon.**
+# Handoff — **0.10.3 cut: names measured by character, the release under DCE. ⛔⛔ M7 index/tags still BLOCKED — daimon does not build for agnos, and the root is upstream of daimon (the operator has it).**
 
-> ⭐⭐ **2026-09-21. `VERSION` reads 0.10.2; 0.10.1 released (tag on the remote).** ⛔ commit/tag/push
-> are the operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
+> ⭐⭐ **2026-09-21. `VERSION` reads 0.10.3; 0.10.1 released (tag on the remote); 0.10.2 and 0.10.3
+> cut in one session, tags pending.** ⛔ commit/tag/push are the operator's; re-run
+> `git log --oneline -3` and `git tag --list` before restating this.
+>
+> ## 0.10.3 — names are measured by CHARACTER, and the release ships under DCE
+>
+> ⭐ **`crab_char_adv(s, at, n, lenp)` is the ONE reader** — `dh_text_decode` (dhancha 0.10.4's own
+> decoder) plus the per-arm advance the draw uses: bitmap = one cell per character with a scalar (`?`
+> and a raw byte included), nothing for a stray continuation byte; scalable = `dh_text_advance` of the
+> SCALAR, nothing for a stray. `crab_text_w` and `crab_name_cell_px` both walk by it, and the cut
+> accepts a character whole or not at all. `Über.txt`: eight cells not nine, fits an eight-cell column
+> unmarked (0.10.2 wrote `Über.t~`); one cell of room holds `Ü` as `C3 9C 7E`, never `C3 7E`.
+> ⛔ **The bound is a LENGTH, not a NUL** (`CRAB_REC_TYPE` 63, `CRAB_TEXT_SCAN_MAX` 256), and the
+> decoder reads continuation bytes until one is not — so within four bytes of the bound it is fed a
+> NUL-terminated copy of what remains, and a crossing length is clamped. ⚠⚠ **Both guards are
+> UNOBSERVABLE by any width** (the whole-name path copies `n` bytes without the decoder; the greedy
+> path can never accept the last character; a cut lead prices as the character it would have become)
+> — deleting either or both leaves the suite green. Held by review; recorded at the assertion.
+> ⛔⛆ **THE FIXTURE FACE COULD NOT TELL THE SCALAR FROM ITS LEAD BYTE, AND THE SUITE WAS GREEN OVER
+> THE WRONG CODE.** Every non-ASCII codepoint was `.notdef` (8 px), so `dh_text_advance(font, cp)`
+> and `dh_text_advance(font, load8(s + at))` answered the same — the lead-byte mutation SURVIVED.
+> `t_prop_face` now maps `Ü` (U+00DC) onto the `n` glyph through a second format-4 segment: scalar
+> 12, lead byte 8, two bytes summed 16 — three implementations, three answers. rekha's search needs
+> segments sorted by endCode and ignores the searchRange hints; written correctly regardless.
+> **2543 / 0** (+40, `t_utf8_0103`), six mutations caught (0.10.2's `ui.cyr` fails 21), the 0.9.0
+> Latin-1 expiry inverted (`é` = ONE `.notdef`), render dump byte-identical to 0.10.2.
+> ⭐ **`CYRIUS_DCE=1` on `release.yml` — operator ruling — AND on `ci.yml`'s two target builds**, so
+> the gate compiles what ships (the 0.7.7 lesson): host **608,040 B**, agnos **878,376 B** (1,771 fns,
+> 806,806 B NOPed). Every gate re-run against the DCE binaries; **QEMU `crab-face-test.py` PASSES on
+> the DCE agnos binary**. `render_test` stays plain in CI (a harness, not the artifact; 55/0 under DCE
+> too). ⚠ DCE keeps `.bss` — the `large static data` advisory stays.
+> ⛆ Three stale "the draw walks one BYTE per glyph" comments cut (`crab_door`, the button gate, the
+> `main.cyr` menu-bar note, `crab_kind_mark`) and the roadmap's glyph row re-derived: the 🦀 is
+> closed at TWO levels now (BMP-only cmap; no glyph in the face), not three.
 >
 > ## ⛔⛔ READ FIRST — M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING, AND A PIN MOVE IS NOT THE FIX
 >

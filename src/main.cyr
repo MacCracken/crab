@@ -2173,8 +2173,8 @@ fn main(): i64 {
                                 } else { crab_clear_notice(); crab_say("crab: preview off\n"); }
                             }
                             # ⭐⭐ THE MENU BAR (canvas turn 2). ⛔ THE CANVAS ASKS FOR A 🦀 BUTTON
-                            # AND crab CANNOT DRAW ONE — still, with a real face. `dh_draw_text_ink`
-                            # walks one BYTE per glyph in BOTH branches, `rekha_char_to_glyph` is
+                            # AND crab CANNOT DRAW ONE — still, with a real face, and still after
+                            # dhancha 0.10.4 taught the draw UTF-8: `rekha_char_to_glyph` is
                             # BMP-only (U+1F980 is past it) and Liberation Sans has no crab anyway.
                             # ⇒ `F10` is the door; the button needs an ICON path, not a font. See
                             # `crab_door`'s ⛔, which names why 0.9.0 did not unblock this.

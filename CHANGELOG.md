@@ -2,6 +2,107 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.3] — 2026-09-21 — names are measured by character, and the release ships under DCE
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> Two things, both decided at the 0.10.2 cut and done here: crab measures text the way dhancha
+> 0.10.4 draws it — one glyph per **character** — and the release build carries `CYRIUS_DCE=1`.
+
+### Fixed — ⛔⛆ crab measured per BYTE while the toolkit drew per CHARACTER
+
+dhancha 0.10.4 made every text walk decode UTF-8. crab's two measuring loops — `crab_text_w` and
+`crab_name_cell_px` in `src/ui.cyr` — still handed `load8(s + i)` to `dh_text_advance` one byte at
+a time, so from 0.10.2 the two disagreed about anything non-ASCII:
+
+```
+                            drawn (dhancha 0.10.4)   measured (crab 0.10.2)
+`Über.txt`  (9 bytes)       8 cells                  9 cells        -> a `~` on a name that fitted
+`—`         (E2 80 94)      1 cell                   3 cells
+a cut with room for `Ü`'s lead but not its continuation:            -> `C3 7E` — a raw cell, then `~`
+```
+
+- ⭐ **One reader, shared with the draw**: `crab_char_adv(s, at, n, lenp)` — `dh_text_decode` (the
+  toolkit's own decoder) plus the per-arm advance the draw uses: the bitmap arm one cell for every
+  character with a scalar (`?` and a raw byte included) and nothing for a stray continuation byte;
+  the scalable arm `dh_text_advance` of the **scalar**, nothing for a stray. Both loops walk by it.
+- ⛔ **The cut lands on a character boundary.** A character is accepted whole or not at all; `fit`
+  counts BYTES written (what the caller is told, where the marker goes) while `j` walks CHARACTERS.
+- ⛔ **The bound is the bound.** `dh_text_decode` reads a lead's continuation bytes until one is not
+  a continuation byte, and crab's bound is a LENGTH (`CRAB_REC_TYPE`, `CRAB_TEXT_SCAN_MAX`), not a
+  NUL — so within four bytes of it the decoder is fed a NUL-terminated copy of what remains, and a
+  length that would cross it is clamped. A sequence the bound cuts is its raw lead byte, one byte
+  long: a wrong width, never a walk, the rule the scans have kept since 0.5.0.
+- ⚠ For ASCII nothing moved: the 640x220 `render_test` dump is **byte-identical** to 0.10.2's.
+- ⚠ The bitmap arm's `n * CRAB_COL_CHARW` shortcut is gone — it was the bug for non-ASCII — so a
+  label is now walked under both faces. Labels are short; the sweep that measured 4 µs/keystroke at
+  0.9.4 is unaffected (nothing here is on the stat path).
+
+### Fixed — stale text about the per-byte draw, cut
+
+The 🦀-glyph gate was recorded in three places as closed at **three** independent levels, the
+first being *"`dh_draw_text_ink` walks ONE BYTE per glyph in both branches"*. dhancha 0.10.4 closed
+that one — a four-byte 🦀 now reaches the cmap as U+1F980 — and the other two stand (rekha's
+format-4 cmap is BMP-only; Liberation Sans has no crab; kashi's page is CP437, so it draws `?`).
+`crab_door`'s comment, the button-gate comment in `ui.cyr`, the `main.cyr` note beside the menu bar
+and `crab_kind_mark`'s *"the two faces disagree about every byte >= 128"* all said the 0.9.0 thing;
+each now says the 0.10.4 thing. The roadmap's *Absent affordances* row for the glyph likewise.
+
+### Changed — ⭐ `CYRIUS_DCE=1` on the release build, and on CI's two target builds
+
+Operator ruling 2026-09-21, taken with the 0.10.2 measurements in hand (2,149 unreachable
+functions, 1,027,854 B, riding in the shipped artifact). `release.yml` builds both targets under
+`CYRIUS_DCE=1`. ⛔ **And so does `ci.yml`** — deliberately, and said out loud rather than done
+quietly: `release.yml` gates on `ci.yml`, the suite spawns `build/crab`, and the QEMU harnesses take
+`build/crab_agnos`; a gate that tests a plain binary and a release that ships a DCE'd one is the
+0.7.7 lesson (two compilers, one green) in a new coat. `render_test` stays plain — it is a harness,
+not the artifact — and was measured under DCE too (55/0).
+
+| | 0.10.2 (plain) | **0.10.3 (DCE)** |
+|---|---:|---:|
+| host | 1,636,136 | **608,040** (same size as 0.10.2's DCE probe, 94,327 bytes differ — `cmp`, never `ls -l`) |
+| `--agnos` | 1,681,192 | **878,376** |
+
+⚠ DCE NOPs the code of unreachable functions and keeps their `.bss`, so the `large static data
+(143024 bytes)` advisory stays; the compiler's own hint says so.
+
+### Tests
+
+- **2,543 assertions** (2,503 → 2,543): `t_utf8_0103`, its own function per the rule. Under kashi:
+  `Über.txt` measures eight cells not nine; `—` one; a stray continuation byte nothing; an invalid
+  lead its own raw cell; a four-byte 🦀 one cell; an eight-cell column holds `Über.txt` **whole and
+  unmarked** (0.10.2 wrote `Über.t~`); one cell of room holds `Ü` whole — `C3 9C 7E`, the
+  continuation travelling with its lead; no room cuts BEFORE `Ü`, never inside it; a 63-byte name
+  the kernel failed to terminate copies 63 bytes and **not byte 63**, planted here as a continuation
+  byte (the one shape a type byte can never take). Under the fixture face: `nÄm` is 36 px not 44;
+  `mÄmmm` with room for `m` and `Ä` cuts after the whole `Ä`; and **`Ü` measures the SCALAR's 12,
+  not its lead byte's 8 and not the two bytes' 16**.
+- ⭐ **The fixture face now maps `Ü` (U+00DC) onto the `n` glyph** — a second format-4 segment,
+  with a reason: every non-ASCII codepoint was `.notdef` before, so the scalar and its lead byte
+  priced the same (8) and *"decoded, then asked"* was indistinguishable from *"asked about a byte"*.
+  It was: the mutation that hands `load8(s + at)` to `dh_text_advance` **survived** the suite until
+  the segment was added, and fails two assertions after it. rekha's search wants segments sorted by
+  endCode and ignores the searchRange hints; both are written correctly anyway.
+- The 0.9.0 *Latin-1 limit* assertion — `é` at TWO `.notdef` glyphs, *"exactly the two dhancha would
+  draw"* — was an expiry and it fired: INVERTED to one, kept with its history.
+- ⛔ **Mutation-proven**: the 0.10.2 `ui.cyr` under the final suite fails **21**; the cut copying only
+  the first byte of an accepted character, **7**; the bitmap arm pricing per byte of the character,
+  **12**; a stray continuation byte priced as a cell, **1**; the scalable arm pricing the lead byte,
+  **2** (0 before the fixture change). ⚠⚠ **Three SURVIVE and are recorded at the assertion**: the
+  tail copy, the bound clamp, and both together. The whole-name path copies `n` bytes without the
+  decoder, the greedy path can never accept the LAST character, and a lead cut at the bound prices
+  as the character it would have become — so a read past the bound is not something a width can
+  witness. Held by review and by the ⛔ at `crab_char_adv`.
+- `render_test` 55 / 0, dump byte-identical to 0.10.2. Fuzz 100,000. fmt ×8. Coverage 322 / 370,
+  87 %. vet, deny, `deps --verify` 49 / 0 — every gate run against the **DCE** binaries in `build/`,
+  which is now CI's shape.
+- ⭐⭐ **QEMU `crab-face-test.py` PASSES on the DCE'd agnos binary** — 878,376 B, the artifact shape
+  the release now publishes: `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13`,
+  one `font` line, navigations 1, view changes 2, no fault, no allocator-failure text. DCE NOPed
+  **1,771 unreachable functions, 806,806 bytes** (the compiler's own note), and the scalable path,
+  the event loop and the frame arena of what was left ran on a real kernel. ⚠ Not on target: a UTF-8 file name — the harness rootfs has none, and the draw is
+  dhancha's (pinned by its `text_utf8_test`, 126 checks); crab's half is the measure, pinned above.
+
 ## [0.10.2] — 2026-09-21 — toolchain 6.6.6, and the draw-path deps taken to their tags
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
