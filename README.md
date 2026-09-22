@@ -68,15 +68,16 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   > kernel**, so a reader who searched for it found nothing and had no way to tell whether they were
   > misreading the code or the document.
 
-  ⛔ **And separately, corrected 2026-08-26 — the text crab draws is `kashi`'s CP437 8×16 BITMAP
-  font, not `rekha` TrueType.** The bullet above named rekha as something crab drew with; it never
-  did. crab passes `font = 0` to `dh_draw_text`, which is dhancha's kashi bitmap path, and calls
-  **no `rekha_*` function anywhere**. ⚠ rekha remains a declared dependency (dhancha's `dist` bundle
-  references its symbols), and proportional text is a real roadmap item — **M5, gated on rekha plus
-  dhancha font plumbing**. It is not what ships.
+  ⭐ **The text crab draws is `rekha` TrueType — Liberation Sans from the kernel's own
+  `/fonts/default.ttf` — since 0.9.0**, with `kashi`'s CP437 8×16 bitmap as the fallback when no
+  face loads. ⚠ A block here said the opposite from 2026-08-26 to 2026-09-21 (*"crab calls no
+  `rekha_*` function anywhere … M5, gated"*) — true when written, false for twelve releases, and
+  contradicted by the *Status* bullet below it the whole time. Cut, not annotated.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
-  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.1.3); the surfaces below are the work.
+  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.1.4 as of 0.10.2); the surfaces below
+  are the work — ⛔ and daimon does not yet build for agnos (an upstream sidecar defect, filed there),
+  so the index and tags wait.
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to
   mneme's *notes-as-memory*. It reads the shared index; it does not silo its own.
 - **Local-first, no external service** — the whole point of a sovereign store.
@@ -227,9 +228,10 @@ happened rather than showing a blank square.
 - ~~**Text is a bitmap font, not proportional.**~~ **CLOSED at 0.9.0** — crab reads in Liberation
   Sans from the kernel's own `/fonts/default.ttf` through `rekha`, and every width it computes is
   derived from the face. The bitmap path remains as the fallback when no face loads.
-- **None of the AI arc exists YET — but daimon is declared (0.10.0).** No index, no tags, no semantic
-  find, no dedup. `cyrius.cyml` now carries `[deps.daimon]` pinned at 2.1.3, which is the ruling that
-  unblocks M7. ⛔ **Declared, not linked**: daimon is a binary with no `dist/`, so crab talks to it
+- **Of the AI arc, only duplicate detection exists — `Shift+D` (0.10.0), which needs no daimon.** No
+  index, no tags, no semantic find. `cyrius.cyml` carries `[deps.daimon]` (2.1.4), the ruling that
+  unblocks M7 — but daimon does not build for agnos yet (a sidecar defect upstream of daimon, filed
+  2026-09-14, re-measured 2026-09-21), so the index and tags wait on that, not on crab. ⛔ **Declared, not linked**: daimon is a binary with no `dist/`, so crab talks to it
   over the AF_UNIX socket it binds rather than folding an agent orchestrator into a file manager.
   ⚠ And crab runs without it — the index is an enrichment, not a precondition. (Roadmap M7–M8.)
 

@@ -24,6 +24,12 @@ Two facts make it a real choice rather than a default:
    vendored into a consumer's `lib/`: `error: cannot open include file: src/font_data.cyr`.
    kashi 1.0.6 added `dist/kashi.cyr`, which fixes that. So before 1.0.6 there was no decision to
    make; after it, there is.
+   ⚠ **Addendum 2026-09-21 (crab 0.10.2, kashi 1.0.10):** the bundle was **not actually published**
+   between 1.0.6 and 1.0.9 — kashi's `dist/` was gitignored and no release attached it, so a
+   consumer's `git` + `tag` + `modules = ["dist/kashi.cyr"]` resolved to no file at all (kashi's own
+   finding, proven against its cached 1.0.6–1.0.8 clones). The expiry below would have failed to
+   resolve on every kashi this ADR was written against. **1.0.10 tracks, releases and gates the
+   bundle**; the expiry is executable as of crab's kashi 1.0.10 pin. The decision stands unchanged.
 2. **The face costs measurably more, and dead-code elimination does not reclaim it.** Measured on
    dhancha: core **364,640 B** vs full face **548,000 B** — **+183,360 B (+50 %)** for import paths
    and a registry nothing in this stack calls.

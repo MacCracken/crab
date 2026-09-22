@@ -227,7 +227,9 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry — and see the picture of the file you are actually on | — | **shipped** ⛔ *and it found TWO live wrong-on-screen defects: the thumbnail lagged one file behind, and CAMERA persisted onto text files* |
 | ✅ | **0.9.5 · Pointer polish** | **mark a row with the middle button**, and see a popup's highlight follow the pointer | — | **shipped** ⛔ *and the premise was wrong: middle had DISMISSED popups since 0.8.5, in three doc sites' teeth* |
 | ✅ | **the daimon decision** | *(not a release — a ruling)* | — | **RULED 2026-09-14: DECLARED.** `cyrius.cyml` carries `[deps.daimon]` at 2.1.3. ⛔ Declared, NOT linked — daimon is a binary with no `dist/`; crab talks to its AF_UNIX socket. 0.10.0 and 0.11.0 are unblocked. |
-| ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ **daimon DECLARED 2.1.3** | the index is local, background, battery-aware, and the four smart folders are real |
+| ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ **daimon DECLARED** (2.1.4) · ⛔ **daimon does not build for agnos** — root upstream of daimon (bote's sidecar / cyrius distlib), re-measured under 6.6.6 | the index is local, background, battery-aware, and the four smart folders are real |
+| ✅ | **0.10.2 · The 6.6.6 stack** | *(a pin release)* nothing new to do — the same crab on cyrius 6.6.6, sadish 0.11.2, rekha 0.9.0, kashi 1.0.10, dhancha 0.10.4, daimon 2.1.4; a `—` in a notice is one dash now (dhancha 0.10.4) | — | **shipped** ⚠ *+49 % binary, measured and pulled apart; DCE is the operator's call* |
+| | **0.10.3 · Names measured by character** | **see a non-ASCII name cut where it should be** — crab measures per byte (`crab_text_w`, `crab_name_cell_px`) while dhancha 0.10.4 draws per character, so `Über.txt` is over-measured and a cut can strand a lead byte before the `~` | — (`dh_text_decode` is in dhancha 0.10.4) | both loops walk by `dh_text_decode`, the cut lands on a character boundary, and a name with a two-byte character at the edge is pinned in the suite |
 | | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
 | ✅ | **0.9.7 · H1** | *(a fix release)* cancel a merged copy without losing the folder it merged into | — | **shipped** ⛔⛔⛔ *the oldest confirmed data-loss defect; MEASURED on iron both ways (0/3 → 3/3)* |
@@ -283,12 +285,16 @@ scoped hook and would die at the arena's first reset.
 ⚠ **0.10.0 on the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
 is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the number at the cut.
 
-- ⛔⛔ **Local index — BLOCKED, and not in crab.** `Local · 41,208 files`, `index fresh`, background
-  indexing that `pauses on battery`. **daimon does not build for agnos**: `cyrius build --agnos` on
-  daimon 2.1.3 gives 53 errors / 36 undefined symbols — 50 in a VENDORED stdlib file compiled for the
-  wrong target, 3 in daimon's own `src/agent.cyr`. crab runs ON agnos, so a daimon that cannot be
-  built there cannot be talked to. ⇒ Filed in daimon, 2026-09-14; the `sys_unlink` arity class is
-  fixed there and prepared. ⚠ crab will not fake an index it cannot back.
+- ⛔⛔ **Local index — BLOCKED, and not in crab, and not in daimon either.** `Local · 41,208 files`,
+  `index fresh`, background indexing that `pauses on battery`. **daimon does not build for agnos**:
+  53 errors / 36 undefined symbols at 2.1.3 under 6.6.2, the same 53 at 2.1.4 under 6.6.4, and
+  **62 / 51 under 6.6.6** (re-measured by crab 2026-09-21) — `lib/syscalls_linux_common.cyr`
+  compiled for the agnos target, because bote's `dist/bote.deps` sidecar names it as a stdlib leaf
+  and `cyrius deps` prepends sidecar leaves target-blind. The stale-snapshot hypothesis is refuted;
+  **the fix is in cyrius distlib and/or bote's sidecar**, and a pin move is not it. crab runs ON
+  agnos, so a daimon that cannot be built there cannot be talked to. ⇒ Filed in daimon, 2026-09-14
+  (the `sys_unlink` arity class is fixed there, 2.1.4). ⚠ crab will not fake an index it cannot
+  back.
 - ⛔ **Tags — BLOCKED on the same filing.** Manual and suggested (`SUGGESTED TAGS · src → + toolchain
   + cyrius + wip`). Tags need persistence crab does not have and daimon cannot yet provide on agnos.
   ⇒ `Untagged` and `Unrated` do not ship in ANY form until it clears — not greyed, not
@@ -548,6 +554,36 @@ Pulled out of M1–M4 when those sections collapsed, because each still governs 
   answered by putting the colour in dhancha or rupa instead.
 - ⚠ **A milestone closing with gated items is the normal shape here.** M2 shipped 5 of 7, M3 shipped
   4 of 7. Calling that "done" is a lie and calling it "not shipped" is another.
+- ⛔ **MOVING THE CYRIUS PIN — the procedure, with 6.6.6 (0.10.2) as the precedent.** A pin move
+  is a release of its own and never rides with feature work; these are the steps, in order, and
+  every one produced a number at 0.10.2 that the CHANGELOG records.
+  1. **Read the toolchain's changelog for consumer-visible shapes, then grep crab for each.** At
+     6.6.6: `#define` (0), `struct`/`async fn`/`operator` (0), a duplicated top-level `var` name
+     across the five files (0), a comment whose first word begins with an attribute or directive
+     name (0 — the `#if…` hits are real `#ifdef`s), `O_APPEND`/`O_TRUNC` outside `lib/` (one
+     `AO_TRUNC`, the agnos arm of `crab_fs_open_w`, and no PE target). The build is the gate; the
+     greps say where to look when it goes red.
+  2. **Rebuild the CURRENT tree from its TAGS first** — every `path` line disabled — and confirm it
+     reproduces the last cut's artifacts byte-identical. ⛔ At 0.10.2 the untouched checkout did not
+     build at all: `../dhancha` had moved ahead and `path` won. Without this step the baseline is
+     whatever the siblings happen to be.
+  3. **Move the pin alone; keep the old dep tags; build.** That isolates the toolchain's effect:
+     +180 KB each at 6.6.6, all of it the stdlib snapshot (sankoch 2.8.0), and the `large static
+     data` advisory appearing.
+  4. **Then the deps**, each verified three ways before the manifest moves (remote highest tag,
+     sibling on that tag, lock commit == remote commit for the tag-only ones), and the deps that must
+     move TOGETHER moved together (rekha pins sadish exactly). Enumerate crab's own call sites into
+     every moved dep and compare each signature old-bundle vs new — 8 at 0.10.2.
+  5. **`rm -rf lib && cyrius deps`** — CI's shape, not `lib sync` — then `cmp` EVERY stdlib file
+     against `~/.cyrius/versions/<pin>/lib`, not the declared subset (the 0.7.7 lesson), and every
+     bundle against its sibling's `dist/`. List what arrived and what left.
+  6. **Every gate, and the two that `cyrius test` does not run**: `render_test` built explicitly
+     with its log grepped for `undefined function`, and **the pixel diff** — the 640x220 dump before
+     vs after, `cmp` clean or a named reason. Then check 4 (paths off, byte-identical both targets).
+  7. **QEMU** — the face harness at minimum (the scalable path is invisible to every host gate), the
+     pointer harness for the event loop. Then `state.md`'s *Toolchain*, *Dependencies*, *Targets*
+     and *Tests* in the same commit as the CHANGELOG — the 6.6.4 move was never written into
+     *Toolchain* and it asserted 6.6.2 for seven releases.
 
 ### Testing and CI — what the gate does, and what it still cannot see
 

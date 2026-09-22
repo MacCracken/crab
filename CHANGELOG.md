@@ -2,6 +2,201 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.2] — 2026-09-21 — toolchain 6.6.6, and the draw-path deps taken to their tags
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **A pin-only release: no byte of `src/` moved.** The toolchain moves two patch releases and five
+> of the eight deps go to the highest tag on their remote. What changed downstream is the **cost**
+> of the binary (+49 %) and — inherited from dhancha 0.10.4 — how a non-ASCII name is drawn. The
+> pixels of the production render did not: the 640x220 dump is byte-identical across the move.
+
+### Changed — toolchain `6.6.4` → `6.6.6`
+
+- **What 6.6.5 / 6.6.6 refuse or repair, checked against crab.** The nine new refusals need a shape
+  crab does not have: no `#define` anywhere (`src/`, `tests/`: 0), no `struct` / `async fn` /
+  `operator`, no duplicated top-level `var` name across the five files, no comment whose first word
+  begins with an attribute or directive name (the 15 `#if…` hits are real `#ifdef CYRIUS_TARGET_AGNOS`
+  lines), no `var` read after its top-level block. The Windows `O_APPEND` / `O_TRUNC` corruption has
+  no PE target to act on; crab's one `AO_TRUNC` is the agnos arm of `crab_fs_open_w` (unchanged, and
+  still the divergence *Known gaps* records). ⇒ The build was the gate, and it is green on both
+  targets with zero diagnostics that name a `src/` line.
+- ⭐ **The toolchain's own effect, MEASURED IN ISOLATION** (the 0.10.1 tree, its old pins resolved
+  from their tags, compiled by 6.6.6): host **1,097,664 → 1,277,920 B (+180,256)**, agnos
+  **1,146,920 → 1,327,080 B (+180,160)**. Not codegen — the **stdlib snapshot**: `lib/sankoch.cyr`
+  moves **2.7.15 → 2.8.0** (665,879 → 945,063 B; Brotli decode for rekha's WOFF2), a leaf crab
+  reaches only transitively through chitra's PNG inflate and links whole because crab builds
+  without DCE. `lib/bench.cyr` doubles (20,668 → 42,805), `lib/io.cyr` +10 KB, every `syscalls_*`
+  peer grows.
+- ⚠ **New on every build: `warning: large static data (143024 bytes) — consider alloc()`.** The
+  compiler's advisory threshold is 131,072 B of static `var` reservations
+  (`cyrius/src/backend/x86/fixup.cyr`); crab was under it at 0.10.1 (no warning) and the 6.6.6
+  stdlib alone puts it at 138,848 — the warning appears with the OLD deps too. crab's own sources
+  declare **no** top-level array (`grep '^var .*\[' src/` = 0); the reservations are the bundles'
+  (kashi's glyph tables, sankoch's Huffman tables, chitra's, dhancha 0.10.4's 128-slot CP437 map).
+  Advisory, not an error; recorded so the next reader does not hunt for a crab buffer that is not
+  there.
+- **`lib/` re-vendored from scratch** (`rm -rf lib && cyrius deps` — CI's shape, not `lib sync`):
+  **0 of 42 stdlib files drift** from `~/.cyrius/versions/6.6.6/lib` (every file `cmp`'d, not the
+  declared subset — the 0.7.7 lesson). `lib/alloc_cx.cyr` arrives (new in 6.6.6); `lib/flags.cyr`
+  and `lib/hashmap_fast.cyr` leave — nothing in the 6.6.6 resolution names them, and neither target
+  misses a symbol. Lock 50 → **49 entries**, still 3 commit-pinned (the tag-only deps), and
+  `deps --verify` reads **49 verified / 0 failed**.
+- ⛔⛆ **THE COMMITTED 0.10.1 TREE NO LONGER BUILT ON THIS BOX, and nothing in crab had changed.**
+  `cyrius build` on the untouched checkout: `refusing to emit binary with 3 reachable undefined
+  function(s)` — `sd_flatten_op_begin`, `sd_flatten_op_end`, `sd_flatten_degraded`. `../dhancha`
+  had moved to 0.10.4, whose dist calls those; `path` won over `tag = "0.10.0"`, rewrote
+  `lib/dhancha.cyr`, and linked it against the still-pinned sadish 0.5.5. The manifest's hazard
+  says *"`path` wins, so a green local build proves nothing about the tags"*; this is the same
+  hazard facing the other way — **a sibling moving ahead breaks a green tree**. The baseline for
+  every number above was therefore rebuilt from the TAGS (every `path` disabled), and it reproduces
+  the artifacts the 0.10.1 cut left in `build/` **byte-identical** — sha256 `7ee03c10…` host,
+  `a5ba0476…` agnos — which is also the first time those two numbers were re-derived rather than
+  read.
+
+### Changed — dependencies
+
+| dep | was | now | | dep | was | now |
+|---|---|---|---|---|---|---|
+| sadish | 0.5.5 | **0.11.2** | | dhancha | 0.10.0 | **0.10.4** |
+| rekha | 0.3.10 | **0.9.0** | | daimon | 2.1.3 | **2.1.4** |
+| kashi | 1.0.8 | **1.0.10** | | rupa · setu · chitra | 0.1.7 · 0.8.9 · 1.0.3 | unchanged — already the highest tag |
+
+- **Every one of the eight verified three ways** before the manifest moved: the highest tag on the
+  GitHub remote (`git ls-remote --tags … | sort -V | tail -1`), the sibling checkout on that tag, and
+  for the three tag-only deps the lock's commit equal to the remote's (sadish `d9f41f3`, rekha
+  `47aabba`, chitra `833919c`). Every bundle in `lib/` `cmp`s byte-identical to its sibling's
+  `dist/` (kashi: `src/font_data.cyr`).
+- ⛔ **Check 4, re-run at the cut:** every `path` line disabled, `rm -rf lib && cyrius deps` resolved
+  all seven from git (**7 commit-pinned**, dhancha at the peeled `79b7ad1` — ⚠ 0.10.4 is an
+  ANNOTATED tag and `cyrius deps` prints `refs/tags/0.10.4 … is not a commit!` while pinning it
+  correctly), and both targets rebuilt **byte-identical** to the override build — host
+  `5f2a99e0…`, agnos `15e55f90…`. The paths went back afterwards; the tree and the lock `cmp` the
+  same either way.
+- **crab's own call surface into the moved deps is eight functions**, enumerated, every one at the
+  same arity: `sd_surface_pixels` / `_width` / `_height` / `_pixel_at` and `sd_alpha_of`;
+  `rekha_font_open(buf, len)`, `rekha_units_per_em(font)`, `rekha_char_advance_px(font, cp, px)` —
+  rekha's three are `public fn` now. dhancha's 18 `sd_*` and 5 `rekha_*` are dhancha's to check,
+  and its 0.10.1 did.
+- ⭐ **dhancha 0.10.4 draws ONE GLYPH PER CHARACTER.** Through 0.10.3 every text walk took `load8` as
+  the codepoint, so crab's notices — which carry `—` (E2 80 94) — drew three cells for one dash,
+  and a name like `Über.txt` drew as `Ãœber.txt`; under the face each high byte was a `.notdef`.
+  Now the dash is a dash and the umlaut an umlaut, in both arms, with no crab change.
+  ⚠⚠ **AND crab STILL MEASURES PER BYTE — measure and draw now DISAGREE for a non-ASCII name.**
+  `crab_text_w` and `crab_name_cell_px` (`src/ui.cyr`) pass `load8(s + i)` to `dh_text_advance`
+  one byte at a time, so `Über` is summed as **five** advances (Ã, U+009C, b, e, r) where the draw
+  makes **four**; a non-ASCII name is **over-measured** and cut a glyph or two earlier than it
+  needs to be. Worse, the cut is byte-granular: it can land between C3 and 9C, leaving a lone lead
+  byte that 0.10.4 draws as **its raw cell** before the `~`. Before this release the whole name was
+  mojibake, so this is strictly less wrong — but it is a new *kind* of wrong, at the cut, and it is
+  crab's to fix. **Not fixed here**: a pin bump is not the change that teaches the measure UTF-8.
+  dhancha 0.10.4 exports `dh_text_decode(s, at, cpp)` — bytes consumed, scalar stored — for exactly
+  this; the fix is the two loops walking by that and the cut landing on a character boundary.
+  Recorded in the roadmap as the next item.
+- **dhancha 0.10.2** opens ONE flatten operation around a label's glyph loop, so a hostile face
+  cannot spend a budget per glyph; a legitimate label degrades to chords past ~1,889 glyphs at a
+  32 px em. crab's longest label is a 64-byte name. **0.10.3** made dhancha's own `path` lines
+  dormant so its lock pins commits — ⚠ crab has NOT adopted that convention; its five `path` lines
+  are live, and the hazard above is the cost of that. Whether to follow dhancha is the operator's
+  call; the block above is the evidence for the decision.
+- **sadish 0.5.5 → 0.11.2** is six releases: styled strokes, gradient and pattern paint, exact
+  coverage, inline `SdPath` points, the per-operation flatten budget, and **0.11.1's audit — four
+  crashes, a heap overflow and a hang** in code that renders every glyph crab draws with a face.
+  The bundle grows 85,815 → **471,512 B**. **rekha 0.3.10 → 0.9.0** pins sadish 0.11.2 exactly and
+  its dist is cut against the inline-point port, so the two move together — the manifest says so
+  now. 40,750 → **551,402 B**.
+- **kashi 1.0.8 → 1.0.10** — no API change; `src/font_data.cyr` byte-identical. ⭐ But 1.0.10's own
+  finding lands on crab's ADR 0003: **`dist/kashi.cyr` had never been published** — `dist/` was
+  gitignored and no release attached it — so the ADR's written expiry (*switch to
+  `modules = ["dist/kashi.cyr"]` the day crab needs runtime font loading*) would have FAILED to
+  resolve against every kashi through 1.0.8. It is tracked, released and gated as of 1.0.10; the
+  expiry is executable now. The manifest comment says so.
+- ⛔ **daimon 2.1.3 → 2.1.4, and M7's index and tags STAY BLOCKED — with the root now known.** The
+  handoff's *"likely root, NOT confirmed"* (a stale vendored snapshot; *re-run `cyrius deps` on a
+  current pin*) is **REFUTED**: daimon 2.1.4 re-measured under 6.6.4 — identical 53 errors — and
+  this release re-measured it under **6.6.6** in a scratch copy: still refused, **62 error lines,
+  51 distinct undefined symbols** (the count grows with 6.6.6's larger
+  `lib/syscalls_linux_common.cyr`, which is still being compiled for the agnos target). daimon's
+  diagnosis: bote's `dist/bote.deps` sidecar names `syscalls_linux_common` as a stdlib leaf and
+  `cyrius deps` prepends sidecar leaves **target-blind**. The fix is in cyrius distlib and/or bote's
+  sidecar. ⇒ A pin move — this one included — is not it, and crab's `[deps.daimon]` block now says
+  so beside the filing.
+
+### Measured — the binary, and what DCE would return
+
+| | 0.10.1 (6.6.4, old pins) | 6.6.6, old pins | **0.10.2** | Δ total | `CYRIUS_DCE=1` |
+|---|---:|---:|---:|---:|---:|
+| host | 1,097,664 | 1,277,920 | **1,636,136** | +538,472 (+49.1 %) | 608,040 |
+| `--agnos` | 1,146,920 | 1,327,080 | **1,681,192** | +534,272 (+46.6 %) | 874,280 |
+
+The toolchain is a third of the growth and the two draw bundles the rest; dhancha's 0.10.1 saw the
+same shape (`smoke` +88 % plain, +9,632 B under DCE) and its advice is *build with `CYRIUS_DCE=1`*.
+⚠ **crab's CI and `release.yml` build WITHOUT DCE**, and 2,149 unreachable functions (1,027,854 B)
+now ride in the shipped agnos artifact. The DCE build was exercised, not just sized: `render_test`
+under `CYRIUS_DCE=1` is **55 checks, 0 failed** at 546,352 B (1,566,256 plain). Turning it on for
+the release is the operator's decision; the numbers are here so it is not made blind.
+
+### Testing
+
+- `cyrius test` **2,503 / 0**, unchanged. `render_test` **55 / 0** — built explicitly, its build
+  log grepped for `undefined function` (none), because `cyrius test` never builds it. `cyrius fuzz`
+  100,000 rounds ok. `fmt --check` clean on all eight files, one invocation each. `coverage`
+  **322 / 371 fns, 86 %** ≥ 85. `vet`, `deny` (1 dep, 0 violations). `deps --verify` 49 / 0.
+- ⭐⭐ **THE PRODUCTION RENDER IS PIXEL-IDENTICAL ACROSS THE MOVE.** `render_test` dumps the
+  640x220 BGRA frame it asserts on; the dump from the 0.10.1 tree (6.6.4, its own pins, resolved
+  from the tags) and the dump from this tree are **563,200 bytes, `cmp` clean**. A compiler two
+  releases on and three draw-path deps — sadish six releases on, rekha five, dhancha four — changed
+  **no pixel** of the bitmap-font frame. ⚠ That frame is `font = 0`; the face path is QEMU's.
+- ⭐⭐ **QEMU `crab-face-test.py` PASSES on the new agnos binary** (2026-09-21, agnos 1.57.5,
+  aethersafha 0.16.25): crab launched from the compositor, presented, and printed
+  `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13` — the face loaded through
+  rekha 0.9.0, sadish 0.11.2 drew it, dhancha 0.10.4's frame arena carried it: one `font` line,
+  navigations 1, view changes 2, **no fault, no allocator-failure text**. That is the
+  `dh_frame_begin` arena contract the roadmap's bump note asked to see, seen.
+- ⭐ **QEMU `crab-button-test.py` and `crab-pointer-test.py` — every crab arm that received a press
+  answered correctly on the new binary; press DELIVERY at the aimed spot is the harness's coin.**
+  Five runs of the new binary (face, pointer, button ×3) and one of the 0.10.1 binary for
+  discrimination (agnos 1.57.5, aethersafha 0.16.25, TCG):
+  - **button-test, new binary, run 3**: mask 4 → `crab: mark by middle click` (wire **3**, the
+    compositor's one-shot spliced into crab's line), mask 1 → `crab: click`, mask 2 → `crab: context
+    menu opened by pointer`; ARM 2 middle-on-pane **marks**; ARM 3 middle on a popup row **fires
+    nothing**. Run 1 measured ARM 4 — the popup highlight followed the pointer across **6 rows**
+    (`menu 1→2→3→4→5→0`) — and ARM 3's refusal as `crab: press btn 3 no action` in run 2.
+  - **Runs 1 and 2 FAILED ARM 2** (a single middle press, no retry) and the verdict said so. The
+    serial logs say why: the press was never forwarded — aethersafha's one-shot `a non-left button
+    press had NO client content under the cursor` fired on the first probe and every later miss is
+    silent by construction (`ae_btnx_nowin`, `src/main.cyr:659`). ⛔ **Discriminated before it was
+    believed**: the **0.10.1 binary** run on the same kernel missed **all four** per-mask probes —
+    left included — and landed ARM 2's one press. Same coin, different flip; the harness header
+    records exactly this (*"seven runs went into aiming one"*). Not crab's, and not filed anywhere.
+  - **pointer-test, one run**: ascended to `/`, left click resolved to a pane, `u` ×6 → 3 refreshes,
+    `g` and `b` answered, **bare F10 opened the bar, View drove from the keyboard** (1 view change),
+    bare Esc ×3 and Tab ×3 reached crab, Ctrl+Tab / Ctrl+F10 / Ctrl+Q went to the compositor,
+    **no faults**. Its right-click arm was the same delivery miss (`NO client content under the
+    cursor`, three tries) — UNMEASURED there, measured in button-test run 3 above.
+  - ARM 4 (hover) read 6 rows in one run and nothing in two; the harness's own comment names that
+    flake (*"3 rows once and 0 the next, from the same code"*). Measured once, on this binary.
+
+### Fixed — stale text, cut rather than annotated
+
+- `cyrius.cyml` — the rekha block opened *"crab does not draw with it yet (it passes `font = 0`)"*,
+  false since 0.9.0. It names `crab_face` and the three calls now, and the sadish block carries the
+  0.10.4 floor and the move-together rule.
+- `README.md` — the 2026-08-26 correction block (*"crab … calls no `rekha_*` function anywhere …
+  proportional text is M5, gated"*) contradicted the *Status* bullet twelve lines below it that
+  said 0.9.0 closed exactly that; and *"No index, no tags, no semantic find, no dedup"* was written
+  before `Shift+D` shipped in 0.10.0.
+- `docs/development/state.md` — *Toolchain* still asserted a `6.6.2` pin against a manifest that
+  read `6.6.4` (the 0.8.11 bump was never written into it — the file's own third rot, again); the
+  dependency table listed seven deps at 0.8-era tags with sadish `0.5.4` and no daimon row; *Tests*
+  said 2,012; *Known gaps* still carried *"the AI arc … declared nowhere"* and the `net` leaf (both
+  closed at 0.10.0), the symlink *"refuse? report? recreate?"* question (answered by ADR 0004 at
+  0.9.3) and the preview read *"on the selection path"* (moved to the tick at 0.9.4); and the
+  *Version* section carried **117 lines of exact duplicate** (0.9.7 → 0.9.4 twice). Each rewritten
+  to what is true, with the numbers above; the duplicate cut.
+- `cyrius.cyml` said sadish and rekha were *"the only two"* tag-only deps; chitra has been the third
+  since 2026-08-31. ADR 0003 gains a dated addendum for kashi 1.0.10's finding.
+
 ## [0.10.1] — 2026-09-14 — the sidebar can reach its own rows
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

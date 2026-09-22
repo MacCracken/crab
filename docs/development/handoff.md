@@ -1,29 +1,86 @@
-# Handoff — **0.10.1 cut. ⛔⛔ M7 index/tags BLOCKED: daimon does not build for agnos — see below.**
+# Handoff — **0.10.2 cut: the 6.6.6 stack. ⛔⛔ M7 index/tags still BLOCKED — daimon does not build for agnos, and the root is upstream of daimon.**
 
-> ⭐⭐ **2026-09-14. `VERSION` reads 0.10.1; 0.10.0 released (tagged).** ⛔ commit/tag/push are the
-> operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
+> ⭐⭐ **2026-09-21. `VERSION` reads 0.10.2; 0.10.1 released (tag on the remote).** ⛔ commit/tag/push
+> are the operator's; re-run `git log --oneline -3` and `git tag --list` before restating this.
 >
-> ## ⛔⛔ READ FIRST — M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING
+> ## ⛔⛔ READ FIRST — M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING, AND A PIN MOVE IS NOT THE FIX
 >
-> **daimon does not build for agnos.** MEASURED on daimon 2.1.3:
-> `cyrius build --agnos src/main.cyr` → **53 errors, 36 distinct undefined symbols**.
-> - **50** in `lib/syscalls_linux_common.cyr` — a VENDORED stdlib file compiled for the wrong target.
->   ⛔ `lib/syscalls_x86_64_agnos.cyr`'s own header says *"STANDALONE — does NOT include
->   syscalls_linux_common.cyr"*, so something pulls the Linux peer in on the agnos target.
-> - **3** in daimon's own `src/agent.cyr` — `SYS_EXECVE` (:262), `SYS_WAIT4` (:321, :324).
-> ⚠ **Likely root, NOT confirmed**: daimon pins cyrius **6.6.2**, crab pins **6.6.4**, and the two
-> repos' vendored `lib/syscalls_x86_64_agnos.cyr` **differ** (md5 `928cf01e…` vs `eef0518b…`).
-> Re-running `cyrius deps` against a current pin is the cheapest thing to try.
-> ⚠ **And the deeper question the syscall errors distract from**: daimon's `[deps] stdlib` pulls
-> `dynlib`, `fdlopen`, `tls`, `mmap`, `net`. Whether those exist on agnos is a scoping decision about
-> what daimon IS there — daimon's to make, not crab's to assume.
-> ⭐ **Prepared in daimon, uncommitted**: the first failure class was four `sys_unlink` arity errors
-> (agnos takes `(path, len)`, the host takes one arg). `daimon_unlink` is in `src/error.cyr` with the
-> two-target `#ifdef` and all four call sites converted — crab's own `crab_fs_unlink_raw` shape.
-> ⛔ daimon's rule: *"NEVER bump VERSION without the user's express permission"*, and commits are the
-> operator's. ⇒ Filed: `daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md`
+> **daimon does not build for agnos.** MEASURED three times: daimon 2.1.3 under 6.6.2 (**53 errors,
+> 36 distinct undefined symbols**), daimon 2.1.4 under 6.6.4 (identical 53 — daimon's own
+> re-measurement), and daimon 2.1.4 under **6.6.6**, 2026-09-21, in a scratch copy of its HEAD
+> (**62 error lines, 51 distinct undefined symbols**; `lib/syscalls_linux_common.cyr:79` is the first,
+> `SYS_OPENAT`, and the count grew because 6.6.6's copy of that file is 10 KB larger).
+> ⛔ **The 0.10.1 hypothesis is REFUTED.** This block used to say *"likely root, NOT confirmed: the two
+> repos' vendored agnos peers differ; re-run `cyrius deps` against a current pin"*. daimon 2.1.4 did
+> exactly that and got the same 53. **The measured root** (daimon's diagnosis): bote's
+> `dist/bote.deps` sidecar names `syscalls_linux_common` as a stdlib leaf — distlib resolved the
+> symbols bote calls to the file that DEFINES them, the Linux-internal peer — and `cyrius deps`
+> prepends every sidecar leaf as a **target-blind** top-level include, so the Linux peer is compiled
+> beside the standalone agnos peer. Nothing in daimon's own `[deps] stdlib` or sources names it.
+> ⇒ The fix sits in **cyrius distlib and/or bote's sidecar**. 6.6.5/6.6.6 changed neither (the
+> changelogs were read for `sidecar`: nothing). Filed:
+> `daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md`; the `sys_unlink`
+> arity class is fixed and released there (2.1.4).
+> ⚠ **The deeper question still stands**: daimon's `[deps] stdlib` pulls `dynlib`, `fdlopen`, `tls`,
+> `mmap`, `net`. Whether those exist on agnos is a scoping decision about what daimon IS there —
+> daimon's to make, not crab's to assume.
 > ⛔ **crab will not work around it.** Faking an index crab cannot back is the failure crab's own
 > VOLUMES entry exists to name. The half that needs no daimon already shipped (duplicates, 0.10.0).
+>
+> ## 0.10.2 — toolchain 6.6.6, and the draw-path deps taken to their tags
+>
+> ⭐ **A pin-only release; no byte of `src/` moved.** cyrius 6.6.4 → **6.6.6**; sadish 0.5.5 →
+> **0.11.2**, rekha 0.3.10 → **0.9.0**, kashi 1.0.8 → **1.0.10**, dhancha 0.10.0 → **0.10.4**,
+> daimon 2.1.3 → **2.1.4**; rupa 0.1.7, setu 0.8.9, chitra 1.0.3 already the highest tag on their
+> remotes (`ls-remote`, `sort -V`). Check 4 re-run — every `path` disabled, `rm -rf lib && cyrius
+> deps`, 7 commit-pinned — **both targets byte-identical** to the override build.
+> ⛔⛆ **THE UNTOUCHED 0.10.1 CHECKOUT DID NOT BUILD ON THIS BOX.** `../dhancha` had moved to 0.10.4,
+> whose dist calls `sd_flatten_op_begin` / `_end` / `sd_flatten_degraded`; `path` won over
+> `tag = "0.10.0"`, rewrote `lib/dhancha.cyr`, and the link was refused against the still-pinned
+> sadish 0.5.5 — **3 undefined functions in a tree with no diff.** The manifest's hazard, facing the
+> other way; now written into the manifest. The baseline was rebuilt from the TAGS and reproduces
+> the 0.10.1 artifacts byte-identical (`7ee03c10…` / `a5ba0476…`) — the first time those numbers
+> were re-derived rather than read.
+> ⭐⭐ **THE PRODUCTION RENDER IS PIXEL-IDENTICAL ACROSS THE MOVE.** The 640x220 BGRA dump
+> `render_test` writes: 0.10.1 tree on 6.6.4 vs this tree — 563,200 B, `cmp` clean. ⭐⭐ **QEMU
+> `crab-face-test.py` PASSES** on the new agnos binary (agnos 1.57.5, aethersafha 0.16.25): the face
+> loads through rekha 0.9.0 (`410820 bytes adv=9 upem=2048 i=4 m=13`), one `font` line, navigations
+> 1, view changes 2, no fault, no allocator-failure text — the `dh_frame_begin` arena contract under
+> a face, on the target, with the new stack.
+> ⭐ **QEMU button and pointer harnesses, five runs**: on the new binary **middle marks a pane (wire
+> 3), right opens the context menu, middle on a popup row fires nothing, the hover follows the pointer
+> across 6 rows, F10 / View / Esc / Tab / `u` / `g` / `b` all answer, no faults.** ⚠ Two of three
+> button runs FAILED ARM 2 (one middle press, no retry) and one pointer run failed its right-click
+> arm — every one a DELIVERY miss (`aethersafha: a non-left button press had NO client content under
+> the cursor`, a one-shot, so later misses are silent), and the **0.10.1 binary on the same kernel
+> missed all four per-mask probes** before landing its one ARM 2 press. The harness's own header
+> names this flake. ⛔ Read the serial before filing a blocker on a red verdict — the 0.9.5 lesson,
+> re-learned cheaply this time. Serial logs of every run are in the session scratchpad; the harness
+> keeps only its last run's in `agnos/build/crab-buttons/`.
+> ⚠ **THE BINARY IS +49 %** — host 1,097,664 → **1,636,136 B**, agnos 1,146,920 → **1,681,192 B** —
+> and it was pulled apart: the toolchain alone (old pins, 6.6.6) is +180 KB each, ALL of it the
+> stdlib snapshot (`lib/sankoch.cyr` 2.7.15 → 2.8.0, +279 KB of Brotli decode, reached only through
+> chitra's PNG inflate); the sadish (85 → 471 KB) and rekha (41 → 551 KB) bundles are the rest.
+> crab links without DCE. **`CYRIUS_DCE=1`: 608,040 / 874,280 B**, and `render_test` under it is
+> 55/0. ⛔ Whether the release builds with DCE is the operator's decision; the numbers are here so it
+> is not made blind. ⚠ New advisory on every build — `warning: large static data (143024 bytes)` —
+> the compiler's 128 KiB threshold, crossed by the bundles' tables (138,848 with the old deps under
+> 6.6.6, so the toolchain crosses it alone); crab declares no top-level array. Not an error.
+> ⚠⚠ **INHERITED FROM dhancha 0.10.4 AND NOT FIXED HERE: crab MEASURES per BYTE, the toolkit now
+> DRAWS per CHARACTER.** `crab_text_w` / `crab_name_cell_px` hand `load8(s + i)` to
+> `dh_text_advance`; `dh_draw_text_ink` decodes UTF-8. `Über.txt`: five advances summed, four glyphs
+> drawn → over-measured, cut early, and the byte-granular cut can leave a lone C3 that 0.10.4 draws
+> as its raw cell before the `~`. The notices' `—` is a dash now (it was three cells). Strictly less
+> wrong than before; **the next crab item**, with `dh_text_decode(s, at, cpp)` as the tool. A pin
+> bump is not the change to do it in.
+> ⭐ kashi 1.0.10 found that **`dist/kashi.cyr` had never been published** — ADR 0003's expiry
+> (*switch to the library face the day crab needs runtime font loading*) would have failed to
+> resolve against every kashi through 1.0.8. It resolves now. sadish 0.11.1's audit closed four
+> crashes, a heap overflow and a hang under every glyph crab draws with a face.
+> **2503 / 0**, render_test **55**, fuzz 100,000, fmt ×8, coverage 86 %, vet, deny, `deps --verify`
+> 49/0. `state.md` had rotted a third time (Toolchain said 6.6.2 against a 6.6.4 manifest; the dep
+> table sat at 0.8-era tags; Tests said 2,012; three closed gaps still open) and carried 117 lines of
+> exact duplicate — all cut.
 >
 > ## 0.10.1 — the sidebar can reach its own rows
 >

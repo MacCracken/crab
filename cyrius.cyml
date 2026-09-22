@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack. PLANNED, NOT SHIPPED: AI semantic find / auto-tag / dedup via daimon's vector store, files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.6.4"
+cyrius = "6.6.6"
 
 [build]
 entry = "src/main.cyr"
@@ -32,10 +32,23 @@ stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "ass
 # supply them directly.
 # ⛔ `path` WINS OVER `tag`, so a green local build is NOT evidence the declared graph resolves.
 # Re-verify with the overrides disabled at every cut — see `docs/development/state.md` § Hazards.
+# ⛔ AND THE CONVERSE BITES TOO, MEASURED 2026-09-21: a sibling that moves AHEAD of these tags breaks
+# the local build while the committed tree is fine. `../dhancha` at 0.10.4 calls
+# `sd_flatten_op_begin` / `_end` / `sd_flatten_degraded`, which the then-pinned sadish 0.5.5 does not
+# define — `path` won, `lib/dhancha.cyr` was rewritten, and the build refused 3 undefined functions
+# against a manifest that had not changed. To rebuild what a tag actually shipped, disable the
+# `path` lines and resolve from the tags (that reproduced 0.10.1's artifacts byte-identical).
 
+# ⛔ FLOOR: dhancha 0.10.4's `dh_draw_text_ink` calls `sd_flatten_op_begin` / `_end` /
+# `sd_flatten_degraded` (per-operation flatten budget, sadish 0.7.x); 0.10.0's floor of >= 0.5.5
+# (`sd_alloc_set`, `sd_canvas_blit_at`) stands beneath it.
+# ⛔ MOVE sadish AND rekha TOGETHER. rekha 0.9.0 pins sadish 0.11.2 EXACTLY and its dist is cut
+# against sadish's inline-point `SdPath`; two bundles on two sadishes is a link error at best.
+# ⚠ The bundle is 471,512 B of source (85,815 at 0.5.5) and crab links without DCE — see the 0.10.2
+# CHANGELOG for what that costs and what `CYRIUS_DCE=1` returns.
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
-tag = "0.5.5"
+tag = "0.11.2"
 modules = ["dist/sadish.cyr"]
 
 # rupa (रूप — form) — the shared desktop theme-token core. crab reads its tokens through dhancha's
@@ -48,18 +61,21 @@ path = "../rupa"
 tag = "0.1.7"
 modules = ["dist/rupa.cyr"]
 
-# rekha — scalable TrueType outlines. crab does not draw with it yet (it passes `font = 0`), but
-# dhancha's fold calls into it, so crab must supply it.
+# rekha — scalable TrueType outlines. Since 0.9.0 crab draws with it: `crab_face` opens the
+# kernel's `/fonts/default.ttf` through `rekha_font_open` and sizes every column by
+# `rekha_char_advance_px` / `rekha_units_per_em`; dhancha's fold calls the rest.
 # ⛔ FLOOR >= 0.3.6, HARD: dhancha 0.9.27's `dh_text_advance` calls `rekha_char_advance_px`, which
 # 0.3.5 does not define. Against an older pin crab fails to link with
 # `undefined function 'rekha_char_advance_px'` — measured, not predicted.
-# ⛔⛔ TAG-ONLY, AND DELIBERATELY SO. sadish and rekha are the only two deps crab resolves without a
-# `path` override, which makes them the only two whose REMOTE resolution a local build actually
-# exercises. Do not add one — that property is what stands between this manifest and the 2026-08-28
-# phantom-tag failure.
+# ⛔ 0.9.0 pins sadish 0.11.2 EXACTLY — see the sadish block: the two move together.
+# ⛔⛔ TAG-ONLY, AND DELIBERATELY SO. sadish, rekha and chitra are the only three deps crab resolves
+# without a `path` override, which makes them the only three whose REMOTE resolution a local build
+# actually exercises. Do not add one — that property is what stands between this manifest and the
+# 2026-08-28 phantom-tag failure. (This line said "two" until 0.10.2; chitra has been tag-only since
+# it was adopted on 2026-08-31.)
 [deps.rekha]
 git = "https://github.com/MacCracken/rekha.git"
-tag = "0.3.10"
+tag = "0.9.0"
 modules = ["dist/rekha.cyr"]
 
 # kashi (काशि) — the AGNOS system font. dhancha's `dh_draw_text` blits its CP437 8x16 glyphs for
@@ -67,10 +83,14 @@ modules = ["dist/rekha.cyr"]
 # ⛔ THE FREESTANDING CORE IS A MEASURED CHOICE, NOT A SHORTCUT, and it has a written expiry:
 # switch to `modules = ["dist/kashi.cyr"]` the day crab needs runtime font LOADING.
 # See docs/adr/0003-kashi-freestanding-core-over-the-library-face.md.
+# ⚠ That switch would have FAILED against every kashi through 1.0.8 — `dist/` was gitignored and no
+# release attached it, so a `git` + `tag` resolve found no bundle (kashi 1.0.10's own finding).
+# 1.0.10 tracks and publishes it; the expiry is executable now. `src/font_data.cyr` is byte-identical
+# from 1.0.8 to 1.0.10.
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
 path = "../kashi"
-tag = "1.0.8"
+tag = "1.0.10"
 modules = ["src/font_data.cyr"]
 
 # dhancha — the widget toolkit: LIST, GRID, PROGRESS, MENU, SHEET, the theme bindings, and the
@@ -86,7 +106,7 @@ modules = ["src/font_data.cyr"]
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 path = "../dhancha"
-tag    = "0.10.0"
+tag = "0.10.4"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it
@@ -129,7 +149,12 @@ modules = ["dist/chitra.cyr"]
 # with no daimon lists, copies, moves and deletes exactly as it does today, and the M7 surfaces
 # report that the index is unavailable rather than failing. That is the same rule the preview
 # follows for a file it cannot decode — say which kind of nothing this is.
+# ⛔⛔ AND IT DOES NOT BUILD FOR AGNOS — 2.1.3, 2.1.4 and (re-measured 2026-09-21 under 6.6.6) still:
+# `cyrius build --agnos` is refused, 51 distinct undefined symbols, because bote's sidecar names
+# `syscalls_linux_common` as a stdlib leaf and `cyrius deps` prepends sidecar leaves target-blind.
+# The fix is upstream (cyrius distlib / bote's sidecar); a pin move here is NOT it. M7's index and
+# tags wait on it. Filed: daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md
 [deps.daimon]
 git = "https://github.com/MacCracken/daimon.git"
 path = "../daimon"
-tag = "2.1.3"
+tag = "2.1.4"

@@ -24,18 +24,48 @@
 
 ## Version
 
-**0.10.1 IS CUT** — `VERSION` reads `0.10.1` and the CHANGELOG header agrees, 2026-09-14.
-⚠ 0.10.0 released (tagged). Re-run `git log --oneline -3` and `git tag --list` before restating this.
+**0.10.2 IS CUT** — `VERSION` reads `0.10.2` and the CHANGELOG header agrees, 2026-09-21.
+⚠ 0.10.1 is released (tag on the remote). Re-run `git log --oneline -3` and `git tag --list` before
+restating this; the commit, the tag and the push are the operator's.
 
-⛔⛔ **M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING — daimon does not build for agnos.** MEASURED:
-`cyrius build --agnos src/main.cyr` on daimon 2.1.3 gives **53 errors, 36 distinct undefined symbols**
-— 50 in `lib/syscalls_linux_common.cyr` (a VENDORED stdlib file being compiled for the wrong target,
-while `lib/syscalls_x86_64_agnos.cyr`'s own header says it is STANDALONE and does not include it) and
-3 in daimon's own `src/agent.cyr` (`SYS_EXECVE`, `SYS_WAIT4`). ⚠ Likely root, not confirmed: daimon
-pins cyrius **6.6.2** to crab's **6.6.4** and the two vendored agnos peers DIFFER. ⇒ Filed at
-`daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md`; the first failure
-class (four `sys_unlink` arity errors) is FIXED there as `daimon_unlink`, prepared and uncommitted —
-daimon's own rule forbids bumping its VERSION. ⛔ crab will not fake an index it cannot back.
+⛔⛔ **M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING — daimon does not build for agnos, and the root
+is UPSTREAM of daimon.** MEASURED three times now: daimon 2.1.3 under 6.6.2 (**53 errors, 36
+symbols**), daimon 2.1.4 under 6.6.4 (identical 53 — so the handoff's *"likely root: a stale vendored
+snapshot"* is **REFUTED**), and 2.1.4 under **6.6.6** on 2026-09-21 (**62 error lines, 51 distinct
+undefined symbols** — the count grew with 6.6.6's larger `lib/syscalls_linux_common.cyr`, which is
+still being compiled for the agnos target). daimon's diagnosis: bote's `dist/bote.deps` sidecar names
+`syscalls_linux_common` as a stdlib leaf and `cyrius deps` prepends sidecar leaves **target-blind**,
+so the Linux-internal peer lands beside the standalone agnos peer. ⇒ The fix is in cyrius distlib
+and/or bote's sidecar; **a pin move is not it**. Filed at
+`daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md` (the `sys_unlink`
+arity class is fixed there, 2.1.4). ⛔ crab will not fake an index it cannot back.
+
+**0.10.2 contents — toolchain 6.6.6, and the draw-path deps taken to their tags.** A pin-only
+release; no byte of `src/` moved. cyrius **6.6.4 → 6.6.6**; sadish 0.5.5 → **0.11.2**, rekha
+0.3.10 → **0.9.0**, kashi 1.0.8 → **1.0.10**, dhancha 0.10.0 → **0.10.4**, daimon 2.1.3 → **2.1.4**;
+rupa, setu, chitra already at their highest tags. Every tag verified on its remote; check 4 re-run
+with every `path` disabled — both targets **byte-identical** to the override build.
+⭐⭐ **The production render is PIXEL-IDENTICAL across the move** — the 640x220 `render_test` dump
+from the 0.10.1 tree on 6.6.4 and from this tree `cmp` clean (563,200 B). ⭐⭐ **QEMU
+`crab-face-test.py` PASSES** on the new agnos binary: the face loads through rekha 0.9.0
+(`adv=9 i=4 m=13`), no fault, no allocator failure. The button and pointer harnesses: every crab arm
+that received a press answered correctly (middle marks, right opens the menu, middle on a popup row
+fires nothing, the hover follows, F10/View/Esc/Tab answer); the red verdicts in two of three button
+runs were press DELIVERY misses the 0.10.1 binary also hit — see *Proven*.
+⚠ **The binary is +49 %**: host 1,097,664 → **1,636,136 B**, agnos 1,146,920 → **1,681,192 B** — a
+third from the toolchain's stdlib (sankoch 2.7.15 → 2.8.0, +279 KB of Brotli), the rest from the
+sadish (471 KB) and rekha (551 KB) bundles, all linked whole because crab builds without DCE.
+`CYRIUS_DCE=1` returns **608,040 / 874,280 B**, `render_test` 55/0 under it. The release decision
+is the operator's. ⚠ New advisory on every build: `large static data (143024 bytes)` — the
+compiler's 128 KiB threshold, crossed by the bundles' tables (crab declares no top-level array).
+⛔⛆ **The committed 0.10.1 tree did not build on this box**: `../dhancha` had moved to 0.10.4 and
+`path` won — 3 undefined `sd_flatten_*` against the pinned sadish 0.5.5. The converse of the
+manifest's hazard, now written into it. The 0.10.1 baseline was rebuilt from its TAGS and reproduces
+the shipped artifacts byte-identical (`7ee03c10…` / `a5ba0476…`).
+⚠ **Inherited from dhancha 0.10.4 — one glyph per CHARACTER, while crab still MEASURES per byte**
+(`crab_text_w`, `crab_name_cell_px`): a non-ASCII name is over-measured and a cut can land inside a
+UTF-8 sequence. Strictly less wrong than the mojibake it replaces; **the next crab item**, not this
+release's — `dh_text_decode` is the tool. **2503 / 0**, render_test 55, all gates green.
 
 **0.10.1 contents — the sidebar can reach its own rows.** Two defects found while designing M7's
 smart-folder section, cut on their own rather than bundled.
@@ -82,123 +112,6 @@ real gate is an ICON PATH, because `dh_draw_text_ink` walks one byte per glyph i
 size pre-filter, and bypassing the `CRAB_KIND_FILE` guard — both change what crab OPENS, not what it
 MARKS, so no mark-based assertion can see them. A directory opens and then fails to READ, so its hash
 stays 0 either way. Both predicates are pinned exhaustively; their USE in the scan is not.
-
-**0.9.7 contents — H1.** `crab_walk_reroot_dtree` turns a cancelled tree copy into a RECURSIVE DELETE
-of the destination root. Its own comment named the invariant that made that safe (`crab_walk_begin`
-refused an existing destination, so the root was always one crab had just made) **and named the
-consequence of losing it**: *"if that guard is ever relaxed to allow merging … THIS FUNCTION BECOMES A
-DATA-LOSS BUG and must be deleted in the same change."* 0.8.7 relaxed exactly that guard and did not
-touch the delete. ⇒ Cancelling a copy that MERGED into a folder the operator already had deleted that
-folder wholesale.
-⭐⭐ **MEASURED ON IRON BOTH WAYS** (`crab-h1-test.py`, `debugfs` readback after shutdown): shipped →
-`/zzkeep` GONE, **0/3** of the operator's files survived; fixed → folder intact, **3/3** survived,
-`crab: transfer cancelled rc 23`.
-⇒ `CRAB_OP_DMADE` is written at the only place that knows (the `mkdir` in `crab_walk_begin`) and
-`crab_cancel_may_remove(dmade, root_len)` is the decision, lifted out of the walk so the suite drives
-it. ⚠ Only an explicit `1` authorises removal — truthiness would let a stale record authorise deleting
-the operator's folder. A cancelled merge now reports `CRAB_FS_EMERGED` — *"what was already copied
-into that folder is still there"* — instead of implying a clean undo. **2451 / 0**, four mutations.
-
-**0.9.6 contents — a drag cannot outlive its listing.** Two data-loss defects found during 0.9.5 and
-deliberately not bundled into it. One root cause: **a drag is a claim about a ROW INDEX and nothing
-kept the listing still** — `dragging`/`drag_pane` were touched in exactly three places and NOTHING in
-the key dispatch consulted drag state.
-⛔⛆ **(1) A drop could move a file while a DELETE PROMPT was on screen.** The release was gated on the
-LEFT BUTTON and nothing else — neither `crab_pointer_blocked` nor `crab_pointer_modal`, though the
-click has asked since 0.8.0 and the wheel since 0.8.5. Press-hold, move 4 px, press `d` (the prompt
-asks about entry X), drag across, release: the drop moved a file, RELISTED BOTH PANES, cleared marks
-and CLAMPED both selections — and the `y` deleted something else. **MEASURED on iron**:
-`crab: prompt … delete anuenue?` then `crab: drop refused 2`.
-⛔⛆ **(2) The keyboard could re-list the source pane mid-drag** — Enter/Backspace descend or ascend
-the pane being dragged FROM while the button is down, and `crab_sort_entries` permutes in place even
-without navigating. ⇒ **THE NAME IS THE IDENTITY**: the press captures the row's name, the drop
-verifies it and refuses out loud. Same discipline as the delete queue's *"queue by NAME first"*.
-⚠ **(3) A press on a pane HEADER left the previous drag armed** — arming sat inside `if (hr >= 0)`
-with no else, and `crab_hit` records headers as row -1. Nothing else ever disarms a drag: the
-compositor DROPS a release outside the content rect, so releasing on the titlebar left `dragging = 1`.
-⇒ `crab_drop_ok` is the decision, lifted out of the `#ifdef`. ⛔ The question is asked BEFORE the
-target (an operator with a prompt up must not be told "dropped nowhere"), but `dragging` outranks
-even that so an ordinary click stays silent. **2440 / 0**, five mutations, each the shipped behaviour.
-⭐⭐ **QEMU `crab-drop-test.py` ARM 1 PASSES** (twice, separate runs). ⚠ ARM 2 is honestly UNMEASURED:
-its own Backspace re-lists the pane so each retry starts from a different layout and the loop does not
-converge — it shows nothing moved; the name check is proven in the suite by mutation instead.
-⛔ The drag needed TWO generous moves to promote, not one nudge: `crab_drag_started` needs 4 px but
-promotion happens in the POINTER_MOVE arm, so it needs a motion EVENT delivered while the button is
-down — and aethersafha dedupes motion.
-
-**0.9.5 contents — pointer polish, and the roadmap's premise was wrong.** The item read *"the middle
-mouse button does nothing"*; it has **DISMISSED popups since 0.8.5** — both `CRAB_PA_DISMISS` returns
-are button-blind and never test `btn` — and three doc sites claimed otherwise while no test pinned the
-one behaviour it had. ⭐⭐ **MIDDLE NOW MARKS the row under the pointer**, an ALIAS of `Space`
-(`crab_pa_accel` answers `0x2C`, the arm synthesises that one key through the one binding table, so
-there is no second `crab_mark_toggle` call site) — and *"middle is Space, not `d`"* is a HOST
-assertion instead of a literal inside the agnos `#ifdef`. ⛔⛔ Deliberately the safest gesture
-available: X11 numbers buttons left/**middle**/right, so X11 muscle memory aims middle where crab's
-RIGHT lives and `Delete` is a row in the menu right opens — a mark is self-inverse and moves nothing.
-Middle stays refused on a popup row, a bar cell, the door, the strip and the sidebar.
-⭐⭐ **THE POPUP HIGHLIGHT FOLLOWS THE POINTER.** ⛔ It does not engage until the pointer has MOVED:
-the popup is placed AT the pointer and `dh_place_at_point` FLIPS it above the anchor when it would
-overhang (which at 380x220 it usually does), so the cursor that opened the menu sits mid-list over a
-row nobody aimed at. ⛔⛆ And `-1` from `dh_list_index_at` means BOTH "inert row" and "outside the
-list": inside-on-inert HOLDS (the keyboard's rule), OUTSIDE RESTORES the open-time choice — otherwise
-sweeping off a menu leaves `Enter` armed on the last row crossed, and the natural exit is
-down-and-right through `Delete`.
-⛔⛆ **Fixed: the context menu opened on an EMPTY pane with NO HIGHLIGHT AT ALL** — `menu_sel = 0` is
-`CRAB_MI_OPEN`, which `crab_menu_enabled` refuses when `count <= 0`, so `dh_list_select` refused the
-inert row and `Enter` did nothing. MEASURED: `enabled(OPEN,0) = 0`, first enabled = 5. `crab_menu_first`
-is the twin `crab_mb_item_first` has had since 0.8.6; fixed at BOTH open sites.
-⛆ Cut four false claims in `crab_mlst`'s comment (all falsified by 0.8.5, left standing four releases)
-and corrected the README. **2421 / 0**, five mutations; one expiry fired and was INVERTED
-(`"a pane, middle: nothing yet"` → `CRAB_PA_MARK`).
-⭐⭐ **QEMU `crab-button-test.py` PASSES, four arms** — and **button 3 is observed for the FIRST TIME
-anywhere in this stack**: mask 4 → `crab: mark by middle click`. The hover trace
-`menu 3→2→1→0→1→2→3→4→5→0` shows the sweep up a flipped menu, back down all six rows, and the final
-`→0` as the pointer leaves and `Enter` means `Open` again.
-⛔ **Three harness lessons, each of which gave a WRONG answer first**: a `-2000` home with 0.3 s
-settles found nothing (needs `-4000` and 0.8 s — the pin needs its own frame) and would have produced
-a false cross-repo blocker; aethersafha's diagnostic is ONE-SHOT so press ORDER decides what it can
-tell you; and a popup left open by one probe decides the next in the wrong branch (middle with a menu
-up is DISMISS, not MARK).
-
-**0.9.4 contents — the preview shows the SELECTION, and costs nothing.** The roadmap asked for one
-thing (*"the 64 KiB dimension+EXIF read is on the idle tick"*) and moving it exposed that the whole
-column was reading process-wide *"last touched"* state instead of anything derived from the selection.
-⛔⛆ **Two of those readers were wrong and shipping, both measured on the host BEFORE any change:**
-(1) the **thumbnail lagged one file behind** — the keypress frame asked `crab_thumb_pixels()` ("what
-the last STEP was about") and the tick's gate `if (tafter != tbefore)` skips on `OK -> OK`, so **no
-frame was drawn at all** and the previous picture stayed under the new name. That is 0.8.2's bug,
-whose own fix comment names the mechanism, obeyed by **1 of 8 render sites**. (2) **`CAMERA: Canon
-EOS R5` stayed under a TEXT FILE's name** — `crab_preview_dims` returned at its `is_image` gate
-before clearing the process-wide EXIF buffers, and the CAMERA/SHOT rows sit outside the column's
-`is_image` block. ⇒ Both die by construction: `crab_pvc_*` (128 path-keyed slots in ui.cyr, 56,320 B
-once) holds dims AND EXIF together, `crab_pv_publish` is the ONE publisher for all eight sites and
-CLEARS as well as sets, and `crab_pv_redraw_due` makes the SLOT part of the redraw answer.
-⭐ **The read is on the tick** (`crab_pv_step`, at most one file per tick, gated on
-`crab_preview_fit` — the EFFECTIVE state, so a too-narrow window now reads nothing). MEASURED:
-selection path **4 µs per keystroke, the SAME with an empty cache as a warm one** — a miss is a
-lookup, never a read. ⚠ The host number understates agnos by ~100x; crab's own recorded figure for
-the cheaper *stat* sweep is ~1.1 ms/entry, which is why that was deferred too. Arrowing BACK is now
-free (the old memo held ONE entry). Also fixed: a bare `sys_read` that memoised a wrong negative on a
-short read, and the **mascot**, the one render site of eight that published no preview state at all.
-**2384 / 0**, five mutations; a sixth SURVIVED and is recorded at its assertion (a regular file never
-short-reads, so the loop is unprovable with a file fixture).
-⭐⭐ **QEMU `crab-preview-test.py` PASSES and is mutation-proven** — new `crab: pv` oracle emitted by
-the DRAIN and nothing else; 137x42 and 320x200 each resolved correctly, every file read **exactly
-once**, and the 48 non-images produced no line. Against a planted re-read it reports files read up to
-**36 times each**.
-⛔⛆ **AND THE LAYERING GATE WAS HALF A GATE.** `render_test` includes `ui.cyr` alone to stop the
-render path calling up — but an undefined **constant** is `error:` (build fails) while an undefined
-**function** is only `warning:` (build exits 0, `53 checks, 0 failed`). Enforced for enums, NOT for
-functions — the likelier mistake. `ci.yml` now fails on the warning, mutation-proven both ways.
-⛔ Its first draft had a second hole: `cyrius build … | tee` hides the build's exit status, so a
-FAILED build ran the STALE binary and reported its old green count. Caught doing exactly that.
-
-⭐⭐⭐ **H1 IS CLOSED (0.9.7).** This section carried it as OPEN for four releases; the fix, the
-mutation proofs and the iron measurement are in the 0.9.7 block above. `crab_walk_reroot_dtree` now
-asks `crab_cancel_may_remove`, which authorises removing the destination root only when
-`CRAB_OP_DMADE` says crab's own `mkdir` created it. Reproduced by the operator before the fix
-(`tests/zz_h1_repro.tcyr`, since removed): `POST-CANCEL precious.txt exists = 0 *** DELETED BY
-CRAB ***` — and reproduced again by `crab-h1-test.py` against a planted revert, **0/3 surviving**.
 
 **0.9.7 contents — H1.** `crab_walk_reroot_dtree` turns a cancelled tree copy into a RECURSIVE DELETE
 of the destination root. Its own comment named the invariant that made that safe (`crab_walk_begin`
@@ -659,14 +572,36 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.6.2` (in `cyrius.cyml [package].cyrius`) — moved **2026-09-11 at the 0.8.4
+- **Cyrius pin**: `6.6.6` (in `cyrius.cyml [package].cyrius`) — moved **2026-09-21 at the 0.10.2
+  cut, on operator direction**, from `6.6.4`. Two repair releases (6.6.5: call ABI, aggregate
+  layout, `cyrlint --strict-deferrals`; 6.6.6: the Windows `O_APPEND`/`O_TRUNC` corruption, CVE-44
+  and CVE-45, nine new refusals — a redeclared global, a top-level block `var` read after its block,
+  a function-like `#define` in a comment). crab's `src/` needed **no edits**: it has no `#define`, no
+  `struct`, no PE target, no duplicated global; the build was the gate and it is green.
+  ⭐ **The bump's effect was MEASURED IN ISOLATION** (the 0.10.1 tree, its old dep tags, compiled
+  by 6.6.6): host 1,097,664 → **1,277,920 B**, agnos 1,146,920 → **1,327,080 B** — +180 KB each,
+  and none of it codegen: the **stdlib snapshot** moved `lib/sankoch.cyr` 2.7.15 → **2.8.0**
+  (665,879 → 945,063 B, Brotli decode for rekha's WOFF2 — a leaf crab reaches only through chitra's
+  PNG inflate), doubled `lib/bench.cyr`, and grew every `syscalls_*` peer. That is also what crosses
+  the compiler's 128 KiB **`large static data`** advisory (138,848 B with the old deps, 143,024 with
+  the new): crab declares no top-level array; the tables are the bundles'.
+  ⭐ `lib/` re-vendored from scratch (`rm -rf lib && cyrius deps`, CI's shape): **0 of 42** stdlib
+  files drift from `~/.cyrius/versions/6.6.6/lib` — every file `cmp`'d. `lib/alloc_cx.cyr` arrives
+  (new in 6.6.6); `lib/flags.cyr` and `lib/hashmap_fast.cyr` leave (nothing names them; no target
+  misses a symbol). Lock 50 → 49 entries. ⚠ `cycc` on PATH is 6.6.6 too, so bare `cycc` and
+  `cyrius` agree for once — do not rely on it; `cyrius` resolves the pin, bare `cycc` never does.
+- *(history)* `6.6.4` — moved **2026-09-14 at the 0.8.11 cut, by the operator**, from `6.6.2`, with
+  the whole stack (sadish 0.5.5, rekha 0.3.10, dhancha 0.9.29 → 0.10.0). ⛔ **It was never written
+  into this section** — for seven releases (0.8.11 → 0.10.1) this bullet asserted `6.6.2` against a
+  manifest that read `6.6.4`. The same rot the header above records twice already; the CHANGELOG's
+  0.8.11 entry is where that bump lives.
+- *(history)* `6.6.2` — moved **2026-09-11 at the 0.8.4
   cut, by the operator**, from `6.6.1`, together with the whole sibling stack (every dep, and
-  aethersafha's stack behind it, now sits on 6.6.2). 6.6.2 is the repair release for 6.6.0's
+  aethersafha's stack behind it, then sat on 6.6.2). 6.6.2 is the repair release for 6.6.0's
   `: stack` value-form change; crab's `src/` needed no edits. ⚠ The bump re-vendored `boxed`,
   `hashmap`, `result` and `tagged` and **left `lib/sankoch.cyr` at 6.6.1's 2.7.14** — the
   transitive leaf the sync never walks — corrected 2026-09-12 by `cyrius deps`, after which the
-  whole vendored tree `cmp`s byte-identical to `~/.cyrius/versions/6.6.2/lib`. ⚠ The wrapper on
-  PATH is already 6.6.3 (`cycc --version`); `cyrius` resolves the manifest pin, bare `cycc` does not.
+  whole vendored tree `cmp`'d byte-identical to `~/.cyrius/versions/6.6.2/lib`.
 - *(history)* `6.6.1` — moved **2026-09-08 on operator direction**, from `6.6.0`. ⭐ **Not cosmetic, and the reason is on crab's shipping target**:
   6.6.1 rebinds `chrono`'s AGNOS monotonic clock from `sys_uptime_ms` (**#40**, `timer_ticks`) to
   `sys_uptime_us` (**#95**, `rdtsc`). ⛔⛔ **A foreground `run` program on AGNOS executes with IF
@@ -691,7 +626,8 @@ demands and the one this file broke twice.
   longer hardcodes a syscall number, and crab is the first consumer to actually call that wrapper.
 - Trail: `6.4.71` → `6.5.5` (0.4.3) → `6.5.9` → **6.5.21** (0.4.9, one language version across the
   desktop stack) → **6.5.27** (0.4.11) → **6.5.28** (0.4.13) → **6.5.35** (0.4.15) →
-  **6.5.36** (0.7.1).
+  **6.5.36** (0.7.1) → **6.5.41** (0.7.7) → **6.6.0** (0.8.0) → **6.6.1** (0.8.2) → **6.6.2** (0.8.4)
+  → **6.6.4** (0.8.11) → **6.6.6** (0.10.2).
 - ⚠ The pin is documentation, not enforcement — `cyrius build` compiles with the **installed** `cycc`,
   warns `toolchain drift`, and carries on. ⛔ It is not cosmetic: **CI installs the toolchain from this
   pin** (`grep '^cyrius = ' cyrius.cyml`, both `.github/workflows/*.yml`), so while the pin lagged, a
@@ -735,8 +671,9 @@ demands and the one this file broke twice.
 
 ## Source
 
-**8,092 lines** across **six** files, plus **4,486** in `tests/` *(0.7.7; 7,915 at 0.7.6, 5,368 at
-0.7.5, 2,227 at the 0.7.0 cut)*.
+**14,257 lines** across **five** files, plus **8,406** in `tests/` *(0.10.2, `wc -l`; 8,092 / 4,486
+at 0.7.7, 7,915 at 0.7.6, 5,368 at 0.7.5, 2,227 at the 0.7.0 cut)*. ⚠ Unchanged from 0.10.1 — 0.10.2
+moved no source line.
 ⛔ **THE PER-FILE COUNTS THAT USED TO SIT IN THE HEADINGS BELOW ARE DELETED, NOT UPDATED.** They were
 `main.cyr (1,287)` against a real 1,494 and `app.cyr (2,484)` against a real 3,007 — understated by
 523 lines in the largest file in the project — while this very section warned three lines down never
@@ -816,6 +753,28 @@ that were written with their tests.
 the render call sites the deferred-stat drain added.
 
 ## Proven
+
+### ⭐⭐ As of 2026-09-21 — the 0.10.2 binary (cyrius 6.6.6, sadish 0.11.2, rekha 0.9.0, dhancha 0.10.4) under QEMU, agnos 1.57.5, aethersafha 0.16.25
+
+- `crab-face-test.py` **PASS**: `crab: font /fonts/default.ttf 410820 bytes adv=9 upem=2048 i=4 m=13`
+  — the face loads through rekha 0.9.0 and measures proportionally; one `font` line; navigations 1,
+  view changes 2; **no fault, no allocator-failure text**. The scalable draw path and the frame arena,
+  on the target, with every draw-path dep moved.
+- `crab-button-test.py`, three runs: **run 3 landed every button** — middle → `crab: mark by middle
+  click` (wire 3), left → `crab: click`, right → `crab: context menu opened by pointer`, ARM 2
+  (middle on a pane) **marks**, ARM 3 (middle on a popup row) **fires nothing**; run 1 measured the
+  hover following the pointer across **6 rows**; run 2 saw the popup-row refusal as
+  `crab: press btn 3 no action`. ⚠ Runs 1 and 2 FAILED ARM 2 and the verdict said so — each a press
+  the compositor never forwarded (`NO client content under the cursor`, one-shot, later misses
+  silent). **Discriminated, not assumed**: the 0.10.1 binary on the same kernel missed all four
+  per-mask probes and landed ARM 2 once. The aiming under TCG is a coin; the harness header says so.
+- `crab-pointer-test.py`, one run: ascend, left click, `u` ×6 → 3 refreshes, `g`, `b`, **bare F10
+  opens the bar and View drives from the keyboard**, bare Esc/Tab reach crab, Ctrl chords go to the
+  compositor, **no faults**. Its right-click arm was the same delivery miss (three tries) —
+  UNMEASURED there, measured in button run 3.
+- ⚠ **Not on target for this binary**: the drop, H1, symlink, preview, door, go, columns, shift and
+  resize harnesses — none of their code moved, and the pixel diff on the host is byte-identical, but
+  a compiler moved under the event loop and only the face, button and pointer harnesses were run.
 
 ### ⭐⭐ As of 2026-09-13 — QEMU, a real agnos kernel, aethersafha 0.16.24, one compositor
 
@@ -946,14 +905,27 @@ per release stops being readable exactly when a cold start needs it most.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-09-12: all SEVEN declared tags equal that repo's
-highest tag on its remote** (`git ls-remote --tags`, `sort -V`), every sibling tree clean on its tag,
-and the declared graph resolves with **all four `path` overrides disabled** — 7 deps / 0 errors,
-lock **3 → 7 commit-pinned**, `deps --verify` **50 verified / 0 failed**, host and `--agnos` both
-build, **1748/0**.
+Declared in `cyrius.cyml`. ⭐ **Re-verified 2026-09-21 at the 0.10.2 cut: all EIGHT declared tags
+equal that repo's highest tag on its remote** (`git ls-remote --tags`, `sort -V`), every sibling
+checkout on its tag (kashi and daimon one commit past theirs — kashi's is comment-only and
+`src/font_data.cyr` is the same file; daimon has no module), and the declared graph resolves with
+**all five `path` overrides disabled** — `rm -rf lib && cyrius deps` → 7 resolved (daimon declares
+no module), lock **3 → 7 commit-pinned**, `deps --verify` **49 verified / 0 failed**, host and
+`--agnos` both build, **2503/0**.
 ⭐⭐ **AND THE OVERRIDE-DISABLED BUILD IS BYTE-IDENTICAL TO THE OVERRIDE BUILD** — host
-**1,045,296 B** `d75c35a9…`, agnos **1,085,872 B** `9ca89ea3…`, both ways (measured at the dep
-bump, before the pointer routes landed on top).
+**1,636,136 B** `5f2a99e0…`, agnos **1,681,192 B** `15e55f90…`, both ways.
+⚠ dhancha's `0.10.4` is an ANNOTATED tag: `cyrius deps` prints `refs/tags/0.10.4 … is not a
+commit!` and then pins the peeled commit (`79b7ad1`) correctly. Not an error; recorded so the next
+reader does not stop on it.
+⛔⛆ **THE CONVERSE HAZARD, OBSERVED 2026-09-21: a sibling that moves AHEAD of the tags breaks the
+local build while the committed tree is fine.** `../dhancha` at 0.10.4 calls `sd_flatten_op_begin`
+/ `_end` / `sd_flatten_degraded`; `path` won over `tag = "0.10.0"`, rewrote `lib/dhancha.cyr`, and
+the untouched 0.10.1 checkout was refused with 3 undefined functions against the pinned sadish
+0.5.5. ⇒ To rebuild what a tag shipped, disable the `path` lines and resolve from the tags — done
+for 0.10.1, and it reproduced the shipped artifacts byte-identical. ⚠ dhancha 0.10.3 made its own
+`path` lines DORMANT (commented, uncommented only for cross-repo work) so its lock pins every
+commit and its tree cannot drift this way. crab has not adopted that; it is a convention change and
+the operator's call.
 ⛔ **0.8.4 SHIPPED WITH THE DIVERGENCE THIS CHECK EXISTS FOR.** Its `lib/` carried dhancha 0.9.29,
 rupa 0.1.7 and setu 0.8.9 through `path` while the manifest declared 0.9.28 / 0.1.6 / 0.8.8 — so CI
 compiled the old tags and the local build the new ones, green both ways, and nothing said so. All
@@ -966,13 +938,19 @@ tag, clean; re-derive it rather than assuming it, since `path` is what makes it 
 
 | dep     | tag    | `path`? | why crab needs it                                   |
 |---------|--------|---------|-----------------------------------------------------|
-| sadish  | 0.5.4  | no      | 2D vector — the surface everything else draws into   |
+| sadish  | 0.11.2 | no      | 2D vector — the surface everything else draws into; the flatten budget (0.7.x) dhancha 0.10.4 needs; 0.11.1's audit. ⛔ moves WITH rekha |
 | rupa    | 0.1.7  | yes     | shared theme tokens + **`on-accent`** and contrast   |
-| rekha   | 0.3.7  | no      | text; references `sd_*`. ⭐ adds the advance widths   |
-| kashi   | 1.0.7  | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0)    |
-| dhancha | 0.9.29 | yes     | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`    |
+| rekha   | 0.9.0  | no      | **the face** — `crab_face` opens `/fonts/default.ttf` through it; advances size every column. ⛔ pins sadish 0.11.2 exactly |
+| kashi   | 1.0.10 | yes     | CP437 8×16 glyph data for `dh_draw_text` (font=0), the fallback face. ⭐ `dist/kashi.cyr` is finally published (ADR 0003's expiry is executable) |
+| dhancha | 0.10.4 | yes     | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`, the frame arena; ⭐ 0.10.4 draws one glyph per CHARACTER |
 | chitra  | 1.0.3  | **no**  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
 | setu    | 0.8.9  | yes     | client transport — channel-band, reads `AGNOS_CHAN`  |
+| daimon  | 2.1.4  | yes     | **declared, NOT linked** — no `modules`; the AF_UNIX peer for M7/M8. ⛔ does not build for agnos (upstream sidecar defect) |
+
+⚠ **This table sat at the 0.8-era tags (sadish `0.5.4`, rekha `0.3.7`, dhancha `0.9.29`, seven rows)
+from 2026-09-12 to 2026-09-21** — through the 0.8.11 stack bump, 0.9.0's face and 0.10.0's daimon
+row. The table is refreshed at every cut or it is fiction; this is the third time this file has had
+to say so about itself.
 
 ⛔ **THIS TABLE WAS FICTION FOR PART OF 2026-08-28, AND THAT IS THE FAILURE MODE TO REMEMBER.** The
 manifest named `rupa 0.1.5` and `dhancha 0.9.20` while **neither existed on any remote** — both were
@@ -1014,29 +992,36 @@ what compiles at all while `path` is set. Re-run all four at every cut. Automati
 still open — see the roadmap's 0.8.0 batch.
 
 ⛔ **`path` WINS over `tag`, so a green local build is not evidence that the declared graph resolves.**
-That is the drift 0.4.13 caught and closed. **Four of six** carry `path` — the table's own column says
-which; the manifest's old "every other dep in this stack carries both" was false and is corrected as of
-0.4.15. At every cut, re-verify each tag three ways: the sibling's `VERSION`, `git rev-parse <tag> ==
+That is the drift 0.4.13 caught and closed. **Five of eight** carry `path` — the table's own column
+says which; the manifest's old "every other dep in this stack carries both" was false and is corrected
+as of 0.4.15. At every cut, re-verify each tag three ways: the sibling's `VERSION`, `git rev-parse <tag> ==
 HEAD` in the sibling tree, and the newest tag actually published
 (`git ls-remote --tags … | sort -V | tail -1`).
 
-⚠ **crab consumes `dist/` bundles, not `src/`.** Five deps — sadish, rupa, rekha, dhancha, setu — are
-`modules = ["dist/<name>.cyr"]`, so a fix reaches crab only after `cyrius distlib` runs **in that
-sibling**; a local `path` override alone is not enough. **kashi is the exception**: it is
+⚠ **crab consumes `dist/` bundles, not `src/`.** Six deps — sadish, rupa, rekha, dhancha, setu,
+chitra — are `modules = ["dist/<name>.cyr"]`, so a fix reaches crab only after `cyrius distlib` runs
+**in that sibling**; a local `path` override alone is not enough. **kashi is the exception**: it is
 `modules = ["src/font_data.cyr"]`, the freestanding core, deliberately — the library face costs
-+183,360 B (+50 %) for a runtime font registry crab never calls, and `CYRIUS_DCE=1` reclaims none of it.
++183,360 B (+50 %) for a runtime font registry crab never calls, and `CYRIUS_DCE=1` reclaims none of
+it. **daimon is the other**: no `modules` at all. ⚠ The sadish and rekha bundles are 471 KB and 551 KB
+of source at 0.11.2 / 0.9.0 (86 KB and 41 KB before), and crab links without DCE — see *Targets*.
 
-⚠ **The `net` stdlib leaf is now REDUNDANT, not load-bearing.** The manifest claimed "`net` stays until
-setu moves off TCP" — setu moved off TCP in **0.8.4 (2026-08-07)** and crab has pinned past it since
-0.4.5. Measured 2026-08-26: with `net` deleted from `[deps].stdlib` **and** `lib/net.cyr` removed,
-`cyrius deps` re-creates the leaf (30,092 B) from setu's `dist/setu.deps` sidecar and `cyrius build` is
-OK at the same 377,288 B. ⇒ Dropping the declaration is a real cleanup — held back from 0.4.15 as a
-separate change, not bundled into a version bump.
+✅ **The `net` stdlib declaration is GONE (0.10.0).** This paragraph carried it as a queued cleanup
+from 2026-08-26; `lib/net.cyr` still lands, transitively, from setu's `dist/setu.deps` sidecar
+(AF_UNIX / SOCK_SEQPACKET, not TCP) — which is where it belongs.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **2,012 passed / 0 failed**
-  *(unreleased; 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230 at 0.7.7, 253 at 0.7.0)*
+- `tests/crab.tcyr` — the only suite `cyrius test` discovers. **2,503 passed / 0 failed**
+  *(0.10.1 and 0.10.2; 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
+  0.9.4, 2,345 at 0.9.3, 2,012 at 0.8.7, 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230
+  at 0.7.7, 253 at 0.7.0)*. ⚠ This line said 2,012 from 0.8.7 to 0.10.1 while the *Version* section
+  above carried the live count — two numbers in one file, one of them stale. `render_test` is **55**
+  checks (0.10.1; 53 from 0.7.6 to 0.10.0).
+  ⭐ **0.10.2's test was a PIXEL DIFF, not a count**: the 640x220 BGRA dump `render_test` writes
+  `cmp`s byte-identical between the 0.10.1 tree (6.6.4, old pins from their tags) and the bumped
+  tree — 563,200 bytes, no difference. A toolchain and three draw-path deps moved and the
+  bitmap-font frame did not.
   ⭐ **+41 unreleased — `t_refresh`**: the selection rule, the exact re-seat asserted AGAINST the
   containment rule and against the `/` place/volume alias, the menu entry, the sidebar gate, the
   kept thumbnail cache with the write-op relist as control; six mutations each caught.
@@ -1109,8 +1094,8 @@ separate change, not bundled into a version bump.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **1,084,832 B** *(0.9.3; 1,084,744 at 0.9.2, 1,080,480 at 0.9.1)* ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
-| `--agnos`    | ✅ builds, **1,129,864 B** *(0.9.3; 1,129,760 at 0.9.2, 1,121,344 at 0.9.1)* — ⭐ **and it draws in Liberation Sans on a real kernel** (`crab-face-test.py`, 2026-09-14) | — the real target, **CI builds it**, and ⭐ **it ran on a real kernel under QEMU on 2026-09-13, three times** (the pointer, columns and shift harnesses — see *Proven*) |
+| x86_64 linux | ✅ builds, **1,636,136 B** *(0.10.2; 1,097,664 at 0.10.1, 1,084,832 at 0.9.3)* — ⚠ **+49.1 % in one pin-only release**: +180,256 from 6.6.6's stdlib (sankoch 2.8.0), +358,216 from the sadish 0.11.2 / rekha 0.9.0 bundles, linked whole because CI and the release build **without DCE**. `CYRIUS_DCE=1`: **608,040 B**. ⚠ 0.8.5's size did not move across the marker while its hash did — `cmp`, never `ls -l` |
+| `--agnos`    | ✅ builds, **1,681,192 B** *(0.10.2; 1,146,920 at 0.10.1, 1,129,864 at 0.9.3)*, `CYRIUS_DCE=1`: **874,280 B** — ⭐ **and it draws in Liberation Sans on a real kernel with the new stack** (`crab-face-test.py` PASS, 2026-09-21: rekha 0.9.0 loads the face, sadish 0.11.2 draws it, dhancha 0.10.4's arena carries it, no fault) — the real target, **CI builds it**. ⚠ 2,149 unreachable functions (1,027,854 B) ride in the shipped artifact; DCE for the release is the operator's call, measured above so it is not made blind |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1172,9 +1157,10 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   caught a real segfault in `crab_img_dims` the day it was written.
   ⚠ **What it still does NOT cover**: `crab_readdir_into` (agnos-only, needs a syscall), the write
   layer's path joins, and `crab_batch_name`'s pattern expansion. Those are the next targets.
-- ⛔ **The AI arc is promised in three shipped documents and declared nowhere.** The package
-  description, the `[deps]` comment and the README all commit to daimon; `cyrius.cyml` declares no
-  daimon dep, and **daimon 2.1.2 exists locally**.
+- ✅ **CLOSED at 0.10.0 — daimon is DECLARED** (`[deps.daimon]`, 2.1.4 as of 0.10.2; no
+  `modules`, deliberately). This line said *"promised in three shipped documents and declared
+  nowhere"* for a release after the ruling. ⛔ **What is open instead is upstream of daimon**: it
+  does not build for agnos — see *Version*.
 - ✅ **CLOSED in 0.7.6 — `crab_render` takes one record, not 32 positional parameters.** (The
   count here said 33; it was 32.) `crab_rs_pane` / `_op` / `_chrome` / `_preview` / `_dims` fill it,
   max arity 11, and `crab_rs_reset` owns the three `-1`-means-unknown defaults that 23 call sites
@@ -1189,17 +1175,29 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   usages 0xE1/0xE5 into a two-bit mask and the field reads `crab_shift_held()`. **Names can hold
   capital letters**, and the shifted number row is filled — which also makes `#` and `*`, the batch
   sheet's own two operators, typeable into the field that advertises them.
-- ⚠ **crab cannot recreate a symlink** — but the GATE on it is gone. A recursive copy copies whatever
-  `open`+`read` yields through one. ⭐ **`lstat`#102 GOT its cyrius peer**: 6.5.37 shipped `sys_lstat`
-  and crab vendors it as of the 0.7.7 pin — 3-arg on agnos, 2-arg on the host, the same `#ifdef`
-  arity split `crab_fs_exists` already resolves. ⇒ **This is now a decision, not a limit**: what
-  crab should DO with the answer (refuse? report? recreate?) is unanswered, and that is the work.
+- ✅ **DECIDED at 0.9.3 — [ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)**:
+  a link is SHOWN (`@`, KIND *Link*), delete and move PRESERVE it, copy DEREFERENCES it (`cp -r`).
+  This line asked *"refuse? report? recreate?"* for six releases after the answer shipped.
+  ⚠ Still true: **crab cannot recreate a symlink** — `symlink`#63 / `readlink`#70 are ext2-only and
+  crab copies between volumes, so what a link *becomes* on a filesystem that cannot hold one is its
+  own decision, deferred with its reason.
 - ✅ **CLOSED in 0.7.6 — `README.md` § Status.** It said *"Shipping, and read-only"*, which M4
   falsified, and quoted the retired 256-entry cap. Now states the write layer, the preview column,
   and what is genuinely absent. ⚠ **It has been wrong in both directions now**; the replacement text
   carries that warning itself.
 - ⚠ **Focusing a pane by its header does not work** — the header is a sibling of the list, so
   `crab_hit` resolves a header click to no pane. Clicking a row is correct.
+- ⚠⚠ **NEW at 0.10.2, inherited from dhancha 0.10.4: crab MEASURES text per BYTE while the toolkit
+  now DRAWS it per CHARACTER.** `crab_text_w` and `crab_name_cell_px` (`src/ui.cyr`) hand
+  `load8(s + i)` to `dh_text_advance` one byte at a time; `dh_draw_text_ink` decodes UTF-8. For
+  ASCII the two agree exactly. For a non-ASCII name — `Über.txt` — crab sums five advances where
+  four glyphs are drawn, so the name is **over-measured** and cut early, and the cut is
+  byte-granular: it can land between C3 and 9C and leave a lead byte that 0.10.4 draws as its raw
+  cell before the `~`. Strictly less wrong than the mojibake it replaces (every byte was a glyph
+  before), but a new kind of wrong at the cut. ⇒ **The next crab item**: walk both loops by
+  `dh_text_decode(s, at, cpp)` (dhancha 0.10.4 exports it — bytes consumed, scalar stored) and let
+  the cut land on a character boundary; pin it with a name that holds a two-byte character at the
+  edge. Not bundled into the pin bump on purpose.
 - ⛔⛔ **`crab_fs_open_w` BEHAVES DIFFERENTLY ON THE TWO TARGETS, AND THE TARGET THAT SHIPS IS THE
   PERMISSIVE ONE.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, which refuses
   an existing file and returns `EEXIST` — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with
@@ -1236,10 +1234,9 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   the clip comparisons leaves the suite green: dhancha's BOX_V compresses its children rather than
   overflowing them, so no cheap fixture produces a canvas laid out partially outside its column.
   Two attempts to build one failed to discriminate. The guard stays — measured, not assumed.
-- ⚠ **The preview's dimension read is on the selection path, not the idle tick.** It is memoised on
-  (directory, name) and capped at 64 KiB, so it costs one open/read/close per newly-selected image
-  and nothing otherwise — but a directory of huge JPEGs arrowed through quickly still pays per
-  entry. The idle-tick stepping that thumbnails will need is the same machinery that would move it.
+- ✅ **CLOSED at 0.9.4 — the preview's dimension read is on the idle tick** (`crab_pv_step`, one
+  file per tick, 128 path-keyed slots); the selection path is a lookup, **4 µs per keystroke with an
+  empty cache**. This line described the 0.7.6 shape for five releases after 0.9.4 moved it.
 - ⚠ **The zero-allocation gate covers the states its fixture renders, and nothing else.** It caught
   nothing for three cuts while `crab_overlay` leaked 32 B per frame with a menu open, because the
   fixture never opened one. Arms now exist for the menu, the sheet and the preview. **A new
@@ -1256,10 +1253,14 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 
 ### Hazards that are permanent, not gaps
 
-- ⛔ **`path` wins over `tag`**, and four of six deps carry an override. A green local build is not
+- ⛔ **`path` wins over `tag`**, and five of eight deps carry an override. A green local build is not
   evidence the declared graph resolves — only a resolve with every `path` line disabled is.
-  **sadish and rekha are tag-only**, which makes them the only two whose remote resolution a local
-  build genuinely exercises. Do not add overrides for them.
+  **sadish, rekha and chitra are tag-only**, which makes them the only three whose remote
+  resolution a local build genuinely exercises. Do not add overrides for them.
+  ⛔ **And it cuts the other way (2026-09-21)**: a sibling that moves ahead of its tag breaks the
+  local build of an UNCHANGED tree — `../dhancha` at 0.10.4 against the pinned sadish 0.5.5 was 3
+  undefined functions. When a green tree turns red with no diff, look at the siblings before the
+  source.
 - ⛔ **`lib/` is not what compiles** while a `path` override is set — the sibling's `dist/` is. A
   cross-repo change must be followed by `cyrius distlib` in that repo, and for dhancha by
   `sh scripts/sync-deps-sidecar.sh` after it.
@@ -1272,6 +1273,21 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 _None — top-level application._
 
 ## Next
+
+⭐ **As of 0.10.2 (2026-09-21), in the order the roadmap's ladder gives them:**
+1. **`0.10.3 · Names measured by character`** — `crab_text_w` / `crab_name_cell_px` walk by
+   `dh_text_decode` and the cut lands on a character boundary (see *Known gaps*). Small, unblocked,
+   crab's alone.
+2. **The two decisions this release put numbers under, both the operator's**: whether `release.yml`
+   builds with `CYRIUS_DCE=1` (1,681,192 → 874,280 B on the target; `render_test` 55/0 under it),
+   and whether crab adopts dhancha 0.10.3's dormant-`path` convention so a sibling moving ahead
+   cannot break an unchanged tree (it did, 2026-09-21).
+3. **M7's index and tags** — blocked upstream of daimon (bote's sidecar / cyrius distlib), re-measured
+   under 6.6.6. Nothing for crab to do but not fake it.
+4. **`0.11.0 · Assisted search`** — behind 3.
+
+Everything below this line is the record of how the earlier queue was carried, kept because its
+reasoning still governs.
 
 ⭐ **0.8.2 CLOSED THE AUDIT BACKLOG'S CORRECTNESS SECTION — all eight, plus the recursive-walk
 defect none of them had noticed.** See the CHANGELOG and the roadmap's *Unfinished from earlier
@@ -1378,9 +1394,10 @@ horizontal strip is not.
 
 ### What is verified, and what is not
 
-Stated as fact, not as a priority. ⚠ The last on-target run was **2026-08-30, against the 0.7.0
-tree**. Everything since — the write layer, the tray, recursion, the menu, the edit field, the
-render-state record, the preview, thumbnails and EXIF — has run on the host and under QEMU only.
+Stated as fact, not as a priority. ⚠ The on-target runs recorded before this release are dated
+**2026-09-14** (the H1, symlink and face harnesses — the handoff says which were iron and which
+QEMU); the newest is **2026-09-21, the 0.10.2 binary under QEMU** — see *Proven*. Everything since
+0.9.7 has run on the host and under QEMU only.
 Every `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction. agnos has
 moved 1.56.53 → 1.56.55 underneath.
 
