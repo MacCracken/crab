@@ -2,6 +2,99 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.4] — unreleased — daimon 2.4.3, and M7's gate re-derived: the build closed, the surface was never there
+
+> **Not cut.** `VERSION` stays `0.10.3`; the number on this heading and the cut are the operator's.
+>
+> **A pin release, and no byte of crab moved** — daimon is declared, not linked. What moved is what
+> crab's documents say about daimon, because re-deriving the gate at this pin found that most of it
+> was wrong.
+
+### Changed — daimon `2.1.4` → `2.4.3`
+
+- **Verified three ways before the manifest moved**: the highest tag on the remote is `2.4.3`
+  (`e5537f45`), the sibling checkout sits on it, and it is the only one of the eight declared deps
+  that moved — the other seven are on their highest tags.
+- ⭐ **No byte moved.** Both DCE targets are **byte-identical** to the 0.10.3 cut — host
+  `f6a223f9…` (608,040 B), agnos `8102a82e…` (878,376 B) — so 0.10.3's QEMU face PASS stands for
+  these exact bytes. `cyrius.lock` unchanged; check 4 (every `path` off) byte-identical.
+- ✅ **daimon builds AND runs on agnos — re-derived, not read off its changelog.** `cyrius build
+  --agnos` in a scratch copy of the 2.4.3 tag: **0 errors** (one unreachable `sys_dup2` warning,
+  from nein's bundle), where 2.1.4 gave 53. And the 2.4.3 commit's CI job *"AGNOS guest test — Guest
+  test on the released agnos kernel"* passed, read from the run record.
+- The blocker 0.10.2 recorded closed where 0.10.2 said it would, upstream: **cyrius 6.6.6's
+  `distlib` dropped `syscalls_linux_common` from bote's sidecar** when bote 3.3.10 regenerated it,
+  daimon 2.1.5 pinned that bote, and daimon's own three sites went with its 2.1.7 agnos port.
+  ⚠ **0.10.2's handoff said *"6.6.5/6.6.6 changed neither"* — wrong**: 6.6.6 is exactly what fixed
+  it, once the sibling between re-ran `distlib`. 0.10.2 measured daimon 2.1.4, which still pinned
+  bote 3.3.9. A toolchain fix reaches a consumer only through the sibling that regenerates.
+- ⛔ **The transport crab's manifest named NO LONGER EXISTS.** `agent_ipc_new` → `<dir>/<agent>.sock`,
+  the AF_UNIX socket crab was going to talk to, was **removed at daimon 2.3.3** — it had no caller and
+  its `SO_PEERCRED` check failed open. Agents daimon starts now get a channel on fd 3 (`chan_op`#97
+  on agnos), which is for daimon's children. daimon's road for crab is its **HTTP API** — its 2.3.0
+  entry says so in as many words, *"crab reaches it over HTTP"*: 127.0.0.1:8090 on Linux; on agnos
+  the NIC's own address, because `sock_listen`#56 takes none and TCP to 127.0.0.1 is dropped — so a
+  local client dials `sys_net_ip()` and still sends `Host: 127.0.0.1`, as daimon's own
+  `tests/agnos/http_client.cyr` does.
+- ⛔⛆ **NOTHING IN THE TOOLCHAIN VERIFIES THE DAIMON TAG.** With no `modules`, `cyrius deps` never
+  fetches daimon. Measured: `tag = "9.9.9"` — which does not exist — with every `path` disabled:
+  "7 deps resolved", `deps --verify` 49/0, `~/.cyrius/deps/daimon` never created. A phantom daimon
+  pin passes every gate crab has, which is the 2026-08-28 phantom-tag failure in a new place. It is
+  checked by `git ls-remote --tags` at the cut and by nothing else; written into the manifest and
+  into the roadmap's *Still to automate*.
+
+### Found — ⛔⛆ the eighth false gate: the agnos build was never M7's only one
+
+From 0.10.0 the roadmap's gate table called the index, tags and smart folders **UNGATED** because
+daimon was *declared*; from 0.10.1 to 0.10.3 it called them blocked on daimon's *build* — and the
+manifest said M7 *"waits on it"*. Neither ever checked whether daimon offered anything M7 could use.
+**It does not, on any target, at 2.4.3 or before:**
+
+- none of the **25 path branches** in daimon's `http_route` (`src/router.cyr`) is about files, tags
+  or an index;
+- its per-agent **memory store has no route** and no tag field — its own KNOWN GAP note says tag
+  lookup is *"a SUBSTRING search over the whole record"*;
+- its **RAG keeps nothing on disk** (no write in `vector_store.cyr`, `fed_vector_store.cyr` or
+  `rag.cyr`), "embeds" into **32 slots indexed by the sum of a token's bytes** (`stop`, `pots` and
+  `tops` are one token), and answers a query with a **prompt template**, not with files.
+
+⇒ Wrong about *which half was missing*, the way proportional text was: the build now exists; the
+surface never did. **Filed where it can be acted on** —
+`daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`, with
+crab's copy in `docs/development/issues/`. It states the need from crab's canvas — a persisted,
+background, battery-aware disk-wide index; per-file tags (exact, with counts and suggestions) and
+ratings; smart folders as queries with counts; ranked file results with *why* for M8 — and the
+constraints the answer must fit (crab's loop never blocks; five open agnos filings bear on any
+local TCP client; 8 TCP slots on the machine; three kinds of nothing to tell apart). It designs no
+route, and it tells daimon crab has no attachment to HTTP.
+⛔ **crab ships nothing for M7's remaining half meanwhile**: no crab-side index (it would silo the
+shared index crab's design says it reads) and no tag or smart-folder rows that could only ever say
+"unavailable" (the VOLUMES rule). ⚠ **Someone was working in daimon's tree during this** (its README
+and two guides modified — a doc refresh, no new routes); the filing is the only file this session
+put there.
+
+### Fixed — stale text, cut rather than annotated
+
+- `cyrius.cyml` `[deps.daimon]`: the AF_UNIX transport, and the *"DOES NOT BUILD FOR AGNOS"* block
+  0.10.2 added — both false at this pin.
+- `docs/development/roadmap.md`: the daimon-ruling row (*"crab talks to its AF_UNIX socket. 0.10.0 and
+  0.11.0 are unblocked"*), the index and search rows' gates, the paragraph under the ladder (*"what
+  remains is the daimon ruling"* — ruled 2026-09-14), M7's and M8's gate lines, and the gate table's
+  four daimon rows, which said **UNGATED** (the closed duplicates row is dropped, as the table's own
+  rule says). Below the table, *"Next is `0.9.0`"* and *"`cyrius.cyml` declares [daimon] nowhere, and
+  daimon 2.1.2 exists locally"* — both false since 0.10.0 — are cut. *Small, cheap, unblocked* still
+  listed dropping the `net` declaration *"still in `cyrius.cyml`"*: 0.10.0 dropped it; cut.
+- `README.md`, `docs/development/state.md`, `docs/development/handoff.md`: every *"daimon does not
+  build for agnos"* and every AF_UNIX transport claim; the dependency table's daimon row; the Known-gaps
+  item; *Next*. The handoff's old READ FIRST block is replaced rather than amended.
+
+### Tests
+
+No source line changed, and every gate was run anyway: `cyrius test` **2,543 / 0**; `render_test` **55
+/ 0**, built explicitly with its log grepped for `undefined function` (none); `cyrius fuzz` 100,000
+rounds; `fmt --check` clean on all eight files; coverage **87 %**; `vet`, `deny`, `deps --verify`
+49 / 0. Both targets built under `CYRIUS_DCE=1`, as CI and the release build them.
+
 ## [0.10.3] — 2026-09-21 — names are measured by character, and the release ships under DCE
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

@@ -1,8 +1,52 @@
-# Handoff — **0.10.3 cut: names measured by character, the release under DCE. ⛔⛔ M7 index/tags still BLOCKED — daimon does not build for agnos, and the root is upstream of daimon (the operator has it).**
+# Handoff — **0.10.3 cut; `0.10.4 — unreleased` in the tree (daimon 2.4.3). ⛔⛔ M7 and M8 still BLOCKED — daimon builds and runs on agnos now, and has no file index, tags or ranked search to offer.**
 
-> ⭐⭐ **2026-09-21. `VERSION` reads 0.10.3; 0.10.1 released (tag on the remote); 0.10.2 and 0.10.3
-> cut in one session, tags pending.** ⛔ commit/tag/push are the operator's; re-run
-> `git log --oneline -3` and `git tag --list` before restating this.
+> ⭐⭐ **2026-09-23. `VERSION` reads 0.10.3 — tagged, and 0.10.2 with it. The tree carries
+> `## [0.10.4] — unreleased`**: the number is the operator's to confirm and the cut theirs to make.
+> ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and `git log --oneline -3`
+> before restating this.
+>
+> ## ⛔⛔ READ FIRST — THE AGNOS BUILD WAS NEVER M7's ONLY GATE. daimon has no surface for it.
+>
+> ✅ **daimon builds AND runs on agnos** — re-derived for 2.4.3 on 2026-09-23, not read off its
+> changelog: `cyrius build --agnos` **0 errors** in a scratch copy (was 53 at 2.1.4), and the 2.4.3
+> commit's CI job *"AGNOS guest test — Guest test on the released agnos kernel"* **passed**.
+> ⛔⛆ **And crab's roadmap had said that was the last thing in the way. It was not.** daimon 2.4.3
+> holds **no index of files, no tags and no ranked results** on any target: none of the 25 path
+> branches in `http_route` is about files; the per-agent memory store has no route and no tag field;
+> RAG keeps nothing on disk, embeds by a 32-slot character-sum hash (`stop`/`pots`/`tops` collide)
+> and answers with a prompt template. From 0.10.0 the gate table called M7 **UNGATED** because daimon
+> was *declared*; from 0.10.1 it called it blocked on the *build*. Neither checked for the surface.
+> ⇒ **The eighth false gate**, wrong about *which half was missing*.
+> ⇒ **Filed where it can be acted on**: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
+> (crab's copy: `docs/development/issues/2026-09-23-daimon-has-no-file-index-tags-or-ranked-search.md`).
+> It states the need from the canvas — a persisted disk-wide index, per-file tags and ratings, smart
+> folders with counts, ranked file results with *why* — and the constraints, and designs no route.
+> ⛔ **crab ships nothing for M7's remaining half meanwhile**: no crab-side indexer (it would silo the
+> shared index), no "unavailable" rows (the VOLUMES rule). Duplicates (0.10.0) needs no daimon.
+> ⚠ **A correction to 0.10.2's block, which this replaces**: it said *"6.6.5/6.6.6 changed neither"*
+> of the fixes the blocker needed. **Wrong** — cyrius 6.6.6's `distlib` is what dropped
+> `syscalls_linux_common` from bote's sidecar, once **bote 3.3.10** regenerated it under 6.6.6, and
+> daimon 2.1.5 pinned that bote. A toolchain fix reaches a consumer only when the sibling in between
+> re-runs `distlib`; 0.10.2 measured daimon 2.1.4, which still pinned bote 3.3.9.
+> ⚠ **Someone is working in daimon right now**: at 2026-09-23 its tree had `README.md`,
+> `docs/guides/api.md` and `quickstart.md` modified (a doc refresh — no new routes), none of it this
+> session's. The filing above is the only file this session put there.
+>
+> ## 0.10.4 (unreleased) — daimon 2.1.4 → 2.4.3, and the transport the manifest named is gone
+>
+> ⭐ **Declared, not linked, so no byte moved**: both DCE targets are **byte-identical** to 0.10.3
+> (`f6a223f9…` host, `8102a82e…` agnos) — so 0.10.3's QEMU face PASS stands for these exact bytes.
+> Lock unchanged; check 4 re-run (7 commit-pinned, byte-identical).
+> ⛔ **The AF_UNIX socket the manifest named was REMOVED at daimon 2.3.3** (`agent_ipc_new` had no
+> caller and its `SO_PEERCRED` check failed open). daimon's road for crab is its **HTTP API** — its
+> 2.3.0 changelog says *"crab reaches it over HTTP"*. On agnos it listens on the NIC's own address
+> and TCP to 127.0.0.1 is dropped, so a client dials `sys_net_ip()`:8090 with `Host: 127.0.0.1`, as
+> daimon's `tests/agnos/http_client.cyr` does. Five open agnos filings (all daimon's) bear on such a
+> client — a local send over 2 KB can stop the machine; recv never reports EOF; 8 TCP slots in all.
+> ⛔⛆ **NOTHING VERIFIES THE DAIMON TAG.** With no `modules`, `cyrius deps` never fetches it: measured,
+> `tag = "9.9.9"` with every `path` off → "7 deps resolved", `deps --verify` 49/0. A phantom daimon
+> pin passes every gate crab has — only `git ls-remote --tags` at the cut catches it. Written into the
+> manifest and the roadmap's *Still to automate*.
 >
 > ## 0.10.3 — names are measured by CHARACTER, and the release ships under DCE
 >
@@ -34,30 +78,6 @@
 > ⛆ Three stale "the draw walks one BYTE per glyph" comments cut (`crab_door`, the button gate, the
 > `main.cyr` menu-bar note, `crab_kind_mark`) and the roadmap's glyph row re-derived: the 🦀 is
 > closed at TWO levels now (BMP-only cmap; no glyph in the face), not three.
->
-> ## ⛔⛔ READ FIRST — M7's INDEX AND TAGS ARE BLOCKED IN A SIBLING, AND A PIN MOVE IS NOT THE FIX
->
-> **daimon does not build for agnos.** MEASURED three times: daimon 2.1.3 under 6.6.2 (**53 errors,
-> 36 distinct undefined symbols**), daimon 2.1.4 under 6.6.4 (identical 53 — daimon's own
-> re-measurement), and daimon 2.1.4 under **6.6.6**, 2026-09-21, in a scratch copy of its HEAD
-> (**62 error lines, 51 distinct undefined symbols**; `lib/syscalls_linux_common.cyr:79` is the first,
-> `SYS_OPENAT`, and the count grew because 6.6.6's copy of that file is 10 KB larger).
-> ⛔ **The 0.10.1 hypothesis is REFUTED.** This block used to say *"likely root, NOT confirmed: the two
-> repos' vendored agnos peers differ; re-run `cyrius deps` against a current pin"*. daimon 2.1.4 did
-> exactly that and got the same 53. **The measured root** (daimon's diagnosis): bote's
-> `dist/bote.deps` sidecar names `syscalls_linux_common` as a stdlib leaf — distlib resolved the
-> symbols bote calls to the file that DEFINES them, the Linux-internal peer — and `cyrius deps`
-> prepends every sidecar leaf as a **target-blind** top-level include, so the Linux peer is compiled
-> beside the standalone agnos peer. Nothing in daimon's own `[deps] stdlib` or sources names it.
-> ⇒ The fix sits in **cyrius distlib and/or bote's sidecar**. 6.6.5/6.6.6 changed neither (the
-> changelogs were read for `sidecar`: nothing). Filed:
-> `daimon/docs/development/issues/2026-09-14-daimon-does-not-build-for-agnos.md`; the `sys_unlink`
-> arity class is fixed and released there (2.1.4).
-> ⚠ **The deeper question still stands**: daimon's `[deps] stdlib` pulls `dynlib`, `fdlopen`, `tls`,
-> `mmap`, `net`. Whether those exist on agnos is a scoping decision about what daimon IS there —
-> daimon's to make, not crab's to assume.
-> ⛔ **crab will not work around it.** Faking an index crab cannot back is the failure crab's own
-> VOLUMES entry exists to name. The half that needs no daimon already shipped (duplicates, 0.10.0).
 >
 > ## 0.10.2 — toolchain 6.6.6, and the draw-path deps taken to their tags
 >

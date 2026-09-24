@@ -75,9 +75,9 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   contradicted by the *Status* bullet below it the whole time. Cut, not annotated.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
-  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.1.4 as of 0.10.2); the surfaces below
-  are the work — ⛔ and daimon does not yet build for agnos (an upstream sidecar defect, filed there),
-  so the index and tags wait.
+  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.4.3), and it builds and runs on agnos
+  now — ⛔ but it holds no index of files, no tags and no ranked results yet, so the surfaces below
+  wait on that (filed in daimon, 2026-09-23).
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to
   mneme's *notes-as-memory*. It reads the shared index; it does not silo its own.
 - **Local-first, no external service** — the whole point of a sovereign store.
@@ -229,11 +229,12 @@ happened rather than showing a blank square.
   Sans from the kernel's own `/fonts/default.ttf` through `rekha`, and every width it computes is
   derived from the face. The bitmap path remains as the fallback when no face loads.
 - **Of the AI arc, only duplicate detection exists — `Shift+D` (0.10.0), which needs no daimon.** No
-  index, no tags, no semantic find. `cyrius.cyml` carries `[deps.daimon]` (2.1.4), the ruling that
-  unblocks M7 — but daimon does not build for agnos yet (a sidecar defect upstream of daimon, filed
-  2026-09-14, re-measured 2026-09-21), so the index and tags wait on that, not on crab. ⛔ **Declared, not linked**: daimon is a binary with no `dist/`, so crab talks to it
-  over the AF_UNIX socket it binds rather than folding an agent orchestrator into a file manager.
-  ⚠ And crab runs without it — the index is an enrichment, not a precondition. (Roadmap M7–M8.)
+  index, no tags, no semantic find. `cyrius.cyml` carries `[deps.daimon]` (2.4.3), and daimon builds
+  and runs on agnos — but it offers no surface for files: no index, no tags, no ranked results. The
+  need is filed in daimon (2026-09-23); the index and tags wait on that, not on crab.
+  ⛔ **Declared, not linked**: daimon is a binary with no `dist/`, so crab will reach it over its HTTP
+  API rather than folding an agent orchestrator into a file manager. ⚠ And crab runs without it —
+  the index is an enrichment, not a precondition. (Roadmap M7–M8.)
 
 Roadmap **Priority 1 — ship before beta** (agnosticos
 `docs/development/planning/roadmap.md` § File Manager). Retires the third-party

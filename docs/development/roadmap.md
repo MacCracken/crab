@@ -227,20 +227,21 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.9.3 · Symlinks** | **see that a link is a link** — marked `@`, KIND says Link — and know what each verb does with one | — | **shipped** ([ADR 0004](../adr/0004-symlinks-are-shown-preserved-and-dereferenced-on-copy.md)) |
 | ✅ | **0.9.4 · A preview that costs nothing** | arrow through a directory of large JPEGs without paying per entry — and see the picture of the file you are actually on | — | **shipped** ⛔ *and it found TWO live wrong-on-screen defects: the thumbnail lagged one file behind, and CAMERA persisted onto text files* |
 | ✅ | **0.9.5 · Pointer polish** | **mark a row with the middle button**, and see a popup's highlight follow the pointer | — | **shipped** ⛔ *and the premise was wrong: middle had DISMISSED popups since 0.8.5, in three doc sites' teeth* |
-| ✅ | **the daimon decision** | *(not a release — a ruling)* | — | **RULED 2026-09-14: DECLARED.** `cyrius.cyml` carries `[deps.daimon]` at 2.1.3. ⛔ Declared, NOT linked — daimon is a binary with no `dist/`; crab talks to its AF_UNIX socket. 0.10.0 and 0.11.0 are unblocked. |
-| ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ **daimon DECLARED** (2.1.4) · ⛔ **daimon does not build for agnos** — root upstream of daimon (bote's sidecar / cyrius distlib), re-measured under 6.6.6 | the index is local, background, battery-aware, and the four smart folders are real |
+| ✅ | **the daimon decision** | *(not a release — a ruling)* | — | **RULED 2026-09-14: DECLARED.** `cyrius.cyml` carries `[deps.daimon]` (2.4.3 as of 0.10.4). ⛔ Declared, NOT linked — daimon is a binary with no `dist/`; crab reaches it over its HTTP API. ⛔ **Necessary, not sufficient**: M7 and M8 wait on a daimon surface for files, which does not exist — see the next row. |
+| ◐ | **0.10.0 · The index** (M7) | ⭐ **find duplicates** (`Shift+D`, marks all but the newest) — tags and smart folders still to come | ✅ daimon builds and runs on agnos (2.4.3, re-derived 2026-09-23) · ⛔ **daimon holds no file index, no tags and no smart-folder queries** — on any target. Filed in daimon 2026-09-23 | the index is local, background, battery-aware, and the four smart folders are real |
 | ✅ | **0.10.2 · The 6.6.6 stack** | *(a pin release)* nothing new to do — the same crab on cyrius 6.6.6, sadish 0.11.2, rekha 0.9.0, kashi 1.0.10, dhancha 0.10.4, daimon 2.1.4; a `—` in a notice is one dash now (dhancha 0.10.4) | — | **shipped** ⚠ *+49 % binary, measured and pulled apart; DCE is the operator's call* |
+| | **0.10.4 · daimon 2.4.3** *(unreleased; the number is the operator's)* | *(a pin release)* nothing new to do — the declared daimon moves to the release that builds and runs on agnos, and no byte of crab moves | — | *in the tree* ⛔⛆ *and re-deriving the gate found the eighth false gate: the agnos build was never M7's only one* |
 | ✅ | **0.10.3 · Names measured by character** | **see a non-ASCII name cut where it should be** — `Über.txt` fits an eight-cell column unmarked, `—` is one cell, and a cut never strands half a character before the `~` | — | **shipped** ⭐ *one reader (`crab_char_adv` = `dh_text_decode` + the draw's per-arm advance) for both loops; the fixture face grew a mapped `Ü` because an all-`.notdef` face could not tell the scalar from its lead byte* · ⭐ *and the release ships under `CYRIUS_DCE=1` — 878,376 B on the target* |
-| | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | **daimon** local-only embedding | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
+| | **0.11.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | ⛔ **daimon**: no ranked FILE results exist — its RAG answers with a prompt template and embeds by a 32-slot character-sum hash. Filed 2026-09-23 | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
 | ✅ | **0.9.7 · H1** | *(a fix release)* cancel a merged copy without losing the folder it merged into | — | **shipped** ⛔⛔⛔ *the oldest confirmed data-loss defect; MEASURED on iron both ways (0/3 → 3/3)* |
 | 🏁 | **1.0.0** | — | every box in [v1.0 criteria](#v10-criteria) | see below |
 
 ⭐⭐ **0.9.x IS COMPLETE AND ALL THREE KNOWN DATA-LOSS DEFECTS ARE CLOSED** — H1 (0.9.7) and the two
-drag defects (0.9.6), each measured on iron both ways. What remains before 1.0 is **the daimon
-ruling**, then 0.10.0 → 0.11.0. ⛔ The ruling is the operator's and nothing downstream can start
-without it: `0.10.0` and `0.11.0` are both gated on it. The one chain left is **0.10.0 → 0.11.0, behind one ruling**. ⚠ 0.9.1 was
-chained to 0.9.0 (the face, then the glyph that needs it); **0.9.0 shipped, so that chain is gone**.
+drag defects (0.9.6), each measured on iron both ways. What remains before 1.0 is **0.10.0's
+second half, then 0.11.0**, and both wait on ONE thing: **a daimon surface for files**, filed
+2026-09-23. ⛔⛆ The ruling (2026-09-14) and daimon's agnos build (2.1.7; verified at 2.4.3) were
+each recorded here as the last gate in turn; each was necessary and neither was the surface.
 
 ### ✅ What blocked `0.9.0 · A real face`, and how both cleared in a day
 
@@ -283,25 +284,30 @@ scoped hook and would die at the arena's first reset.
 
 ### M7 — The index
 
-⚠ **0.10.0 on the ladder above, behind the daimon ruling.** The `v0.10.0` this section once reserved
-is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the number at the cut.
+⚠ **0.10.0 on the ladder above** — its first half (duplicates) shipped; the rest waits on a daimon
+surface. The `v0.10.0` this section once reserved is not a promise — M5 landed inside a patch and M6
+across seven. Re-derive the number at the cut.
 
-- ⛔⛔ **Local index — BLOCKED, and not in crab, and not in daimon either.** `Local · 41,208 files`,
-  `index fresh`, background indexing that `pauses on battery`. **daimon does not build for agnos**:
-  53 errors / 36 undefined symbols at 2.1.3 under 6.6.2, the same 53 at 2.1.4 under 6.6.4, and
-  **62 / 51 under 6.6.6** (re-measured by crab 2026-09-21) — `lib/syscalls_linux_common.cyr`
-  compiled for the agnos target, because bote's `dist/bote.deps` sidecar names it as a stdlib leaf
-  and `cyrius deps` prepends sidecar leaves target-blind. The stale-snapshot hypothesis is refuted;
-  **the fix is in cyrius distlib and/or bote's sidecar**, and a pin move is not it. crab runs ON
-  agnos, so a daimon that cannot be built there cannot be talked to. ⇒ Filed in daimon, 2026-09-14
-  (the `sys_unlink` arity class is fixed there, 2.1.4). ⚠ crab will not fake an index it cannot
-  back.
+- ⛔⛔ **Local index — BLOCKED in daimon, on a SURFACE, not a build.** `Local · 41,208 files`,
+  `index fresh`, background indexing that `pauses on battery`. ✅ **daimon builds and runs on agnos**
+  — re-derived for 2.4.3 on 2026-09-23 (`--agnos` 0 errors; its CI agnos guest job passed on the
+  2.4.3 commit). The 2026-09-14 filing is resolved: cyrius 6.6.6's `distlib` dropped
+  `syscalls_linux_common` from bote's sidecar (bote 3.3.10) and daimon ported its own sites (2.1.7).
+  ⛔ **But daimon holds no index of files, on any target**: none of the 25 path branches in its
+  `http_route` is about files; RAG keeps nothing on disk, embeds by a 32-slot character-sum hash
+  and answers with a prompt template. ⇒ **Filed in daimon, 2026-09-23**:
+  `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md` —
+  the need, from the canvas; no route designed. ⚠ crab will not fake an index it cannot back, and
+  will not build its own: *crab reads the shared index; it does not silo its own.*
 - ⛔ **Tags — BLOCKED on the same filing.** Manual and suggested (`SUGGESTED TAGS · src → + toolchain
-  + cyrius + wip`). Tags need persistence crab does not have and daimon cannot yet provide on agnos.
+  + cyrius + wip`). Tags need persistence crab does not have, and daimon's per-agent memory store has
+  no route and no tag field (its own note: tag lookup is a substring search).
   ⇒ `Untagged` and `Unrated` do not ship in ANY form until it clears — not greyed, not
   "unavailable": a row that answers identically on every box for every file forever is the probe the
   VOLUMES entry refused.
-- **Smart folders** — Recent, Duplicates, Untagged, Large & old, Raw only, Unrated.
+- **Smart folders** — Recent, Duplicates, Untagged, Large & old, Raw only, Unrated. ⛔ Each is a
+  query over the index, with a count — the same filing. Duplicates *within a listing* is crab's
+  (below); *disk-wide* it is the index's.
 - ✅ **Duplicate detection — SHIPPED (0.10.0).** `Shift+D` groups by content and marks all but the
   newest. ⭐ Done WITHOUT daimon, as this row always allowed: size is a free pre-filter (every entry
   is already stat'ed), so only a size collision is opened and hashed. ⛔ It MARKS; it does not delete.
@@ -313,9 +319,11 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
   ⛔ **Declared, NOT linked, and that is the shape of the dependency.** daimon is a BINARY
   (`[build] output = "build/daimon"`) and ships no `dist/` — there is no module to fold in, and
   there must not be: linking an agent orchestrator would put its HTTP server, scheduler and
-  federation code in crab's address space for the sake of a query. crab talks to the **AF_UNIX
-  socket daimon binds per agent** (`agent_ipc_new(agent_id, socket_dir)`), and agnos carries the
-  surface: `sock_connect` #47, `sock_listen` #56, `sock_accept` #57.
+  federation code in crab's address space for the sake of a query. crab reaches it over its **HTTP
+  API** — daimon 2.3.0's own words, *"crab reaches it over HTTP"*. ⛔ The AF_UNIX socket this bullet
+  named (`agent_ipc_new`) was REMOVED at daimon 2.3.3. On agnos daimon listens on the NIC's own
+  address and TCP to 127.0.0.1 is dropped; five open agnos filings (daimon's) bear on such a client
+  — see the crab copy of the 2026-09-23 filing.
   ⚠ **No `modules` key**, deliberately — it would make `cyrius deps` fold a file that does not exist.
   The pin records which daimon crab's protocol is written against, which is what a pin is for.
   ⛔ **And crab still runs without it.** The index is an enrichment, not a precondition: a box with no
@@ -334,7 +342,10 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 - **WHY IT MATCHED** and **APPEARS IN** panels
 - Dupes-within-result-set grouping
 - ⭐ **`no external service` · `index stays on device`** — stated in the canvas UI, and it is a
-  promise the implementation must actually keep. **Gate: daimon** local-only embedding.
+  promise the implementation must actually keep. ⛔ **Gate: daimon** — ranked FILE results with
+  *why*, from a local embedding. Neither exists: daimon's RAG answers with a prompt template, and its
+  "embedding" is 32 slots indexed by the sum of a token's bytes (`stop`/`pots`/`tops` collide).
+  Filed 2026-09-23 with M7's surface.
 - `SAVE AS → Smart folder…` closes the loop back to M7.
 
 ---
@@ -347,11 +358,13 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 > about other repositories go stale without anything failing. ⇒ **Re-derive before believing.** The
 > `verified` column is when the claim was last actually checked against the repo.
 >
-> ⛔⛔ **SEVEN FALSE GATES ARE ON RECORD, AND THEY WERE WRONG IN FOUR DIFFERENT WAYS.** About
+> ⛔⛔ **EIGHT FALSE GATES ARE ON RECORD, AND THEY WERE WRONG IN FOUR DIFFERENT WAYS.** About
 > *existence*: M4's write syscalls (real since agnos 1.41.3), the sidebar's "dhancha TREE" (every
 > piece existed), COLUMNS (never dhancha's at all). About *price*: thumbnails ("no image decoder"
 > when chitra shipped one — and the real obstacle was a cost no gate line mentioned). About *which
-> half was missing*: proportional text (the plumbing existed; advance widths did not). About *where*:
+> half was missing*: proportional text (the plumbing existed; advance widths did not), and **M7**
+> (called UNGATED once daimon was declared, then blocked only on daimon's agnos build — the build
+> now exists; the file-index surface never did). About *where*:
 > drag ("gated on nothing" when it was gated, elsewhere). And one was **real but MIS-NAMED**: the
 > menu bar needed a horizontal selectable strip, not a `MENU BAR` kind.
 > ⇒ **A price is not a gate, and a table of gates invites reading one as the other.**
@@ -360,10 +373,8 @@ is not a promise — M5 landed inside a patch and M6 across seven. Re-derive the
 |---|---|---|---|
 | ✅ Proportional text | M5 → **0.9.0, SHIPPED** | ⭐ rekha 0.3.6 added the advance widths; dhancha 0.9.27 consumes them. ⭐ **0.8.8 gave the 9 one reader**, **0.8.10 derived every width from the font** and proved it against a synthetic proportional face. ⛔⛆ **The remaining gate is NOT crab's and this row said "gated on nothing" until 0.8.10 checked**: there is no TrueType face anywhere in the stack and nothing stages one onto the target (**agnos** + an operator licence ruling), and dhancha's scalable draw allocates a full-surface canvas per label per frame outside the arena (**dhancha**). See *What actually blocks 0.9.0*. | 2026-09-13 ⛔ **re-derived — the gate was real and mis-stated** |
 | The 🦀 **glyph** | M6 → later | ⛔⛆ **STILL CLOSED, AND 0.9.0 DID NOT OPEN IT — this row said the face would.** Two independent walls: `rekha_char_to_glyph` returns 0 above U+FFFF in its own code (*"format 4 is BMP-only"*) and the shipped face carries no format-12 subtable. U+1F980 is 128,896. ⚠ A third — `dh_draw_text_ink` walking ONE BYTE per glyph — fell with dhancha 0.10.4 (crab 0.10.2/0.10.3): the draw decodes UTF-8 now, so the crab reaches the cmap and the cmap has nothing; under kashi it draws `?`. ⭐ **The open road is CANVAS**, which crab already ships for thumbnails (`dh_canvas_new(&crab_thumb_draw, pix)`) — an icon is a glyph with no font. **0.9.1 shipped the DOOR** (three filled boxes) and left the crab for whoever wants to bake a bitmap. | 2026-09-21 ⛔ **re-derived again — one of three walls fell, two stand** |
-| Sidebar — SMART FOLDERS + TAGS | M6→M7 → **0.10.0** | ✅ **UNGATED — `[deps.daimon]` 2.1.3 is declared (0.10.0).** Declared, NOT linked: daimon is a binary with no `dist/`, so crab talks to the AF_UNIX socket it binds. | 2026-09-14 |
-| Local index · tags · smart folders | M7 → **0.10.0** | ✅ **UNGATED — daimon declared (0.10.0).** ⚠ crab must still run WITHOUT it: the index is an enrichment, not a precondition. | 2026-09-14 |
-| Duplicate detection | M7 → **0.10.0** | ✅ **UNGATED — daimon declared.** ⚠ And it was never fully gated: a content hash is something crab could do alone, which is the cheaper first half. | 2026-09-14 |
-| Assisted search | M8 → **0.11.0** | ✅ **UNGATED — daimon declared (0.10.0).** The embedding is daimon's; the query bar and the WHY column are crab's. | 2026-09-14 |
+| Local index · tags · smart folders (and their sidebar rows) | M7 → **0.10.0** | ⛔ **GATED on a daimon SURFACE — filed 2026-09-23.** daimon is declared (0.10.0) and builds and runs on agnos (2.4.3), and holds no index of files, no tags and no smart-folder queries on any target. ⚠ This row said **UNGATED** from 0.10.0 because daimon was *declared*; 0.10.1–0.10.3 said blocked on the *build*. Neither checked for the surface — the eighth false gate. ⚠ crab must still run WITHOUT daimon: the index is an enrichment. | 2026-09-23 ⛔ **re-derived — the gate moved** |
+| Assisted search | M8 → **0.11.0** | ⛔ **GATED on the same filing**: ranked FILE results with *why*, from a local embedding. daimon's RAG answers with a prompt template and "embeds" by a 32-slot character-sum hash. The query bar and the WHY column are crab's. | 2026-09-23 |
 
 ⭐ **Closed gates are not listed.** GRID (dhancha 0.9.25), the menu bar's strip (0.9.26), thumbnails
 (chitra, an operator ruling on price), sidebar PLACES and VOLUMES (agnos `mountlist`#104, minted
@@ -382,15 +393,9 @@ answer should **mint `mountlist`#104 rather than widen `mount`#11**, whose unuse
 carry stale values rather than 0. ⇒ **Declining to approximate is what got the right primitive
 built.** ⛔ *We nearly filed the wrong syscall number: it is `mount`#11, not #23.*
 
-**Ungated and available now**: see [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order),
-which is now the single ordered answer to "what is next". The overwrite policy (0.8.7) and columns
-(0.8.8) closed out of that order, and Shift shipped as **0.8.9**. **Next is `0.9.0` — a real face.**
-⚠ **daimon is deliberately NOT in the version order** — it is a ruling the operator owns, and M7/M8
-stay gated behind it.
-
-⚠ **daimon is the one to settle first.** Three milestones name it, `cyrius.cyml` declares it nowhere,
-and **daimon 2.1.2 exists locally** with vector/RAG stores. **Declare the dependency or stop
-promising the AI arc** — open since the roadmap was written.
+**What is next**: see [the ladder to 1.0](#the-ladder-to-10--what-ships-next-in-order), the single
+ordered answer. ⛔ Both of its remaining feature releases (0.10.0's second half, 0.11.0) sit behind
+the one daimon filing above; nothing else on the ladder is open.
 
 ## Unfinished from earlier stages — what the 2026-09-02 completeness audit left
 
@@ -600,6 +605,11 @@ why, is recorded in `ci.yml` itself.
   ⛔ A `path` dep gets no `cyrius.lock` commit pin, so a declared-tag/vendored-record divergence is
   invisible to every other gate — that shipped in 0.7.6. The tell is the commit-pinned count: 3 with
   the overrides on, 7 with them off.
+- **Verify the daimon tag, since nothing else does.** With no `modules`, `cyrius deps` never fetches
+  daimon — measured 2026-09-23: `tag = "9.9.9"` with every `path` off still gives "7 deps resolved"
+  and `deps --verify` 49/0. A phantom daimon pin passes every gate crab has (the 2026-08-28 class).
+  Today it is `git ls-remote --tags` by hand at the cut; a CI step running that one command would
+  close it.
 - **Make the toolchain sync walk the WHOLE vendored tree.** `cyrius lib sync` walks only the declared
   `[deps].stdlib` set, so transitive leaves go stale across a bump silently. At the 6.5.41 bump it
   left three `thread_*` leaves behind; `lib/atomic.cyr` escaped only because it happens to be
@@ -684,11 +694,6 @@ The parts a green CI still does not prove:
 None of these is a milestone or a release; each is one change, ridden along with whatever is in
 flight.
 
-- **Drop the redundant `net` stdlib declaration** (still in `cyrius.cyml`, checked 2026-09-13).
-  setu removed TCP at 0.8.4 and crab has pinned past it since 0.4.5. Removal is measured clean — `cyrius deps` re-creates the leaf from setu's sidecar
-  and the binary is the same size. ⚠ The leaf lands at a different concatenation offset, so ~165 KB
-  *differs* at that same size: record it as "same size, same tests, different layout" or the next
-  reader thinks something broke.
 - **Give the stat trace an arm that works where it is needed.** On agnos the compositor spawns crab,
   so `CRAB_STAT_TRACE=1` set in a shell never reaches it.
 - **Close or formally park the `--win` failure.** `sys_socket` / `sys_connect` are absent from the
