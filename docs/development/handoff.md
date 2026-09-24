@@ -1,9 +1,8 @@
-# Handoff — **0.10.3 cut; `0.10.4 — unreleased` in the tree (daimon 2.4.3). ⛔⛔ M7 and M8 still BLOCKED — daimon builds and runs on agnos now, and has no file index, tags or ranked search to offer.**
+# Handoff — **0.10.4 cut: daimon 2.4.3. ⛔⛔ M7 and M8 still BLOCKED — daimon builds and runs on agnos now, and has no file index, tags or ranked search to offer.**
 
-> ⭐⭐ **2026-09-23. `VERSION` reads 0.10.3 — tagged, and 0.10.2 with it. The tree carries
-> `## [0.10.4] — unreleased`**: the number is the operator's to confirm and the cut theirs to make.
-> ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and `git log --oneline -3`
-> before restating this.
+> ⭐⭐ **2026-09-23. `VERSION` reads 0.10.4 and the CHANGELOG header agrees; 0.10.3 and 0.10.2 are
+> tagged.** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> `git log --oneline -3` before restating this.
 >
 > ## ⛔⛔ READ FIRST — THE AGNOS BUILD WAS NEVER M7's ONLY GATE. daimon has no surface for it.
 >
@@ -32,7 +31,7 @@
 > `docs/guides/api.md` and `quickstart.md` modified (a doc refresh — no new routes), none of it this
 > session's. The filing above is the only file this session put there.
 >
-> ## 0.10.4 (unreleased) — daimon 2.1.4 → 2.4.3, and the transport the manifest named is gone
+> ## 0.10.4 — daimon 2.1.4 → 2.4.3, and the transport the manifest named is gone
 >
 > ⭐ **Declared, not linked, so no byte moved**: both DCE targets are **byte-identical** to 0.10.3
 > (`f6a223f9…` host, `8102a82e…` agnos) — so 0.10.3's QEMU face PASS stands for these exact bytes.

@@ -24,10 +24,9 @@
 
 ## Version
 
-**0.10.3 IS THE LAST CUT** — `VERSION` reads `0.10.3`, tagged on the remote along with 0.10.2. The
-tree carries **`## [0.10.4] — unreleased`** (the daimon pin); its number is the operator's to confirm.
-Re-run `git describe --tags` and `git log --oneline -3` before restating this; the commit, the tag
-and the push are the operator's.
+**0.10.4 IS CUT** — `VERSION` reads `0.10.4` and the CHANGELOG header agrees, 2026-09-23. 0.10.3 and
+0.10.2 are tagged on the remote. Re-run `git describe --tags` and `git log --oneline -3` before
+restating this; the commit, the tag and the push are the operator's.
 
 ⛔⛔ **M7's INDEX, TAGS AND SMART FOLDERS — AND ALL OF M8 — ARE BLOCKED IN DAIMON, ON A SURFACE.**
 ✅ The build gate this paragraph carried is **closed**: daimon builds and runs on agnos, re-derived
@@ -42,7 +41,7 @@ daimon was declared, then blocked only on the build — **the eighth false gate*
 `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md` (crab's
 copy in `issues/`). ⛔ crab will not fake an index it cannot back, nor build one of its own.
 
-**0.10.4 contents (unreleased) — daimon 2.1.4 → 2.4.3.** Declared, not linked: both DCE targets
+**0.10.4 contents — daimon 2.1.4 → 2.4.3.** Declared, not linked: both DCE targets
 **byte-identical** to 0.10.3 (`f6a223f9…` / `8102a82e…`), lock unchanged, check 4 byte-identical — so
 0.10.3's QEMU face PASS covers these exact bytes. ⛔ The transport the manifest named — daimon's
 per-agent AF_UNIX socket (`agent_ipc_new`) — was **removed at daimon 2.3.3**; crab reaches daimon over
@@ -1301,9 +1300,8 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.10.4 (unreleased, 2026-09-23), in the order the roadmap's ladder gives them:**
-1. **`0.10.4 · daimon 2.4.3`** — in the tree, byte-identical binaries; the cut and its number are
-   the operator's.
+⭐ **As of 0.10.4 (2026-09-23), in the order the roadmap's ladder gives them:**
+1. ✅ **`0.10.4 · daimon 2.4.3`** — cut; byte-identical binaries.
 2. **One decision still open, the operator's**: whether crab adopts dhancha 0.10.3's dormant-`path`
    convention so a sibling moving ahead cannot break an unchanged tree (it did, 2026-09-21).
 3. **M7's index, tags and smart folders** — ✅ the agnos build is closed (daimon 2.4.3); ⛔ blocked

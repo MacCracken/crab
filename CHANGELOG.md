@@ -2,9 +2,9 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.10.4] — unreleased — daimon 2.4.3, and M7's gate re-derived: the build closed, the surface was never there
+## [0.10.4] — 2026-09-23 — daimon 2.4.3, and M7's gate re-derived: the build closed, the surface was never there
 
-> **Not cut.** `VERSION` stays `0.10.3`; the number on this heading and the cut are the operator's.
+> Cut on operator direction; the commit, the tag and the push are the operator's.
 >
 > **A pin release, and no byte of crab moved** — daimon is declared, not linked. What moved is what
 > crab's documents say about daimon, because re-deriving the gate at this pin found that most of it
