@@ -352,6 +352,15 @@ across seven. Re-derive the number at the cut.
 
 ---
 
+## Moving the cyrius pin to 6.6.13 — one manifest line first (recorded 2026-10-02)
+
+cyrius 6.6.13 (its issue I10) gives a `[deps.X]` with no `modules` a meaning: `modules = ["dist/X.cyr"]`
+when the tag ships that file, otherwise a named warning and a "vendored nothing" count — and a git dep is
+CLONED either way. crab's `[deps.daimon]` (declared on purpose, not linked; daimon ships no `dist/`) would
+then warn on every build and clone daimon in CI. **Before pinning ≥ 6.6.13, add `modules = []` to
+`[deps.daimon]`** — 6.6.13's documented "declared, not linked" spelling (silent, no clone). In the same
+commit, re-vendor `lib/math.cyr` with `cyrius deps` in the same commit — 6.6.13 made `f64_le` / `f64_ge` / `f64_trunc` compiler builtins (reserved names), and a pre-6.6.13 vendored copy still defines them (`reserved keyword`).
+
 ## ⛔ Everything gated on another repo, in one table
 
 > **Read this before planning a slot.** A gate is a claim about a *different repository*, and claims
