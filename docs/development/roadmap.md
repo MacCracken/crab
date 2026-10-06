@@ -722,3 +722,12 @@ flight.
   crab is an AGNOS desktop application.
 - **Network / remote filesystems** — crab is local-first by design.
 - **A plugin system.**
+
+## Recorded by cyrius 6.6.17 (2026-10-05) — for the next cyrius pin move
+
+⛔ **Nothing to do until cyrius 6.6.17 is tagged and out.** Docs-only note from the cyrius 6.6.17 lanes; each item
+is this repo's to adopt when it pins ≥ 6.6.17. Nothing here gates a cyrius release.
+
+- **`cyrius test` RUNS the `[build].test` entry from 6.6.17** (cyrius m5): `.github/workflows/ci.yml`'s
+  "⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY" becomes false at the pin bump. `test = "tests"` runs
+  each `.tcyr` once (the declared directory and the `tests/` walk are de-duplicated), not twice.
