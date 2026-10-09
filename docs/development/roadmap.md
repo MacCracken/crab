@@ -731,3 +731,22 @@ is this repo's to adopt when it pins ≥ 6.6.17. Nothing here gates a cyrius rel
 - **`cyrius test` RUNS the `[build].test` entry from 6.6.17** (cyrius m5): `.github/workflows/ci.yml`'s
   "⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY" becomes false at the pin bump. `test = "tests"` runs
   each `.tcyr` once (the declared directory and the `tests/` walk are de-duplicated), not twice.
+
+## Recorded by cyrius 6.7.6 (2026-10-08) — for the next cyrius pin move
+
+⛔ Needs cyrius >= 6.7.6 — nothing to do until cyrius 6.7.6 is tagged; then at your pin bump:
+
+- **Git first: a `path` beside `git` / `tag` becomes a dev override** (here: `rupa`, `kashi`, `dhancha`, `setu`,
+  `daimon`).
+  From 6.7.6 it is read only in local mode (`CYRIUS_LOCAL=1`, `CYRIUS_LOCAL=<dep,dep>` or `--local`).
+  With no switch, `cyrius deps` / `build` resolve the TAG (commit pin checked) and print one `hint:`
+  line naming the checkout not used, so a local build and CI compile the same code.
+- Local mode prints a `local:` line per override and builds from `build/local-deps/` without writing
+  `lib/` or `cyrius.lock`; a hand-written `include "lib/<dep>.cyr"` sees the override there too (the
+  compiler's `CYRIUS_LIB_OVERLAY`, set by `cyrius`).
+- The first default resolve adds commit pins for these deps to `cyrius.lock` — a one-time diff.
+- CI lock guards and `sed`-the-path-out steps can become `cyrius deps --locked`.
+- `.github/workflows/ci.yml:42-43` (`cyrius deps` then `cyrius deps --verify`) is such a guard.
+  `cyrius.cyml:72-76`'s TAG-ONLY reasoning (sadish / rekha / chitra are the only deps whose remote resolution a
+  local build exercises) no longer holds: without the switch every dep's tag is resolved locally.
+- Reference: the cyrius guide's *Git first; local development is a switch (6.7.6)*.
