@@ -65,11 +65,9 @@ jobs:
         run: CYRIUS_DCE=1 cyrius build --agnos src/main.cyr build/crab-agnos
 
       - name: Test
-        # ⛔ `cyrius test` DOES NOT RUN THE `[build].test` ENTRY — it auto-discovers `tests/*.tcyr`
-        # and nothing else. Proven by pointing `[build].test` at a file that exits 1 and watching
-        # this step return **rc=0** anyway. The key is inert in this toolchain.
-        # ⚠ It now reads `test = "tests"` so it at least NAMES where the suite is; the orphaned
-        # `src/test.cyr` that it used to name is deleted. (*deferrals #17, #40*, both closed.)
+        # ⭐ Since cyrius 6.6.17 `cyrius test` RUNS the `[build].test` entry as well as auto-discovering
+        # `tests/*.tcyr` — measured on 6.6.20: pointing it at a file that fails turns this step red
+        # (rc=1). `test = "tests"` names the directory the walk already covers; each `.tcyr` runs once.
         # ⚠ It needs `build/` and `build/crab` to exist — 134 assertions write fixtures into a
         # relative `build` dir and one hard-codes `build/crab` — which the host build above provides.
         run: cyrius test
@@ -77,9 +75,9 @@ jobs:
       - name: render_test — the pixel assertions
         # ⛔⛔ THIS IS crab's STRONGEST TEST. It is the only enforcement of the rule
         # that the render path (`src/ui.cyr`) must never call up into `src/app.cyr` — a rule the
-        # source records being broken four or five times. Nothing discovered it: `cyrius.cyml` sets
-        # `test = "src/test.cyr"` (inert, see above) and auto-discovery covers `tests/*.tcyr` only,
-        # so these checks ran under NEITHER gate while catching mutations the suite missed.
+        # source records being broken four or five times. Nothing discovers it: `cyrius test` runs
+        # `tests/*.tcyr` and the `[build].test` entry (`tests`), and this file is neither, so these
+        # checks ran under no gate while catching mutations the suite missed — until this step.
         # ⚠ ITS EXIT CODE IS THE ASSERTION — it returns the number of failed checks. Verified by
         # injecting a bad check: `54 checks, 1 failed`, exit 1. It also prints its own count, so a
         # run that silently executed zero checks is visible; it used to exit 0 either way.
@@ -123,10 +121,13 @@ jobs:
 
       - name: Coverage floor
         # ⚠ REFERENCE coverage — a floor, not a correctness proof, and the tool says so itself.
-        # The v1.0 criterion is 80%; the floor here is 85 against a measured 87%, so it gates with
-        # headroom rather than being a rubber stamp. Verified it can fail: `--min 95` exits 1 with
-        # `coverage gate FAILED`.
-        run: cyrius coverage --min 85
+        # The v1.0 criterion is 80%; the floor sits two points under the measurement, so it gates with
+        # headroom rather than being a rubber stamp: 82 against a measured 84% (347/413, cyrius 6.6.20,
+        # `render_test` in the corpus via `[coverage] programs`). It was 85 against 87% until cyrius
+        # 6.6.8 made the tool honest — it now reads `public fn` and whole files, and crab's ui.cyr +
+        # app.cyr had hidden 49 fns past its old 256 KiB buffer — so the same tree read 82%.
+        # Verified it can fail: `--min 85` exits 1 with `coverage gate FAILED`.
+        run: cyrius coverage --min 82
 
       - name: Static checks
         run: |

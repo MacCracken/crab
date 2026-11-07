@@ -1,35 +1,67 @@
-# Handoff — **0.10.4 cut: daimon 2.4.3. ⛔⛔ M7 and M8 still BLOCKED — daimon builds and runs on agnos now, and has no file index, tags or ranked search to offer.**
+# Handoff — **0.10.5 cut: cyrius 6.6.20 and every dep on the tag its repo cut for it. ⛔⛔ M7 and M8 still BLOCKED — daimon 2.4.4 builds and runs on agnos, and has no file index, tags or ranked search to offer.**
 
-> ⭐⭐ **2026-09-23. `VERSION` reads 0.10.4 and the CHANGELOG header agrees; 0.10.3 and 0.10.2 are
-> tagged.** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-07. `VERSION` reads 0.10.5 and the CHANGELOG header agrees; 0.10.4 is tagged on the
+> remote.** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
 >
-> ## ⛔⛔ READ FIRST — THE AGNOS BUILD WAS NEVER M7's ONLY GATE. daimon has no surface for it.
+> ## ⛔⛔ READ FIRST — EVERY `path` LINE IS DORMANT NOW, AND THAT WAS THE OPERATOR'S OPEN DECISION
 >
-> ✅ **daimon builds AND runs on agnos** — re-derived for 2.4.3 on 2026-09-23, not read off its
-> changelog: `cyrius build --agnos` **0 errors** in a scratch copy (was 53 at 2.1.4), and the 2.4.3
-> commit's CI job *"AGNOS guest test — Guest test on the released agnos kernel"* **passed**.
-> ⛔⛆ **And crab's roadmap had said that was the last thing in the way. It was not.** daimon 2.4.3
-> holds **no index of files, no tags and no ranked results** on any target: none of the 25 path
-> branches in `http_route` is about files; the per-agent memory store has no route and no tag field;
-> RAG keeps nothing on disk, embeds by a 32-slot character-sum hash (`stop`/`pots`/`tops` collide)
-> and answers with a prompt template. From 0.10.0 the gate table called M7 **UNGATED** because daimon
-> was *declared*; from 0.10.1 it called it blocked on the *build*. Neither checked for the surface.
-> ⇒ **The eighth false gate**, wrong about *which half was missing*.
-> ⇒ **Filed where it can be acted on**: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
+> `state.md`'s *Next* carried "adopt dhancha 0.10.3's dormant-`path` convention?" as the operator's
+> call. 0.10.5 took it, because the pin move could not be made without it: every sibling checkout is
+> on its cyrius **6.7.18** line (sadish 0.12.1 … daimon 2.5.5), and a live `path` vendors the
+> sibling's working tree over the declared tag. The uncommitted tree this cut began from had already
+> done exactly that — `lib/` held setu 0.8.13, rupa 0.1.8 and kashi **1.2.1** under a manifest
+> declaring 0.8.9 / 0.1.7 / 1.0.10. ⇒ Uncomment a `path` only for cross-repo work; comment it again
+> before a cut. Reversible in five lines if the ruling goes the other way.
+>
+> ## ⛔⛔ AND M7 / M8 ARE STILL BLOCKED IN DAIMON, ON A SURFACE
+>
+> ✅ **daimon builds AND runs on agnos** — re-derived for **2.4.4** on 2026-11-07: `cyrius build
+> --agnos` from its tag, every `path` off, **0 errors**; the 2.4.4 commit's CI job *"AGNOS guest
+> test"* **passed** (agnos 1.57.14).
+> ⛔⛆ **And the build was never the last thing in the way.** daimon 2.4.4 holds **no index of files,
+> no tags and no ranked results** on any target: its routes are agents, edge, health, mcp, metrics,
+> rag and scheduler; the per-agent memory store has no route and no tag field; RAG keeps nothing on
+> disk, embeds by a 32-slot character-sum hash (`stop`/`pots`/`tops` collide) and answers with a
+> prompt template. 2.4.4 changed none of those files. From 0.10.0 the gate table called M7
+> **UNGATED** because daimon was *declared*; from 0.10.1 it called it blocked on the *build*.
+> Neither checked for the surface. ⇒ **The eighth false gate.**
+> ⇒ **Filed where it can be acted on**, still **OPEN** at 2.4.4: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 > (crab's copy: `docs/development/issues/2026-09-23-daimon-has-no-file-index-tags-or-ranked-search.md`).
-> It states the need from the canvas — a persisted disk-wide index, per-file tags and ratings, smart
-> folders with counts, ranked file results with *why* — and the constraints, and designs no route.
 > ⛔ **crab ships nothing for M7's remaining half meanwhile**: no crab-side indexer (it would silo the
 > shared index), no "unavailable" rows (the VOLUMES rule). Duplicates (0.10.0) needs no daimon.
-> ⚠ **A correction to 0.10.2's block, which this replaces**: it said *"6.6.5/6.6.6 changed neither"*
-> of the fixes the blocker needed. **Wrong** — cyrius 6.6.6's `distlib` is what dropped
-> `syscalls_linux_common` from bote's sidecar, once **bote 3.3.10** regenerated it under 6.6.6, and
-> daimon 2.1.5 pinned that bote. A toolchain fix reaches a consumer only when the sibling in between
-> re-runs `distlib`; 0.10.2 measured daimon 2.1.4, which still pinned bote 3.3.9.
-> ⚠ **Someone is working in daimon right now**: at 2026-09-23 its tree had `README.md`,
-> `docs/guides/api.md` and `quickstart.md` modified (a doc refresh — no new routes), none of it this
-> session's. The filing above is the only file this session put there.
+>
+> ## 0.10.5 — toolchain 6.6.20, and every dep on its 6.6.20 tag
+>
+> ⭐ **A pin release; no code line moved.** cyrius 6.6.6 → **6.6.20**; sadish **0.11.3**, rupa
+> **0.1.9**, rekha **1.0.0**, kashi **1.1.1**, dhancha **0.10.5**, setu **0.8.14**, chitra **1.0.4**,
+> daimon **2.4.4** — for each, the newest tag whose own `[package].cyrius` is `6.6.20`, not its
+> newest tag. All eight verified on their remotes and commit-pinned in the lock (7 → 8: daimon).
+> ⭐ **Built from the release tarball** (`38814a81…`); the 42 stdlib leaves `cmp` against it, every
+> bundle against `git show <tag>:dist/…`. `lib/poison.cyr` in, `lib/net.cyr` out.
+> ⭐ **Baseline first**: the 0.10.4 tree rebuilt from its tags on 6.6.6 reproduced its artifacts
+> byte-identical (`f6a223f9…` / `8102a82e…`). The toolchain alone on the old tags: host 605,360 /
+> agnos 868,048 B. kashi 1.1.0 → 1.1.1 alone: exactly **−88,576 B** on both, and the end of the
+> `large static data` advisory. Shipped: **521,544 / 784,200 B** under DCE.
+> ⭐ **`[deps.daimon] modules = []`** (6.6.13) — cloned, pinned, nothing vendored. ⇒ **A phantom
+> daimon tag fails `cyrius deps` now** (`9.9.9` → rc=1); through 0.10.4 it passed every gate.
+> ⛔ **kashi >= 1.1.0 is hard** — dhancha 0.10.5's `dh_text_cp437` calls `kashi_cp437_from_unicode`;
+> against 1.0.10 both targets are refused (measured).
+> ⚠ **The CI coverage floor moved 85 → 82.** cyrius 6.6.8 made the tool honest (`public fn`, whole
+> files; ui.cyr + app.cyr hid 49 fns past its old 256 KiB buffer), and the unchanged tree read 82 %.
+> `[coverage] programs = ["src/render_test.cyr"]` (6.6.17) → 84 % (347/413); the floor sits two
+> under, the rule `ci.yml` states; `--min 85` still exits 1. ⛔ No test was written to move it.
+> ⚠ **6.6.17 runs `[build].test`** — measured (a failing entry turns `cyrius test` red). The "INERT"
+> / "DOES NOT RUN" comments in the manifest and `ci.yml` are rewritten.
+> **crab's 114 call sites into the seven bundles: every signature identical.** **2543 / 0**,
+> render_test **55 / 0**, the 640x220 dump **`cmp`-identical to 0.10.4's**, fuzz 100,000, fmt ×8,
+> coverage 84 %, vet, deny 0. ⭐ **QEMU on the DCE agnos binary** (agnos 1.57.17, aethersafha
+> 0.17.7): **face PASS** (`410820 bytes adv=9 upem=2048 i=4 m=13`), **pointer PASS**, **button PASS**
+> (every arm in one run), **resize PARTIAL** — the harness's QEMU ceiling (no `#86` carveout): the
+> extent is refused, 16 keys answered after, repeat stops on release, no fault. Serial logs of each
+> run are in the session scratchpad; the harnesses keep only their last run in `agnos/build/crab-*/`.
+> ⚠ **Not in this release**: agnos's `issues/2026-10-09-mountlist-backend-4-zfs-shows-unknown.md`
+> (a ZFS volume labelled "unknown") — filed against crab, untracked in the tree, not taken.
 >
 > ## 0.10.4 — daimon 2.1.4 → 2.4.3, and the transport the manifest named is gone
 >

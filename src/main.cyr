@@ -428,12 +428,9 @@ fn main(): i64 {
     # ⇒ The loop now ends on the two things that actually mean "stop": EOF and WINDOW_CLOSE. Both
     # were already handled; neither was allowed to be the reason the loop ended.
     #
-    # ⚠ AND THE IDLE WAIT IS LOAD-BEARING, NOT POLITENESS. `dh_setu_poll_event` calls `setu_msg_new()`
-    # BEFORE it knows whether anything is pending, so every idle poll leaks ~80 B into an allocator
-    # with no free. Removing the frame cap without slowing the poll would have turned a bounded
-    # 152 MB leak into an unbounded one — roughly 80 MB/s of idle growth. Waiting on an interrupt
-    # instead of spinning bounds it to the tick rate: still a leak, still upstream, but survivable
-    # while dhancha's poll is fixed.
+    # ⚠ AND THE IDLE WAIT IS LOAD-BEARING, NOT POLITENESS. An idle poll allocates nothing (dhancha
+    # 0.9.16 hoisted its message; setu 0.8.13 its per-read buffers), but it also blocks on nothing, so
+    # without the wait an idle crab spins a core at 100%.
     # ⇒ Wait ONLY when the poll came back empty, so a burst of events still drains at full speed.
     # ⛔ WHICH wait primitive is not a detail — see the ⛔ block at the bottom of this loop. Getting
     # it wrong froze the whole desktop, and only a QEMU run showed it.
@@ -506,9 +503,8 @@ fn main(): i64 {
                         # on a maximize `setu_buf_create` failed, crab had already released its only
                         # buffer, and it exited — `crab: buf_create failed on resize -- exiting`.
                         # **Never destroy a working surface to attempt an upgrade.** setu's own
-                        # `setu_client_present` closes first, but it has an inline-pixel fallback to
-                        # land on; crab's hand-rolled LIVE-buffer path has none, so the same order is
-                        # fatal here. Two slots are held for one call, which is 2 of 16 transiently.
+                        # `setu_client_present` takes the same order since setu 0.8.11. Two slots are
+                        # held for one call, which is 2 of 16 transiently.
                         nbuf = setu_buf_create(nb);
                         if (nbuf < 0) {
                             # ⛔ A REFUSED RESIZE IS A FROZEN EXTENT, NOT A DEATH. The kernel caps a
