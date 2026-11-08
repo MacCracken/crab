@@ -33,6 +33,28 @@
 # `main.cyr` ends in `_entry();` and including it would run the app.
 include "src/app.cyr"
 
+# ⚠ THE TRANSFERS THE EVENT LOOP RUNS, DRIVEN TO THE END. The suite asserted on a blocking copy that no shipping
+# path ever called until 0.11.2, so what it proved was not what ran.
+fn t_run_op(): i64 {
+    var rc = crab_op_step();
+    while (rc == 1) { rc = crab_op_step(); }
+    return rc;
+}
+
+fn t_copy(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+    var rc = crab_copy_begin(CRAB_OP_COPY, srcdir, name, dstdir, scr1, scr2, statbuf);
+    if (rc != CRAB_FS_OK) { return rc; }
+    return t_run_op();
+}
+
+fn t_move(srcdir, name, dstdir, scr1, scr2, statbuf): i64 {
+    var rr = crab_fs_move_rename(srcdir, name, dstdir, scr1, scr2, statbuf);
+    if (rr != CRAB_FS_EXDEV) { return rr; }
+    var rc = crab_copy_begin(CRAB_OP_MOVE, srcdir, name, dstdir, scr1, scr2, statbuf);
+    if (rc != CRAB_FS_OK) { return rc; }
+    return t_run_op();
+}
+
 # --- a mock readdir buffer, mirroring src/render_test.cyr's fixture shape ------------------------
 # One 64-byte record per entry: NUL-terminated name at +0, type byte at +63.
 # =================================================================================================
@@ -1717,7 +1739,7 @@ fn main() {
     assert_eq(crab_fs_exists(sc1, fpl, fstat), 1, "the source file exists");
 
     # --- copy -------------------------------------------------------------------------------------
-    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "copy to the other pane");
+    assert_eq(t_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "copy to the other pane");
     var cpl = crab_fs_path(sc2, fsdir2, "src.txt");
     assert_eq(crab_fs_exists(sc2, cpl, fstat), 1, "...the destination exists");
     # ⛔ AND THE SOURCE SURVIVES — a copy that moved would be indistinguishable here without this.
@@ -1732,11 +1754,11 @@ fn main() {
     assert_eq(m4got, 15, "...and holds exactly the bytes written");
     store8(m4rb + 15, 0);
     assert(t_streq(m4rb, "crab m4 payload"), "...byte for byte");
-    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_EEXIST,
+    assert_eq(t_copy(fsdir, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_EEXIST,
       "a second copy refuses rather than clobbering");
-    assert_eq(crab_fs_copy(fsdir, "src.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
+    assert_eq(t_copy(fsdir, "src.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
       "copying a file onto ITSELF is refused before either handle opens");
-    assert_eq(crab_fs_copy(fsdir, "..", fsdir2, sc1, sc2, fstat), CRAB_FS_EBADNAME, "copy refuses '..'");
+    assert_eq(t_copy(fsdir, "..", fsdir2, sc1, sc2, fstat), CRAB_FS_EBADNAME, "copy refuses '..'");
 
     # --- rename -----------------------------------------------------------------------------------
     assert_eq(crab_fs_rename(fsdir, "src.txt", "renamed.txt", sc1, sc2, fstat), CRAB_FS_OK, "rename within a directory");
@@ -1752,7 +1774,7 @@ fn main() {
       "...so a typed escape cannot leave the directory");
 
     # --- move -------------------------------------------------------------------------------------
-    assert_eq(crab_fs_move(fsdir, "renamed.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "move to the other pane");
+    assert_eq(t_move(fsdir, "renamed.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "move to the other pane");
     var mpl = crab_fs_path(sc2, fsdir2, "renamed.txt");
     assert_eq(crab_fs_exists(sc2, mpl, fstat), 1, "...the destination exists");
     # ⛔ AND THE SOURCE IS GONE — this is what makes it a move rather than a copy.
@@ -1760,11 +1782,11 @@ fn main() {
     assert_eq(crab_fs_exists(sc1, mspl, fstat), 0, "...and the source is gone");
     # ⛔⛔ A REFUSED MOVE MUST NOT DELETE THE SOURCE. This is the single most destructive thing the
     # write layer could get wrong, so it is asserted rather than reasoned about.
-    assert_eq(crab_fs_move(fsdir2, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_ESAME, "a same-path move is refused");
+    assert_eq(t_move(fsdir2, "src.txt", fsdir2, sc1, sc2, fstat), CRAB_FS_ESAME, "a same-path move is refused");
     var survive = crab_fs_path(sc1, fsdir2, "src.txt");
     assert_eq(crab_fs_exists(sc1, survive, fstat), 1, "...and the source SURVIVES the refusal");
 
-    # ⛔⛔ THE DATA-LOSS PATH, AND IT NEEDS FORCING TO REACH. `crab_fs_move` tries `rename` first and
+    # ⛔⛔ THE DATA-LOSS PATH, AND IT NEEDS FORCING TO REACH. A move tries `rename` first and
     # falls back to copy-then-delete only when it refuses — and within one filesystem rename NEVER
     # refuses, so every assertion above exercised the atomic arm and left the destructive arm dead.
     # A mutation that deleted the source regardless of the copy's result passed the whole suite.
@@ -1775,7 +1797,7 @@ fn main() {
     assert(dfd >= 0, "a file to try to lose");
     assert_eq(sys_write(dfd, "do not lose me", 14), 14, "...with contents");
     sys_close(dfd);
-    assert(crab_fs_move(fsdir, "precious.txt", "build/m4nodir", sc1, sc2, fstat) != CRAB_FS_OK,
+    assert(t_move(fsdir, "precious.txt", "build/m4nodir", sc1, sc2, fstat) != CRAB_FS_OK,
       "a move whose rename AND copy both fail reports failure");
     var dl2 = crab_fs_path(sc1, fsdir, "precious.txt");
     assert_eq(crab_fs_exists(sc1, dl2, fstat), 1,
@@ -1820,8 +1842,8 @@ fn main() {
 
     # --- 0.8.2: THE RENAME HALF, SPLIT OUT SO THE EVENT LOOP CAN STOP BLOCKING ----------------------
     # ⛔⛆ `src/main.cyr` carried the comment *"a move still tries `rename` first … so the common case
-    # never reads or writes a byte"* and then called `crab_fs_move`, which on a rename failure runs
-    # `crab_fs_copy` — a BLOCKING whole-file copy — to completion inside the keypress branch. No
+    # never reads or writes a byte"* and then called a move that on a rename failure ran
+    # a BLOCKING whole-file copy to completion inside the keypress branch. No
     # frames were drawn while it ran, so the tray never appeared and Esc could not cancel it, and the
     # stepped `CRAB_OP_MOVE` path was unreachable for the ONE case it exists for: across filesystems.
     # ⇒ `crab_fs_move_rename` is the cheap half alone. Only `CRAB_FS_EXDEV` means "now step it".
@@ -1862,9 +1884,9 @@ fn main() {
     assert_neq(CRAB_FS_EXDEV, CRAB_FS_ESYS, "...and is distinct from the kernel refusal");
     assert(load8(crab_fs_msg(CRAB_FS_EXDEV)) != 0, "...and has a sentence, so it can never blank the status line");
 
-    # ⚠ `crab_fs_move` STILL BLOCKS, deliberately, for callers that want the move finished on return.
+    # ⚠ `t_move` drives the stepped path to its end, for the assertions below.
     # Asserted so the split is a new entry point rather than a silent behaviour change.
-    assert_eq(crab_fs_move(fsdir, "collide.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
+    assert_eq(t_move(fsdir, "collide.txt", fsdir, sc1, sc2, fstat), CRAB_FS_ESAME,
       "the blocking move still refuses what it always refused");
     assert_eq(crab_fs_delete(fsdir, "collide.txt", 0, sc1), CRAB_FS_OK, "cleanup");
     assert_eq(crab_fs_delete(fsdir2, "collide.txt", 0, sc1), CRAB_FS_OK, "cleanup");
@@ -1915,7 +1937,7 @@ fn main() {
     var bw = 0;
     while (bw < 11) { sys_write(bfd, chunk, 1000); bw = bw + 1; }      # 11,000 B = 2.7 chunks
     sys_close(bfd);
-    assert_eq(crab_fs_copy(fsdir, "big.bin", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "a multi-chunk copy succeeds");
+    assert_eq(t_copy(fsdir, "big.bin", fsdir2, sc1, sc2, fstat), CRAB_FS_OK, "a multi-chunk copy succeeds");
     var bdst = crab_fs_path(sc2, fsdir2, "big.bin");
     var bfd2 = crab_fs_open_r(sc2, bdst);
     var total = 0;
@@ -2660,7 +2682,7 @@ fn main() {
     assert_eq(crab_edit_insert(97), 0, "...and refuses the next keystroke");
     assert_eq(load8(crab_edit_buf() + crab_edit_len()), 0, "...still NUL-terminated");
     # ⚠ The cap IS CRAB_NAME_MAX: a name that cannot be typed could not be stored anyway.
-    assert_eq(CRAB_EDIT_CAP, CRAB_NAME_MAX, "the field cap is the name cap");
+    assert_eq(CRAB_EDIT_CAP, CRAB_NAME_CHARS + 1, "the field holds the longest name crab can list, and its NUL");
 
     # --- the HID keymap ----------------------------------------------------------------------------
     # ⛔ crab receives HID USAGES, not characters, and nothing else in the stack translates them.
@@ -4735,7 +4757,7 @@ fn t_gridview(): i64 {
     # ⭐⭐ THE COLUMNS VIEW IS A VIEW MODE OF **ONE** PANE — the active listing plus a narrow context
     # column showing the parent directory with the current one marked. It is NOT N miller panes, and
     # that is a safety decision: `active_pane` is a 0/1 the WRITE layer resolves every copy, move and
-    # delete against, so a drag from column k to column k+1 would plan a `crab_fs_move` of a directory
+    # delete against, so a drag from column k to column k+1 would plan a move of a directory
     # INTO ITS OWN SUBTREE. See `crab_cols_list` in `src/app.cyr`.
 
     # ---- the parent, derived ONCE ----------------------------------------------------------------
@@ -5934,12 +5956,12 @@ fn t_audit_fixes(): i64 {
     # ⛔ The record's type byte comes from `DT_DIR` on the host and `ftype == 2` on agnos; a
     # filesystem answering `DT_UNKNOWN` leaves it 0, so a real directory arrives as a leaf, `unlink`
     # refuses it, and a recursive delete reported a failure instead of descending.
-    assert_eq(crab_walk_retry_as_dir(0), 1, "a LEAF-typed entry whose unlink failed is retried as a directory");
+    assert_eq(crab_walk_retry_as_dir(0, 1), 1, "a LEAF-typed entry whose unlink failed is retried as a directory");
     # ⛔ `== 0`, NOT `!= 1`. An entry that ALREADY said directory and still failed is a real error;
     # retrying it takes the descend branch a second time and masks the failure behind a readdir that
     # also fails — one step later and with a worse message.
-    assert_eq(crab_walk_retry_as_dir(1), 0, "an entry already typed as a directory is NOT retried");
-    assert_eq(crab_walk_retry_as_dir(7), 0, "...nor a raw ext2 ftype a future backend might pass through");
+    assert_eq(crab_walk_retry_as_dir(1, 1), 0, "an entry already typed as a directory is NOT retried");
+    assert_eq(crab_walk_retry_as_dir(7, 1), 0, "...nor a raw ext2 ftype a future backend might pass through");
     # ⚠ WHAT THIS DOES NOT PROVE, said plainly rather than left to be assumed: that the walk still
     # consults the predicate. Reaching that needs a filesystem answering `DT_UNKNOWN`, and the host's
     # `getdents64` types directories correctly — so the trigger cannot be produced here at all. The

@@ -53,7 +53,10 @@ enum CrabRec {
 # cap above: one constant, derived everywhere, never a literal at a call site.
 enum CrabPath {
     CRAB_PATH_MAX = 256;
-    CRAB_NAME_MAX = 64;      # one readdir record — the longest name that can exist
+    CRAB_NAME_MAX = 64;      # one readdir record, name and type byte included
+    # ⛔ THE LONGEST NAME crab CAN SEE. agnos's readdir copies at most 62 bytes and gives no sign of the
+    # cut, though ext2 allows 255: a longer name lists as its first 62 bytes and names nothing on disk.
+    CRAB_NAME_CHARS = 62;
 }
 
 # @public — length of a NUL-terminated string, scanning AT MOST `cap` bytes. Returns the length, or

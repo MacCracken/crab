@@ -13,9 +13,10 @@
 > | + step 2 (dhancha 0.9.14 + crab) — the sadish render target, reused | 77,568 B |
 > | + step 3 (dhancha 0.9.15 + crab) — the widget tree, arena'd | **0 B** |
 >
-> ⚠ **Zero is per-frame, not total.** crab pays a **one-time ~597 KB**: the 334,432 B render target
-> plus the 262,144 B arena chunk, both allocated on the first frame and reused for the life of the
-> process. That is the whole point — a fixed cost instead of a per-keypress one.
+> ⚠ **Zero is per-frame, not total.** crab pays a one-time cost for the render target and the arena,
+> both reused for the life of the process: at 380x220 the 334,432 B target plus the arena, whose chain
+> measured 786,432 B with the real font at 114 entries, 2.1 MB at 1,024 entries, and 8.65 MB at
+> 1920x1080 with 1,024 (0.11.2). It converges and is reused; it does not grow per frame.
 > ⛔ **This document has been wrong twice in ways worth keeping**: step 1 was not "one line", and step
 > 2 was not purely upstream. Both corrections are below, with what made them wrong.
 
@@ -51,14 +52,14 @@ frame delta bytes: 0
 arena high-water bytes: 262144
 ```
 
-Identical at 114 and at 256 entries per pane: the 256 KiB initial chunk absorbs both, so the arena
-never even has to chain.
+Identical at 114 and at 256 entries per pane with the bitmap face: the 256 KiB initial chunk absorbed
+both when this was measured. The real font and larger listings do chain; see the note above.
 
 | item | before | now |
 |---|---:|---:|
 | `dh_surface_new` pixel buffer | 334,440 | **0** — deferred (0.9.13); nothing calls the accessor |
 | `sd_surface_new` render target | 334,432 | **0/frame** — cached on the DhSurface (0.9.14); 334,432 B once |
-| ~236 widget records @ 248 B | 58,528 | **0** — arena'd, rewound each frame (0.9.15) |
+| ~236 widget records @ 248 B (320 B today) | 58,528 | **0** — arena'd, rewound each frame (0.9.15) |
 | crab's row/status scratch | ~19,000 | **0** — same arena, via `dh_falloc` |
 
 ⚠ **The original figure in this document was 749,704 B; the reproduction measured 746,440 B.** The

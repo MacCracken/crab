@@ -1,0 +1,693 @@
+# tests/hardening.tcyr — the 0.11.2 P(-1) repairs, each driven the way it failed.
+#
+# Every group here reproduces a finding in docs/audit/2026-11-08-0.11.2-p-1.md against real files on the
+# host, and was seen to fail with its repair removed. `crab_op_step` is driven by hand, as the idle tick
+# drives it.
+include "src/app.cyr"
+
+var t_root = "build/p1";
+var t_buf = 0;
+var sc1 = 0;
+var sc2 = 0;
+var fst = 0;
+
+# "build/p1/<rel>", in a buffer the next call reuses.
+fn t_p(rel): i64 {
+    crab_join_n(t_buf, CRAB_PATH_MAX, t_root, rel);
+    return t_buf;
+}
+
+# Remove a tree. Re-reads from the top, because the entries it just removed are gone.
+fn t_rmtree(path): i64 {
+    sys_chmod(path, 0x1ED);
+    var buf = alloc(64 * 64);
+    var cur = alloc(8);
+    var child = alloc(CRAB_PATH_MAX);
+    var guard = 0;
+    while (guard < 256) {
+        store64(cur, 0);
+        var n = crab_walk_readdir(path, crab_cstr_len(path, CRAB_PATH_MAX), buf, 64, cur);
+        if (n <= 0) { break; }
+        var i = 0;
+        while (i < n) {
+            crab_join_n(child, CRAB_PATH_MAX, path, buf + i * 64);
+            if (load8(buf + i * 64 + CRAB_REC_TYPE) == 1) { t_rmtree(child); } else { sys_unlink(child); }
+            i = i + 1;
+        }
+        guard = guard + 1;
+    }
+    sys_rmdir(path);
+    return 0;
+}
+
+fn t_mkdir(rel): i64 { return sys_mkdir(t_p(rel), 0x1ED); }
+
+fn t_write(rel, text): i64 {
+    var fd = sys_open(t_p(rel), O_WRONLY | O_CREAT | O_TRUNC, 0x1A4);
+    if (fd < 0) { return fd; }
+    sys_write(fd, text, strlen(text));
+    sys_close(fd);
+    return 0;
+}
+
+fn t_link(target, rel): i64 { return sys_symlink(target, t_p(rel)); }
+
+fn t_exists(rel): i64 {
+    var p = t_p(rel);
+    return crab_fs_exists(p, strlen(p), fst);
+}
+
+fn t_size(rel): i64 {
+    var p = t_p(rel);
+    return crab_fs_stat_size(p, strlen(p), fst);
+}
+
+# Is `rel` itself a link? Lets a test tell a preserved link from a copy of its target.
+fn t_is_link(rel): i64 {
+    var p = t_p(rel);
+    return crab_fs_is_link(p, strlen(p), fst);
+}
+
+# Drive the running operation until it stops or asks. -> its last answer.
+fn t_run(): i64 {
+    var rc = crab_op_step();
+    var guard = 0;
+    while (((rc == 1) || (rc == 2)) && (guard < 2000)) {
+        rc = crab_op_step();
+        guard = guard + 1;
+    }
+    return rc;
+}
+
+# Steps taken by the last `t_steps` run, for the findings about spinning.
+fn t_steps(): i64 {
+    var n = 1;
+    var rc = crab_op_step();
+    while (((rc == 1) || (rc == 2)) && (n < 5000)) {
+        rc = crab_op_step();
+        n = n + 1;
+    }
+    return n;
+}
+
+fn t_dir(rel): i64 {
+    var q = alloc(CRAB_PATH_MAX);
+    crab_join_n(q, CRAB_PATH_MAX, t_root, rel);
+    return q;
+}
+
+fn t_line(): i64 {
+    test_group("crab P(-1) H9: the line composer stops at its cap");
+    var long = alloc(1024);
+    var i = 0;
+    while (i < 1023) { store8(long + i, 65 + (i & 15)); i = i + 1; }
+    store8(long + 1023, 0);
+    crab_line_reset();
+    # ⚠ A hang here IS the failure: the suite's own timeout is what reports it.
+    crab_line_s(long);
+    assert_eq(crab_line_len(), CRAB_LINE_MAX - 1, "a long string fills the line and stops");
+    crab_line_say();
+    assert_eq(load8(crab_line_buf() + CRAB_LINE_MAX - 2), 10, "a full line still ends in its newline");
+    return 0;
+}
+
+fn t_cancel(): i64 {
+    test_group("crab P(-1) H1: a cancel removes only the file in flight");
+    t_mkdir("c1"); t_mkdir("c1/left"); t_mkdir("c1/left/junk"); t_mkdir("c1/right");
+    t_write("c1/left/keep.txt", "KEEP");
+    t_write("c1/left/junk/f", "j");
+    var left = t_dir("c1/left"); var right = t_dir("c1/right");
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, left, "keep.txt", right, sc1, sc2, fst), CRAB_FS_OK, "a copy starts");
+    assert_eq(t_run(), CRAB_FS_OK, "...and finishes");
+    assert_eq(t_exists("c1/right/keep.txt"), 1, "the finished copy is there");
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, left, "junk", 0, sc1, sc2, fst), CRAB_FS_OK,
+      "an unrelated folder delete starts");
+    assert_eq(crab_copy_cancel(), CRAB_FS_OK, "Esc on it");
+    assert_eq(t_exists("c1/right/keep.txt"), 1, "⛔ the earlier copy survives a cancel of a later delete");
+
+    t_mkdir("c2"); t_mkdir("c2/l"); t_mkdir("c2/l/t"); t_mkdir("c2/r"); t_mkdir("c2/r/t");
+    t_write("c2/l/solo.txt", "SOLO");
+    t_write("c2/l/t/a", "SRC");
+    t_write("c2/r/t/a", "OLD");
+    var l2 = t_dir("c2/l"); var r2 = t_dir("c2/r");
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, l2, "solo.txt", r2, sc1, sc2, fst), CRAB_FS_OK, "a copy starts");
+    assert_eq(t_run(), CRAB_FS_OK, "...and finishes");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l2, "t", r2, sc1, sc2, fst), CRAB_FS_OK, "a merge starts");
+    assert_eq(t_run(), 3, "...and stops at its collision");
+    assert_eq(crab_copy_cancel(), CRAB_FS_EMERGED, "Esc at the question");
+    assert_eq(t_exists("c2/r/solo.txt"), 1, "⛔ the previous operation's file survives a cancelled merge");
+    assert_eq(t_size("c2/r/t/a"), 3, "...and so does the file the question was about");
+
+    test_group("crab P(-1) M7: a question dies with its operation");
+    assert_eq(crab_op_waiting(), 0, "nothing is waiting after the cancel");
+    t_write("c2/l/plain.txt", "P");
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, l2, "plain.txt", r2, sc1, sc2, fst), CRAB_FS_OK, "a plain copy starts");
+    assert_eq(crab_op_waiting(), 0, "⛔ ...and is not waiting on the cancelled merge's question");
+    assert_eq(t_run(), CRAB_FS_OK, "...and finishes");
+    assert_eq(t_size("c2/r/plain.txt"), 1, "...with its bytes");
+
+    test_group("crab P(-1) M4: a cancel does not report done");
+    assert_eq(t_streq(crab_cancel_msg(CRAB_FS_OK), "cancelled"), 1, "a cancel reads as cancelled");
+    assert_eq(t_streq(crab_cancel_msg(CRAB_FS_EMERGED), crab_fs_msg(CRAB_FS_EMERGED)), 1, "a merge says what stayed");
+    return 0;
+}
+
+fn t_replace(): i64 {
+    test_group("crab P(-1) H2: nothing at the destination goes until the source has opened");
+    t_mkdir("r1"); t_mkdir("r1/l"); t_mkdir("r1/l/t"); t_mkdir("r1/r"); t_mkdir("r1/r/t");
+    t_write("r1/l/t/x", "NEWDATA");
+    t_write("r1/r/t/x", "PRECIOUS");
+    var src = t_p("r1/l/t/x");
+    sys_chmod(src, 0);
+    var unreadable = 1;
+    var probe = sys_open(src, O_RDONLY, 0);
+    if (probe >= 0) { sys_close(probe); unreadable = 0; }   # running as root: the fixture cannot refuse
+    var l = t_dir("r1/l"); var r = t_dir("r1/r");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l, "t", r, sc1, sc2, fst), CRAB_FS_OK, "a merge starts");
+    if (unreadable == 1) {
+        assert_eq(t_run(), CRAB_FS_ESYS, "⛔ an unreadable source stops the walk before any question");
+        assert_eq(t_size("r1/r/t/x"), 8, "...and the destination is untouched");
+        assert_eq(crab_op_active(), 0, "...and nothing is left running");
+    } else { crab_copy_cancel(); }
+    sys_chmod(t_p("r1/l/t/x"), 0x1A4);
+
+    test_group("crab P(-1) M6: one link does not stop a tree copy");
+    t_mkdir("r2"); t_mkdir("r2/l"); t_mkdir("r2/l/t"); t_mkdir("r2/l/target"); t_mkdir("r2/r");
+    t_link("../target", "r2/l/t/dirlink");
+    t_link("/nonexistent/nowhere", "r2/l/t/dangling");
+    t_write("r2/l/t/after", "AFTER");
+    var l2 = t_dir("r2/l"); var r2 = t_dir("r2/r");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l2, "t", r2, sc1, sc2, fst), CRAB_FS_OK, "a tree with two links starts");
+    assert_eq(t_run(), CRAB_FS_OK, "⛔ ...and finishes");
+    assert_eq(t_size("r2/r/t/after"), 5, "the real file beside them was copied");
+    assert_eq(t_exists("r2/r/t/dirlink"), 0, "no stray where the link to a directory was");
+    assert_eq(crab_op_ov_skipped(), 2, "both links were counted as passed over");
+
+    test_group("crab P(-1) H2: a dangling source and a Replace");
+    t_mkdir("r3"); t_mkdir("r3/l"); t_mkdir("r3/l/t"); t_mkdir("r3/r"); t_mkdir("r3/r/t");
+    t_link("/nonexistent/nowhere", "r3/l/t/x");
+    t_write("r3/r/t/x", "PRECIOUS");
+    var l3 = t_dir("r3/l"); var r3 = t_dir("r3/r");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l3, "t", r3, sc1, sc2, fst), CRAB_FS_OK, "a merge starts");
+    assert_eq(t_run(), CRAB_FS_OK, "a dangling source is passed over, not asked about");
+    assert_eq(t_size("r3/r/t/x"), 8, "⛔ the real file at the destination survives");
+    return 0;
+}
+
+fn t_alias(): i64 {
+    test_group("crab P(-1) H3: two spellings of one directory");
+    t_mkdir("a1"); t_mkdir("a1/real"); t_mkdir("a1/real/d");
+    t_write("a1/real/d/f", "ONLY");
+    t_link("real", "a1/alias");
+    var real = t_dir("a1/real"); var alias = t_dir("a1/alias");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, real, "d", alias, sc1, sc2, fst), CRAB_FS_ESAME,
+      "⛔ a merge onto itself through a link is refused");
+    assert_eq(t_size("a1/real/d/f"), 4, "...and the only copy is there");
+
+    t_mkdir("a2"); t_mkdir("a2/src"); t_mkdir("a2/src/d");
+    t_write("a2/src/d/f", "X");
+    t_link("src/d", "a2/into");
+    var s2 = t_dir("a2/src"); var into = t_dir("a2/into");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, s2, "d", into, sc1, sc2, fst), CRAB_FS_ELOOP,
+      "⛔ a destination inside the source through a link is refused");
+
+    # A destination folder that is itself a link back into the source.
+    t_mkdir("a3"); t_mkdir("a3/l"); t_mkdir("a3/l/t"); t_mkdir("a3/l/t/sub"); t_mkdir("a3/r"); t_mkdir("a3/r/t");
+    t_write("a3/l/t/sub/f", "ONLY");
+    t_link("../../l/t/sub", "a3/r/t/sub");
+    var l3 = t_dir("a3/l"); var r3 = t_dir("a3/r");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l3, "t", r3, sc1, sc2, fst), CRAB_FS_OK,
+      "the roots differ, so this starts");
+    assert_eq(t_run(), CRAB_FS_ESAME, "⛔ a collision of a file with itself stops the walk");
+    assert_eq(t_size("a3/l/t/sub/f"), 4, "...and the file is whole");
+
+    t_mkdir("a4"); t_mkdir("a4/a"); t_mkdir("a4/b");
+    t_write("a4/a/same", "1234");
+    var p1 = alloc(CRAB_PATH_MAX); var p2 = alloc(CRAB_PATH_MAX);
+    crab_join_n(p1, CRAB_PATH_MAX, t_root, "a4/a"); crab_join_n(p2, CRAB_PATH_MAX, t_root, "a4/b");
+    assert_eq(crab_fs_same_node(p1, strlen(p1), p2, strlen(p2), fst, sc1), 0,
+      "two different directories are not the same node");
+    assert_eq(crab_fs_same_node(p1, strlen(p1), p1, strlen(p1), fst, sc1), 1, "a directory is itself");
+
+    test_group("crab P(-1) A17: a folder moved into itself says so");
+    var m1 = t_dir("a4");
+    var m2 = t_dir("a4/a/x");
+    assert_eq(crab_fs_move_rename(m1, "a", m2, sc1, sc2, fst), CRAB_FS_ELOOP, "⛔ not reported as another filesystem");
+    return 0;
+}
+
+fn t_delete(): i64 {
+    test_group("crab P(-1) M1: an entry that cannot be unlinked stops the delete at once");
+    t_mkdir("d1"); t_mkdir("d1/t");
+    # A name longer than the record: the host arm cuts it where agnos does, so the unlink names nothing.
+    var longn = alloc(80);
+    var i = 0;
+    while (i < 70) { store8(longn + i, 97); i = i + 1; }
+    store8(longn + 70, 0);
+    var fp = alloc(CRAB_PATH_MAX);
+    crab_join_n(fp, CRAB_PATH_MAX, t_dir("d1/t"), longn);
+    var fd = sys_open(fp, O_WRONLY | O_CREAT, 0x1A4);
+    sys_close(fd);
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, t_dir("d1"), "t", 0, sc1, sc2, fst), CRAB_FS_OK, "a tree delete starts");
+    assert(t_steps() < 100, "⛔ it stops in a few steps, not 262,144");
+    assert_eq(crab_op_active(), 0, "...and is over");
+    sys_unlink(fp);
+    assert_eq(crab_walk_retry_as_dir(0, 0), 0, "a leaf that is not really a directory is not descended");
+    assert_eq(crab_walk_retry_as_dir(0, 1), 1, "an untyped real directory is");
+    return 0;
+}
+
+fn t_answer(): i64 {
+    test_group("crab P(-1) M2: a collision answer is about the entry it was asked about");
+    t_mkdir("n1"); t_mkdir("n1/l"); t_mkdir("n1/l/t"); t_mkdir("n1/r"); t_mkdir("n1/r/t");
+    t_write("n1/l/t/a", "NEW"); t_write("n1/l/t/b", "NEW");
+    t_write("n1/r/t/a", "OLDDD"); t_write("n1/r/t/b", "OLDDD");
+    var l = t_dir("n1/l"); var r = t_dir("n1/r");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, l, "t", r, sc1, sc2, fst), CRAB_FS_OK, "a merge starts");
+    assert_eq(t_run(), 3, "it asks");
+    # Remove whichever file it asked about, then answer Replace: the answer is now about nothing.
+    var asked = alloc(CRAB_NAME_MAX);
+    crab_strcpy_n(asked, crab_op_ov_name(), CRAB_NAME_MAX);
+    var other = "a";
+    if (load8(asked) == 97) { other = "b"; }
+    var d = alloc(CRAB_PATH_MAX);
+    crab_join_n(d, CRAB_PATH_MAX, t_dir("n1/r/t"), asked);
+    sys_unlink(d);
+    assert_eq(crab_op_ov_answer(0x15), 1, "Replace is accepted for the file that was asked about");
+    assert_eq(t_run(), 3, "⛔ the OTHER file's collision is asked about, not silently replaced");
+    assert_eq(t_streq(crab_op_ov_name(), other), 1, "...and the question names it");
+    var od = alloc(CRAB_PATH_MAX);
+    crab_join_n(od, CRAB_PATH_MAX, "n1/r/t", other);
+    assert_eq(t_size(od), 5, "...and it is untouched");
+    crab_copy_cancel();
+
+    # The same name twice in one walk: the second collision is not what the answer was about.
+    t_mkdir("n2"); t_mkdir("n2/l"); t_mkdir("n2/l/t"); t_mkdir("n2/l/t/z");
+    t_mkdir("n2/r"); t_mkdir("n2/r/t"); t_mkdir("n2/r/t/z");
+    t_write("n2/l/t/a", "NEW"); t_write("n2/l/t/z/a", "NEW");
+    t_write("n2/r/t/a", "OLDDD"); t_write("n2/r/t/z/a", "OLDDD");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, t_dir("n2/l"), "t", t_dir("n2/r"), sc1, sc2, fst), CRAB_FS_OK,
+      "a nested merge starts");
+    assert_eq(t_run(), 3, "it asks about one `a`");
+    var first_in_z = 0;
+    var cdepth = crab_cstr_len(crab_op_rec() + CRAB_OP_CURS, CRAB_PATH_MAX);
+    if (cdepth > crab_cstr_len(crab_op_rec() + CRAB_OP_SROOT, CRAB_PATH_MAX)) { first_in_z = 1; }
+    if (first_in_z == 1) { sys_unlink(t_p("n2/r/t/z/a")); } else { sys_unlink(t_p("n2/r/t/a")); }
+    assert_eq(crab_op_ov_answer(0x15), 1, "Replace, for a collision that has since gone");
+    assert_eq(t_run(), 3, "⛔ the other `a` is asked about in its own right");
+    crab_copy_cancel();
+
+    # An answer reaching an entry other than the one it was asked about, as a changed directory arranges.
+    assert_eq(crab_walk_begin(CRAB_OP_DTREE, t_dir("n2"), "l", 0, sc1, sc2, fst), CRAB_FS_OK,
+      "a record to drive by hand");
+    var rec = crab_op_rec();
+    crab_strcpy_n(rec + CRAB_OP_NAME, "asked", CRAB_NAME_MAX);
+    store64(rec + CRAB_OP_OVACT, CrabOvAnswer.CRAB_OVA_REPLACE);
+    assert_eq(crab_walk_collide(rec, "other"), CrabOvAnswer.CRAB_OVA_NONE, "⛔ the answer is not spent on another name");
+    assert_eq(crab_op_waiting(), 1, "...which is asked about instead");
+    store64(rec + CRAB_OP_OVPEND, 0);
+    store64(rec + CRAB_OP_OVACT, CrabOvAnswer.CRAB_OVA_REPLACE);
+    assert_eq(crab_walk_collide(rec, "other"), CrabOvAnswer.CRAB_OVA_REPLACE,
+      "the name now in the record gets its own answer");
+    crab_copy_cancel();
+    return 0;
+}
+
+fn t_close(): i64 {
+    test_group("crab P(-1) H4: a move deletes its source only once the close has answered");
+    assert_eq(crab_move_may_unlink(0, 10, 10), 1, "a whole copy may");
+    assert_eq(crab_move_may_unlink(0 - 1, 10, 10), 0, "a failed close may not");
+    assert_eq(crab_move_may_unlink(0, 9, 10), 0, "a short copy may not");
+    assert_eq(crab_move_may_unlink(0, 10, 0 - 1), 0, "a copy of unknown size may not");
+    assert_eq(crab_copy_was_whole(0, 10, 0 - 1), 1, "...though as a copy it stands");
+    assert_eq(crab_copy_was_whole(0 - 1, 10, 10), 0, "a failed close is not a whole copy");
+    t_mkdir("e1"); t_mkdir("e1/l"); t_mkdir("e1/r");
+    t_write("e1/l/empty", "");
+    var l = t_dir("e1/l"); var r = t_dir("e1/r");
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, l, "empty", r, sc1, sc2, fst), CRAB_FS_OK,
+      "a move of an empty file starts");
+    # Close its output first: EOF arrives without a write, and the close is the only thing that can fail.
+    sys_close(load64(crab_op_rec() + CRAB_OP_FOUT));
+    assert_eq(crab_op_step(), CRAB_FS_EIO, "⛔ a failed close is a failed transfer");
+    assert_eq(t_exists("e1/l/empty"), 1, "⛔ ...and the source is still there");
+    sys_unlink(t_p("e1/r/empty"));
+
+    t_write("e1/l/short", "ABCD");
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, l, "short", r, sc1, sc2, fst), CRAB_FS_OK, "a move starts");
+    store64(crab_op_rec() + CRAB_OP_TOTAL, 99);
+    assert_eq(t_run(), CRAB_FS_EIO, "⛔ fewer bytes than the file holds is a failure");
+    assert_eq(t_exists("e1/l/short"), 1, "...and keeps the source");
+    sys_unlink(t_p("e1/r/short"));
+
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, l, "short", r, sc1, sc2, fst), CRAB_FS_OK, "a move starts");
+    store64(crab_op_rec() + CRAB_OP_TOTAL, 0 - 1);
+    assert_eq(t_run(), CRAB_FS_EKEPT, "⛔ an unconfirmable copy keeps its source");
+    assert_eq(t_exists("e1/l/short"), 1, "...which is still there");
+    assert_eq(t_exists("e1/r/short"), 1, "...beside the copy");
+
+    t_mkdir("e2"); t_mkdir("e2/l"); t_mkdir("e2/l/t"); t_mkdir("e2/r");
+    t_write("e2/l/t/f", "");
+    assert_eq(crab_walk_begin(CRAB_OP_CTREE, t_dir("e2/l"), "t", t_dir("e2/r"), sc1, sc2, fst), CRAB_FS_OK,
+      "a tree copy starts");
+    var rc = crab_op_step();
+    while (load64(crab_op_rec() + CRAB_OP_FIN) < 0) { rc = crab_op_step(); }
+    sys_close(load64(crab_op_rec() + CRAB_OP_FOUT));
+    assert_eq(t_run(), CRAB_FS_EIO, "⛔ a failed close inside a tree stops it too");
+    return 0;
+}
+
+fn t_queue(): i64 {
+    test_group("crab P(-1) H7: a refused transfer leaves the running queue alone");
+    t_mkdir("q1"); t_mkdir("q1/l"); t_mkdir("q1/l2"); t_mkdir("q1/r");
+    t_write("q1/l/A", "AA"); t_write("q1/l/B", "BB");
+    t_write("q1/l2/D", "DD"); t_write("q1/l2/E", "EE");
+    var buf = alloc(4 * 64);
+    var marks = alloc(4);
+    store8(marks, 1); store8(marks + 1, 1);
+    crab_strcpy_n(buf, "A", 64); crab_strcpy_n(buf + 64, "B", 64);
+    var l = t_dir("q1/l"); var l2 = t_dir("q1/l2"); var r = t_dir("q1/r");
+    assert_eq(crab_queue_start(buf, marks, 2, CRAB_OP_COPY, l, r, sc1, sc2, fst), 1, "a marked copy starts");
+    var buf2 = alloc(4 * 64);
+    crab_strcpy_n(buf2, "D", 64); crab_strcpy_n(buf2 + 64, "E", 64);
+    assert_eq(crab_queue_start(buf2, marks, 2, CRAB_OP_MOVE, l2, r, sc1, sc2, fst), CRAB_FS_EBUSY,
+      "⛔ a second one is refused");
+    assert_eq(crab_queue_left(), 1, "...and the first queue still has its second entry");
+    assert_eq(t_run(), CRAB_FS_OK, "the first file finishes");
+    assert_eq(crab_queue_advance(sc1, sc2, fst), 1, "...and the queue goes on with B");
+    assert_eq(t_run(), CRAB_FS_OK, "B finishes");
+    assert_eq(t_exists("q1/r/B"), 1, "⛔ B arrived");
+    assert_eq(t_exists("q1/r/E"), 0, "⛔ E was never touched");
+    assert_eq(t_exists("q1/l2/E"), 1, "⛔ ...and is still at its source");
+
+    test_group("crab P(-1) H7: marked delete and batch rename do not borrow the queue");
+    assert_eq(crab_queue_start(buf, marks, 2, CRAB_OP_COPY, l, t_dir("q1/l2"), sc1, sc2, fst), 1,
+      "a marked copy starts");
+    assert_eq(crab_mlist_marked(buf2, marks, 2), 2, "a separate list holds the delete's names");
+    assert_eq(t_streq(crab_mlist_next(), "D"), 1, "...in order");
+    assert_eq(crab_queue_left(), 1, "⛔ ...and the transfer's queue is untouched");
+    crab_copy_cancel();
+
+    test_group("crab P(-1) M5: a queued move renames");
+    t_mkdir("q2"); t_mkdir("q2/l"); t_mkdir("q2/r");
+    t_write("q2/target", "T");
+    t_link("../target", "q2/l/lnk");
+    t_write("q2/l/f", "F");
+    sys_chmod(t_p("q2/l/f"), 0x180);
+    var m2 = alloc(2);
+    store8(m2, 1); store8(m2 + 1, 1);
+    var b3 = alloc(2 * 64);
+    crab_strcpy_n(b3, "lnk", 64); crab_strcpy_n(b3 + 64, "f", 64);
+    assert_eq(crab_queue_start(b3, m2, 2, CRAB_OP_MOVE, t_dir("q2/l"), t_dir("q2/r"), sc1, sc2, fst), CRAB_FS_OK,
+      "same-volume moves finish at once");
+    assert_eq(crab_op_active(), 0, "...with no stepped copy");
+    assert_eq(t_is_link("q2/r/lnk"), 1, "⛔ a link is still a link");
+    assert_eq(t_exists("q2/l/f"), 0, "the source is gone");
+    var fp = t_p("q2/r/f");
+    crab_fs_stat_raw(fp, strlen(fp), fst);
+    assert_eq(load64(fst + STAT_MODE) & 0x1FF, 0x180, "⛔ the mode travelled with it");
+    assert_eq(crab_copy_begin(CRAB_OP_MOVE, t_dir("q2/r"), "lnk", t_dir("q2/l"), sc1, sc2, fst), CRAB_FS_ELINK,
+      "⛔ a stepped move refuses a link");
+
+    test_group("crab P(-1) M3: a failure in the middle of a queue is reported at the end");
+    t_mkdir("q3"); t_mkdir("q3/l"); t_mkdir("q3/r");
+    t_write("q3/l/ok1", "1"); t_write("q3/l/clash", "2"); t_write("q3/l/ok2", "3");
+    t_write("q3/r/clash", "X");
+    var b4 = alloc(3 * 64);
+    var m4 = alloc(3);
+    store8(m4, 1); store8(m4 + 1, 1); store8(m4 + 2, 1);
+    crab_strcpy_n(b4, "ok1", 64); crab_strcpy_n(b4 + 64, "clash", 64); crab_strcpy_n(b4 + 128, "ok2", 64);
+    assert_eq(crab_queue_start(b4, m4, 3, CRAB_OP_COPY, t_dir("q3/l"), t_dir("q3/r"), sc1, sc2, fst), 1,
+      "a marked copy starts");
+    var st = t_run();
+    crab_queue_note(st);
+    assert_eq(crab_queue_advance(sc1, sc2, fst), 1, "the refused clash is passed over and ok2 starts");
+    st = t_run();
+    crab_queue_note(st);
+    assert_eq(st, CRAB_FS_OK, "the last file is fine");
+    assert_eq(crab_queue_result(st), CRAB_FS_EPARTIAL, "⛔ the end does not say done");
+    crab_queue_reset();
+    assert_eq(crab_queue_result(CRAB_FS_OK), CRAB_FS_OK, "with no queue, the operation's own answer stands");
+    return 0;
+}
+
+fn t_names(): i64 {
+    test_group("crab P(-1) M14: a name crab could not list again is not created");
+    var n = alloc(70);
+    var i = 0;
+    while (i < 62) { store8(n + i, 120); i = i + 1; }
+    store8(n + 62, 0);
+    assert_eq(crab_name_ok(n), 1, "62 bytes is the longest name crab can see");
+    store8(n + 62, 120); store8(n + 63, 0);
+    assert_eq(crab_name_ok(n), 0, "⛔ 63 is refused");
+    assert_eq(crab_edit_start(n), crab_edit_len(), "the edit field takes it");
+    assert_eq(crab_edit_len(), CRAB_NAME_CHARS, "...up to the longest name");
+
+    test_group("crab P(-1) C11: a crafted entry cannot walk the pane out of its directory");
+    var buf = alloc(64);
+    var i2 = 0;
+    while (i2 < 64) { store8(buf + i2, 0); i2 = i2 + 1; }
+    crab_strcpy_n(buf, "../../etc", 64);
+    store8(buf + CRAB_REC_TYPE, 1);
+    var path = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(path, "/mnt/usb", CRAB_PATH_MAX);
+    var namescr = alloc(64); var scr = alloc(CRAB_PATH_MAX);
+    var sizes = alloc(8); var mt = alloc(8);
+    assert_eq(crab_descend(path, buf, 0, 1, namescr, scr, sizes, mt, fst), 0 - 1, "⛔ refused");
+    assert_eq(t_streq(path, "/mnt/usb"), 1, "...and the pane has not moved");
+
+    test_group("crab P(-1) H10: two rows of one name are never duplicates of each other");
+    t_mkdir("n3");
+    t_write("n3/same", "CONTENT");
+    t_write("n3/other", "CONTENT");
+    var rec = alloc(3 * 64);
+    var s = alloc(3 * 8); var m = alloc(3 * 8); var marks = alloc(3);
+    var j = 0;
+    while (j < 3 * 64) { store8(rec + j, 0); j = j + 1; }
+    crab_strcpy_n(rec, "same", 64); crab_strcpy_n(rec + 64, "same", 64);
+    store64(s, 7); store64(s + 8, 7); store64(m, 5); store64(m + 8, 5);
+    store8(marks, 0); store8(marks + 1, 0);
+    assert_eq(crab_dup_scan(t_dir("n3"), rec, 2, s, m, marks, sc1), 0, "⛔ one file listed twice marks nothing");
+    crab_strcpy_n(rec + 64, "other", 64);
+    assert_eq(crab_dup_scan(t_dir("n3"), rec, 2, s, m, marks, sc1), 1, "two names with one content still mark");
+    crab_mark_clear(marks, 2);
+
+    test_group("crab P(-1) M15: only what was read whole is marked");
+    t_mkdir("n4");
+    var big = alloc(CRAB_DUP_READ_MAX + 16);
+    var bi = 0;
+    while (bi < CRAB_DUP_READ_MAX + 16) { store8(big + bi, 65); bi = bi + 1; }
+    var k = 0;
+    while (k < 2) {
+        var nm = "aa"; if (k == 1) { nm = "bb"; }
+        var fp = alloc(CRAB_PATH_MAX);
+        crab_join_n(fp, CRAB_PATH_MAX, t_dir("n4"), nm);
+        var fd = sys_open(fp, O_WRONLY | O_CREAT | O_TRUNC, 0x1A4);
+        sys_write(fd, big, CRAB_DUP_READ_MAX);
+        if (k == 1) { sys_write(fd, "Xdiffers", 8); } else { sys_write(fd, "Ydiffers", 8); }
+        sys_close(fd);
+        k = k + 1;
+    }
+    var r5 = alloc(2 * 64);
+    var z = 0;
+    while (z < 2 * 64) { store8(r5 + z, 0); z = z + 1; }
+    crab_strcpy_n(r5, "aa", 64); crab_strcpy_n(r5 + 64, "bb", 64);
+    store64(s, CRAB_DUP_READ_MAX + 8); store64(s + 8, CRAB_DUP_READ_MAX + 8); store64(m, 1); store64(m + 8, 2);
+    assert_eq(crab_dup_scan(t_dir("n4"), r5, 2, s, m, marks, sc1), 0, "⛔ files that differ past 64 KiB are not marked");
+    assert(load8(crab_dup_msg(0)) != 0, "...and the message says why");
+
+    test_group("crab P(-1) M17: an image path that cannot be joined is not pending");
+    var deep = alloc(CRAB_PATH_MAX + 1);
+    var di = 0;
+    store8(deep, 47);
+    di = 1;
+    while (di < CRAB_PATH_MAX - 1) { store8(deep + di, 100); di = di + 1; }
+    store8(deep + di, 0);
+    assert_eq(crab_pv_state_for(deep, "pic.png", sc1), CRAB_PVD_NONE,
+      "⛔ never PENDING for something that will never be read");
+    return 0;
+}
+
+fn t_abandon(): i64 {
+    test_group("crab P(-1) M11: closing the window finishes a cancel");
+    t_mkdir("x1"); t_mkdir("x1/l"); t_mkdir("x1/r");
+    var fp = alloc(CRAB_PATH_MAX);
+    crab_join_n(fp, CRAB_PATH_MAX, t_dir("x1/l"), "big");
+    var fd = sys_open(fp, O_WRONLY | O_CREAT | O_TRUNC, 0x1A4);
+    var chunk = alloc(4096);
+    var i = 0;
+    while (i < 200) { sys_write(fd, chunk, 4096); i = i + 1; }
+    sys_close(fd);
+    assert_eq(crab_copy_begin(CRAB_OP_COPY, t_dir("x1/l"), "big", t_dir("x1/r"), sc1, sc2, fst), CRAB_FS_OK,
+      "a copy starts");
+    assert_eq(crab_op_step(), 1, "...and is part-way");
+    crab_op_abandon();
+    assert_eq(crab_op_active(), 0, "the transfer is over");
+    assert_eq(t_exists("x1/r/big"), 0, "⛔ no truncated file wears the real name");
+    return 0;
+}
+
+fn t_grid(): i64 {
+    test_group("crab P(-1) M16: the decode walk never asks for more cells than the cache holds");
+    var n = 400;
+    var buf = alloc(n * CRAB_REC_SZ);
+    var gz = alloc(n * 8);
+    var gm = alloc(n * 8);
+    var sl = alloc(8);
+    var sr = alloc(8);
+    store64(sl, 0);
+    store64(sr, 0);
+    var i = 0;
+    while (i < n * CRAB_REC_SZ) { store8(buf + i, 0); i = i + 1; }
+    i = 0;
+    while (i < n) {
+        crab_strcpy_n(buf + i * CRAB_REC_SZ, "photo.png", CRAB_REC_SZ);
+        store64(gz + i * 8, 1000);
+        store64(gm + i * 8, 1000);
+        i = i + 1;
+    }
+    var rs = crab_rs();
+    var surf = dh_surface_new(1920, 1080);
+    crab_rs_reset(rs);
+    crab_rs_pane(rs, 0, buf, n, "/g", gz, gm, CRAB_PANE_OK, 0, 0, sl);
+    crab_rs_pane(rs, 1, buf, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, sr);
+    crab_rs_view(rs, CRAB_VIEW_GALLERY);
+    assert(crab_render(surf, 0, rs) != 0, "a full-screen gallery renders");
+    var vb = alloc(16);
+    assert_eq(crab_grid_visible(crab_pane_widget(0), vb, n), 1, "...and reports a range");
+    assert(load64(vb + 8) - load64(vb) + 1 <= CRAB_TC_N, "⛔ no longer than the cache");
+    return 0;
+}
+
+fn t_input(): i64 {
+    test_group("crab P(-1) H6: a relist withdraws what it would change the meaning of");
+    assert_eq(crab_relist_voids(1, 0, 0, 0 - 1), 1, "a delete prompt");
+    assert_eq(crab_relist_voids(0, 1, 0, 0 - 1), 1, "a rename sheet");
+    assert_eq(crab_relist_voids(0, 3, 0, 0 - 1), 1, "a batch rename sheet");
+    assert_eq(crab_relist_voids(0, 2, 0, 0 - 1), 0, "a new-folder sheet names no row, so it stays");
+    assert_eq(crab_relist_voids(0, 0, 1, 0 - 1), 1, "a context menu");
+    assert_eq(crab_relist_voids(0, 0, 0, 1), 1, "a drop-down");
+    assert_eq(crab_relist_voids(0, 0, 0, 0 - 1), 0, "nothing open, nothing withdrawn");
+
+    test_group("crab P(-1) M18: a frame is owed only when something changed");
+    assert_eq(crab_event_frame(POINTER_MOVE), CRAB_FRAME_NONE, "motion owes nothing by itself");
+    assert_eq(crab_event_frame(KEY), CRAB_FRAME_NONE, "a key owes nothing until it acts");
+    assert_eq(crab_event_frame(WINDOW_CONFIGURE), CRAB_FRAME_NONE, "a resize draws when it is applied");
+    assert_eq(crab_event_frame(POINTER_BTN), CRAB_FRAME_HARD, "a press draws");
+    assert_eq(crab_frame_raise(CRAB_FRAME_HARD, CRAB_FRAME_SOFT), CRAB_FRAME_HARD,
+      "a request never lowers what is owed");
+    assert_eq(crab_frame_raise(CRAB_FRAME_NONE, CRAB_FRAME_SOFT), CRAB_FRAME_SOFT, "...but raises it");
+    assert_eq(crab_frame_now(CRAB_FRAME_SOFT, 7), 0, "a soft frame waits for the queue to drain");
+    assert_eq(crab_frame_now(CRAB_FRAME_SOFT, 0), 1, "...and draws when it has");
+    assert_eq(crab_frame_now(CRAB_FRAME_HARD, 7), 1, "a hard frame does not wait");
+    assert_eq(crab_frame_now(CRAB_FRAME_NONE, 0), 0, "nothing owed, nothing drawn");
+    assert_eq(crab_stat_frame_due(1, 0), 1, "the stat drain's first batch draws");
+    assert_eq(crab_stat_frame_due(2, 0), 0, "...the next does not");
+    assert_eq(crab_stat_frame_due(9, 0), 1, "...every eighth does");
+    assert_eq(crab_stat_frame_due(3, 1), 1, "...and so does the finish");
+
+    test_group("crab P(-1) M10: a collision prompt spends every key");
+    assert_eq(crab_ov_key_after(CRAB_FS_ECANCEL), 0x29, "Esc goes on, to the cancel");
+    assert_eq(crab_ov_key_after(0), 0, "a key that was not an answer is spent");
+    assert_eq(crab_ov_key_after(1), 0, "and so is one that was");
+
+    test_group("crab P(-1) M8, M13: drags");
+    assert_eq(crab_drag_marked(3, 1), 3, "dragging a marked row carries the marks");
+    assert_eq(crab_drag_marked(3, 0), 0, "⛔ dragging an unmarked row carries only itself");
+    assert_eq(crab_pointer_at_edge(0, 50, 380, 220), 1, "the left edge");
+    assert_eq(crab_pointer_at_edge(50, 0, 380, 220), 1, "the top edge");
+    assert_eq(crab_pointer_at_edge(379, 50, 380, 220), 1, "the right edge");
+    assert_eq(crab_pointer_at_edge(50, 219, 380, 220), 1, "the bottom edge");
+    assert_eq(crab_pointer_at_edge(50, 50, 380, 220), 0, "inside the window");
+    assert_eq(crab_pointer_at_edge(378, 218, 380, 220), 0, "one pixel in");
+
+    test_group("crab P(-1) D13: a held key moves as far as a press");
+    assert_eq(crab_sel_step(5, 4, 20, 1), 9, "down a row of four");
+    assert_eq(crab_sel_step(2, 4, 20, 0 - 1), 0, "up, stopping at the top");
+    assert_eq(crab_sel_step(18, 4, 20, 1), 19, "down, stopping at the end");
+    assert_eq(crab_sel_step(0, 1, 0, 1), 0, "an empty listing has no selection to move");
+
+    test_group("crab P(-1) M12: a drop-down opens only if it can be drawn");
+    assert_eq(crab_mb_open_first(CRAB_MB_EDIT, 220, 220, 3, 0, 0), 0 - 2, "⛔ a window too narrow for it refuses");
+    assert(crab_mb_open_first(CRAB_MB_EDIT, 760, 400, 3, 0, 0) >= 0, "a wide one opens");
+    assert_eq(t_streq(crab_mb_refusal(0 - 2), "this window is too small for that menu"), 1,
+      "...and the refusal says why");
+
+    test_group("crab P(-1) D18: a drop-down eats what would lose marks");
+    assert_eq(crab_mb_drop_key(0x16), CRAB_MBK_EAT, "s");
+    assert_eq(crab_mb_drop_key(0x18), CRAB_MBK_EAT, "u");
+    return 0;
+}
+
+fn t_text(): i64 {
+    test_group("crab P(-1) C10: the name field steps by character");
+    crab_edit_start("\xC3\x9Cb");
+    assert_eq(crab_edit_len(), 3, "two characters, three bytes");
+    assert_eq(crab_edit_caret(), 3, "the caret starts at the end");
+    crab_edit_backspace();
+    assert_eq(crab_edit_len(), 2, "b goes");
+    crab_edit_backspace();
+    assert_eq(crab_edit_len(), 0, "⛔ the whole of the two-byte character goes, not half");
+    crab_edit_start("\xC3\x9Cb");
+    crab_edit_move(0 - 1);
+    assert_eq(crab_edit_caret(), 2, "left over b");
+    crab_edit_move(0 - 1);
+    assert_eq(crab_edit_caret(), 0, "⛔ left over the whole character");
+    crab_edit_move(1);
+    assert_eq(crab_edit_caret(), 2, "⛔ right over the whole character");
+
+    test_group("crab P(-1) E6: a name with nothing to draw is not a blank");
+    var cell = alloc(70);
+    crab_name_cell(cell, "\x80\x81", 8);
+    assert_eq(load8(cell), 63, "⛔ it shows a stand-in");
+    crab_name_cell(cell, "ok", 8);
+    assert_eq(load8(cell), 111, "a real name is untouched");
+
+    test_group("crab P(-1) B9: parser edges");
+    var b = alloc(64);
+    var o = alloc(CRAB_IMG_SZ);
+    var i = 0;
+    while (i < 64) { store8(b + i, 0); i = i + 1; }
+    store8(b, 66); store8(b + 1, 77); store8(b + 14, 40);
+    store8(b + 18, 1); store8(b + 21, 255); store8(b + 19, 255); store8(b + 20, 255);
+    store8(b + 22, 16);
+    assert_eq(crab_img_dims(b, 64, o), 0, "⛔ a negative BMP width is refused");
+    i = 0;
+    while (i < 64) { store8(b + i, 0); i = i + 1; }
+    store8(b, 137); store8(b + 1, 80); store8(b + 2, 78); store8(b + 3, 71);
+    store8(b + 12, 73); store8(b + 13, 72); store8(b + 14, 68); store8(b + 15, 82);
+    store8(b + 19, 16); store8(b + 23, 16);
+    assert_eq(crab_img_dims(b, 64, o), 0, "⛔ four signature bytes do not make a PNG");
+    store8(b + 4, 13); store8(b + 5, 10); store8(b + 6, 26); store8(b + 7, 10);
+    assert_eq(crab_img_dims(b, 64, o), 1, "all eight do");
+    return 0;
+}
+
+fn t_streq(a, b): i64 { return crab_streq_n(a, b, CRAB_PATH_MAX); }
+
+fn main(): i64 {
+    alloc_init();
+    t_buf = alloc(CRAB_PATH_MAX);
+    sc1 = alloc(CRAB_PATH_MAX);
+    sc2 = alloc(CRAB_PATH_MAX);
+    fst = alloc(STAT_BUFSZ);
+    sys_mkdir("build", 0x1ED);
+    t_rmtree(t_root);
+    assert_eq(sys_mkdir(t_root, 0x1ED) >= 0, 1, "a clean fixture root");
+    t_line();
+    t_cancel();
+    t_replace();
+    t_alias();
+    t_delete();
+    t_answer();
+    t_close();
+    t_queue();
+    t_names();
+    t_abandon();
+    t_input();
+    t_text();
+    t_grid();
+    return assert_summary();
+}
+
+fn _entry(): i64 { var rc = main(); syscall(SYS_EXIT, rc); return 0; }
+_entry();

@@ -121,7 +121,7 @@ fn main(): i64 {
     var namescr = alloc(CRAB_NAME_MAX);     # scratch: selected entry name (descend)
     var pathscr = alloc(CRAB_PATH_MAX);     # scratch: joined child path (descend / stat)
     # ⛔ M4 NEEDS TWO PATH SCRATCHES AT ONCE, and reusing `pathscr` for both would be the 0.5.0
-    # aliasing bug in a new place: `crab_fs_copy` holds the SOURCE in one buffer while it joins the
+    # aliasing bug in a new place: a copy holds the SOURCE in one buffer while it joins the
     # DESTINATION into the other, and a single buffer would make them the same string — which
     # `crab_streq_n` would then correctly report as CRAB_FS_ESAME, refusing every copy.
     var pathscr2 = alloc(CRAB_PATH_MAX);    # scratch: the second path (copy / move destinations)
@@ -251,8 +251,6 @@ fn main(): i64 {
     # ⚠ THE ALLOCATOR HAS NO `free()` (`lib/alloc.cyr` is a bump allocator; `alloc_reset` rewinds the
     # WHOLE arena and would invalidate the pane paths, the readdir buffers and the client struct). So
     # "allocated once" is not a tidiness point — it is the only way a frame's cost is not permanent.
-    # ⚠ WHEN RESIZE LANDS (M2 / `WINDOW_CONFIGURE`), THIS IS THE LINE THAT HAS TO CHANGE: the surface
-    # is created at the compile-time `w`/`h` and dhancha has no `dh_surface_resize` yet.
     var surf = dh_surface_new(w, h);
     if (surf == 0) { crab_say("crab: surface alloc failed\n"); return 1; }
 
@@ -361,6 +359,11 @@ fn main(): i64 {
     crab_line_u(voln);
     crab_line_s(")");
     crab_line_say();
+    var frame_due = CRAB_FRAME_NONE;
+    var cfg_pending = 0;
+    var cfg_w = 0;
+    var cfg_h = 0;
+    var stat_batches = 0;
     var resized = 0;        # set by WINDOW_CONFIGURE, consumed by the re-ATTACH after the next render
     # ⭐ POINTER STATE (M2, *deferral #05*), OWNED BY crab RATHER THAN BY `dh_dispatch`.
     # ⛔ `SETU_INPUT_PTR_BTN` CARRIES NO COORDINATES — only button and state. The position comes from
@@ -459,6 +462,7 @@ fn main(): i64 {
         }
         if (ev > 0) {
             var k = dh_event_kind(ev);
+            var ev_frame = crab_event_frame(k);
             # ⭐ A POINTER PICK IS A KEY (0.8.5). A left press on a popup row sets this to the entry's
             # accelerator — `crab_menu_accel`, the same map Enter uses — and the key dispatch below
             # runs it through the one binding table. There is still exactly one implementation of
@@ -491,44 +495,13 @@ fn main(): i64 {
             # and only crab can grow it. Nothing changes until the re-ATTACH below lands.
             # ⚠ The DECISION is `crab_resize_wanted` in `src/app.cyr`, where a test can reach it; what
             # is here is the syscall plumbing that cannot be.
+            # ⛔⛔ RECORDED HERE, APPLIED WHEN THE QUEUE IS DRAINED (P(-1) H11). A grip drag sends a CONFIGURE per
+            # motion step, and each one that reaches dhancha abandons a whole window of pixels to a heap with
+            # no free(): 200 steps cost 274 MB, measured. Only the last size of a burst can be on screen.
             if (k == WINDOW_CONFIGURE) {
-                var aw = dh_event_a(ev);
-                var ah = dh_event_b(ev);
-                if (crab_resize_wanted(w, h, aw, ah) == 1) {
-                    var nb = crab_surface_bytes(aw, ah);
-                    var nbuf = buf_id;
-                    var ok = 1;
-                    if (nb != nbytes) {
-                        # ⛔⛔ CREATE BEFORE CLOSE. THE FIRST DRAFT CLOSED FIRST AND QEMU KILLED IT:
-                        # on a maximize `setu_buf_create` failed, crab had already released its only
-                        # buffer, and it exited — `crab: buf_create failed on resize -- exiting`.
-                        # **Never destroy a working surface to attempt an upgrade.** setu's own
-                        # `setu_client_present` takes the same order since setu 0.8.11. Two slots are
-                        # held for one call, which is 2 of 16 transiently.
-                        nbuf = setu_buf_create(nb);
-                        if (nbuf < 0) {
-                            # ⛔ A REFUSED RESIZE IS A FROZEN EXTENT, NOT A DEATH. The kernel caps a
-                            # `#71` pmm slot at 2 MB and only a real GPU carveout (`#86`) reaches
-                            # 32 MB — under QEMU there is no carveout, so a fullscreen ask cannot be
-                            # backed at all. Staying at the old size is the documented degradation
-                            # for a client that cannot honour a CONFIGURE; exiting is not.
-                            crab_log_extent("crab: cannot back a surface of ", aw, ah);
-                            ok = 0;
-                        }
-                        else { setu_buf_close(buf_id); }
-                    }
-                    if (ok == 1) {
-                        if (dh_surface_resize(surf, aw, ah) == DHANCHA_OK) {
-                            buf_id = nbuf;
-                            w = aw;
-                            h = ah;
-                            nbytes = nb;
-                            stride = w * 4;
-                            resized = 1;     # the ATTACH+COMMIT happens after the render below
-                            crab_log_extent("crab: resized to ", w, h);
-                        }
-                    }
-                }
+                cfg_w = dh_event_a(ev);
+                cfg_h = dh_event_b(ev);
+                cfg_pending = 1;
             }
             # ⭐ POINTER MOTION — track it, do not act on it. Coordinates are CONTENT-relative and
             # the compositor has already dropped anything outside the content rect (its own ⛔: a
@@ -546,6 +519,7 @@ fn main(): i64 {
                         if (crab_drag_started(drag_x, drag_y, ptr_x, ptr_y) == 1) {
                             dragging = 1;
                             crab_set_notice("drag to the other pane to move");
+                            ev_frame = CRAB_FRAME_SOFT;
                         }
                     }
                 }
@@ -553,11 +527,7 @@ fn main(): i64 {
                 # only for the arrow keys, so the operator had to aim with the mouse and then commit
                 # with a key that was pointing somewhere else entirely — the one gesture in crab
                 # where the two input roads disagreed about what was selected.
-                # ⛔ IT COSTS NO EXTRA REDRAW, AND THAT IS A MEASURED FACT RATHER THAN A DESIGN: the
-                # render at the bottom of this `if (ev > 0)` block is UNCONDITIONAL — every pointer
-                # event already repaints the window and rewrites w*h*4 bytes of shm. `crab_hover_*`
-                # is asked here; `crab_motion_redraw_due` exists so a later cut can gate that render
-                # on something having changed, which nothing in this loop does today.
+                # ⚠ A motion that changes nothing draws nothing: `crab_motion_redraw_due` raises the frame.
                 # ⛔ THE POPUP IS ASKED, NOT THE MODEL. `mb_drop >= 0` does NOT mean a drop-down is on
                 # screen — `crab_render` refuses one locally when it does not fit and never tells
                 # main() — so the hit test is what decides, and a refused drop hit-tests to nothing.
@@ -593,6 +563,7 @@ fn main(): i64 {
                     # emits one line, and a pointer sweeping a popup emits one per row — so a harness
                     # can assert the hover without drowning a console three processes share.
                     if (crab_motion_redraw_due(hsel0, menu_sel, hitem0, mb_item) == 1) {
+                        ev_frame = CRAB_FRAME_SOFT;
                         crab_line_reset();
                         crab_line_s("crab: hover ");
                         if (mb_drop >= 0) { crab_line_s("drop "); crab_line_u(mb_item); }
@@ -764,7 +735,7 @@ fn main(): i64 {
                             var bisdir = 0;
                             if (bcnt > 0) { bisdir = load8(bbufp + bselp * CRAB_REC_SZ + CRAB_REC_TYPE); }
                             var bmark = crab_mark_count(bmkp, bcnt);
-                            var bf0 = crab_mb_item_first(bar_cell, bcnt, bisdir, bmark);
+                            var bf0 = crab_mb_open_first(bar_cell, w, h, bcnt, bisdir, bmark);
                             if (bf0 >= 0) {
                                 mb_drop = bar_cell; mb_item = bf0;
                                 # ⚠ LATCH THE HOVER'S ANCHOR AT EVERY OPEN SITE. `crab_hover_armed`
@@ -772,7 +743,7 @@ fn main(): i64 {
                                 # minutes ago would arm the hover before the pointer had moved.
                                 hover_x = ptr_x; hover_y = ptr_y; mb_open_item = bf0;
                             }
-                            else { mb_drop = 0 - 1; crab_set_notice("that menu has no items yet"); }
+                            else { mb_drop = 0 - 1; crab_set_notice(crab_mb_refusal(bf0)); }
                         }
                         crab_say("crab: bar click\n");
                     }
@@ -973,8 +944,7 @@ fn main(): i64 {
                             # `crab_hit` records with row -1 — left the PREVIOUS drag armed and its
                             # row pointing into a listing the operator had since moved on from. And
                             # nothing else ever disarms one: the release arm is the only clearer, and
-                            # the compositor DROPS a release delivered outside crab's content rect,
-                            # so releasing on the titlebar leaves `dragging = 1` with no button down.
+                            # a release can arrive somewhere that clears nothing else.
                             drag_pane = 0 - 1;
                             drag_row = 0 - 1;
                             dragging = 0;
@@ -1014,6 +984,9 @@ fn main(): i64 {
                         # IN the listing, and does that row still hold THE NAME THE PRESS ARMED.
                         var dtp = 0 - 1;
                         if (crab_hit(ptr_x, ptr_y, hit) == 1) { dtp = load64(hit); }
+                        # ⛔ Off the window is how an operator aborts a drag, and the compositor's grab hands
+                        # that release back clamped onto the edge, where it hit a pane and moved the file.
+                        if (crab_pointer_at_edge(ptr_x, ptr_y, w, h) == 1) { dtp = 0 - 1; }
                         var dsb = lbuf; var dsc = ln;
                         if (drag_pane == 1) { dsb = rbuf; dsc = rn; }
                         var dnameok = 0;
@@ -1056,6 +1029,7 @@ fn main(): i64 {
                                     # it is reachable by the suite, which this branch is not.
                                     var dmk = lmarks; if (drag_pane == 1) { dmk = rmarks; }
                                     var dmarked = crab_mark_count(dmk, sc2);
+                                    dmarked = crab_drag_marked(dmarked, crab_marked(dmk, drag_row, sc2));
                                     # ⚠ THE RAW KIND, NOT A BOOLEAN — `crab_transfer_plan` classifies
                                     # it now, because a boolean each call site derived was two chances
                                     # to derive it wrong and both sites are unreachable from the suite.
@@ -1072,11 +1046,10 @@ fn main(): i64 {
                                         # ⚠ Same queue the keyboard move uses, so a refusal inside the
                                         # set skips that entry and keeps going, and the tray shows one
                                         # continuous operation rather than N flashing ones.
-                                        crab_queue_marked(sb2, dmk, sc2);
-                                        crab_queue_dirs(CRAB_OP_MOVE, sp2, dp2);
-                                        var dqn = crab_queue_advance(pathscr, pathscr2, statbuf);
+                                        var dqn = crab_queue_start(sb2, dmk, sc2, CRAB_OP_MOVE, sp2, dp2,
+                                          pathscr, pathscr2, statbuf);
                                         if (dqn == 1) { crab_set_notice("moving the marked files..."); }
-                                        else { crab_set_notice("nothing could be moved"); }
+                                        else { crab_set_notice(crab_queue_start_msg(dqn)); }
                                         crab_say("crab: drag-move marked\n");
                                     }
                                     # ⚠ Nested rather than `else if`, which cyrius does not have.
@@ -1109,11 +1082,9 @@ fn main(): i64 {
                                     # the idle tick, which relists when it ends. Relisting now would
                                     # readdir a directory the transfer is still writing into.
                                     if (crab_op_active() == 0) {
-                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                        ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
                                         lstate = crab_pane_state(ln, crab_listing_err());
-                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                        rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
                                         rstate = crab_pane_state(rn, crab_listing_err());
                                         if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                         if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -1197,6 +1168,7 @@ fn main(): i64 {
                     # ⚠ TWO ORACLES, NOT ONE. `crab: key press` counts what the wire's KEY events made
                     # crab do and a harness ratios it against `crab: key received`; a synthesised
                     # verb has no `received` line and must not lean on that ratio.
+                    ev_frame = CRAB_FRAME_HARD;
                     if (k == KEY) { crab_say("crab: key press\n"); }
                     else { crab_say("crab: verb by pointer\n"); }
                     # ⚠ The pane facts the menu's enable rules need, read once per keypress.
@@ -1223,11 +1195,11 @@ fn main(): i64 {
                                     # listing, so renaming the second entry by index would be safe only by accident.
                                     var bmk = lmarks; var bbuf = lbuf; var bcnt = ln;
                                     if (active_pane == 1) { bmk = rmarks; bbuf = rbuf; bcnt = rn; }
-                                    crab_queue_marked(bbuf, bmk, bcnt);
+                                    crab_mlist_marked(bbuf, bmk, bcnt);
                                     var bi = 1;
                                     var bfail = 0;
                                     var bdst = crab_batch_dst();
-                                    var bnm = crab_queue_next();
+                                    var bnm = crab_mlist_next();
                                     while (bnm != 0) {
                                         if (crab_batch_name(bdst, crab_edit_buf(), bi, bnm) < 0) { bfail = bfail + 1; }
                                         else {
@@ -1240,10 +1212,9 @@ fn main(): i64 {
                                             }
                                         }
                                         bi = bi + 1;
-                                        bnm = crab_queue_next();
+                                        bnm = crab_mlist_next();
                                     }
-                                    crab_queue_reset();
-                                    if (bfail > 0) { erc = CRAB_FS_ESYS; } else { erc = CRAB_FS_OK; }
+                                    if (bfail > 0) { erc = CRAB_FS_EBATCH; } else { erc = CRAB_FS_OK; }
                                 } else {
                                     if (edit_open == 2) {
                                         erc = crab_fs_mkdir(epath, crab_edit_buf(), pathscr, statbuf);
@@ -1269,11 +1240,9 @@ fn main(): i64 {
                                 if (ebn != 0) { crab_say(ebn); }
                                 crab_say(" -> "); crab_say(crab_fs_msg(erc)); crab_say("\n");
                                 edit_open = 0;
-                                ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
                                 lstate = crab_pane_state(ln, crab_listing_err());
-                                rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
                                 rstate = crab_pane_state(rn, crab_listing_err());
                                 if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                 if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -1309,10 +1278,10 @@ fn main(): i64 {
                                     # same buffer, and deleting by index while the buffer still describes
                                     # the pre-delete listing is only safe because nothing re-reads it in
                                     # between. Queuing by name removes that "only safe because" entirely.
-                                    crab_queue_marked(dbuf2, dmk, dcnt);
+                                    crab_mlist_marked(dbuf2, dmk, dcnt);
                                     var dfails = 0;
                                     var dok = 0;
-                                    var dnm = crab_queue_next();
+                                    var dnm = crab_mlist_next();
                                     while (dnm != 0) {
                                         # ⚠ The type byte must be read BEFORE the queue advanced past the
                                         # record, so it is re-derived from the name's index instead.
@@ -1321,17 +1290,14 @@ fn main(): i64 {
                                         if (di2 >= 0) { dis = load8(dbuf2 + di2 * CRAB_REC_SZ + CRAB_REC_TYPE); }
                                         var rcm = crab_fs_delete(dpath, dnm, dis, pathscr);
                                         if (rcm == CRAB_FS_OK) { dok = dok + 1; } else { dfails = dfails + 1; }
-                                        dnm = crab_queue_next();
+                                        dnm = crab_mlist_next();
                                     }
-                                    crab_queue_reset();
                                     if (dfails > 0) { crab_set_notice("some entries could not be deleted"); }
                                     else { crab_set_notice("done"); }
                                     crab_say("crab: delete marked\n");
-                                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                    crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                    ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
                                     lstate = crab_pane_state(ln, crab_listing_err());
-                                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                    crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                    rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
                                     rstate = crab_pane_state(rn, crab_listing_err());
                                     if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                     if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -1364,11 +1330,9 @@ fn main(): i64 {
                                     # ⚠ A tree delete is still RUNNING here — the idle tick relists when
                                     # it finishes. Relisting now would readdir a directory mid-removal.
                                     if (crab_op_active() == 0) {
-                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                        ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
                                         lstate = crab_pane_state(ln, crab_listing_err());
-                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                        rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
                                         rstate = crab_pane_state(rn, crab_listing_err());
                                         if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                         if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -1426,12 +1390,12 @@ fn main(): i64 {
                                         # ⛔ OPEN ONTO THE FIRST *ENABLED* ITEM. Landing on a greyed
                                         # row means `dh_list_select` refuses it and the drop-down
                                         # paints no highlight at all — while Enter still fires it.
-                                        var f0 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        var f0 = crab_mb_open_first(mb_sel, w, h, mcnt2, misdir2, mmark2);
                                         if (f0 >= 0) {
                                             mb_drop = mb_sel; mb_item = f0;
                                             hover_x = ptr_x; hover_y = ptr_y; mb_open_item = f0;
                                         }
-                                        else { crab_set_notice("that menu has no items yet"); }
+                                        else { crab_set_notice(crab_mb_refusal(f0)); }
                                         u = 0;
                                     }
                                 } else {
@@ -1460,7 +1424,7 @@ fn main(): i64 {
                                     # open, which is how every menu bar behaves.
                                     if (mbk == CRAB_MBK_PREV) {
                                         mb_sel = crab_mb_move(mb_sel, 0 - 1);
-                                        var fn2 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
+                                        var fn2 = crab_mb_open_first(mb_sel, w, h, mcnt2, misdir2, mmark2);
                                         if (fn2 >= 0) {
                                             mb_drop = mb_sel; mb_item = fn2;
                                             hover_x = ptr_x; hover_y = ptr_y; mb_open_item = fn2;
@@ -1470,8 +1434,11 @@ fn main(): i64 {
                                     }
                                     if (mbk == CRAB_MBK_NEXT) {
                                         mb_sel = crab_mb_move(mb_sel, 1);
-                                        var fn3 = crab_mb_item_first(mb_sel, mcnt2, misdir2, mmark2);
-                                        if (fn3 >= 0) { mb_drop = mb_sel; mb_item = fn3; }
+                                        var fn3 = crab_mb_open_first(mb_sel, w, h, mcnt2, misdir2, mmark2);
+                                        if (fn3 >= 0) {
+                                            mb_drop = mb_sel; mb_item = fn3;
+                                            hover_x = ptr_x; hover_y = ptr_y; mb_open_item = fn3;
+                                        }
                                         else { mb_drop = 0 - 1; }
                                         u = 0;
                                     }
@@ -1542,6 +1509,20 @@ fn main(): i64 {
                             # ⚠ `crab_sb_focus_eff` is asked with `crab_sidebar_shown` — the SAME
                             # pair `crab_render` asks — so the keyboard cannot believe it is driving
                             # a sidebar the renderer did not draw. That equality is `b`'s own lesson.
+                            # ⭐⭐ A COLLISION PROMPT OWNS THE KEYBOARD WHILE IT IS UP (0.8.7): the operation is
+                            # stopped on a question whose answer destroys or keeps a file. ⛔ IT STANDS ABOVE EVERY
+                            # BINDING, sidebar included. Keys that were not answers used to fall through, so `d`
+                            # under the prompt armed a delete whose question the next tick overwrote, and `y`
+                            # then deleted with nothing on screen (P(-1) M10). Esc answers CANCEL and falls into
+                            # the same cancel the transfer arm below runs.
+                            if (crab_op_waiting() == 1) {
+                                var ovr = crab_op_ov_answer(u);
+                                u = crab_ov_key_after(ovr);
+                                if (crab_op_waiting() == 1) {
+                                    crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
+                                    crab_set_notice(ovbuf);
+                                } else { crab_clear_notice(); }
+                            }
                             var sbon_k = crab_sidebar_shown(w, pv_open, sb_open);
                             if (u == 0x2B) {                                       # Tab
                                 var nf = crab_sb_focus_toggle(sb_focus, sbon_k, placen, voln);
@@ -1563,7 +1544,7 @@ fn main(): i64 {
                                 sb_focus = nf;
                                 u = 0;
                             }
-                            if (crab_sb_focus_eff(sb_focus, sbon_k, placen, voln) == 1) {
+                            if ((crab_op_waiting() == 0) && (crab_sb_focus_eff(sb_focus, sbon_k, placen, voln) == 1)) {
                                 var sbk = crab_sb_key(u, crab_op_active());
                                 if (sbk == CRAB_SBK_UP) { sb_row = crab_sb_step(sb_row, 0 - 1, placen, voln); u = 0; }
                                 if (sbk == CRAB_SBK_DOWN) { sb_row = crab_sb_step(sb_row, 1, placen, voln); u = 0; }
@@ -1588,30 +1569,6 @@ fn main(): i64 {
                                     if (sbp != 0) { synth_goto = sbp; }
                                     else { crab_set_notice("nothing to go to"); }
                                     u = 0;
-                                }
-                            }
-                            # ⭐⭐ A COLLISION PROMPT OWNS THE KEYBOARD WHILE IT IS UP (0.8.7), and it
-                            # sits ABOVE every binding including Esc-cancels-a-transfer — because the
-                            # operation is not merely running, it is STOPPED on a question whose
-                            # answer destroys or keeps a file. ⛔ `r`, `s` and `k` are ordinary verbs
-                            # elsewhere (rename, sort, nothing) and MUST NOT reach them here; the arm
-                            # consumes every key it recognises and leaves the rest alone so a stray
-                            # keystroke does nothing rather than something.
-                            # ⚠ Esc answers CANCEL and falls into the same cancel the transfer arm
-                            # below runs — one implementation, reached two ways.
-                            if (crab_op_waiting() == 1) {
-                                var ovr = crab_op_ov_answer(u);
-                                if (ovr == CRAB_FS_ECANCEL) {
-                                    u = 0x29;                      # fall through to the Esc-cancel arm
-                                } else {
-                                    if (crab_ov_answer(u) != CrabOvAnswer.CRAB_OVA_NONE) { u = 0; }
-                                    # ⚠ The notice is refreshed either way: arming `[all]` must show
-                                    # before the key that acts on it, and a resumed walk should stop
-                                    # showing a question nobody is being asked any more.
-                                    if (crab_op_waiting() == 1) {
-                                        crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
-                                        crab_set_notice(ovbuf);
-                                    } else { crab_clear_notice(); }
                                 }
                             }
                             # ⭐⭐ ESC CANCELS A TRANSFER (M4, v0.7.3). ⛔ A STEPPED OPERATION THE
@@ -1656,16 +1613,14 @@ fn main(): i64 {
                                         # something that is half done — and the half that is done
                                         # sits inside a folder full of the operator's own files.
                                         # ⇒ crab does NOT delete that folder; it says what survived.
-                                        crab_set_notice(crab_fs_msg(rcan));
+                                        crab_set_notice(crab_cancel_msg(rcan));
                                         crab_line_reset();
                                         crab_line_s("crab: transfer cancelled rc ");
                                         crab_line_u(0 - rcan);
                                         crab_line_say();
-                                        ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                        crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                        ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
                                         lstate = crab_pane_state(ln, crab_listing_err());
-                                        rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                        crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                        rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
                                         rstate = crab_pane_state(rn, crab_listing_err());
                                         if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                         if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -1690,12 +1645,7 @@ fn main(): i64 {
                             # RESOLVED width, so "down" moves by the number of columns the operator
                             # can actually see. Recomputing it here from `panew` would be a second
                             # answer, free to disagree by one at exactly the widths that matter.
-                            var gstep = 1;
-                            if (crab_view_is_grid(view_mode) == 1) {
-                                var apw = crab_pane_widget(active_pane);
-                                if (apw != 0) { gstep = dh_grid_cols(apw); }
-                                if (gstep < 1) { gstep = 1; }
-                            }
+                            var gstep = crab_row_step(view_mode, active_pane);
                             if (u == 0x0B) { active_pane = 0; }                    # h — always a pane switch
                             if (u == 0x0F) { active_pane = 1; }                    # l — always a pane switch
                             if (u == 0x50) {                                       # Left
@@ -1715,18 +1665,12 @@ fn main(): i64 {
                                 # `dh_grid_move_sel` refuses a move off the edge, which is right for
                                 # a widget; crab holds the selection itself (the 2026-08-27 ruling),
                                 # and clamping keeps a partial top row reachable.
-                                if (active_pane == 0) { if (sel_l >= gstep) { sel_l = sel_l - gstep; } else { sel_l = 0; } }
-                                if (active_pane == 1) { if (sel_r >= gstep) { sel_r = sel_r - gstep; } else { sel_r = 0; } }
+                                if (active_pane == 0) { sel_l = crab_sel_step(sel_l, gstep, ln, 0 - 1); }
+                                if (active_pane == 1) { sel_r = crab_sel_step(sel_r, gstep, rn, 0 - 1); }
                             }
                             if ((u == 0x51) || (u == 0x0D)) {                      # Down / j
-                                if (active_pane == 0) {
-                                    if (sel_l + gstep <= crab_maxsel(ln)) { sel_l = sel_l + gstep; }
-                                    else { sel_l = crab_maxsel(ln); }
-                                }
-                                if (active_pane == 1) {
-                                    if (sel_r + gstep <= crab_maxsel(rn)) { sel_r = sel_r + gstep; }
-                                    else { sel_r = crab_maxsel(rn); }
-                                }
+                                if (active_pane == 0) { sel_l = crab_sel_step(sel_l, gstep, ln, 1); }
+                                if (active_pane == 1) { sel_r = crab_sel_step(sel_r, gstep, rn, 1); }
                             }
                             if (u == 0x0A) {                                       # g — cycle the view
                                 # ⚠ A CYCLE, NOT A TOGGLE, and one key rather than four. Four views
@@ -1838,6 +1782,9 @@ fn main(): i64 {
                             # ⚠ `menu_x`/`menu_y` PLACE it at the last tracked pointer position.
                             if (u == 0x65) {                                       # the Menu key
                                 menu_open = 1;
+                                mb_sel = 0 - 1;
+                                mb_drop = 0 - 1;
+                                sb_focus = 0;
                                 # ⛔ THE FIRST **ENABLED** ITEM — the same fix as the pointer road's
                                 # open site, and it has to be in BOTH or the two roads open the same
                                 # menu differently. On an empty pane row 0 (`CRAB_MI_OPEN`) is greyed,
@@ -1877,6 +1824,7 @@ fn main(): i64 {
                                         upath = rpath; ubuf = rbuf; ucnt = rn;
                                         usz = rsizes; umt = rmtimes; umk = rmarks;
                                     }
+                                    crab_stat_batch(upath, ubuf, ucnt, usz, umt, pathscr, statbuf, ucnt);
                                     var dupn = crab_dup_scan(upath, ubuf, ucnt, usz, umt, umk, pathscr);
                                     var dmsg = crab_dup_msg(dupn);
                                     if (dmsg != 0) { crab_set_notice(dmsg); }
@@ -1991,11 +1939,10 @@ fn main(): i64 {
                                         if (smarked > 0) {
                                             var qkind = CRAB_OP_COPY;
                                             if (u == 0x10) { qkind = CRAB_OP_MOVE; }
-                                            crab_queue_marked(sbuf2, smk, scnt);
-                                            crab_queue_dirs(qkind, srcp, dstp);
-                                            var qn0 = crab_queue_advance(pathscr, pathscr2, statbuf);
+                                            var qn0 = crab_queue_start(sbuf2, smk, scnt, qkind, srcp, dstp,
+                                              pathscr, pathscr2, statbuf);
                                             if (qn0 == 1) { crab_set_notice("transferring..."); }
-                                            else { crab_set_notice("nothing could be transferred"); }
+                                            else { crab_set_notice(crab_queue_start_msg(qn0)); }
                                             crab_say("crab: transfer marked\n");
                                         }
                                         var rcc = 0;
@@ -2005,17 +1952,9 @@ fn main(): i64 {
                                         var started = 0;
                                         if (smarked > 0) { started = 0 - 1; }
                                         if ((smarked == 0) && (u == 0x10)) {
-                                            # ⛔⛆ `crab_fs_move_rename`, NOT `crab_fs_move` (0.8.2). The
-                                            # comment above has always said the move tries rename first
-                                            # and steps only when it refuses — but `crab_fs_move` runs a
-                                            # BLOCKING `crab_fs_copy` on that refusal, to completion,
-                                            # right here in the keypress. The loop drew no frames, so the
-                                            # tray never appeared and Esc could not cancel; the stepped
-                                            # `CRAB_OP_MOVE` path was unreachable for the only case it
-                                            # exists for. Moving a large file across a mount point froze
-                                            # crab until it finished.
-                                            # ⇒ Only `EXDEV` means "step it". Every other refusal is a
-                                            # real answer and is reported as one.
+                                            # ⛔ `crab_fs_move_rename`, THE CHEAP HALF: the stepped copy starts below
+                                            # only when it refuses, so the loop keeps drawing and Esc still works.
+                                            # ⇒ Only `EXDEV` means "step it"; any other answer is the result.
                                             rcc = crab_fs_move_rename(srcp, namescr, dstp, pathscr, pathscr2, statbuf);
                                             if (rcc == CRAB_FS_OK) { started = 0; }
                                             if (rcc == CRAB_FS_EXDEV) { started = 1; }
@@ -2034,11 +1973,11 @@ fn main(): i64 {
                                         if (u == 0x06) { crab_say("crab: copy "); } else { crab_say("crab: move "); }
                                         crab_say(namescr); crab_say(" -> "); crab_say(crab_fs_msg(rcc)); crab_say("\n");
                                         if (crab_op_active() == 0) {
-                                            ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                                            crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
+                                            ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks,
+                                              pathscr, statbuf);
                                             lstate = crab_pane_state(ln, crab_listing_err());
-                                            rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                                            crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
+                                            rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks,
+                                              pathscr, statbuf);
                                             rstate = crab_pane_state(rn, crab_listing_err());
                                             if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
                                             if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
@@ -2056,10 +1995,8 @@ fn main(): i64 {
                                 # the file the operator was looking at, which is the point of re-sorting.
                                 # ⛔ CAPTURE BOTH NAMES BEFORE EITHER SORT — `crab_sort_entries` permutes in
                                 # place, so a name read after the first sort is already the wrong row's.
-                                var lkeep = alloc(CRAB_NAME_MAX);
-                                var rkeep = alloc(CRAB_NAME_MAX);
-                                if (ln > 0) { crab_strcpy_n(lkeep, lbuf + sel_l * CRAB_REC_SZ, CRAB_NAME_MAX); }
-                                if (rn > 0) { crab_strcpy_n(rkeep, rbuf + sel_r * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                if (ln > 0) { crab_strcpy_n(rf_lkeep, lbuf + sel_l * CRAB_REC_SZ, CRAB_NAME_MAX); }
+                                if (rn > 0) { crab_strcpy_n(rf_rkeep, rbuf + sel_r * CRAB_REC_SZ, CRAB_NAME_MAX); }
                                 var sm = crab_sort_cycle();
                                 # ⛔ A SIZE OR MTIME ORDER CANNOT BE COMPUTED FROM PARTIAL DATA (*#03*). The
                                 # deferred sweep may still have entries pending, and sorting on the -2 marker
@@ -2072,6 +2009,7 @@ fn main(): i64 {
                                 }
                                 crab_sort_entries(lbuf, lsizes, lmtimes, ln, sm);
                                 crab_sort_entries(rbuf, rsizes, rmtimes, rn, sm);
+                                crab_cols_forget();
                                 # ⛔⛔ A RE-SORT PERMUTES THE ENTRIES, SO EVERY MARK NOW POINTS AT A
                                 # DIFFERENT FILE. This is the subtlest way a mark set goes stale — the
                                 # listing did not change, only its ORDER, so nothing else here notices.
@@ -2082,8 +2020,8 @@ fn main(): i64 {
                                 crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
                                 sel_l = 0;
                                 sel_r = 0;
-                                if (ln > 0) { var nl = crab_index_of(lbuf, ln, lkeep); if (nl >= 0) { sel_l = nl; } }
-                                if (rn > 0) { var nr = crab_index_of(rbuf, rn, rkeep); if (nr >= 0) { sel_r = nr; } }
+                                if (ln > 0) { var nl = crab_index_of(lbuf, ln, rf_lkeep); if (nl >= 0) { sel_l = nl; } }
+                                if (rn > 0) { var nr = crab_index_of(rbuf, rn, rf_rkeep); if (nr >= 0) { sel_r = nr; } }
                                 crab_say("crab: sort ");
                                 crab_say(crab_sort_name(sm));
                                 crab_say("\n");
@@ -2185,6 +2123,7 @@ fn main(): i64 {
                                 # key cannot report a bar the frame will not draw — `b`'s own lesson.
                                 if (mb_sel < 0) {
                                     if (crab_menubar_fit(w, 1) == 1) {
+                                        menu_open = 0;
                                         mb_sel = 0;
                                         crab_say("crab: menu bar\n");
                                     } else { crab_set_notice("the menu bar needs a wider window"); }
@@ -2298,53 +2237,7 @@ fn main(): i64 {
                 synth_goto = 0;
             }
 
-            # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE. This render + 334 KB shm write used to run
-            # unconditionally, including on the WINDOW_CLOSE and EOF paths — drawing one last frame
-            # into a surface the compositor had just destroyed, and leaking a full render to do it.
-            if (running == 1) {
-                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
-                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
-                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
-                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                crab_rs_preview(rs, pv_open);
-                crab_rs_view(rs, view_mode);
-                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
-                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
-                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
-                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
-                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
-                # setters collapse into one call so they cannot drift apart again — they had.
-                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
-                var s2 = crab_render(surf, crab_face(), rs);
-                if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                else {
-                    setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
-                    # ⛔ RE-ATTACH ONLY AFTER A RESIZE, AND ONLY AFTER THE PIXELS ARE WRITTEN. crab's
-                    # steady state is a LIVE buffer — write in place, no re-present — which is why
-                    # this is not in the normal path. But the compositor holds the OLD extent and the
-                    # OLD buffer id until an ATTACH says otherwise, so a resize that skipped this
-                    # would render at the new size into a buffer nothing reads at that size.
-                    # ⚠ ORDER: write, then ATTACH, then COMMIT — the same order `setu_client_present`
-                    # uses, because the compositor re-reads the id it holds on each commit.
-                    if (resized == 1) {
-                        resized = 0;
-                        if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) {
-                            crab_say("crab: re-attach failed after resize -- exiting\n");
-                            running = 0;
-                        }
-                        elif (setu_send(fd, setu_commit(sid)) < 0) {
-                            crab_say("crab: re-commit failed after resize -- exiting\n");
-                            running = 0;
-                        }
-                    }
-                }
-            }
+            frame_due = crab_frame_raise(frame_due, ev_frame);
         }
         # ⛔⛔ `sys_pause` (#14), NOT `sys_sleep_ms` (#41). THIS EXACT LINE WAS A REGRESSION IN A
         # 0.5.0 DRAFT AND QEMU CAUGHT IT — no host test could have.
@@ -2362,8 +2255,7 @@ fn main(): i64 {
         # ⭐ `pause` (#14) is the primitive this loop actually wants: the syscall handler **yields to
         # a ready proc first**, and only falls through to a safe IF=1 `hlt` when nothing else is
         # runnable. So other processes get the CPU, and when the machine really is idle crab waits on
-        # an interrupt instead of spinning — which is also what bounds `dh_setu_poll_event`'s ~80 B
-        # per-poll leak until that dhancha gate closes.
+        # an interrupt instead of spinning.
         # ⚠ It is NOT `sys_sched_yield`: yield hands off but comes straight back, so an idle desktop
         # still spins a core at poll speed. `pause` is yield-then-wait.
         #
@@ -2377,7 +2269,10 @@ fn main(): i64 {
         if (running == 1) {
             if (held_key != 0) {
                 var rnow = clock_now_ms();
-                if (crab_repeat_due(rnow - held_since, rnow - held_last) == 1) {
+                # ⛔⛔ HELD KEYS OBEY THE SAME MODES THE PRESS DOES. Nothing asked: holding Down in an open menu
+                # ran the pane's selection underneath it, so Copy and Rename hit another file (P(-1) H8).
+                if ((crab_repeat_due(rnow - held_since, rnow - held_last) == 1)
+                  && (crab_pointer_modal(confirm_del, edit_open, menu_open, mb_sel, crab_op_waiting()) == 0)) {
                     held_last = rnow;
                     # ⛔⛆ THE REPEAT ARM IS A SECOND COPY OF UP/DOWN AND IT MUST OBEY THE SAME MODE
                     # (0.8.3). It was mode-blind: holding Down while the sidebar had focus moved the
@@ -2391,38 +2286,18 @@ fn main(): i64 {
                     if (rsbk == CRAB_SBK_UP) { sb_row = crab_sb_step(sb_row, 0 - 1, placen, voln); }
                     if (rsbk == CRAB_SBK_DOWN) { sb_row = crab_sb_step(sb_row, 1, placen, voln); }
                     if (rsbf == 0) {
-                        if ((held_key == 0x52) || (held_key == 0x0E)) {          # Up / k
-                            if (active_pane == 0) { if (sel_l > 0) { sel_l = sel_l - 1; } }
-                            if (active_pane == 1) { if (sel_r > 0) { sel_r = sel_r - 1; } }
+                        var rstep = crab_row_step(view_mode, active_pane);
+                        if ((held_key == 0x52) || (held_key == 0x0E)) {
+                            if (active_pane == 0) { sel_l = crab_sel_step(sel_l, rstep, ln, 0 - 1); }
+                            if (active_pane == 1) { sel_r = crab_sel_step(sel_r, rstep, rn, 0 - 1); }
                         }
-                        if ((held_key == 0x51) || (held_key == 0x0D)) {          # Down / j
-                            if (active_pane == 0) { if (sel_l < crab_maxsel(ln)) { sel_l = sel_l + 1; } }
-                            if (active_pane == 1) { if (sel_r < crab_maxsel(rn)) { sel_r = sel_r + 1; } }
+                        if ((held_key == 0x51) || (held_key == 0x0D)) {
+                            if (active_pane == 0) { sel_l = crab_sel_step(sel_l, rstep, ln, 1); }
+                            if (active_pane == 1) { sel_r = crab_sel_step(sel_r, rstep, rn, 1); }
                         }
                     }
                     crab_say("crab: key repeat\n");
-                    # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
-                    var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
-                    if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
-                    crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                    crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                    crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                    crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                    crab_rs_preview(rs, pv_open);
-                    crab_rs_view(rs, view_mode);
-                    crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                    crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                    # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
-                    # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
-                    # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
-                    # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
-                    # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
-                    # setters collapse into one call so they cannot drift apart again — they had.
-                    crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
-                    var s3 = crab_render(surf, crab_face(), rs);
-                    if (s3 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                    else { setu_buf_write(buf_id, sd_surface_pixels(s3), nbytes); }
+                    frame_due = CRAB_FRAME_HARD;
                 }
             }
         }
@@ -2455,75 +2330,62 @@ fn main(): i64 {
                 # ⛔ The suite did not catch it because every walk test drives `crab_op_step` — the
                 # right entry point — while this, the only caller that ships, drove the wrong one.
                 # A test that calls a different function than the shipping caller tests nothing here.
-                # ⛔⛔ A WAITING OPERATION DOES NOT STEP (0.8.7). A collision prompt is up and the
-                # answer decides what happens to a file; a tick that stepped anyway would either
-                # re-ask every 16 ms or walk past the very entry being asked about. The prompt is
-                # re-rendered from the record each tick so an armed `[all]` shows immediately.
-                if (crab_op_waiting() == 1) {
-                    crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
-                    crab_set_notice(ovbuf);
-                    continue;
-                }
-                var cstep = crab_op_step();
-                # ⚠ 3 = "stopped, waiting for a collision answer" — not a terminal code and not
-                # progress. It leaves the operation ALIVE with `OVPEND` set; the branch above owns
-                # every tick after it until the operator answers.
-                if (cstep == 3) {
-                    crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
-                    crab_set_notice(ovbuf);
-                    crab_say("crab: collision -- waiting for an answer\n");
-                    continue;
-                }
-                # ⚠ A WALK STEP ALSO RETURNS 2 ("an item finished, the walk continues"), which is
-                # neither 1 nor a terminal `CRAB_FS_*`. It must keep the operation alive exactly as 1
-                # does, or a tree copy would report "done" at its first completed file.
-                if (cstep == 2) { cstep = 1; }
-                if (cstep != 1) {
-                    # ⭐ ADVANCE THE QUEUE BEFORE REPORTING. A multi-file transfer should look like ONE
-                    # continuous operation, not N separate ones flashing "done" between files.
-                    # ⚠ A REFUSAL DOES NOT STOP THE QUEUE — one file already present at the
-                    # destination must not abandon the other nine. Only a cancel stops everything.
-                    var more = crab_queue_advance(pathscr, pathscr2, statbuf);
-                    if (more == 1) { cstep = 1; }
-                    # Finished or failed. Both panes are stale: the source lost an entry on a move,
-                    # the destination gained one either way.
-                    if (more != 1) {
-                        crab_set_notice(crab_fs_msg(cstep));
-                        crab_say("crab: transfer -> "); crab_say(crab_fs_msg(cstep)); crab_say("\n");
+                # ⛔⛔ A WAITING OPERATION DOES NOT STEP (0.8.7). A collision prompt is up and the answer
+                # decides what happens to a file; a tick that stepped anyway would walk past the very
+                # entry being asked about.
+                # ⛔ AND IT STILL REACHES THE FRAME AND `sys_pause` BELOW. Two `continue`s used to skip both,
+                # so the question was never drawn and crab spun a core until a key arrived (P(-1) M9).
+                var cstep = 1;
+                if (crab_op_waiting() == 0) {
+                    cstep = crab_op_step();
+                    # ⚠ 3 = "stopped, waiting for a collision answer" — not terminal and not progress.
+                    if (cstep == 3) {
+                        crab_ov_prompt(ovbuf, CRAB_OV_PROMPT_CAP, crab_op_ov_name(), crab_op_ov_all());
+                        crab_set_notice(ovbuf);
+                        crab_say("crab: collision -- waiting for an answer\n");
+                        frame_due = CRAB_FRAME_HARD;
                     }
-                    ln = crab_relist(lpath, lbuf, lsizes, lmtimes, pathscr, statbuf);
-                    crab_mark_clear(lmarks, CRAB_MAX_ENTRIES);
-                    lstate = crab_pane_state(ln, crab_listing_err());
-                    rn = crab_relist(rpath, rbuf, rsizes, rmtimes, pathscr, statbuf);
-                    crab_mark_clear(rmarks, CRAB_MAX_ENTRIES);
-                    rstate = crab_pane_state(rn, crab_listing_err());
-                    if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
-                    if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                    else {
+                        # ⚠ A WALK STEP ALSO RETURNS 2 ("an item finished, the walk continues"). It must
+                        # keep the operation alive exactly as 1 does, or a tree copy would report "done"
+                        # at its first completed file.
+                        if (cstep == 2) { cstep = 1; }
+                        if (cstep != 1) {
+                            # ⭐ ADVANCE THE QUEUE BEFORE REPORTING: a multi-file transfer is ONE operation,
+                            # and a refusal does not stop it. Only a cancel stops everything.
+                            crab_queue_note(cstep);
+                            var more = crab_queue_advance(pathscr, pathscr2, statbuf);
+                            # ⛔ THE PANES ARE RE-READ ONLY WHEN THE QUEUE IS DONE. Queue entries are names, so
+                            # nothing needs the listing mid-queue, and a re-read per file was two full
+                            # readdirs and sorts each (P(-1) M19).
+                            if (more != 1) {
+                                var qres = crab_queue_result(cstep);
+                                crab_set_notice(crab_fs_msg(qres));
+                                crab_say("crab: transfer -> "); crab_say(crab_fs_msg(qres)); crab_say("\n");
+                                # ⛔⛔ THE LISTING IS ABOUT TO CHANGE UNDER WHATEVER IS OPEN. Rows shift and
+                                # marks clear, so a `y` or an Enter answers the next thing it reads: a prompt
+                                # that named three files deleted the row under the cursor instead (P(-1) H6).
+                                if (crab_relist_voids(confirm_del, edit_open, menu_open, mb_drop) == 1) {
+                                    confirm_del = 0;
+                                    if (edit_open != 2) { edit_open = 0; }
+                                    menu_open = 0;
+                                    mb_drop = 0 - 1;
+                                    crab_set_notice(crab_relist_void_msg());
+                                }
+                                last_pane = 0 - 1;
+                                last_row = 0 - 1;
+                                ln = crab_relist_pane(lpath, lbuf, lsizes, lmtimes, lmarks, pathscr, statbuf);
+                                lstate = crab_pane_state(ln, crab_listing_err());
+                                rn = crab_relist_pane(rpath, rbuf, rsizes, rmtimes, rmarks, pathscr, statbuf);
+                                rstate = crab_pane_state(rn, crab_listing_err());
+                                if (sel_l > crab_maxsel(ln)) { sel_l = crab_maxsel(ln); }
+                                if (sel_r > crab_maxsel(rn)) { sel_r = crab_maxsel(rn); }
+                            }
+                        }
+                        # ⚠ A FRAME EVERY STEP: the bar moving IS the point.
+                        frame_due = CRAB_FRAME_HARD;
+                    }
                 }
-                # ⚠ REDRAW EVERY STEP, not only on completion — the bar moving IS the point, and a
-                # tray that updates once at the end is the blocking copy with extra steps.
-                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
-                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
-                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
-                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                crab_rs_preview(rs, pv_open);
-                crab_rs_view(rs, view_mode);
-                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
-                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
-                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
-                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
-                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
-                # setters collapse into one call so they cannot drift apart again — they had.
-                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
-                var s5 = crab_render(surf, crab_face(), rs);
-                if (s5 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                else { setu_buf_write(buf_id, sd_surface_pixels(s5), nbytes); }
             }
         }
         # ⭐⭐ THE THUMBNAIL DECODE (M5) — ON THE IDLE TICK, NEVER ON THE KEYSTROKE PATH.
@@ -2598,33 +2460,7 @@ fn main(): i64 {
                 }
                 # ⚠ REDRAW ONLY WHEN A PICTURE ACTUALLY LANDED. Repainting on every tick once the
                 # gallery is full turns the idle loop into a busy loop drawing the same frame.
-                if (qdid == 1) {
-                    crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                    crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                    crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                    crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                    crab_rs_preview(rs, pv_open);
-                    crab_rs_view(rs, view_mode);
-                    crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                    crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                    crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                    # ⛔⛆ THE PREVIEW SHOWS THE **SELECTION**, NOT WHAT THIS WALK JUST DECODED (0.8.2).
-                    # `crab_thumb_pixels()` reads `crab_th_slot`, which records what the last STEP was
-                    # about — and the step immediately above was about a GALLERY CELL. With the
-                    # preview open this drew that cell's picture in the preview column under the
-                    # selected entry's name, and it PERSISTED: the preview's own redraw fires only
-                    # when its state CHANGES, and OK -> OK is not a change, so nothing corrected it.
-                    # ⇒ Look the selection's slot up directly, which decodes nothing and disturbs
-                    # nothing. A -1 slot yields the zeroed scratch and NONE, i.e. "draw no picture".
-                    # ⭐ 0.9.4 MADE THAT THE RULE EVERYWHERE. This was the ONLY one of eight render
-                    # sites that obeyed it; the other seven asked "what was the last step about" and
-                    # were wrong in exactly the way this comment describes. `crab_pv_publish` is that
-                    # lookup, for the picture AND the dimensions AND the EXIF, in one place.
-                    crab_pv_publish(rs, qpath, qbuf, qsel, qcnt, pv_open, pathscr);
-                    var s7 = crab_render(surf, crab_face(), rs);
-                    if (s7 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                    else { setu_buf_write(buf_id, sd_surface_pixels(s7), nbytes); }
-                }
+                if (qdid == 1) { frame_due = CRAB_FRAME_HARD; }
             }
         }
         # 🦀 BUELLER. ⛔ ITS OWN IDLE BRANCH, because there is NO unconditional per-tick redraw to
@@ -2652,28 +2488,7 @@ fn main(): i64 {
                     if (crab_get_notice() == crab_mascot_text(mascot_stage)) { crab_clear_notice(); }
                 } else { crab_set_notice(crab_mascot_text(mwant)); }
                 mascot_stage = mwant;
-                crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                crab_rs_preview(rs, pv_open);
-                crab_rs_view(rs, view_mode);
-                crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⛔⛆ THE MASCOT WAS THE ONE RENDER SITE THAT PUBLISHED NO PREVIEW STATE AT ALL, and
-                # `crab_rs_reset` is never called inside this loop — so it drew DIMENSIONS, the
-                # thumbnail and CAMERA from whatever the record still held from a frame that could be
-                # minutes old and about a different directory. It fires precisely when the operator
-                # has been idle long enough to be reading the screen.
-                # ⇒ It publishes like every other site now. Since 0.9.4 that is a lookup, so there is
-                # no cost argument against it — which is why it was left out before.
-                var mpath = lpath; var mbuf = lbuf; var msel = sel_l; var mcnt = ln;
-                if (active_pane == 1) { mpath = rpath; mbuf = rbuf; msel = sel_r; mcnt = rn; }
-                crab_pv_publish(rs, mpath, mbuf, msel, mcnt, pv_open, pathscr);
-                var sm = crab_render(surf, crab_face(), rs);
-                if (sm == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                else { setu_buf_write(buf_id, sd_surface_pixels(sm), nbytes); }
+                frame_due = CRAB_FRAME_HARD;
             }
         }
         if ((running == 1) && (ev == 0)) {
@@ -2727,19 +2542,7 @@ fn main(): i64 {
                     # (OK -> OK), so no frame was drawn and the PREVIOUS picture stayed under the new
                     # name. The slot is part of the answer: see `crab_pv_redraw_due`.
                     if (crab_pv_redraw_due(tbefore, tafter, tsbefore, tsafter, dbefore, dafter) == 1) {
-                        crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
-                        crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
-                        crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
-                        crab_rs_chrome(rs, active_pane, menu_open, menu_x, menu_y, menu_sel, edit_open, edit_label);
-                        crab_rs_preview(rs, pv_open);
-                        crab_rs_view(rs, view_mode);
-                        crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
-                        crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
-                        crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                        crab_pv_publish(rs, tpath, tbuf, tsel, tcnt, pv_open, pathscr);
-                        var s6 = crab_render(surf, crab_face(), rs);
-                        if (s6 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                        else { setu_buf_write(buf_id, sd_surface_pixels(s6), nbytes); }
+                        frame_due = CRAB_FRAME_HARD;
                     }
                 }
             }
@@ -2755,14 +2558,66 @@ fn main(): i64 {
                 # completed from one that never ran, and "the sizes fill in" would be an assumption.
                 # It fires once because `sdone > 0` means work happened on THIS tick, and the pending
                 # scan only reaches -1 on the tick that finishes the pane.
+                var stat_done = 0;
                 if (crab_stat_next_pending(lsizes, ln, 0) == 0 - 1) {
                     if (crab_stat_next_pending(rsizes, rn, 0) == 0 - 1) {
+                        stat_done = 1;
                         crab_say("crab: stat-drain complete\n");
                     }
                 }
-                # ⚠ WHICH PANE THE PREVIEW DESCRIBES — the ACTIVE one, the same pane the status line reads.
-                var apath = lpath; var abuf2 = lbuf; var asel2 = sel_l; var acount = ln;
-                if (active_pane == 1) { apath = rpath; abuf2 = rbuf; asel2 = sel_r; acount = rn; }
+                # ⛔ Not one frame per batch: 1024 entries is 32 batches, and only the first can change a
+                # visible row. The first batch, every eighth after it, and the finish (P(-1), F6).
+                stat_batches = stat_batches + 1;
+                if (crab_stat_frame_due(stat_batches, stat_done) == 1) { frame_due = CRAB_FRAME_HARD; }
+                if (stat_done == 1) { stat_batches = 0; }
+            }
+        }
+        if ((running == 1) && (ev == 0) && (cfg_pending == 1)) {
+            cfg_pending = 0;
+            var aw = cfg_w;
+            var ah = cfg_h;
+            if (crab_resize_wanted(w, h, aw, ah) == 1) {
+                var nb = crab_surface_bytes(aw, ah);
+                var nbuf = buf_id;
+                var ok = 1;
+                if (nb != nbytes) {
+                    # ⚠ A NEW BUFFER ONLY WHEN THE BYTE COUNT CHANGES, and it is created BEFORE the old
+                    # one is closed: a refused size must leave the window exactly as it was.
+                    nbuf = setu_buf_create(nb);
+                    if (nbuf < 0) {
+                        # ⛔ REFUSED, NOT FATAL. The kernel could not back that extent; crab stays at the
+                        # size it can draw and says so.
+                        crab_log_extent("crab: cannot back a surface of ", aw, ah);
+                        ok = 0;
+                    }
+                    else { setu_buf_close(buf_id); }
+                }
+                if (ok == 1) {
+                    if (dh_surface_resize(surf, aw, ah) == DHANCHA_OK) {
+                        buf_id = nbuf;
+                        w = aw;
+                        h = ah;
+                        nbytes = nb;
+                        stride = w * 4;
+                        resized = 1;
+                        crab_log_extent("crab: resized to ", w, h);
+                        # ⚠ A popup placed for the old size may not fit the new one.
+                        menu_open = 0;
+                        mb_drop = 0 - 1;
+                        frame_due = CRAB_FRAME_HARD;
+                    }
+                }
+            }
+        }
+        # ⭐⭐ ONE FRAME PER TURN OF THE LOOP, BUILT IN ONE PLACE (0.11.2, P(-1) M18). Everything above only says
+        # that a frame is owed. There used to be one full copy of this block per cause, and one frame per
+        # event: a key release, a Shift edge and every pointer step each drew the whole window.
+        # ⛔ DO NOT REPAINT A WINDOW THAT IS GONE: the WINDOW_CLOSE and EOF paths leave `running` at 0.
+        if (running == 1) {
+            if (crab_frame_now(frame_due, ev) == 1) {
+                frame_due = CRAB_FRAME_NONE;
+                var fpath = lpath; var fbuf = lbuf; var fsel = sel_l; var fcnt = ln;
+                if (active_pane == 1) { fpath = rpath; fbuf = rbuf; fsel = sel_r; fcnt = rn; }
                 crab_rs_pane(rs, 0, lbuf, ln, lpath, lsizes, lmtimes, lstate, lmarks, sel_l, scroll_l);
                 crab_rs_pane(rs, 1, rbuf, rn, rpath, rsizes, rmtimes, rstate, rmarks, sel_r, scroll_r);
                 crab_rs_op(rs, crab_op_name(), crab_op_done(), crab_op_total(), crab_op_rate(), crab_op_eta());
@@ -2772,20 +2627,34 @@ fn main(): i64 {
                 crab_cols_sync(rs, view_mode, active_pane, lpath, rpath, pathscr, statbuf);
                 crab_rs_sidebar(rs, sb_open, places, placen, vols, voln, sb_row, sb_focus);
                 crab_rs_menubar(rs, mb_sel, mb_drop, mb_item);
-                # ⭐⭐ NOTHING IS READ HERE ANY MORE (0.9.4). This used to be an open/read/close of up to 64 KiB
-                # on the SELECTION path — the arrow key's own frame — which is exactly what M3 *#03* restructured
-                # the whole listing to remove, for a smaller saving than this. `crab_pv_publish` is a lookup in a
-                # path-keyed cache and costs ZERO syscalls; the read lives on the idle tick, in `crab_pv_step`.
-                # ⛔ AND IT PUBLISHES THE **SELECTION**, not whatever the last step happened to touch. Three
-                # setters collapse into one call so they cannot drift apart again — they had.
-                crab_pv_publish(rs, apath, abuf2, asel2, acount, pv_open, pathscr);
-                var s4 = crab_render(surf, crab_face(), rs);
-                if (s4 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
-                else { setu_buf_write(buf_id, sd_surface_pixels(s4), nbytes); }
+                # ⭐ `crab_pv_publish` is a lookup in a path-keyed cache and costs ZERO syscalls; the read lives
+                # on the idle tick. It publishes the SELECTION of the ACTIVE pane, the one the status line reads.
+                crab_pv_publish(rs, fpath, fbuf, fsel, fcnt, pv_open, pathscr);
+                var s2 = crab_render(surf, crab_face(), rs);
+                if (s2 == 0) { crab_say("crab: render failed -- exiting\n"); running = 0; }
+                else {
+                    setu_buf_write(buf_id, sd_surface_pixels(s2), nbytes);
+                    # ⛔ RE-ATTACH ONLY AFTER A RESIZE, AND ONLY AFTER THE PIXELS ARE WRITTEN. crab's steady
+                    # state is a LIVE buffer, but the compositor holds the OLD extent and buffer id until an
+                    # ATTACH says otherwise. ⚠ ORDER: write, then ATTACH, then COMMIT.
+                    if (resized == 1) {
+                        resized = 0;
+                        if (setu_send(fd, setu_attach_buf(sid, w, h, stride, 1, buf_id)) < 0) {
+                            crab_say("crab: re-attach failed after resize -- exiting\n");
+                            running = 0;
+                        }
+                        elif (setu_send(fd, setu_commit(sid)) < 0) {
+                            crab_say("crab: re-commit failed after resize -- exiting\n");
+                            running = 0;
+                        }
+                    }
+                }
             }
         }
         if ((running == 1) && (ev == 0)) { sys_pause(); }
     }
+    # ⛔ A window closed mid-copy must not leave a truncated file under the real name (P(-1) M11).
+    crab_op_abandon();
     #endif
     dh_client_close(c);          # symmetry: connected through the toolkit, close through it too
     return 0;

@@ -2,6 +2,98 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.2] — 2026-11-08 — the P(-1): a cancel that deleted the wrong file, questions the listing changed under, and one frame loop
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **A hardening release, and no feature.** Six read-only reviews, one per surface; every finding read against the
+> code before it was fixed; every repair a host test can reach proven by undoing it and watching a suite fail (53
+> mutants). 11 HIGH, 21 MEDIUM, 31 LOW. The full record is
+> [`docs/audit/2026-11-08-0.11.2-p-1.md`](docs/audit/2026-11-08-0.11.2-p-1.md).
+> **Memory safety held**: no overflow in crab's own code, and the image and EXIF parsers are sound. The serious
+> findings are all an action landing on something the operator did not name.
+
+### Fixed — actions that hit the wrong thing, or lost the only copy
+
+- ⛔ **Esc on a folder delete destroyed an earlier copy.** `crab_copy_cancel` unlinked `CRAB_OP_DST` whether or not a
+  file was in flight, and nothing clears that field. After a cross-volume move, what it deleted was the only copy.
+- ⛔ **A Replace left the operator with neither file** when the source could not be opened. The source opens first now.
+- ⛔ **A stepped move unlinked its source without asking whether the copy had landed.** FAT, exFAT and ZFS write at
+  `close`, whose answer was discarded. The close is checked, a short copy is a failure, and a copy whose size cannot be
+  confirmed keeps its source and says so.
+- ⛔ **A merge through a symlink destroyed the only copy.** Every same-file guard compared path strings; they compare
+  identity now.
+- ⛔ **FAT and exFAT had no overwrite guard**, for a reason that was false: agnos has had `AO_EXCL` since 1.56.56.
+- ⛔ **A delete prompt, rename sheet or menu stayed armed while a transfer rewrote the rows it described.** A prompt
+  naming three marked files could delete the row under the cursor. The relist now withdraws the question and says so.
+- ⛔ **A verb refused with "a transfer is already running" replaced the running queue, then ran anyway**, as a move.
+  It refuses before touching the queue, and marked delete and batch rename have their own list.
+- ⛔ **A held key moved the selection under an open menu**, so Copy and Rename hit another file.
+- ⛔ **A delete prompt naming long files froze crab**: `crab_line_s` spun forever at its cap.
+- A queued move never tried `rename`, so marked moves within a volume flattened links and reset modes.
+- Dragging an unmarked row moved the marked set instead. A release off the window performed the drop.
+- A collision answer could land on a different file. A question survived its own cancel. The collision prompt was
+  never drawn, spun a core and did not own the keyboard. Closing the window mid-copy left a truncated file.
+- Keys drove a drop-down the renderer had refused to draw. One link to a directory stopped a whole tree copy.
+- A failure in the middle of a queue ended in "done", and so did a cancel. The duplicate scan marked files that differ
+  past 64 KiB, and two rows of one name as duplicates of each other. crab created names it could never list again.
+
+### Changed — the event loop
+
+- ⭐ **One frame per turn, built in one place.** Seven copies of the publish block became one flag and one publisher. A
+  key release, a modifier edge and a pointer step that changes nothing draw nothing; motion waits for the queue to
+  drain. A frame costs 18–178 ms at the sizes measured, and every one of those events used to pay it.
+- ⭐ **A burst of resizes applies only its last.** A grip drag sent a `CONFIGURE` per step and each permanently spent a
+  screenful (274 MB for 200 steps, measured). The cause is in dhancha; this cuts it to one per burst.
+- A marked transfer re-reads the panes once, at the end, not after every file. The stat drain repaints 5 times for
+  1,024 entries, not 32. The gallery never asks for more cells than its cache holds, which had burned the session's
+  decode budget in a thrash.
+- What the loop decides is lifted into host-testable functions where that was honest; the wiring is QEMU's.
+
+### Changed — tests
+
+- ⭐ **`tests/hardening.tcyr` (176 assertions)** reproduces the findings against real files, driving `crab_op_step` as
+  the idle tick does. CI's fmt loop names it.
+- The suite asserted on `crab_fs_copy` and `crab_fs_move`, which no shipping path called. They are gone, and those
+  tests drive the stepped path that ships.
+- `cyrius fuzz` can now see an overread: each parse runs with two different tails past the declared length. All three
+  `len` bounds that had survived a planted removal go red. A dead `fuzz_main` and an aliased EXIF call are gone.
+
+### Fixed — records and comments
+
+- `crab_fs_open_w`, `state.md` and the roadmap said agnos has no `AO_EXCL`. `state.md` said a header click does not
+  focus a pane. About 30 comments were false and are corrected or cut, and `docs/architecture/001`'s arena figures.
+
+### Not fixed — upstream, and the operator's call
+
+`docs/audit/2026-11-08-0.11.2-p-1.md` § *Upstream*: agnos's readdir cuts names at 62 bytes with no signal; dhancha's
+`dh_surface_render` allocates per size change, `dh_event_new` per event, and `dh_draw_text_ink` draws at the box height
+while crab measures at em 16, so a name overruns its column on the shipped face.
+
+### Measured
+
+| | 0.11.1 | 0.11.2 | |
+|---|---:|---:|---:|
+| host, `CYRIUS_DCE=1` (CI, release) | 385,664 | **390,368** | +4,704 |
+| agnos, `CYRIUS_DCE=1` (CI, release) | 654,600 | **659,208** | +4,608 |
+| host, plain | 1,118,848 | 1,127,648 | +8,800 |
+| agnos, plain | 1,178,888 | 1,183,496 | +4,608 |
+
+Gates, every one re-run on 6.7.18: `deps --locked` clean, `deps --verify` 40 / 0; both DCE builds with zero diagnostics;
+`cyrius test` **2543 / 0 and 176 / 0**; `render_test` **55 / 0**, and ⭐ **the 640x220 dump byte-identical to 0.11.1's**;
+fuzz 100,000 rounds; `fmt --check` on all nine files; coverage 84 % (370/440) against `--min 82`; `vet`; `deny` 0 violations.
+⭐ **QEMU, agnos 1.57.17, aethersafha 0.17.7, the DCE agnos binary** (`dbfc15f9…`, byte-identical to the final tree's
+build). All 13 crab harnesses:
+- **PASS**: button, columns, face, go, h1 (the exclusive open on the real kernel, and a cancelled merge), listing-cap,
+  pointer, preview, shift, symlink.
+- **PARTIAL**: resize, its QEMU ceiling (no GPU carveout).
+- **UNMEASURED**: door (it could not land a press in the door's rect) and drop's second arm (reason 0, not 3). Run again
+  on 0.11.1's binary on the same kernel, both answer exactly the same: harness limits, not regressions.
+- ⭐ **A scratch harness for what none of the 13 reaches, PASS**: a merge stops on its collision and asks once; `d`, `n`,
+  Enter and Space under the question do nothing; `s` resumes, and `debugfs` reads the operator's file intact; a delete
+  prompt left open as a transfer ends is withdrawn, and `y` deletes nothing; a held key does not repeat under the menu
+  bar, and does with nothing open. It lives in the session scratchpad, not in the agnos repo.
+
 ## [0.11.1] — 2026-11-07 — cyrius 6.7.18, every dep on its latest tag, and a lock gate that fails on a superseded pin
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

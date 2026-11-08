@@ -150,7 +150,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
   the parent with the current directory marked. ⛔⛔ **That is a safety decision, not a layout one.**
   N independently navigable miller panes make `active_pane` something other than a 0/1, and
   `active_pane` is a 0/1 that the entire M4 **write layer** resolves every copy, move and delete
-  against: a drag from column k into column k+1 would plan a `crab_fs_move` of a directory **into its
+  against: a drag from column k into column k+1 would plan a move of a directory **into its
   own subtree**. K = 2 with one driven column answers that by construction. ⇒ If miller ever goes
   N-deep, **the gate is the write layer, not the renderer**.
   ⭐ Proven on QEMU (`crab-columns-test.py`) — the listing itself is inside the agnos `#ifdef` and no
@@ -237,6 +237,7 @@ Everything else in M1–M6 is done. These are the survivors, each with its reaso
 | ✅ | **0.10.5 · The 6.6.20 stack** | *(a pin release)* nothing new to do — the same crab on cyrius 6.6.20 with every dep on the tag its repo cut for it; a `…`, U+FFFD or `⌂` in a name draws its glyph (dhancha 0.10.5 takes kashi's map) | — | **shipped** ⭐ *−86 / −94 KB, 88,576 B of it kashi 1.1.1; every `path` dormant; the daimon tag verified by `cyrius deps`* |
 | ✅ | **0.11.0 · The 6.7.9 stack** | *(a pin release — cut as 0.11.0 on operator direction, which moved Assisted search to 0.12.0)* nothing new to do — the same crab on cyrius 6.7.9, the language minor, with every dep on its 6.7.9 tag | — | **shipped** ⭐ *−144 / −142 KB, all but 64 B of it chitra 1.1.0's `sankoch-zlib` profile; seven of eight dep moves changed no byte; CI's lock guard is `cyrius deps --locked`* |
 | ✅ | **0.11.1 · The 6.7.18 stack** | *(a pin release)* nothing new to do — the same crab on cyrius 6.7.18 with every dep on its latest tag, each that repo's cut for 6.7.18 | — | **shipped** ⭐ *+8 / +13 KB, all of it rekha 1.1.2's audit; a PNG decode costs ~2.2x its RGBA, not ~2.9x (chitra 1.3.1); CI fails a lock that keeps a superseded pin* |
+| ✅ | **0.11.2 · The P(-1)** | *(a hardening release)* a cancel only removes what it was writing; a prompt the listing changed under is withdrawn; a refused transfer leaves the running one alone | — | **shipped** ⭐ *11 HIGH, 21 MEDIUM, 31 LOW, 53 mutants; one frame flag replaces seven publish blocks; see `docs/audit/2026-11-08-0.11.2-p-1.md`* |
 | ✅ | **0.10.3 · Names measured by character** | **see a non-ASCII name cut where it should be** — `Über.txt` fits an eight-cell column unmarked, `—` is one cell, and a cut never strands half a character before the `~` | — | **shipped** ⭐ *one reader (`crab_char_adv` = `dh_text_decode` + the draw's per-arm advance) for both loops; the fixture face grew a mapped `Ü` because an all-`.notdef` face could not tell the scalar from its lead byte* · ⭐ *and the release ships under `CYRIUS_DCE=1` — 878,376 B on the target* |
 | | **0.12.0 · Assisted search** (M8) | ask in words and get ranked results that say **why** they matched | ⭐ **daimon 2.5.5 ranks files and says why — by WORDS**, not meaning; the canvas promises *"vector + name match"*, so the filing stays open on that · ⛔ and every M7 gate above | the query bar, the MATCH column, WHY IT MATCHED / APPEARS IN, dupes-in-set, and `SAVE AS → Smart folder…` |
 | ✅ | **0.9.6 · A drag cannot outlive its listing** | *(a fix release)* drag without a drop moving a file a prompt was asking about | — | **shipped** ⛔⛔ *two data-loss defects: no modal gate on the drop, and a row index that outlived its listing* |
@@ -460,8 +461,8 @@ the one daimon filing above; nothing else on the ladder is open.
   names the file; `r` replace · `s` skip · `k` keep both · `Esc` stop, with `a` arming an **all** that
   applies the next answer to the rest. ⛔ Directories MERGE — only files ask, because that is where
   the answer destroys something. ⛔ Keep-both suffixes **before** the extension (`report (2).txt`) and
-  tries until a free name is found. ⛔ Replace **unlinks first**, the one sequence that means the same
-  on both targets (the host is `O_EXCL`, agnos has no `AO_EXCL` and truncates). ⚠ The policy resets
+  tries until a free name is found. ⛔ Replace opens the source, then unlinks, then creates exclusively
+  (0.11.2). ⚠ The policy resets
   every run: an armed `replace all` that survived would destroy without asking later.
 - ✅ **`Go` — CLOSED (0.9.2), and all four recorded reasons were real defects rather than reasons to
   wait.** Its rows are every sidebar destination, picked through **one navigator** (`synth_goto`,

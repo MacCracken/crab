@@ -24,8 +24,8 @@
 
 ## Version
 
-**0.11.1 IS CUT** — `VERSION` reads `0.11.1` and the CHANGELOG header agrees, 2026-11-07. 0.11.0 is
-tagged on the remote (`08b31aa`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
+**0.11.2 IS CUT** — `VERSION` reads `0.11.2` and the CHANGELOG header agrees, 2026-11-08. 0.11.1 is
+tagged on the remote (`55453db`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
 the commit, the tag and the push are the operator's.
 
 ⭐⭐ **daimon NOW HAS THE FILE SURFACE M7 AND M8 WAITED ON — M8's ranked by words, not meaning. Nothing in
@@ -49,6 +49,18 @@ each result with a `why`, facets and the folders it appears in.
   127.0.0.1:8090.
 The filing: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 (crab's copy in `issues/`). ⛔ crab will not fake an index it cannot back, nor build one of its own.
+
+**0.11.2 contents — the P(-1).** Six read-only lenses, one per surface; every finding read against the code; every
+repair a host test can reach mutation-proven (53 mutants). 11 HIGH, 21 MEDIUM, 31 LOW:
+[`../audit/2026-11-08-0.11.2-p-1.md`](../audit/2026-11-08-0.11.2-p-1.md). No overflow in crab's own code and the parsers
+are sound; the serious findings are actions landing on something the operator did not name: a cancel that deleted an
+earlier file, a Replace or a stepped move losing the only copy, prompts left armed while a transfer rewrote their rows,
+a refused verb replacing the running queue, a held key moving the selection under a menu, a hang on long names. ⭐ One
+frame flag and one publisher replace seven copies; a key release, a modifier edge and a no-op motion draw nothing. ⛔ Five
+items are upstream: see the audit's *Upstream*. Host **390,368 B**, agnos **659,208 B** under DCE. **2543 / 0 and 176 / 0**
+(`tests/hardening.tcyr`), render_test 55, the 640x220 dump `cmp`-identical. QEMU on the DCE agnos binary: ten harnesses PASS,
+resize PARTIAL, door and drop's second arm UNMEASURED and the same on 0.11.1's binary; a scratch harness for the collision
+prompt, a withdrawn question and the held-key gate PASS.
 
 **0.11.1 contents — toolchain 6.7.9 → 6.7.18, every dep to its latest tag.** No code line moved; the
 comments that the new pins made false were corrected, and both binaries are `cmp`-identical across
@@ -867,7 +879,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   entry); CI's own `render_test` step builds it, fails on any `undefined function` in the build
   log, and runs it. Since 0.10.5 it is also in `cyrius coverage`'s corpus (`[coverage] programs`).
 
-⭐ `cyrius coverage` reports **347/413 fns referenced (84 %)** at 0.10.5, 0.11.0 and 0.11.1, against a CI floor of 82 —
+⭐ `cyrius coverage` reports **370/440 fns referenced (84 %)** at 0.11.2 (347/413 at 0.10.5 – 0.11.1), against a CI floor of 82 —
 the first reading by cyrius 6.6.8's honest tool, which counts `public fn` and reads whole files (the
 same tree read 82 % without `render_test` in the corpus, against the 85 floor set when the old tool
 read 87 %). ⚠ No test was written to move it; `cyrius coverage` lists the 66 unreferenced fns.
@@ -888,6 +900,17 @@ that were written with their tests.
 the render call sites the deferred-stat drain added.
 
 ## Proven
+
+### ⭐⭐ As of 2026-11-08 — the 0.11.2 DCE binary (659,208 B, `dbfc15f9…`; cyrius 6.7.18, same deps as 0.11.1) under QEMU, agnos 1.57.17, aethersafha 0.17.7
+
+- All 13 harnesses. **PASS**: button, columns, face (`410820 bytes adv=9 upem=2048 i=4 m=13`), go, h1, listing-cap, pointer,
+  preview, shift, symlink. **PARTIAL**: resize, its QEMU ceiling. **UNMEASURED**: door and drop's second arm, and
+  identically on 0.11.1's binary on the same kernel, so they are limits of those harnesses, not regressions.
+- ⭐ A scratch harness (session scratchpad) for what the 13 do not reach, **PASS**: a merge asks once on its collision; `d`,
+  `n`, Enter and Space under the question do nothing; `s` resumes and `debugfs` reads the operator's file intact; a delete
+  prompt left open as a transfer ends is withdrawn and `y` deletes nothing; a held key repeats 0 times under the menu bar
+  and 3 with nothing open.
+- ⚠ **Not on the target**: H4's FAT and exFAT close path (no harness has a full FAT volume), M13's edge release, M12's refusal.
 
 ### ⭐⭐ As of 2026-11-07 — the 0.11.1 DCE binary (654,600 B, `5720097b…`; cyrius 6.7.18, sadish 0.12.1, rekha 1.1.2, kashi 1.3.0, dhancha 0.11.1, setu 0.9.1, chitra 1.3.1 + sankoch-zlib 2.8.9) under QEMU, agnos 1.57.17, aethersafha 0.17.7
 
@@ -1220,9 +1243,11 @@ bundles are 472 KB and 552 KB of source at 0.12.0 / 1.1.0 (86 KB and 41 KB at 0.
 
 ## Tests
 
-- `tests/crab.tcyr` — the only suite `cyrius test` runs (discovered, and named by `[build].test =
+- ⭐ `tests/hardening.tcyr` (0.11.2) — **176 assertions**: the P(-1) findings, reproduced against real files with
+  `crab_op_step` driven as the idle tick drives it, each one seen to fail with its repair removed.
+- `tests/crab.tcyr` — the main suite `cyrius test` runs (discovered, and named by `[build].test =
   "tests"`, which cyrius has run since 6.6.17 — once). **2,543 passed / 0 failed**
-  *(0.10.3 through 0.11.1 — on cyrius 6.7.18 at 0.11.1, 6.7.9 at 0.11.0; 2,503 at 0.10.1 and 0.10.2, 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
+  *(0.10.3 through 0.11.2 — on cyrius 6.7.18 at 0.11.1, 6.7.9 at 0.11.0; 2,503 at 0.10.1 and 0.10.2, 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
   0.9.4, 2,345 at 0.9.3, 2,012 at 0.8.7, 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230
   at 0.7.7, 253 at 0.7.0)*. ⚠ This line said 2,012 from 0.8.7 to 0.10.1 while the *Version* section
   above carried the live count — two numbers in one file, one of them stale. `render_test` is **55**
@@ -1309,8 +1334,8 @@ bundles are 472 KB and 552 KB of source at 0.12.0 / 1.1.0 (86 KB and 41 KB at 0.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **385,664 B under `CYRIUS_DCE=1`** *(0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
-| `--agnos`    | ✅ builds, **654,600 B under `CYRIUS_DCE=1`** *(0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
+| x86_64 linux | ✅ builds, **390,368 B under `CYRIUS_DCE=1`** *(0.11.2; plain 1,127,648. 385,664 at 0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
+| `--agnos`    | ✅ builds, **659,208 B under `CYRIUS_DCE=1`** *(0.11.2; plain 1,183,496. 654,600 at 0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1401,21 +1426,13 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
   falsified, and quoted the retired 256-entry cap. Now states the write layer, the preview column,
   and what is genuinely absent. ⚠ **It has been wrong in both directions now**; the replacement text
   carries that warning itself.
-- ⚠ **Focusing a pane by its header does not work** — the header is a sibling of the list, so
-  `crab_hit` resolves a header click to no pane. Clicking a row is correct.
 - ✅ **CLOSED at 0.10.3 — crab measures text by CHARACTER, as dhancha 0.10.4 draws it.** Opened at
   0.10.2 (the pin bump that brought 0.10.4 in), closed one release later by `crab_char_adv`, the one
   reader both measuring loops share. ⚠ What remains true: a name with a character NEITHER face
   carries draws `?` under kashi and `.notdef` under the face — one cell either way, measured as one.
   ⚠⚠ **Two bound guards in `crab_char_adv` are held by review** — the NUL-terminated tail copy and
   the crossing-length clamp protect a READ, and no width can witness a read. Recorded at the test.
-- ⛔⛔ **`crab_fs_open_w` BEHAVES DIFFERENTLY ON THE TWO TARGETS, AND THE TARGET THAT SHIPS IS THE
-  PERMISSIVE ONE.** The host arm is `O_WRONLY|O_CREAT|O_EXCL` — M4's overwrite guard, which refuses
-  an existing file and returns `EEXIST` — while the agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC` with
-  **no `AO_EXCL`**, so on agnos the same call TRUNCATES an existing file. Every host assertion about
-  "crab will not overwrite" is therefore a claim about the host only. Found during 0.7.6 while
-  testing the preview's dimension cache; pinned by a host assertion, **not changed** — altering
-  write semantics is an operator decision, and a recursive copy is what would notice.
+- ✅ **CLOSED at 0.11.2 — `crab_fs_open_w` is exclusive on both targets.** The agnos arm is `AO_WRONLY|AO_CREAT|AO_TRUNC|AO_EXCL`. ⚠ This note said agnos had no `AO_EXCL` from 0.7.6 until the audit; it has had one since 1.56.56. The cost of the error was real: FAT and exFAT answer `stat` with -1, so a copy onto an existing file there replaced it without asking (P(-1) H5).
 - ⛔⛔ **EVERY THUMBNAIL DECODE IS PERMANENT, AND THAT — NOT THE BINARY SIZE — IS THE LIVE
   CONSTRAINT.** chitra has 30 `alloc()` call sites (1.3.1), `chitra_image_free` is a **no-op**, and
   cyrius's `alloc` has no `free()`. Measured at 0.11.1: **~2.2x the RGBA size per decode, never
@@ -1486,7 +1503,8 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.11.1 (2026-11-07), in the order the roadmap's ladder gives them:**
+⭐ **As of 0.11.2 (2026-11-08), in the order the roadmap's ladder gives them:**
+0. ✅ **`0.11.2 · The P(-1)`** — cut; the audit in `docs/audit/`. Five items wait upstream (agnos's 62-byte name cut, three in dhancha, and text drawn at the box height).
 1. ✅ **`0.11.1 · The 6.7.18 stack`** — cut; every dep on its latest tag, rekha 1.1.2's audit, chitra's
    cheaper decode, CI failing a lock that keeps a superseded pin. ✅ `0.11.0 · The 6.7.9 stack` before it.
 2. **M7's index, tags and smart folders** — ✅ daimon's side exists (2.5.4's `/v1/files`). ⛔ Not yet
@@ -1565,9 +1583,7 @@ horizontal strip is not.
   ⛔ **Adopting `dh_dispatch` would relitigate the 2026-08-27 operator ruling** (*crab owns its
   interaction state*). That ruling was made because of the pointer problem, which is now fixed — but
   it is still a ruling, and reversing it is the operator's call, not a consequence of the fix.
-- **The `crab_fs_open_w` target divergence** — the shipping target has no overwrite guard, because
-  agnos has no `AO_EXCL`. Filed (⚠ at `0x2000`; the first filing proposed `0x400`, which is
-  `AO_APPEND`). See *Known gaps*.
+- ✅ **The `crab_fs_open_w` target divergence — closed at 0.11.2**; see *Known gaps*.
 - ✅ **The Gallery view is IN.** `g` cycles list → grid → gallery → columns (0.8.8). ⛔ **The view never triggers a
   decode — the idle tick does, one per tick** — so opening a gallery of a thousand files costs one
   frame and the pictures land progressively. Backed by a 64-slot (~1.07 MB, allocate-once) cache
@@ -1610,7 +1626,7 @@ horizontal strip is not.
 
 Stated as fact, not as a priority. ⚠ The on-target runs recorded before this release are dated
 **2026-09-14** (the H1, symlink and face harnesses — the handoff says which were iron and which
-QEMU); the newest is **2026-11-07, the 0.11.1 DCE binary under QEMU** (agnos 1.57.17, aethersafha
+QEMU); the newest is **2026-11-08, the 0.11.2 DCE binary under QEMU** (agnos 1.57.17, aethersafha
 0.17.7) — see *Proven*. Everything since 0.9.7 has run on the host and under QEMU only.
 Every `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction.
 

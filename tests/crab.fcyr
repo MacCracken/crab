@@ -168,22 +168,56 @@ fn fz_check_dims(r, out): i64 {
     return 0;
 }
 
-fn fuzz_main(data, len) {
-    if (len == 0) { return 0; }
-    var out = alloc(CRAB_IMG_SZ);
-    # ⚠ THE DECLARED LENGTH IS FUZZED SEPARATELY FROM THE CONTENT, and that is deliberate: a caller
-    # that hands over a length longer than the buffer is the exact mistake bounds checks exist to
-    # survive, and `crab_preview_hdr` derives its length from a `read()` return that a short file
-    # makes smaller than the buffer.
-    crab_img_dims(data, len, out);
+# ⛔ AN OVERREAD HERE DOES NOT CRASH AND USUALLY DOES NOT SHOW. So every parse runs twice, with the bytes just
+# past the declared length set to two different values: an answer that changes read something it was told
+# not to. (0.11.2, P(-1) B8; before this, rounds 1 and 2 could not see one at all.)
+fn fz_tail(buf, len, v): i64 {
+    if (len < 0) { return 0; }
+    var i = 0;
+    while (i < 64) { store8(buf + len + i, v); i = i + 1; }
     return 0;
+}
+
+fn fz_same_dims(out, out2): i64 {
+    if (load64(out + CRAB_IMG_W) != load64(out2 + CRAB_IMG_W)) { return fz_fail("FAIL: a width past the length"); }
+    if (load64(out + CRAB_IMG_H) != load64(out2 + CRAB_IMG_H)) { return fz_fail("FAIL: a height past the length"); }
+    return 0;
+}
+
+fn fz_tail_le(buf, len, v): i64 {
+    if (len < 0) { return 0; }
+    var i = 0;
+    while (i < 64) {
+        if (((len + i) % 4) == 2) { store8(buf + len + i, v); } else { store8(buf + len + i, 0); }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn fz_dims_within(buf, len, out, out2): i64 {
+    fz_tail(buf, len, 1);
+    var r1 = crab_img_dims(buf, len, out);
+    fz_tail(buf, len, 254);
+    var r2 = crab_img_dims(buf, len, out2);
+    if (r1 != r2) { return fz_fail("FAIL: crab_img_dims read past its declared length"); }
+    if (r1 == 1) { fz_same_dims(out, out2); }
+    # ⚠ Again with a tail that decodes to a PLAUSIBLE little-endian size at BMP's field offsets: a size read
+    # from all-ones or all-254 is absurd, gets refused either way, and would hide the overread.
+    fz_tail_le(buf, len, 5);
+    var r3 = crab_img_dims(buf, len, out);
+    fz_tail_le(buf, len, 6);
+    var r4 = crab_img_dims(buf, len, out2);
+    if (r3 != r4) { return fz_fail("FAIL: crab_img_dims read past its declared length"); }
+    if (r3 == 1) { fz_same_dims(out, out2); }
+    return fz_check_dims(r1, out);
 }
 
 fn main() {
     alloc_init();
     fz_state = FZ_SEED;
-    var buf = alloc(FZ_BUFSZ);
+    var buf = alloc(FZ_BUFSZ + 128);
     var out = alloc(CRAB_IMG_SZ);
+    var out2 = alloc(CRAB_IMG_SZ);
     var name = alloc(CRAB_NAME_MAX + 8);
 
     # ---- round 1: mutate valid headers ------------------------------------------------------
@@ -197,7 +231,7 @@ fn main() {
         while (f < flips) { store8(buf + fz_upto(64), fz_byte()); f = f + 1; }
         # ⚠ A LENGTH THAT LIES SHORT is the truncated-file case and must be refused, not read past.
         var len = fz_upto(FZ_BUFSZ + 1);
-        fz_check_dims(crab_img_dims(buf, len, out), out);
+        fz_dims_within(buf, len, out, out2);
         round = fz_round(round);
     }
 
@@ -206,7 +240,7 @@ fn main() {
     while (round < FZ_ROUNDS) {
         var i = 0;
         while (i < 64) { store8(buf + i, fz_byte()); i = i + 1; }
-        fz_check_dims(crab_img_dims(buf, fz_upto(65), out), out);
+        fz_dims_within(buf, fz_upto(65), out, out2);
         round = fz_round(round);
     }
 
@@ -241,6 +275,7 @@ fn main() {
     # the overread would go unseen. `~` (126) is printable and appears in no fixture.
     var exb = alloc(FZ_EXIF_ARENA);
     var exd = alloc(128);
+    var exw = alloc(128);
     round = 0;
     while (round < FZ_ROUNDS) {
         var pi = 0;
@@ -276,7 +311,7 @@ fn main() {
         if (crab_exif_str(exb, elen, CRAB_EX_DATETIME, exd, 64) == 1) { fz_check_poison(exd, "DateTime"); }
         # ⚠ And the reshaper, over whatever the parser just produced — including a value the file
         # chose the length and contents of.
-        crab_exif_when(exd, exd, 64);
+        crab_exif_when(exw, exd, 64);
         round = fz_round(round);
     }
     # ⛔⛔ WHAT THE POISON TAIL CATCHES, AND WHAT IT CANNOT — measured by planting six bugs.

@@ -1,8 +1,28 @@
-# Handoff — **0.11.1 cut: cyrius 6.7.18 and every dep on its latest tag. ⭐ daimon 2.5.5 has the file surface M7/M8 asked for — by words, not meaning, opt-in, and with no client in crab yet.**
+# Handoff — **0.11.2 cut: the P(-1). A cancel that deleted the wrong file, questions the listing changed under, a queue a refused verb replaced — fixed and mutation-proven. Five items wait upstream.**
 
-> ⭐⭐ **2026-11-07. `VERSION` reads 0.11.1 and the CHANGELOG header agrees; 0.11.0 is tagged on the
-> remote (`08b31aa`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-08. `VERSION` reads 0.11.2 and the CHANGELOG header agrees; 0.11.1 is tagged on the
+> remote (`55453db`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
+>
+> ## 0.11.2 — the P(-1)
+>
+> ⭐ **The record is [`docs/audit/2026-11-08-0.11.2-p-1.md`](../audit/2026-11-08-0.11.2-p-1.md).** Six read-only lenses,
+> 11 HIGH, 21 MEDIUM, 31 LOW; every finding read against the code; 53 mutants, all killed. The serious ones are not memory
+> errors: a cancel unlinked `CRAB_OP_DST` whether or not a file was in flight; a Replace or a stepped move could lose the
+> only copy; same-file guards compared strings; a relist ran under open prompts; a refused verb replaced the queue.
+> ⛔ **What changed underneath you:**
+> - `crab_fs_open_w` is exclusive on both targets (`AO_EXCL`); the "agnos has no `AO_EXCL`" record was false.
+> - A frame is owed, not drawn: everything in the loop raises `frame_due`, and one publisher at the end draws.
+>   **Add no new render block.** A key release, a modifier edge and a no-op motion draw nothing.
+> - The `CONFIGURE` body runs when the queue is drained, not in the event arm.
+> - Names longer than `CRAB_NAME_CHARS` (62) are refused: agnos cannot list them back.
+> - `crab_fs_copy` and `crab_fs_move` are gone. Tests drive the stepped path through `t_copy` / `t_move`.
+> ⛔ **Upstream, not fixed here** (the audit's *Upstream*): agnos's readdir cuts names at 62 bytes with no signal; dhancha's
+> `dh_surface_render` allocates per size change and `dh_event_new` per event; `dh_draw_text_ink` draws at the box height
+> while crab measures at em 16, so a name overruns its column on the shipped face; `dh_widget_add_child` is O(n²) per list.
+> ⚠ **What main.cyr's wiring rests on**: the host tests its lifted predicates; the wiring is the 13 QEMU harnesses plus a
+> scratch harness for the collision prompt, the withdrawn question and the held-key gate. That harness lives in the session
+> scratchpad and is **not in the agnos repo**. Door and drop's second arm are UNMEASURED on 0.11.1's binary too.
 >
 > ## ⛔⛔ READ FIRST — 6.7 CHANGES WHAT CODE MEANS, AND THE BUILD CANNOT SEE IT
 >

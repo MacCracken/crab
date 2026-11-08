@@ -370,13 +370,6 @@ fn crab_cols_for_width(panew): i64 {
 # over-reports, the cut goes unmarked, and the operator selects, descends and ACTS on that row.
 # ⇒ The 9 now has ONE reader. Everything that used to divide by it asks `crab_char_w()`.
 #
-# ⚠ WHAT THIS DOES **NOT** DO, STATED PLAINLY SO NOBODY READS MORE INTO IT. crab still passes
-# `font = 0`, so every number below is bit-for-bit what it was — this change renders identically by
-# construction, which is the point of making it now rather than alongside a font switch. The
-# remaining half of the item is passing a real face, and with it: the six constants that encode
-# CHARACTER COUNTS at 9 px (`CRAB_COL_NAME_MIN`, `CRAB_COL_SIZE_W`, `CRAB_COL_MTIME_W`, `CRAB_PV_W`,
-# `CRAB_GRID_CELL_W`, `CRAB_GAL_CELL_W`), dhancha's fixed 9 px caret advance, and the Latin-1 limit
-# of the scalable path. Those are pinned in the roadmap, not done here.
 
 # ⚠ THE FRAME'S FONT, RECORDED ON THE SAME DISCIPLINE AS `crab_root` AND `crab_llst`: `crab_render`
 # is handed it, every width derivation needs it, and threading a `font` parameter through
@@ -606,6 +599,9 @@ fn crab_name_cell_px(dst, name, px): i64 {
     if (px <= 0) { store8(dst, 0); return 0; }
     var n = 0;
     while ((n < CRAB_REC_TYPE) && (load8(name + n) != 0)) { n = n + 1; }
+    # ⛔ A NAME MADE ONLY OF STRAY UTF-8 BYTES DRAWS AS NOTHING, so rows and prompts showed a blank where a
+    # file was. It gets a visible stand-in; the file's real name is untouched. (P(-1) E6.)
+    if ((n > 0) && (crab_text_w(name) == 0)) { store8(dst, 63); store8(dst + 1, 0); return 1; }
     # ⚠ The whole name first: if it fits, nothing is cut and no marker is written.
     # ⛔⛆ THE FONT CHECK IS INSIDE `crab_char_adv`, AND IT COMES FIRST. A first draft of 0.9.0 summed
     # `dh_text_advance` and THEN overwrote the total when `crab_font == 0` — but `dh_text_advance(0,
@@ -786,13 +782,14 @@ fn crab_grid_cell(g, rec, is_dir, marked): i64 {
     if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
     var chars = crab_col_chars(crab_grid_cell_w());
     var disp = dh_falloc(CRAB_NAME_MAX + 4);
-    var n = crab_name_cell(disp, rec, chars);
-    # ⚠ The trailing `/` marks a directory, as in the list. It is appended only when there is room,
-    # so a name that already fills the cell is not silently one character longer than it can draw.
+    # ⚠ The trailing `/` marks a directory, as in the list. Its cell is reserved BEFORE the name is cut,
+    # so a long folder name still reads as a folder: `n` is bytes and `chars` characters, and comparing
+    # them dropped the mark from any name that filled the cell (P(-1) C13).
     var gmk = crab_kind_mark(is_dir);
-    if (gmk != 0) {
-        if (n < chars) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
-    }
+    var gcap = chars;
+    if (gmk != 0) { gcap = chars - 1; }
+    var n = crab_name_cell(disp, rec, gcap);
+    if (gmk != 0) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
     dh_widget_set_text(cell, disp);
     dh_grid_add(g, cell);
     return cell;
@@ -820,7 +817,7 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     if (is_dir == CRAB_KIND_FILE) {
         if (crab_is_image(rec) == 1) {
             # ⚠ The join is per cell per frame. `crab_join_n` is bounded and the cache scan is 64
-            # slots, so this is a constant per visible cell — and the alternative, threading a
+            # slots, so this is a constant per entry — and the alternative, threading a
             # per-entry array down from `app.cyr`, would need one built every frame anyway.
             var jp = dh_falloc(CRAB_PATH_MAX);
             if (crab_join_n(jp, CRAB_PATH_MAX, dirpath, rec) >= 0) {
@@ -857,11 +854,11 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     dh_widget_set_flex(lab, 0);
     var chars = crab_col_chars(crab_gal_cell_w());
     var disp = dh_falloc(CRAB_NAME_MAX + 4);
-    var n = crab_name_cell(disp, rec, chars);
     var gmk = crab_kind_mark(is_dir);
-    if (gmk != 0) {
-        if (n < chars) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
-    }
+    var gcap = chars;
+    if (gmk != 0) { gcap = chars - 1; }
+    var n = crab_name_cell(disp, rec, gcap);
+    if (gmk != 0) { store8(disp + n, gmk); store8(disp + n + 1, 0); }
     dh_widget_set_text(lab, disp);
     dh_widget_add_child(cell, lab);
     dh_grid_add(g, cell);
@@ -911,7 +908,7 @@ fn crab_pane_state_label(state): i64 {
 # ⛔⛔ THE SIDEBAR HAS ITS OWN HIT FUNCTION, AND THAT IS THE MOST IMPORTANT LINE HERE.
 # `crab_hit` returns a 0/1 PANE index which reaches the WRITE layer — `crab_drag_targets` rejects
 # only negatives and same-pane, so a drop resolved against a widened pane index would execute a real
-# `crab_fs_move`. Teaching `crab_hit` about the sidebar would put a third surface behind a number
+# a move. Teaching `crab_hit` about the sidebar would put a third surface behind a number
 # two write paths trust. ⇒ `crab_sidebar_hit` is separate, returns a PLACE index, and shares no
 # vocabulary with the pane index at all.
 #
@@ -2164,7 +2161,25 @@ fn crab_mb_drop_key(u): i64 {
     if (u == 0x11) { return CRAB_MBK_EAT; }                      # n — new folder
     if (u == 0x2A) { return CRAB_MBK_EAT; }                      # Backspace — ascend
     if (u == 0x2C) { return CRAB_MBK_EAT; }                      # Space — mark
+    # ⛔ `s` and `u` belong in this set: each clears every mark, a loss the operator cannot see happen.
+    if (u == 0x16) { return CRAB_MBK_EAT; }                      # s — sort
+    if (u == 0x18) { return CRAB_MBK_EAT; }                      # u — refresh
     return CRAB_MBK_NONE;
+}
+
+# @public — the first item of drop `m` if it can really open, or a refusal: -1 it has no items, -2 this
+# window cannot draw it.
+# ⛔ THE RENDERER REFUSES A DROP THAT DOES NOT FIT AND NEVER TELLS main(). Opening it anyway left the keyboard
+# driving a menu nobody could see: at 380x220 F10, Right, Right, Enter drew nothing, and the next Enter sent the
+# pane somewhere it never showed (P(-1) M12).
+fn crab_mb_open_first(m, w, h, count, isdir, marked): i64 {
+    if (crab_mb_drop_fit_h(w, h, m, crab_mb_item_count(m)) == 0) { return 0 - 2; }
+    return crab_mb_item_first(m, count, isdir, marked);
+}
+
+fn crab_mb_refusal(code): i64 {
+    if (code == (0 - 2)) { return "this window is too small for that menu"; }
+    return "that menu has no items yet";
 }
 
 fn crab_mb_move(i, d): i64 {
@@ -2224,7 +2239,7 @@ fn crab_menubar(parent, sel): i64 {
 # ⭐ IT IS A CONTROL AS OF 0.8.5, AND ITS HIT IS ITS OWN. `crab_hit` walks parents against exactly
 # `crab_llst` / `crab_rlst` and returns a 0/1 pane index that reaches the WRITE layer —
 # `crab_drag_targets` rejects only negatives and same-pane, so a drop resolved against a widened
-# index would execute a real `crab_fs_move`. The strip is therefore never resolved through
+# index would execute a real move. The strip is therefore never resolved through
 # `crab_hit`: the pointer arm asks `dh_list_index_at(crab_switcher_widget(), …)` and
 # `crab_pointer_action` ranks that answer ABOVE the pane's, because the strip sits inside a header
 # `crab_hit` also records. A strip press focuses the pane its cell names, and nothing else.
@@ -2427,8 +2442,7 @@ fn crab_dup_same(size_a, size_b, hash_a, hash_b): i64 {
     if (size_a < 0) { return 0; }
     if (size_b < 0) { return 0; }
     if (size_a != size_b) { return 0; }
-    # ⚠ A zero-length file has no bytes to hash, so every empty file hashes alike — which is CORRECT:
-    # they ARE byte-identical. `crab_hash64` answers 0 for them and the sizes agree.
+    # ⚠ `crab_dup_scan` treats a hash of 0 as "not hashed", so empty files never reach this as equals.
     if (hash_a != hash_b) { return 0; }
     return 1;
 }
@@ -2504,7 +2518,7 @@ fn crab_mark_clear(marks, count): i64 {
 # milestone — the rule is that anything the render path touches must be at or below this file.
 
 enum CrabEdit {
-    CRAB_EDIT_CAP = 64;        # = CRAB_NAME_MAX: a name that cannot be typed cannot be created
+    CRAB_EDIT_CAP = 63;        # CRAB_NAME_CHARS + its NUL: a name crab could not list again is not typed
 }
 
 var crab_ebuf = 0;
@@ -2561,24 +2575,43 @@ fn crab_edit_insert(ch): i64 {
 }
 
 # @public — delete the byte BEFORE the caret. -> 1 if one went, 0 at the start of the field.
+# ⛔ THE CARET STEPS BY CHARACTER. It stepped by byte, so Backspace over `Ü` left a lone 0xC3 and Enter
+# wrote that into the file's name. (0.11.2, P(-1) C10.)
+fn crab_edit_prev(b, i): i64 {
+    var j = i - 1;
+    while ((j > 0) && ((load8(b + j) & 0xC0) == 0x80)) { j = j - 1; }
+    return j;
+}
+
 fn crab_edit_backspace(): i64 {
     var b = crab_edit_buf();
     if (b == 0) { return 0; }
     if (crab_ecar <= 0) { return 0; }
-    var i = crab_ecar - 1;
-    while (i < (crab_elen - 1)) { store8(b + i, load8(b + i + 1)); i = i + 1; }
-    crab_elen = crab_elen - 1;
-    crab_ecar = crab_ecar - 1;
+    var st = crab_edit_prev(b, crab_ecar);
+    var gone = crab_ecar - st;
+    var i = st;
+    while (i < (crab_elen - gone)) { store8(b + i, load8(b + i + gone)); i = i + 1; }
+    crab_elen = crab_elen - gone;
+    crab_ecar = st;
     store8(b + crab_elen, 0);
     return 1;
 }
 
 # @public — move the caret by `d`, clamped to the field. -> the new position.
 fn crab_edit_move(d): i64 {
-    var n = crab_ecar + d;
-    if (n < 0) { n = 0; }
-    if (n > crab_elen) { n = crab_elen; }
-    crab_ecar = n;
+    var b = crab_edit_buf();
+    if (b == 0) { return 0; }
+    while (d < 0) {
+        if (crab_ecar > 0) { crab_ecar = crab_edit_prev(b, crab_ecar); }
+        d = d + 1;
+    }
+    while (d > 0) {
+        if (crab_ecar < crab_elen) {
+            crab_ecar = crab_ecar + 1;
+            while ((crab_ecar < crab_elen) && ((load8(b + crab_ecar) & 0xC0) == 0x80)) { crab_ecar = crab_ecar + 1; }
+        }
+        d = d - 1;
+    }
     return crab_ecar;
 }
 
@@ -2812,7 +2845,7 @@ fn crab_batch_name(dst, pattern, idx, orig): i64 {
                 # 64-byte record, **by the DESTINATION cap**. Verified empirically by removing this
                 # line and running a poison-tailed record through it: no poison reached the output.
                 # ⇒ It is kept because that safety is a **coincidence of two constants that can move
-                # independently**: `CRAB_EDIT_CAP` (64) and `CRAB_NAME_MAX` (64). Raise the edit cap
+                # independently**: `CRAB_EDIT_CAP` (63) and `CRAB_NAME_MAX` (64). Raise the edit cap
                 # alone and the overread becomes real, silently. The assertion in `t_batch_bounds`
                 # pins the relationship so that change cannot pass unnoticed.
                 var j = 0;
@@ -2977,11 +3010,11 @@ fn crab_col_ctx(parent, title, buf, count, sel): i64 {
         # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so the
         # string must live exactly as long as the widget — one frame. See `crab_grid_cell`.
         var disp = dh_falloc(CRAB_NAME_MAX + 4);
-        var dn = crab_name_cell(disp, rec, chars);
         var cmk = crab_kind_mark(isd);
-        if (cmk != 0) {
-            if (dn < chars) { store8(disp + dn, cmk); store8(disp + dn + 1, 0); }
-        }
+        var ccap = chars;
+        if (cmk != 0) { ccap = chars - 1; }
+        var dn = crab_name_cell(disp, rec, ccap);
+        if (cmk != 0) { store8(disp + dn, cmk); store8(disp + dn + 1, 0); }
         dh_widget_set_text(row, disp);
         dh_list_add(lst, row);
         i = i + 1;
@@ -3351,6 +3384,8 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
     var w = 0;
     var k = 0; var ch = load8(rec + k);                 # name (<= 40)
     while ((ch != 0) && (k < 40)) { store8(out + w, ch); w = w + 1; k = k + 1; ch = load8(rec + k); }
+    # ⚠ A cut must not leave half a character for the draw to show as a raw cell.
+    if (ch != 0) { while ((k > 0) && ((load8(rec + k) & 0xC0) == 0x80)) { k = k - 1; w = w - 1; } }
     store8(out + w, 32); w = w + 1; store8(out + w, 32); w = w + 1;
     if (load8(rec + CRAB_REC_TYPE) == 1) {              # directory -> "<dir>"
         var dtag = "<dir>"; var t = 0;
@@ -3403,7 +3438,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 # per pane) without ever chaining. GROW covers anything past that with ONE extra chunk." Both halves
 # were true when written and neither survived, because TWO things moved under it and neither
 # re-derived the number: M3 *#02* took the cap 256 -> 1024, and M3 *#32* took a row from one widget
-# to 1 + `ncols` (a row widget plus a cell widget per column, at `DH_WIDGET_SIZE` = 256 B each).
+# to 1 + `ncols` (a row widget plus a cell widget per column, at `DH_WIDGET_SIZE` = 320 B each).
 #
 # ⭐ RE-MEASURED 2026-08-30 with `arena_capacity_total`, per rendered frame, both panes:
 #
@@ -3496,9 +3531,6 @@ var crab_rhdr = 0;
 # any position outside the content rect before forwarding, because a pointer on the titlebar produced
 # `ry` in [-30,-1] and a client indexing `ry / row_h` read before its own buffer. crab does not
 # re-derive that bound; it relies on it, and this note is where that reliance is written down.
-# ⚠ A CLICK ON A PANE HEADER RETURNS 0 TODAY. The header is a sibling of the list, not inside it, so
-# the walk below never reaches a LIST and the click does nothing. Focusing a pane by its header is a
-# reasonable thing to want; it is simply not claimed here.
 # ⚠ ONE COLUMN SPEC PER PANE, ALLOCATED ONCE (*#32*). Built lazily so the allocation happens on the
 # first render rather than at module-init, and reset — not rebuilt — on every frame after that.
 var crab_lspec = 0;
@@ -3584,6 +3616,10 @@ fn crab_grid_visible(g, out16, count): i64 {
     var last = (lastrow + 1) * cols - 1;
     if (last > count - 1) { last = count - 1; }
     if (first > last) { return 0; }
+    # ⛔⛔ NEVER MORE CELLS THAN THE CACHE HOLDS. Past `CRAB_TC_N` the idle walk evicted a visible image to
+    # decode the next, then found the evicted one uncached and decoded it again: 954 permanent decodes in
+    # one sitting, until the session's whole budget was gone (0.11.2, P(-1) M16).
+    if ((last - first + 1) > CRAB_TC_N) { last = first + CRAB_TC_N - 1; }
     store64(out16, first);
     store64(out16 + 8, last);
     return 1;
@@ -3596,6 +3632,16 @@ fn crab_grid_visible(g, out16, count): i64 {
 # column count the pane was LAID OUT with, not one recomputed from `panew` — the second answer would
 # be free to disagree by one at exactly the widths where it matters, and the operator would see the
 # cursor skip a row with nothing to explain it.
+# @public — how many entries one Up or Down covers: a row of cells in a grid, one row in a list.
+fn crab_row_step(mode, pane): i64 {
+    if (crab_view_is_grid(mode) == 0) { return 1; }
+    var pw = crab_pane_widget(pane);
+    if (pw == 0) { return 1; }
+    var n = dh_grid_cols(pw);
+    if (n < 1) { return 1; }
+    return n;
+}
+
 fn crab_pane_widget(which): i64 {
     if (which == 1) { return crab_rlst; }
     return crab_llst;
@@ -3696,7 +3742,7 @@ fn crab_tray_detail(dst, rate, eta): i64 {
     store8(dst + n, 115); n = n + 1;                   # 's'
     if (eta < 0) { store8(dst + n, 0); return n; }
     store8(dst + n, 32); n = n + 1;
-    store8(dst + n, 183 - 0); n = n + 1;               # CP437 middle dot
+    store8(dst + n, 45); n = n + 1;                    # '-': byte 183 decoded as a stray UTF-8 tail and drew nothing
     store8(dst + n, 32); n = n + 1;
     n = n + crab_dur_str(dst + n, eta);
     store8(dst + n, 32); n = n + 1;
@@ -4292,6 +4338,8 @@ fn crab_img_dims(buf, len, out): i64 {
             if (load8(buf + 2) == 78) {
                 if (load8(buf + 3) == 71) {
                     if (len < 24) { return 0; }
+                    # ⚠ The signature is eight bytes, and all eight are the signature.
+                    if (load64(buf) != 0x0A1A0A0D474E5089) { return 0; }
                     # ⛔ THE CHUNK TYPE IS CHECKED, not assumed from the signature. IHDR is required
                     # to be first by the spec, and a file that breaks that rule is exactly the file
                     # this parser must not read four arbitrary bytes out of.
@@ -4333,7 +4381,8 @@ fn crab_img_dims(buf, len, out): i64 {
             # ⚠ A NEGATIVE HEIGHT MEANS TOP-DOWN ROW ORDER, not a negative size. It is a direction
             # flag living in the sign bit, and the magnitude is the real height.
             if (bh >= 2147483648) { bh = 4294967296 - bh; }
-            if (bw >= 2147483648) { bw = 4294967296 - bw; }
+            # ⚠ Only the HEIGHT carries a direction. A negative width is simply not a width.
+            if (bw >= 2147483648) { return 0; }
             return crab_dims_ok(out, bw, bh);
         }
     }
@@ -4466,7 +4515,7 @@ fn crab_ex_ifd(buf, len, t, ifd, le, tag, dst, cap, sub_out): i64 {
                             # EXIF string is NUL-terminated by the spec, but the FILE supplies the
                             # count — so a count longer than the string walks into the next field.
                             # And a control byte reaching a LABEL is a widget drawing whatever the
-                            # file put there; `crab_name_cell` has the same rule for readdir names.
+                            # file put there.
                             # ⚠ ONE LOOP. A first draft scanned twice — once to find a stop and once
                             # to copy — which is two chances to disagree about where the string ends.
                             # Shrinking `take` to `k` ends the loop AND leaves `k` as the length.
@@ -4480,7 +4529,8 @@ fn crab_ex_ifd(buf, len, t, ifd, le, tag, dst, cap, sub_out): i64 {
                                 }
                             }
                             store8(dst + k, 0);
-                            if (k > 0) { found = 1; }
+                            # ⚠ A repeated tag replaces the answer, so an empty repeat must not read as found.
+                            if (k > 0) { found = 1; } else { found = 0; }
                         }
                     }
                 }
@@ -4857,7 +4907,7 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, dstate, t
 # render path, and the render path may never call up into `app.cyr`. So the storage and the lookup
 # come down to `ui.cyr` (they are pure: `crab_join_n` and `crab_streq_n` are in `path.cyr`, below
 # this file) and only the DECODE, which needs syscalls and chitra, stays up there.
-# ⚠ Same split as `crab_img_dims` (here) against `crab_preview_dims` (there). Fifth time this rule
+# ⚠ Same split as `crab_img_dims` (here) against `crab_pv_step` (there). Fifth time this rule
 # has decided where something goes; it has cost this project four wrong guesses.
 # ⭐⭐ THE THUMBNAIL CACHE (M5, the gallery). ONE decoded thumbnail was enough for a preview that
 # describes a single selection; a gallery shows dozens at once.
@@ -4902,7 +4952,7 @@ fn crab_tc_base(): i64 {
     return crab_tc;
 }
 
-# @public — the slot holding `path`, or -1. ⚠ A linear scan of 64 slots on the idle tick; a hash
+# @public — the slot holding `path`, or -1. ⚠ A linear scan of 64 slots, per cell and per tick; a hash
 # would need a second structure to keep in step with the round-robin replacement, for a search that
 # is already bounded by a constant.
 fn crab_tc_find(path): i64 {
@@ -5107,6 +5157,7 @@ fn crab_pvc_set(i, st, w, h): i64 {
 # and for the same reason every other path-keyed cache is cleared there: crab is a program that
 # makes a path mean a different file.
 fn crab_pvc_clear(): i64 {
+    if (crab_pvc == 0) { return 0; }
     var b = crab_pvc_base();
     if (b == 0) { return 0; }
     var i = 0;
@@ -5148,6 +5199,8 @@ fn crab_pvd_row(state, w, h): i64 {
 # the same reason: every key here is a PATH, and crab is a program that makes a path mean a
 # different file. ⚠ The session SPEND is deliberately not reset — those bytes are still gone.
 fn crab_tc_clear(): i64 {
+    # ⚠ Nothing to clear until something is cached; allocating here spent 1.1 MB on a first relist.
+    if (crab_tc == 0) { return 0; }
     var b = crab_tc_base();
     if (b == 0) { return 0; }
     var i = 0;
@@ -5380,7 +5433,7 @@ fn crab_rs_preview(rs, want): i64 {
 }
 
 # @public — the selected entry's pixel dimensions, for the preview's DIMENSIONS line.
-# ⛔ THE READ THAT PRODUCES THESE LIVES IN `app.cyr` (`crab_preview_dims`) BECAUSE IT NEEDS A
+# ⛔ THE READ THAT PRODUCES THESE LIVES IN `app.cyr` (`crab_pv_step`) BECAUSE IT NEEDS A
 # SYSCALL, and this file sits below that one. Carrying the answer in the record is what keeps the
 # render path from reaching up for it — the same rule the pane state and the tray follow.
 # ⛔ THE STATE TRAVELS WITH THE NUMBERS (0.9.4), because `w == 0` can no longer mean "no answer":
@@ -5582,7 +5635,10 @@ fn crab_render(surf, font, rs): i64 {
     var mbsel = load64(rs + CRAB_RS_MBSEL);
     var mbh = 0;
     if (mbsel >= 0) { mbh = CRAB_MB_H; }
-    dh_widget_set_pref(panes, 0, h - 24 - trayh - mbh);   # status line + tray + the menu bar
+    # ⚠ At least 1: a pref of exactly 0 means "measure the content", which threw the status row off screen.
+    var panesh = h - 24 - trayh - mbh;                     # status line + tray + the menu bar
+    if (panesh < 1) { panesh = 1; }
+    dh_widget_set_pref(panes, 0, panesh);
     # ⛔ CLEARED BEFORE THE PANES ARE BUILT, not after. A stale strip pointer from the previous frame
     # would survive a layout that stopped building one — a window resized from solo to two panes —
     # and report a widget the arena has already rewound.
@@ -5834,7 +5890,8 @@ fn crab_render(surf, font, rs): i64 {
     # ⛔⛆ AND THE SIDEBAR HAS NEVER BEEN SCROLLED BY ANYTHING — a live defect, not a gap left for a
     # feature. `crab_sblst` appears seven times in this file and not one is a scroll call, while the
     # panes and the context column have been followed for releases.
-    # ⇒ MEASURED on the shipped 380x220: the pane band is 174 px and `CRAB_SB_ROW_H` is 22, so SEVEN
+    # ⇒ MEASURED on the shipped 380x220 with the menu bar up: the pane band is 174 px and `CRAB_SB_ROW_H` is
+    # 22, so SEVEN
     # rows fit. An ordinary desktop builds seven places (Home, Desktop, Documents, Downloads,
     # Pictures, Music, Root) plus two headers plus its volumes = ELEVEN rows. **Four below the fold.**
     # `crab_sb_step` walks all eleven, so the cursor reaches row 10 while the list still shows 0..6:
@@ -5845,8 +5902,9 @@ fn crab_render(surf, font, rs): i64 {
     # the sidebar is not scroll-driven, so the only offset it can honestly have is the one that shows
     # the cursor. Rebuilt at 0 each frame and re-followed.
     if (crab_sblst != 0) { dh_list_scroll_to_sel(crab_sblst); }
-    store64(scroll_l, dh_widget_scroll_y(llst));
-    store64(scroll_r, dh_widget_scroll_y(rlst));
+    # ⚠ A pane that was not built this frame keeps its offset: solo mode has no list for the hidden one.
+    if (llst != 0) { store64(scroll_l, dh_widget_scroll_y(llst)); }
+    if (rlst != 0) { store64(scroll_r, dh_widget_scroll_y(rlst)); }
     dh_layout_apply(root, w, h);
 
     return dh_surface_render(surf, font);
