@@ -30,7 +30,7 @@
 > - The `CONFIGURE` body runs when the queue is drained, not in the event arm.
 > - Names longer than `CRAB_NAME_CHARS` (62) are refused: agnos cannot list them back.
 > - `crab_fs_copy` and `crab_fs_move` are gone. Tests drive the stepped path through `t_copy` / `t_move`.
-> ⛔ **Upstream, not fixed here**: agnos's readdir cuts names at 62 bytes with no signal.
+> ⛔ **Upstream, not fixed here**: agnos's readdir cuts names at 62 bytes with no signal. Filed: `docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`. `getdents#29` returns whole names.
 > ⚠ **What main.cyr's wiring rests on**: the host tests its lifted predicates; the wiring is the 13 QEMU harnesses plus a
 > scratch harness for the collision prompt, the withdrawn question and the held-key gate. That harness lives in the session
 > scratchpad and is **not in the agnos repo**. Door and drop's second arm are UNMEASURED on 0.11.1's binary too.

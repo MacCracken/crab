@@ -1519,7 +1519,8 @@ _None — top-level application._
 ## Next
 
 ⭐ **As of 0.11.3 (2026-11-08), in the order the roadmap's ladder gives them:**
-0. ✅ **`0.11.3 · dhancha 0.12.0`** — cut; the one upstream item left from the audit is agnos's 62-byte name cut.
+0. ✅ **`0.11.3 · dhancha 0.12.0`** — cut; the one upstream item left from the audit is agnos's 62-byte name cut, filed
+   (`docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`).
    ✅ `0.11.2 · The P(-1)` before it; the audit is in `docs/audit/`.
 1. ✅ **`0.11.1 · The 6.7.18 stack`** — cut; every dep on its latest tag, rekha 1.1.2's audit, chitra's
    cheaper decode, CI failing a lock that keeps a superseded pin. ✅ `0.11.0 · The 6.7.9 stack` before it.
