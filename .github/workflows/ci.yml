@@ -34,12 +34,16 @@ jobs:
           echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
       - name: Resolve dependencies
-        # ⚠ `--verify` is the NON-MUTATING check and it runs second on purpose: `cyrius deps` may
-        # rewrite `lib/` and `cyrius.lock` from the toolchain snapshot, so verifying first would
-        # verify the checkout rather than what the build will actually compile.
+        # ⭐ `--locked` (cyrius 6.7.6) resolves every tag, writes NOTHING, and fails naming each
+        # difference between what the tags resolve and the committed `lib/` + `cyrius.lock`.
+        # ⛔ It replaced `cyrius deps` here at 0.11.0 because that one REWROTE a stale lock and then
+        # `--verify` passed against the rewrite — measured on 6.7.9: the 0.10.5 lock under the 0.11.0
+        # manifest went green (40 verified, 0 failed) while `--locked` refused it, rc=1, naming eight
+        # missing commit pins. A tampered pin is refused too. `--verify` stays as a second, independent
+        # hash check of `lib/` against the lock.
         run: |
           set -e
-          cyrius deps
+          cyrius deps --locked
           cyrius deps --verify
 
       - name: Build (host)
@@ -122,10 +126,11 @@ jobs:
       - name: Coverage floor
         # ⚠ REFERENCE coverage — a floor, not a correctness proof, and the tool says so itself.
         # The v1.0 criterion is 80%; the floor sits two points under the measurement, so it gates with
-        # headroom rather than being a rubber stamp: 82 against a measured 84% (347/413, cyrius 6.6.20,
-        # `render_test` in the corpus via `[coverage] programs`). It was 85 against 87% until cyrius
-        # 6.6.8 made the tool honest — it now reads `public fn` and whole files, and crab's ui.cyr +
-        # app.cyr had hidden 49 fns past its old 256 KiB buffer — so the same tree read 82%.
+        # headroom rather than being a rubber stamp: 82 against a measured 84% (347/413 on cyrius
+        # 6.6.20 and 6.7.9, `render_test` in the corpus via `[coverage] programs`). It was 85 against
+        # 87% until cyrius 6.6.8 made the tool honest — it now reads `public fn` and whole files, and
+        # crab's ui.cyr + app.cyr had hidden 49 fns past its old 256 KiB buffer — so the same tree
+        # read 82%.
         # Verified it can fail: `--min 85` exits 1 with `coverage gate FAILED`.
         run: cyrius coverage --min 82
 

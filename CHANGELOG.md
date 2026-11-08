@@ -2,6 +2,129 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] — 2026-11-07 — onto cyrius's 6.7 line, every dep on its 6.7.9 tag, and a lock CI cannot rewrite
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **A pin release, numbered as a minor** because the toolchain crosses onto cyrius's language minor,
+> as sadish 0.12.0, rupa 0.2.0, rekha 1.1.0, kashi 1.2.0, setu 0.9.0 and dhancha 0.11.0 did. No line
+> of crab's code changed. The production render is pixel-identical, the suite is 2543 / 0, and the
+> binary is 144 KB smaller — all but 64 B of it chitra's move to sankoch's `zlib` profile.
+> ⚠ **0.11.0 was the ladder's name for Assisted search (M8)**; M8 is `0.12.0 · Assisted search` now.
+
+### Changed — toolchain `6.6.20` → `6.7.9`
+
+- **Built from the release tarball** (`b517a004…`, equal to its `.sha256`); `~/.cyrius/versions/6.7.9/lib`
+  is byte-identical to it.
+- ⛔ **A build catches what 6.7 refuses; it cannot catch what 6.7 compiles with a different meaning.** So
+  the 6.7.0 – 6.7.9 entries of cyrius's `ecosystem-migration.md` were checked against crab's source —
+  `src/` and `tests/`, with comments, strings and character literals stripped — not only the build.
+  Zero sites each: a lone `!` (dropped by the lexer before 6.7.3, so `if (!ok)` meant `if (ok)`);
+  unary `-` on a name or any `~` (6.7.9: `-K + 10` was 15, is 5); a typed `*T` (6.7.8's narrow `*p`,
+  6.7.9's `&q` and pointer-step rules); `trait`, `const`, `true`, `false`, `do`, `dyn`, `loop`,
+  `impl`, `self`, `struct`, `bool`, `u128`, `f32` as names; `fncall`*N* (6.7.6's argument order); the
+  exec family (6.7.9's child signal state); a `#bounds` line; `OP=`; `fhm_*`; slices. One `println`
+  shape: 6.7.6 routes `println(n)` for a name *declared* an integer — crab's two (`tests/crab.fcyr`)
+  are untyped, which the note says is unchanged.
+- ⭐ **The toolchain's own effect, measured in isolation** — the 0.10.5 tree on its own tags, compiled
+  by 6.7.9: **−64 B on each target** (521,480 / 784,136).
+- **What 6.7 newly refuses** (an unmatched module-scope `}`, a `for` step on an undeclared name,
+  forward-call arity, a top-level pair bind, `OP=` on an array, reserved words): the build reports
+  none. Both targets link with **zero diagnostics**.
+- ⭐ **6.7.6 — git first: a `path` beside `git` / `tag` is a dev override.** A default build builds the
+  tag and checks its pin; a `path` is read only under `CYRIUS_LOCAL=1` / `--local`. Measured on crab's
+  manifest with four `path` lines live: `hint: 4 deps have local checkouts not in use (rupa, kashi,
+  dhancha, setu); CYRIUS_LOCAL=1 builds them (this run built the tags)`, and local mode built the
+  siblings into `build/local-deps/` leaving `lib/` and `cyrius.lock` untouched. The `path` lines stay
+  commented in a commit (dhancha's convention); the manifest's "`path` WINS over `tag`" is rewritten.
+- ⭐ **6.7.6 — `cyrius deps --locked`, and CI's lock guard is it now.** ⛔ The old guard (`cyrius deps`
+  then `--verify`) could not fail on a stale lock: measured, the 0.10.5 lock under this manifest went
+  through it **green** (`40 verified, 0 failed`) because `cyrius deps` rewrote it first. `--locked`
+  refused the same lock (rc=1, eight `no commit pin for <dep> tag <t>` lines), refused a tampered commit
+  pin (`commit-pin mismatch … refusing`), wrote nothing either time, and passes this tree (`lib/ and
+  cyrius.lock are exactly what the tags resolve`). `ci.yml` runs `cyrius deps --locked` then `--verify`.
+
+### Changed — dependencies, each to its 6.7.9 tag
+
+The selector is the pinned toolchain: each pin is the newest tag whose own `[package].cyrius` is
+`6.7.9` (every sibling has since moved to 6.7.18) — the set dhancha 0.11.0 pins.
+
+| dep | was | now | what reaches crab |
+|---|---|---|---|
+| sadish | 0.11.3 | **0.12.0** | nothing — `sadish_version`'s return |
+| rupa | 0.1.9 | **0.2.0** | nothing |
+| rekha | 1.0.0 | **1.1.0** | nothing; it names sadish 0.12.0, so the pair agrees by tag again |
+| kashi | 1.1.1 | **1.2.0** | nothing in `src/font_data.cyr` crab links; the floor stays 1.1.0 |
+| dhancha | 0.10.5 | **0.11.0** | nothing — its bundle differs from 0.10.5's in the version stamp |
+| setu | 0.8.14 | **0.9.0** | nothing |
+| chitra | 1.0.4 | **1.1.3** | sankoch's `zlib` profile instead of all of sankoch (−144 KB); a P(−1) audit sweep; 212 unprefixed internals prefixed |
+| daimon | 2.4.4 | **2.5.0** | declared, not linked; nothing for files |
+
+- **Every tag verified on its remote**, equal to the sibling checkout's tag commit, and commit-pinned:
+  **nine** pins now — sankoch 2.8.7 (`33d7fc7`) joins, transitively through chitra. The lock was
+  regenerated from no lock: 40 entries (49), `deps --verify` 40 / 0.
+- ⭐ **Seven of the eight moves changed no byte.** Built with every new pin but chitra (held at 1.0.4),
+  both targets are **byte-identical** to the toolchain-only build — so sadish, rupa, rekha, kashi,
+  dhancha, setu and daimon cost crab nothing, and chitra is the whole of the change.
+- ⭐ **chitra 1.1.0 links sankoch's `zlib` profile, not all of sankoch.** chitra calls
+  `zlib_decompress` and `crc32`, and through 1.0.4 linked every codec sankoch has to reach them. Since
+  1.1.0 sankoch arrives as chitra's own `[deps.sankoch]` (tag 2.8.7, `dist/sankoch-zlib.cyr`),
+  transitively; its sidecar is just `string`. `lib/sankoch.cyr` (945,297 B) leaves with `mmap`, `sync`
+  ×3 and `thread` ×5; `lib/sankoch-zlib.cyr` (245,368 B) arrives. **Isolated: −144,168 B host, −142,120
+  B agnos.** ⛔ crab must not add `sankoch` to its `[deps] stdlib` — a consumer's own leaf wins
+  (closest-wins) and would link every codec back.
+- **chitra 1.1.1** is a security sweep (65 filed, 57 confirmed, no CRITICAL): no frozen name, layout or
+  error-code value changed. Some JPEG / BMP / PNG cases now decode, are refused, or return a different
+  code — every one toward the reference decoders. crab branches only on `CHITRA_ERR_BUDGET`, which
+  none of them touches; the rest it reports as a decode that failed. **1.1.2 / 1.1.3** prefix 128
+  globals and 84 functions that could collide with a consumer's; crab names none of them.
+- The host suite decodes a real 2x2 PNG with a real zlib IDAT through chitra
+  (`tests/crab.tcyr:4265`), so the swapped inflate is exercised on every run.
+- **daimon 2.5.0, re-derived**: `cyrius build --agnos` from its tag, 0 errors (3,448,104 B); the 2.5.0
+  commit's CI job "AGNOS guest test" passed. Two `src/` files changed (`config.cyr`,
+  `mcp_builtin.cyr`), its routes are 2.4.4's, and the M7 / M8 filing is still OPEN. ⛔ M7's second half and M8 stay blocked.
+
+### Fixed — comments the new pins made false
+
+- `cyrius.cyml`: "`path` WINS over `tag`" (git first since 6.7.6, measured); rekha 1.0.0 "still names
+  sadish 0.11.2" (1.1.0 names 0.12.0); chitra's "31 `alloc()` calls" (32) and its sidecar paragraph;
+  daimon's "assisted search (0.11.0)" (M8, now 0.12.0).
+- `ci.yml`: the lock-guard step's rationale ("`--verify` runs second because `cyrius deps` may
+  rewrite…") went with the step.
+- `roadmap.md`: two *Still to automate* bullets that 0.10.5 should have closed and did not — the
+  `path` re-verification (closed now, by the toolchain and `--locked`) and the daimon tag check
+  (closed at 0.10.5 by `modules = []`) — and the consumed cyrius 6.7.6 pin-move note.
+
+### Measured
+
+| | 0.10.5 (6.6.20) | 0.11.0 (6.7.9) | |
+|---|---:|---:|---:|
+| host, `CYRIUS_DCE=1` (CI, release) | 521,544 | **377,312** | −144,232 |
+| agnos, `CYRIUS_DCE=1` (CI, release) | 784,200 | **642,016** | −142,184 |
+| host, plain | 1,553,736 | 1,102,304 | −451,432 |
+| agnos, plain | 1,615,688 | 1,162,208 | −453,480 |
+
+Gates, every one re-run on 6.7.9: `deps --locked` clean, `deps --verify` 40 / 0; both DCE builds with
+zero diagnostics; `cyrius test` **2543 / 0**; `render_test` **55 / 0**, its build log free of
+`undefined function`, and ⭐ **the 640x220 dump byte-identical to 0.10.5's and 0.10.4's** (563,200 B);
+fuzz 100,000 rounds; `fmt --check` on all eight files; coverage 84 % (347/413) against `--min 82`;
+`vet`; `deny` 0 violations.
+⭐ **QEMU, agnos 1.57.17, aethersafha 0.17.7, the DCE agnos binary** (`899f6bd9…`, byte-identical to the
+final tree's build):
+- `crab-face-test.py` **PASS** — `410820 bytes adv=9 upem=2048 i=4 m=13`, one font line, navigations 1,
+  view changes 2, no fault, no allocator-failure text.
+- `crab-preview-test.py` **PASS** — the PNG path through chitra 1.1.3 and `sankoch-zlib` on the
+  target: the idle tick read `zzpic1.png` as 137x42 and `zzpic2.png` as 320x200, each exactly once.
+- `crab-button-test.py` **PASS** — middle marks a pane, middle on a popup row fires nothing, the hover
+  follows across 5 rows, no fault.
+- `crab-pointer-test.py` **PASS** on the second run. ⚠ The first was INCONCLUSIVE, and it was the
+  serial console, not crab: the Backspace arrived and crab ascended (`listed 9 entries in /`), but
+  aethersafha's frame-cost line was spliced into `crab: cd /`, so the oracle never matched and the
+  pick / dismiss arms were skipped. Run 2: right-click menu, pick (`cd /bin`), dismiss, 6 refreshes,
+  bare F10 / Esc / Tab crab's, Ctrl chords the compositor's.
+- `crab-resize-test.py` **PARTIAL**, its QEMU ceiling (no `#86` carveout): the extent is refused and
+  crab answers 16 keys after; repeat fires 4 times while held and 0 after release; no fault.
+
 ## [0.10.5] — 2026-11-07 — toolchain 6.6.20, and every dep on the tag its repo cut for it
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

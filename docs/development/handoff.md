@@ -1,35 +1,63 @@
-# Handoff — **0.10.5 cut: cyrius 6.6.20 and every dep on the tag its repo cut for it. ⛔⛔ M7 and M8 still BLOCKED — daimon 2.4.4 builds and runs on agnos, and has no file index, tags or ranked search to offer.**
+# Handoff — **0.11.0 cut: cyrius 6.7.9 (the language minor) and every dep on its 6.7.9 tag. ⛔⛔ M7 and M8 still BLOCKED — daimon 2.5.0 builds and runs on agnos, and has no file index, tags or ranked search to offer.**
 
-> ⭐⭐ **2026-11-07. `VERSION` reads 0.10.5 and the CHANGELOG header agrees; 0.10.4 is tagged on the
-> remote.** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-07. `VERSION` reads 0.11.0 and the CHANGELOG header agrees; 0.10.5 is tagged on the
+> remote (`8937529`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
 >
-> ## ⛔⛔ READ FIRST — EVERY `path` LINE IS DORMANT NOW, AND THAT WAS THE OPERATOR'S OPEN DECISION
+> ## ⛔⛔ READ FIRST — 6.7 CHANGES WHAT CODE MEANS, AND THE BUILD CANNOT SEE IT
 >
-> `state.md`'s *Next* carried "adopt dhancha 0.10.3's dormant-`path` convention?" as the operator's
-> call. 0.10.5 took it, because the pin move could not be made without it: every sibling checkout is
-> on its cyrius **6.7.18** line (sadish 0.12.1 … daimon 2.5.5), and a live `path` vendors the
-> sibling's working tree over the declared tag. The uncommitted tree this cut began from had already
-> done exactly that — `lib/` held setu 0.8.13, rupa 0.1.8 and kashi **1.2.1** under a manifest
-> declaring 0.8.9 / 0.1.7 / 1.0.10. ⇒ Uncomment a `path` only for cross-repo work; comment it again
-> before a cut. Reversible in five lines if the ruling goes the other way.
+> A lone `!` was DROPPED by the lexer before 6.7.3 (`if (!ok)` meant `if (ok)`); 6.7.8 made `*p`
+> through a narrow `*T` read the element; 6.7.9 made unary `-` / `~` on a constant bind tighter
+> (`-K + 10` was 15, is 5). Each compiles clean either way. crab has **zero** of every such shape in
+> `src/` and `tests/` (checked with comments and strings stripped, against cyrius's
+> `docs/development/ecosystem-migration.md`). ⇒ **Writing a `!`, a unary `-` on a name or a `*T` now
+> means what it says on 6.7.9 and something else on any consumer still below** — crab has none, but
+> the next change should know.
+>
+> ⚠ **0.11.0 was the ladder's number for Assisted search (M8).** The operator directed this pin
+> release as 0.11.0; M8 reads `0.12.0 · Assisted search` now. The order did not move.
 >
 > ## ⛔⛔ AND M7 / M8 ARE STILL BLOCKED IN DAIMON, ON A SURFACE
 >
-> ✅ **daimon builds AND runs on agnos** — re-derived for **2.4.4** on 2026-11-07: `cyrius build
-> --agnos` from its tag, every `path` off, **0 errors**; the 2.4.4 commit's CI job *"AGNOS guest
-> test"* **passed** (agnos 1.57.14).
-> ⛔⛆ **And the build was never the last thing in the way.** daimon 2.4.4 holds **no index of files,
+> ✅ **daimon builds AND runs on agnos** — re-derived for **2.5.0** on 2026-11-07: `cyrius build
+> --agnos` from its tag, **0 errors**; the 2.5.0 commit's CI job *"AGNOS guest test"* **passed**.
+> ⛔⛆ **And the build was never the last thing in the way.** daimon 2.5.0 holds **no index of files,
 > no tags and no ranked results** on any target: its routes are agents, edge, health, mcp, metrics,
 > rag and scheduler; the per-agent memory store has no route and no tag field; RAG keeps nothing on
 > disk, embeds by a 32-slot character-sum hash (`stop`/`pots`/`tops` collide) and answers with a
-> prompt template. 2.4.4 changed none of those files. From 0.10.0 the gate table called M7
+> prompt template. Neither 2.4.4 nor 2.5.0 changed those files. From 0.10.0 the gate table called M7
 > **UNGATED** because daimon was *declared*; from 0.10.1 it called it blocked on the *build*.
 > Neither checked for the surface. ⇒ **The eighth false gate.**
-> ⇒ **Filed where it can be acted on**, still **OPEN** at 2.4.4: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
+> ⇒ **Filed where it can be acted on**, still **OPEN** at 2.5.0: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 > (crab's copy: `docs/development/issues/2026-09-23-daimon-has-no-file-index-tags-or-ranked-search.md`).
 > ⛔ **crab ships nothing for M7's remaining half meanwhile**: no crab-side indexer (it would silo the
 > shared index), no "unavailable" rows (the VOLUMES rule). Duplicates (0.10.0) needs no daimon.
+>
+> ## 0.11.0 — toolchain 6.7.9, every dep on its 6.7.9 tag, and a lock CI cannot rewrite
+>
+> ⭐ **A pin release; no code line moved.** cyrius 6.6.20 → **6.7.9**; sadish **0.12.0**, rupa
+> **0.2.0**, rekha **1.1.0**, kashi **1.2.0**, dhancha **0.11.0**, setu **0.9.0**, chitra **1.1.3**,
+> daimon **2.5.0** — each the newest tag whose own pin is `6.7.9`. Nine commit pins: sankoch 2.8.7
+> joins, through chitra. Built from the release tarball (`b517a004…`); 32 stdlib leaves, 7 bundles and
+> `sankoch-zlib.cyr` each `cmp`'d against their source.
+> ⭐ **Seven of the eight dep moves changed no byte**: with chitra held at 1.0.4 both targets are
+> byte-identical to the toolchain-only build (which is −64 B). **chitra 1.1.0's `zlib` profile is the
+> whole drop** — the full stdlib `sankoch.cyr` and nine leaves left `lib/`: host 521,544 →
+> **377,312 B**, agnos 784,200 → **642,016 B** under DCE. ⛔ Never add a `sankoch` stdlib leaf: it would
+> win and link every codec back.
+> ⭐ **CI's lock guard is `cyrius deps --locked`.** The old `cyrius deps` + `--verify` went **green**
+> over the stale 0.10.5 lock (it rewrote the lock first); `--locked` refused it (rc=1, eight missing
+> pins named) and a tampered pin, writing nothing.
+> ⭐ **`path` is a dev override since 6.7.6** — measured with four live: the tags built and a `hint:`
+> named the checkouts; `CYRIUS_LOCAL=1` built them into `build/local-deps/`. The lines stay commented.
+> **2543 / 0**, render_test **55 / 0**, the 640x220 dump **`cmp`-identical to 0.10.5's**, fuzz
+> 100,000, fmt ×8, coverage 84 %, vet, deny 0.
+> ⭐ **QEMU on the DCE agnos binary** (`899f6bd9…`; agnos 1.57.17, aethersafha 0.17.7): **face PASS**,
+> **preview PASS** (PNGs through chitra 1.1.3 + `sankoch-zlib` read on the idle tick, right sizes,
+> once each), **button PASS**, **pointer PASS on run 2**, **resize PARTIAL** (its QEMU ceiling).
+> ⚠ Pointer run 1 was INCONCLUSIVE from the CONSOLE: aethersafha's frame-cost line was spliced into
+> `crab: cd /`, so the harness's substring oracle missed a Backspace that had arrived. Read the serial
+> before believing an INCONCLUSIVE; serial logs of every run are in the session scratchpad.
 >
 > ## 0.10.5 — toolchain 6.6.20, and every dep on its 6.6.20 tag
 >

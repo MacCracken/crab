@@ -24,21 +24,37 @@
 
 ## Version
 
-**0.10.5 IS CUT** — `VERSION` reads `0.10.5` and the CHANGELOG header agrees, 2026-11-07. 0.10.4 is
-tagged on the remote. Re-run `git describe --tags` and `git log --oneline -3` before restating this;
+**0.11.0 IS CUT** — `VERSION` reads `0.11.0` and the CHANGELOG header agrees, 2026-11-07. 0.10.5 is
+tagged on the remote (`8937529`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
 the commit, the tag and the push are the operator's.
 
 ⛔⛔ **M7's INDEX, TAGS AND SMART FOLDERS — AND ALL OF M8 — ARE BLOCKED IN DAIMON, ON A SURFACE.**
-✅ daimon builds and runs on agnos — re-derived for **2.4.4** on 2026-11-07 (`--agnos` from its tag,
-**0 errors**; the 2.4.4 commit's CI job *"AGNOS guest test"* passed).
-⛔⛆ **And the build was never the only gate.** daimon 2.4.4 holds **no index of files, no tags and no
+✅ daimon builds and runs on agnos — re-derived for **2.5.0** on 2026-11-07 (`--agnos` from its tag,
+**0 errors**; the 2.5.0 commit's CI job *"AGNOS guest test"* passed).
+⛔⛆ **And the build was never the only gate.** daimon 2.5.0 holds **no index of files, no tags and no
 ranked results**, on any target: its routes are agents, edge, health, mcp, metrics, rag and
 scheduler, none about files; its per-agent memory store has no route and no tag field; its RAG keeps
-nothing on disk, embeds by a 32-slot character-sum hash and answers with a prompt template — and 2.4.4
-touched none of those files. The roadmap called M7 UNGATED once daimon was declared, then blocked
-only on the build — **the eighth false gate**. ⇒ Filed, still **OPEN** at 2.4.4:
+nothing on disk, embeds by a 32-slot character-sum hash and answers with a prompt template — and
+neither 2.4.4 nor 2.5.0 touched those files (2.5.0 changed `config.cyr` and `mcp_builtin.cyr`). The roadmap called M7 UNGATED once daimon was declared, then blocked
+only on the build — **the eighth false gate**. ⇒ Filed, still **OPEN** at 2.5.0:
 `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md` (crab's
 copy in `issues/`). ⛔ crab will not fake an index it cannot back, nor build one of its own.
+
+**0.11.0 contents — toolchain 6.6.20 → 6.7.9, the language minor, every dep to its 6.7.9 tag.** No
+code line moved. sadish 0.12.0, rupa 0.2.0, rekha 1.1.0, kashi 1.2.0, dhancha 0.11.0, setu 0.9.0,
+chitra 1.1.3, daimon 2.5.0 — each the newest tag whose own pin is `6.7.9`; nine commit pins (sankoch
+2.8.7 joins through chitra). ⛔ **6.7 can change what code MEANS without a diagnostic**, so the
+migration notes were checked against the stripped source, not only the build: zero lone `!`, zero
+unary `-` on a name, zero `~`, zero `*T`, zero newly reserved names. ⭐ **Seven of the eight dep
+moves changed no byte** (byte-identical builds with chitra held back); **chitra 1.1.0's `zlib`
+profile is the whole drop**: host **377,312 B**, agnos **642,016 B** under DCE (521,544 / 784,200 at
+0.10.5; the toolchain alone −64). ⭐ **CI's lock guard is `cyrius deps --locked`**: the old
+`deps` + `--verify` went green over the stale 0.10.5 lock (it rewrites first); `--locked` refuses it.
+⭐ **`path` is a dev override since 6.7.6** — a default build builds the tag (measured; the lines stay
+commented). ⚠ **0.11.0 was the ladder's number for Assisted search**; M8 reads 0.12.0 now.
+**2543 / 0**, render_test 55, the 640x220 dump `cmp`-identical to 0.10.5's. QEMU on the DCE agnos
+binary: face, preview (PNG through the new inflate), pointer and button PASS; resize PARTIAL, its QEMU
+ceiling.
 
 **0.10.5 contents — toolchain 6.6.6 → 6.6.20, every dep to the tag its repo cut for 6.6.20.** No code
 line moved. sadish 0.11.3, rupa 0.1.9, rekha 1.0.0, kashi 1.1.1, dhancha 0.10.5, setu 0.8.14,
@@ -612,7 +628,24 @@ demands and the one this file broke twice.
 
 ## Toolchain
 
-- **Cyrius pin**: `6.6.20` (in `cyrius.cyml [package].cyrius`) — moved **2026-11-07 at the 0.10.5
+- **Cyrius pin**: `6.7.9` (in `cyrius.cyml [package].cyrius`) — moved **2026-11-07 at the 0.11.0
+  cut, on operator direction**, from `6.6.20`: onto the 6.7 language minor.
+  ⛔ **The first pin move where the language changes MEANING**, not only what it refuses: 6.7.3 made
+  `!` an operator (the lexer had dropped a lone `!`), 6.7.8 made `*p` through a narrow `*T` read the
+  element, 6.7.9 made unary `-` / `~` on a constant bind tighter. Checked against `src/` and `tests/`
+  with comments and strings stripped: **zero** sites of any shape cyrius's `ecosystem-migration.md`
+  lists for 6.7.0 – 6.7.9; both targets link with zero diagnostics.
+  ⭐ **Built from the released tarball** (`b517a004…`, equal to its `.sha256`); the installed
+  `~/.cyrius/versions/6.7.9/lib` is byte-identical to it. **The toolchain alone** (0.10.5's tree on its
+  tags): −64 B on each target.
+  ⭐ `lib/` re-vendored from no lock: **32** stdlib leaves, every one `cmp`-identical to the tarball;
+  10 left with sankoch (`sankoch`, `mmap`, `sync` ×3, `thread` ×5), `sankoch-zlib.cyr` arrived through
+  chitra. 40 files, lock 40 entries, **9** commit-pinned.
+  ⭐ What the move changed in crab's own files: `ci.yml`'s lock guard is `cyrius deps --locked` (6.7.6),
+  and comments that said `path` wins over `tag` (6.7.6 builds the tag — measured).
+  ⚠ `cycc` on PATH is **6.7.18** — bare `cycc` and the pin disagree. `cyrius` resolves the pin; bare
+  `cycc` never does.
+- *(history)* `6.6.20` — moved **2026-11-07 at the 0.10.5
   cut, on operator direction**, from `6.6.6`: the close of the 6.6.x line, fourteen releases.
   crab's `src/` needed **no code edits** — 0 uses of the names 6.6.20 reserves (`sizeof`, `mulh64`,
   `fncall0`..`8`), 0 `duplicate fn` (6.6.20 binds to the LAST definition), 0 `struct` (6.6.16),
@@ -628,8 +661,6 @@ demands and the one this file broke twice.
   ⭐ What the move changed in crab's own files: `[deps.daimon] modules = []` (6.6.13), `[coverage]
   programs` and the coverage floor 85 → 82 (6.6.8 / 6.6.17), and the comments that said `cyrius test`
   ignores `[build].test` (6.6.17 runs it — measured).
-  ⚠ `cycc` on PATH is **6.7.18** — bare `cycc` and the pin disagree again. `cyrius` resolves the pin;
-  bare `cycc` never does.
 - *(history)* `6.6.6` — moved **2026-09-21 at the 0.10.2
   cut, on operator direction**, from `6.6.4`. Two repair releases (6.6.5: call ABI, aggregate
   layout, `cyrlint --strict-deferrals`; 6.6.6: the Windows `O_APPEND`/`O_TRUNC` corruption, CVE-44
@@ -684,7 +715,7 @@ demands and the one this file broke twice.
 - Trail: `6.4.71` → `6.5.5` (0.4.3) → `6.5.9` → **6.5.21** (0.4.9, one language version across the
   desktop stack) → **6.5.27** (0.4.11) → **6.5.28** (0.4.13) → **6.5.35** (0.4.15) →
   **6.5.36** (0.7.1) → **6.5.41** (0.7.7) → **6.6.0** (0.8.0) → **6.6.1** (0.8.2) → **6.6.2** (0.8.4)
-  → **6.6.4** (0.8.11) → **6.6.6** (0.10.2) → **6.6.20** (0.10.5).
+  → **6.6.4** (0.8.11) → **6.6.6** (0.10.2) → **6.6.20** (0.10.5) → **6.7.9** (0.11.0).
 - ⚠ The pin is documentation, not enforcement — `cyrius build` compiles with the **installed** `cycc`,
   warns `toolchain drift`, and carries on. ⛔ It is not cosmetic: **CI installs the toolchain from this
   pin** (`grep '^cyrius = ' cyrius.cyml`, both `.github/workflows/*.yml`), so while the pin lagged, a
@@ -792,7 +823,7 @@ dimension parser and the memoised read behind it — plus the tests, which are t
   entry); CI's own `render_test` step builds it, fails on any `undefined function` in the build
   log, and runs it. Since 0.10.5 it is also in `cyrius coverage`'s corpus (`[coverage] programs`).
 
-⭐ `cyrius coverage` reports **347/413 fns referenced (84 %)** at 0.10.5, against a CI floor of 82 —
+⭐ `cyrius coverage` reports **347/413 fns referenced (84 %)** at 0.10.5 and 0.11.0, against a CI floor of 82 —
 the first reading by cyrius 6.6.8's honest tool, which counts `public fn` and reads whole files (the
 same tree read 82 % without `render_test` in the corpus, against the 85 floor set when the old tool
 read 87 %). ⚠ No test was written to move it; `cyrius coverage` lists the 66 unreferenced fns.
@@ -813,6 +844,29 @@ that were written with their tests.
 the render call sites the deferred-stat drain added.
 
 ## Proven
+
+### ⭐⭐ As of 2026-11-07 — the 0.11.0 DCE binary (642,016 B, `899f6bd9…`; cyrius 6.7.9, sadish 0.12.0, rekha 1.1.0, kashi 1.2.0, dhancha 0.11.0, setu 0.9.0, chitra 1.1.3 + sankoch-zlib 2.8.7) under QEMU, agnos 1.57.17, aethersafha 0.17.7
+
+- `crab-face-test.py` **PASS**: `410820 bytes adv=9 upem=2048 i=4 m=13`, one `font` line,
+  navigations 1, view changes 2, no fault, no allocator-failure text.
+- `crab-preview-test.py` **PASS** — the one dep that moved bytes, on the target: the idle tick read
+  `zzpic1.png` → 137x42 and `zzpic2.png` → 320x200 through chitra 1.1.3 and sankoch's `zlib` profile,
+  each file exactly once; no fault.
+- `crab-button-test.py` **PASS**, one run, every arm: mask 4 marks a pane, middle on a popup row
+  fires nothing, the hover follows across 5 rows and does not arm before the pointer moves.
+- `crab-pointer-test.py` **PASS on run 2**. ⚠ Run 1 was INCONCLUSIVE from the console, not crab: its
+  serial shows the Backspace delivered and `listed 9 entries in /`, with aethersafha's frame-cost line
+  spliced into the middle of `crab: cd /`, so the harness's substring oracle missed and it skipped the
+  pick / dismiss arms. Run 2: ascend, right-click menu (wire 2), pick ran `cd /bin`, dismiss, `u` ×6 →
+  6 refreshes, bare F10 / Esc / Tab crab's, Ctrl+Tab / Ctrl+F10 / Ctrl+Q the compositor's, no faults.
+- `crab-resize-test.py` **PARTIAL — the harness's QEMU ceiling**: the extent was unbackable (no `#86`
+  carveout), crab refused it and answered 16 keys after; wheel 7 scrolls from 8 events, FULL_KEYS
+  12 / 6, held-key repeat 4 while held and 0 after release, all four sort modes, the stat drain
+  completed, no fault.
+- ⚠ **Not on target for this binary**: the drop, H1, symlink, door, go, columns, shift and
+  listing-cap harnesses. No crab code moved, the host pixel diff is byte-identical, and seven of the
+  eight dep moves are byte-identical in the binary; the toolchain and chitra's inflate moved, and the
+  five harnesses run cover those.
 
 ### ⭐⭐ As of 2026-11-07 — the 0.10.5 DCE binary (784,200 B; cyrius 6.6.20, sadish 0.11.3, rekha 1.0.0, kashi 1.1.1, dhancha 0.10.5, setu 0.8.14) under QEMU, agnos 1.57.17, aethersafha 0.17.7
 
@@ -990,28 +1044,29 @@ per release stops being readable exactly when a cold start needs it most.
 
 ## Dependencies
 
-Declared in `cyrius.cyml`. ⭐ **Re-derived 2026-11-07 for 0.10.5: every tag is the one its repo cut
-for cyrius 6.6.20** — the newest tag whose own `[package].cyrius` is `6.6.20`, NOT the newest tag:
-every sibling has since moved to 6.7.18 (sadish 0.12.1, rupa 0.2.1, rekha 1.1.2, kashi 1.3.0,
-dhancha 0.11.1, setu 0.9.1, chitra 1.3.1, daimon 2.5.5). dhancha 0.10.5 pins the same set. Each tag
-verified on its remote (`git ls-remote --tags` over https), equal to the sibling's local tag commit,
-and **commit-pinned in `cyrius.lock` — all eight** (7 at 0.10.4: daimon joins through `modules = []`).
-⛔ **EVERY `path` LINE IS DORMANT (0.10.5)** — commented in the manifest, uncommented only for
-cross-repo work: dhancha 0.10.3's convention, adopted here. It was forced, not chosen for tidiness:
-with the siblings on their 6.7.18 lines a live `path` vendors their heads, and the uncommitted tree
-this cut began from had already done so — setu 0.8.13, rupa 0.1.8 and kashi **1.2.1** in `lib/` under
-a manifest declaring 0.8.9 / 0.1.7 / 1.0.10. ⇒ With every `path` dormant, the default build IS check
-4: `rm -rf lib cyrius.lock && cyrius deps` resolves every dep from its remote tag, and the bundles
-`cmp` against `git show <tag>:dist/…`.
+Declared in `cyrius.cyml`. ⭐ **Re-derived 2026-11-07 for 0.11.0: every tag is the one its repo cut
+for cyrius 6.7.9** — the newest tag whose own `[package].cyrius` is `6.7.9`, NOT the newest tag: every
+sibling has since moved to 6.7.18. dhancha 0.11.0 pins the same set. Each tag verified on its remote
+(`git ls-remote --tags` over https), equal to the sibling's local tag commit, and **commit-pinned in
+`cyrius.lock` — nine**: the eight declared, plus sankoch 2.8.7 (`33d7fc7`), which chitra 1.1.0+ brings
+as its own `[deps.sankoch]` (`dist/sankoch-zlib.cyr`). ⛔ crab must not declare a `sankoch` stdlib leaf:
+its own would win and link the full codec set back.
+⭐ **GIT FIRST SINCE cyrius 6.7.6 — `path` IS A DEV OVERRIDE, NOT A WINNER.** A default build builds the
+tag and checks its pin; a `path` is read only under `CYRIUS_LOCAL=1` / `--local`. Measured on crab's
+manifest with four `path` lines live: the tags built, `hint: 4 deps have local checkouts not in use`,
+and local mode wrote `build/local-deps/` and left `lib/` and the lock alone. The `path` lines stay
+**commented in a commit** all the same (dhancha's convention; 0.10.5 made them dormant when `path`
+still won). ⭐ CI's guard is `cyrius deps --locked` since 0.11.0: it refuses a lock or `lib/` that
+differs from what the tags resolve — the old `deps` + `--verify` went green over a stale lock.
 ⭐ **THE DAIMON ROW IS VERIFIED BY THE TOOLCHAIN NOW.** `modules = []` (6.6.13) clones and pins the tag:
 `tag = "9.9.9"` fails `cyrius deps` with rc=1 (`Remote branch 9.9.9 not found`). Through 0.10.4 the
 same phantom gave "7 deps resolved" and passed every gate.
 ⚠ dhancha's `0.10.4` was an ANNOTATED tag (`cyrius deps` printed `… is not a commit!` and pinned the
 peeled commit); `0.10.5` is a plain commit tag.
-⛔⛆ **THE CONVERSE HAZARD, OBSERVED 2026-09-21: a sibling that moves AHEAD of the tags breaks the
-local build while the committed tree is fine** — `../dhancha` at 0.10.4 against the pinned sadish
-0.5.5, 3 undefined functions in a tree with no diff. It is what the dormant `path` lines close; a
-`path` uncommented for cross-repo work reopens it for as long as it is live.
+⛔⛆ *(history, through cyrius 6.7.5)* **THE CONVERSE HAZARD, OBSERVED 2026-09-21: a sibling that moves
+AHEAD of the tags broke the local build while the committed tree was fine** — `../dhancha` at 0.10.4
+against the pinned sadish 0.5.5, 3 undefined functions in a tree with no diff. From 6.7.6 a live `path`
+is ignored unless local mode asks for it, so it can only bite a `CYRIUS_LOCAL=1` build.
 ⛔ **0.8.4 SHIPPED WITH THE DIVERGENCE THIS CHECK EXISTS FOR.** Its `lib/` carried dhancha 0.9.29,
 rupa 0.1.7 and setu 0.8.9 through `path` while the manifest declared 0.9.28 / 0.1.6 / 0.8.8 — so CI
 compiled the old tags and the local build the new ones, green both ways, and nothing said so. All
@@ -1024,14 +1079,14 @@ tag, clean; re-derive it rather than assuming it, since `path` is what makes it 
 
 | dep     | tag    | `path`?  | why crab needs it                                   |
 |---------|--------|----------|-----------------------------------------------------|
-| sadish  | 0.11.3 | dormant  | 2D vector — the surface everything else draws into; the flatten budget (0.7.x) dhancha needs; 0.11.1's audit. ⛔ moves WITH rekha (0.11.3 is 0.11.2's code plus the requires block) |
-| rupa    | 0.1.9  | dormant  | shared theme tokens + **`on-accent`** and contrast   |
-| rekha   | 1.0.0  | dormant  | **the face** — `crab_face` opens `/fonts/default.ttf` through it; advances size every column. ⭐ 1.0.0 is the 1.x freeze of 0.9.0's surface; it names sadish 0.11.2 |
-| kashi   | 1.1.1  | dormant  | CP437 8×16 glyph data for `dh_draw_text` (font=0), the fallback face. ⛔ **>= 1.1.0, hard** (`kashi_cp437_from_unicode`); 1.1.1's byte-sized buffers are −88,576 B |
-| dhancha | 0.10.5 | dormant  | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`, the frame arena; one glyph per CHARACTER; ⭐ 0.10.5's CP437 map is kashi's |
-| chitra  | 1.0.4  | dormant  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⛔ see gaps |
-| setu    | 0.8.14 | dormant  | client transport — channel-band, reads `AGNOS_CHAN`; 0.8.11 reads a dead compositor as -6 on Linux |
-| daimon  | 2.4.4  | dormant  | **declared, NOT linked** — `modules = []`; reached over its HTTP API, loopback-only on agnos too since 2.4.4 (agnos >= 1.57.7). ✅ builds and runs on agnos. ⛔ holds no file index, tags or ranked results — M7/M8 filed in daimon 2026-09-23, still OPEN. ⭐ tag verified by `cyrius deps` |
+| sadish  | 0.12.0 | dormant  | 2D vector — the surface everything else draws into; the flatten budget (0.7.x) dhancha needs; 0.11.1's audit. ⛔ moves WITH rekha (rekha 1.1.0 names 0.12.0) |
+| rupa    | 0.2.0  | dormant  | shared theme tokens + **`on-accent`** and contrast   |
+| rekha   | 1.1.0  | dormant  | **the face** — `crab_face` opens `/fonts/default.ttf` through it; advances size every column. ⭐ the 1.x freeze of 0.9.0's surface (1.0.0); 1.1.0 is that bundle on 6.7.9 |
+| kashi   | 1.2.0  | dormant  | CP437 8×16 glyph data for `dh_draw_text` (font=0), the fallback face. ⛔ **>= 1.1.0, hard** (`kashi_cp437_from_unicode`); 1.1.1's byte-sized buffers are −88,576 B |
+| dhancha | 0.11.0 | dormant  | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`, the frame arena; one glyph per CHARACTER; ⭐ 0.10.5's CP437 map is kashi's |
+| chitra  | 1.1.3  | dormant  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⭐ 1.1.0+ brings sankoch's `zlib` profile, not all of sankoch (−144 KB). ⛔ see gaps |
+| setu    | 0.9.0  | dormant  | client transport — channel-band, reads `AGNOS_CHAN`; 0.8.11 reads a dead compositor as -6 on Linux |
+| daimon  | 2.5.0  | dormant  | **declared, NOT linked** — `modules = []`; reached over its HTTP API, loopback-only on agnos too since 2.4.4 (agnos >= 1.57.7). ✅ builds and runs on agnos. ⛔ holds no file index, tags or ranked results — M7/M8 filed in daimon 2026-09-23, still OPEN at 2.5.0. ⭐ tag verified by `cyrius deps` |
 
 ⚠ **This table sat at the 0.8-era tags (sadish `0.5.4`, rekha `0.3.7`, dhancha `0.9.29`, seven rows)
 from 2026-09-12 to 2026-09-21** — through the 0.8.11 stack bump, 0.9.0's face and 0.10.0's daimon
@@ -1073,14 +1128,10 @@ the arena.
    `git show 0.9.15:dist/dhancha.cyr`. **The first three would each have passed 0.4.13**, the release
    that shipped a manifest naming a library the build never compiled.
 
-⚠ **And check 4 is doing even more work than "path wins" implies** — see Known gaps: `lib/` is not
-what compiles at all while `path` is set. ⭐ Since 0.10.5 every `path` is dormant, so every build
-resolves from the tags and check 4 is the default; it stays a check whenever a `path` is uncommented.
-
-⛔ **`path` WINS over `tag`, so a build with a live `path` is not evidence that the declared graph
-resolves.** That is the drift 0.4.13 caught and closed, and the reason all eight are dormant. At every
-cut, verify each tag on its remote (`git ls-remote --tags … | sort -V`) and against the commit the
-lock pins.
+⭐ **Check 4 is the default build since cyrius 6.7.6** (a default build builds the tags) and CI's
+`cyrius deps --locked` since 0.11.0. Through 6.7.5 `path` won over `tag` — the drift 0.4.13 caught —
+and the four checks above were how a cut proved the declared graph. At every cut, still verify each
+tag on its remote (`git ls-remote --tags … | sort -V`) and against the commit the lock pins.
 
 ⚠ **crab consumes `dist/` bundles, not `src/`.** Six deps — sadish, rupa, rekha, dhancha, setu,
 chitra — are `modules = ["dist/<name>.cyr"]`, so a fix reaches crab only after `cyrius distlib` runs
@@ -1088,7 +1139,7 @@ chitra — are `modules = ["dist/<name>.cyr"]`, so a fix reaches crab only after
 `modules = ["src/font_data.cyr"]`, the freestanding core, deliberately — the library face costs
 +183,360 B (+50 %) for a runtime font registry crab never calls, and `CYRIUS_DCE=1` reclaims none of
 it. **daimon is the other**: `modules = []`, cloned and pinned, nothing folded. ⚠ The sadish and rekha
-bundles are 472 KB and 552 KB of source at 0.11.3 / 1.0.0 (86 KB and 41 KB at 0.5.5 / 0.3.10); CI and the release link them under
+bundles are 472 KB and 552 KB of source at 0.12.0 / 1.1.0 (86 KB and 41 KB at 0.5.5 / 0.3.10); CI and the release link them under
 `CYRIUS_DCE=1` since 0.10.3 — see *Targets*.
 
 ✅ **The `net` stdlib declaration is GONE (0.10.0), and since 0.10.5 so is `lib/net.cyr`**: setu
@@ -1097,12 +1148,14 @@ bundles are 472 KB and 552 KB of source at 0.11.3 / 1.0.0 (86 KB and 41 KB at 0.
 ## Tests
 
 - `tests/crab.tcyr` — the only suite `cyrius test` runs (discovered, and named by `[build].test =
-  "tests"`, which 6.6.17 runs — once). **2,543 passed / 0 failed**
-  *(0.10.3, 0.10.4 and 0.10.5 on cyrius 6.6.20; 2,503 at 0.10.1 and 0.10.2, 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
+  "tests"`, which cyrius has run since 6.6.17 — once). **2,543 passed / 0 failed**
+  *(0.10.3 through 0.11.0 — on cyrius 6.7.9 at 0.11.0; 2,503 at 0.10.1 and 0.10.2, 2,490 at 0.10.0, 2,451 at 0.9.7, 2,440 at 0.9.6, 2,421 at 0.9.5, 2,384 at
   0.9.4, 2,345 at 0.9.3, 2,012 at 0.8.7, 1,838 at 0.8.6, 1,790 at 0.8.5, 1,695 at 0.8.3/0.8.4, 1,230
   at 0.7.7, 253 at 0.7.0)*. ⚠ This line said 2,012 from 0.8.7 to 0.10.1 while the *Version* section
   above carried the live count — two numbers in one file, one of them stale. `render_test` is **55**
   checks (0.10.1; 53 from 0.7.6 to 0.10.0).
+  ⭐ **0.11.0's was a pixel diff too**: the same 563,200 B dump on 6.7.9 with the 6.7.9 tags, `cmp`
+  clean against 0.10.5's and 0.10.4's.
   ⭐ **0.10.5's was a pixel diff too**: the 640x220 dump from the 0.10.4 tree (6.6.6, its tags) and
   from 0.10.5 (6.6.20, the new tags) — 563,200 B, `cmp` clean.
   ⭐ **0.10.2's test was a PIXEL DIFF, not a count**: the 640x220 BGRA dump `render_test` writes
@@ -1181,8 +1234,8 @@ bundles are 472 KB and 552 KB of source at 0.11.3 / 1.0.0 (86 KB and 41 KB at 0.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **521,544 B under `CYRIUS_DCE=1`** *(0.10.5, cyrius 6.6.20 — CI and the release build with DCE since 0.10.3; plain 1,553,736. 608,040 at 0.10.3 / 0.10.4: the toolchain alone is −2,680, kashi 1.1.1's byte-sized glyph buffers −88,576, the other deps +4,760)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
-| `--agnos`    | ✅ builds, **784,200 B under `CYRIUS_DCE=1`** *(0.10.5; plain 1,615,688. 878,376 at 0.10.3 / 0.10.4: toolchain −10,328, kashi 1.1.1 −88,576, the other deps +4,728)* — ⭐ **and it draws in Liberation Sans on a real kernel with the 6.6.20 stack** (`crab-face-test.py` PASS on the 0.10.5 DCE binary, agnos 1.57.17 + aethersafha 0.17.7: rekha 1.0.0 loads the face, sadish 0.11.3 draws it, dhancha 0.10.5's arena carries it, no fault) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. ⭐ No `large static data` advisory since 0.10.5 (kashi 1.1.1) |
+| x86_64 linux | ✅ builds, **377,312 B under `CYRIUS_DCE=1`** *(0.11.0, cyrius 6.7.9 — CI and the release build with DCE since 0.10.3; plain 1,102,304. 521,544 at 0.10.5: the toolchain alone −64, chitra 1.1.0's sankoch `zlib` profile −144,168, the seven other dep moves 0 — byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
+| `--agnos`    | ✅ builds, **642,016 B under `CYRIUS_DCE=1`** *(0.11.0; plain 1,162,208. 784,200 at 0.10.5: toolchain −64, chitra 1.1.0's `zlib` profile −142,120, the other deps 0)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.9 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1335,14 +1388,16 @@ file defines `sys_socketpair` but neither of these. Windows is not a declared cr
 
 ### Hazards that are permanent, not gaps
 
-- ⛔ **`path` wins over `tag`**, which is why every `path` line is dormant since 0.10.5. A build with
-  one uncommented is not evidence the declared graph resolves — only a resolve from the tags is.
+- ⭐ **`path` no longer wins over `tag`** (cyrius 6.7.6): a default build builds the tag, and a `path`
+  counts only under `CYRIUS_LOCAL=1`. A local-mode build is therefore not evidence the declared graph
+  resolves — a default one, or `cyrius deps --locked`, is. Through 6.7.5 `path` won, which is why
+  the lines were made dormant at 0.10.5; they stay commented.
   ⛔ **And it cuts the other way (2026-09-21)**: a sibling that moves ahead of its tag breaks the
   local build of an UNCHANGED tree — `../dhancha` at 0.10.4 against the pinned sadish 0.5.5 was 3
   undefined functions. When a green tree turns red with no diff, look at the siblings before the
   source.
-- ⛔ **`lib/` is not what compiles** while a `path` override is set — the sibling's `dist/` is. A
-  cross-repo change must be followed by `cyrius distlib` in that repo (dhancha's
+- ⛔ **In local mode `lib/` is not what compiles** — `build/local-deps/lib/`, from the sibling's
+  `dist/`, is. A cross-repo change must be followed by `cyrius distlib` in that repo (dhancha's
   `scripts/sync-deps-sidecar.sh` is gone since its 0.10.5, with its sidecar).
 - ⛔ **Build both targets, every time.** See the `--agnos` gap above.
 - ⛔ **`src/ui.cyr` is below `src/app.cyr`.** The render path must never call up; `render_test`
@@ -1354,15 +1409,14 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.10.5 (2026-11-07), in the order the roadmap's ladder gives them:**
-1. ✅ **`0.10.5 · The 6.6.20 stack`** — cut. ⚠ It adopted dhancha 0.10.3's dormant-`path`
-   convention, which this list carried as the operator's open decision: with every sibling on its
-   6.7.18 line, a live `path` vendors the wrong bundles, so the pin move could not be made without
-   it. Reversible by uncommenting; recorded so the ruling is visible.
-2. **M7's index, tags and smart folders** — ✅ the agnos build is closed (daimon 2.4.4); ⛔ blocked
+⭐ **As of 0.11.0 (2026-11-07), in the order the roadmap's ladder gives them:**
+1. ✅ **`0.11.0 · The 6.7.9 stack`** — cut; the toolchain onto the 6.7 language minor, chitra's
+   `zlib` profile (−144 KB), CI's lock guard on `--locked`. ✅ `0.10.5 · The 6.6.20 stack` before it,
+   which adopted the dormant-`path` convention.
+2. **M7's index, tags and smart folders** — ✅ the agnos build is closed (daimon 2.5.0); ⛔ blocked
    on a daimon **surface** for files, filed in daimon 2026-09-23, still OPEN. crab does not fake it
    and does not build its own index meanwhile.
-3. **`0.11.0 · Assisted search`** — behind the same filing.
+3. **`0.12.0 · Assisted search`** — behind the same filing (it read 0.11.0 until that number went to the 6.7.9 pin release).
 4. ⚠ Filed against crab by agnos 1.57.11 and not yet taken:
    `issues/2026-10-09-mountlist-backend-4-zfs-shows-unknown.md` — a ZFS volume (`mountlist`#104
    backend 4) is labelled "unknown" in VOLUMES. Cosmetic; not part of a pin release.
@@ -1477,7 +1531,7 @@ horizontal strip is not.
 
 Stated as fact, not as a priority. ⚠ The on-target runs recorded before this release are dated
 **2026-09-14** (the H1, symlink and face harnesses — the handoff says which were iron and which
-QEMU); the newest is **2026-11-07, the 0.10.5 DCE binary under QEMU** (agnos 1.57.17, aethersafha
+QEMU); the newest is **2026-11-07, the 0.11.0 DCE binary under QEMU** (agnos 1.57.17, aethersafha
 0.17.7) — see *Proven*. Everything since 0.9.7 has run on the host and under QEMU only.
 Every `#ifdef CYRIUS_TARGET_AGNOS` region is invisible to the host suite by construction.
 
