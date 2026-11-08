@@ -526,6 +526,51 @@ fn t_abandon(): i64 {
     return 0;
 }
 
+fn t_dhancha(): i64 {
+    test_group("crab 0.11.3: what dhancha 0.12.0 owes crab");
+    # ⛔ A NAME IS CUT BY WHAT `crab_text_w` MEASURES, so the toolkit must draw it at that size.
+    assert_eq(CRAB_TEXT_EM, DH_TEXT_EM, "crab measures text at the em dhancha draws it at");
+    assert_eq(dh_text_em_for(26), CRAB_TEXT_EM, "...in a 26 px row too");
+    # ⛔ A DRAG THROUGH SIZES ALREADY SEEN RETAINS NOTHING. The heap has no free().
+    var buf = alloc(4 * CRAB_REC_SZ);
+    var gz = alloc(4 * 8);
+    var gm = alloc(4 * 8);
+    var sl = alloc(8);
+    var sr = alloc(8);
+    store64(sl, 0);
+    store64(sr, 0);
+    var i = 0;
+    while (i < 4 * CRAB_REC_SZ) { store8(buf + i, 0); i = i + 1; }
+    i = 0;
+    while (i < 4) {
+        crab_strcpy_n(buf + i * CRAB_REC_SZ, "a.txt", CRAB_REC_SZ);
+        store64(gz + i * 8, 1000);
+        store64(gm + i * 8, 1000);
+        i = i + 1;
+    }
+    var rs = crab_rs();
+    var surf = dh_surface_new(1000, 700);
+    var pass = 0;
+    var before = 0;
+    var drawn = 0;
+    while (pass < 2) {
+        if (pass == 1) { before = alloc_used(); }
+        i = 0;
+        while (i < 12) {
+            dh_surface_resize(surf, 400 + i * 50, 300 + i * 30);
+            crab_rs_reset(rs);
+            crab_rs_pane(rs, 0, buf, 4, "/a", gz, gm, CRAB_PANE_OK, 0, 0, sl);
+            crab_rs_pane(rs, 1, buf, 1, "/", gz, gm, CRAB_PANE_OK, 0, 0, sr);
+            if (crab_render(surf, 0, rs) != 0) { drawn = drawn + 1; }
+            i = i + 1;
+        }
+        pass = pass + 1;
+    }
+    assert_eq(drawn, 24, "every size rendered");
+    assert_eq(alloc_used() - before, 0, "⛔ 12 window sizes, seen before, cost the heap nothing");
+    return 0;
+}
+
 fn t_grid(): i64 {
     test_group("crab P(-1) M16: the decode walk never asks for more cells than the cache holds");
     var n = 400;
@@ -686,6 +731,7 @@ fn main(): i64 {
     t_input();
     t_text();
     t_grid();
+    t_dhancha();
     return assert_summary();
 }
 

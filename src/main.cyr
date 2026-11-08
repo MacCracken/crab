@@ -441,6 +441,7 @@ fn main(): i64 {
     # idle mascot line, transfer progress and index progress. A blocking read forecloses all three.
     var running = 1;
     while (running == 1) {
+        # ⛔ `ev` IS VALID ONLY UNTIL THE NEXT POLL (dhancha 0.12.0): copy out what outlives this pass.
         var ev = dh_client_poll_event(c);
         # ⛔ ANY event resets the clock, not just a keypress. Pointer motion, a resize and a scroll
         # are all the operator being present, and a mascot that spoke over someone moving the mouse
@@ -496,8 +497,8 @@ fn main(): i64 {
             # ⚠ The DECISION is `crab_resize_wanted` in `src/app.cyr`, where a test can reach it; what
             # is here is the syscall plumbing that cannot be.
             # ⛔⛔ RECORDED HERE, APPLIED WHEN THE QUEUE IS DRAINED (P(-1) H11). A grip drag sends a CONFIGURE per
-            # motion step, and each one that reaches dhancha abandons a whole window of pixels to a heap with
-            # no free(): 200 steps cost 274 MB, measured. Only the last size of a burst can be on screen.
+            # motion step, and only the last size of a burst can be on screen: a shared buffer created and
+            # attached for any other is work nothing shows.
             if (k == WINDOW_CONFIGURE) {
                 cfg_w = dh_event_a(ev);
                 cfg_h = dh_event_b(ev);

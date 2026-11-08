@@ -59,7 +59,7 @@ both when this was measured. The real font and larger listings do chain; see the
 |---|---:|---:|
 | `dh_surface_new` pixel buffer | 334,440 | **0** — deferred (0.9.13); nothing calls the accessor |
 | `sd_surface_new` render target | 334,432 | **0/frame** — cached on the DhSurface (0.9.14); 334,432 B once |
-| ~236 widget records @ 248 B (320 B today) | 58,528 | **0** — arena'd, rewound each frame (0.9.15) |
+| ~236 widget records @ 248 B (328 B today) | 58,528 | **0** — arena'd, rewound each frame (0.9.15) |
 | crab's row/status scratch | ~19,000 | **0** — same arena, via `dh_falloc` |
 
 ⚠ **The original figure in this document was 749,704 B; the reproduction measured 746,440 B.** The
@@ -121,7 +121,7 @@ byte, which is the part the conclusion rested on.
   reclaimed, ~4.8 KB/s at 60 Hz. The message is pure scratch, so it is now one hoisted buffer per
   process. ⇒ **crab's render/input loop allocates nothing in steady state**, and the repaint rule is
   lifted outright rather than moved.
-  ⚠ An **event** still costs 56 B (`dh_event_new`) — per input, not per cycle.
+  A polled **event** costs nothing either since dhancha 0.12.0: it is one buffer, valid until the next poll.
 - ⚠ **Anything added to the render path must allocate through `dh_falloc`, not `alloc`.** A single
   plain `alloc()` in `crab_render` reintroduces a per-frame leak, and the suite will say so:
   `tests/crab.tcyr` asserts twenty rendered frames move the global heap by exactly 0 bytes.

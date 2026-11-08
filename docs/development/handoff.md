@@ -1,8 +1,21 @@
-# Handoff — **0.11.2 cut: the P(-1). A cancel that deleted the wrong file, questions the listing changed under, a queue a refused verb replaced — fixed and mutation-proven. Five items wait upstream.**
+# Handoff — **0.11.3 cut: dhancha 0.12.0. Names stay in their columns and a resize stops costing a window. 0.11.2's P(-1) below it; agnos's 62-byte name cut is the one upstream item left**
 
-> ⭐⭐ **2026-11-08. `VERSION` reads 0.11.2 and the CHANGELOG header agrees; 0.11.1 is tagged on the
-> remote (`55453db`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-08. `VERSION` reads 0.11.3 and the CHANGELOG header agrees; 0.11.2 is tagged on the
+> remote (`e8d1b38`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
+>
+> ## 0.11.3 — dhancha 0.12.0
+>
+> ⭐ **A pin release, and one that changes what you see on a real face.** dhancha 0.11.1 → **0.12.0**, nothing else moved.
+> Text now draws at 16 px in every row, so a name stops at the column `crab_text_w` cut it for. No line of crab's code
+> moved: `tests/hardening.tcyr` gained a group, and the rest is comments.
+> ⛔ **What changed underneath you:**
+> - An event from `dh_client_poll_event` is valid only until the next poll. `src/main.cyr` reads each one inside its own pass.
+>   Anything kept longer goes through `dh_event_copy`.
+> - `CRAB_TEXT_EM` must equal dhancha's `DH_TEXT_EM`; the suite holds them equal.
+> - `dh_surface_render` re-uses its buffer across sizes. crab still drains a burst of `CONFIGURE`s to its last, because each
+>   one it applied would still build and attach a shared buffer.
+> ⚠ **Not on the target:** QEMU cannot back a larger window, so a real grow is host-proven only.
 >
 > ## 0.11.2 — the P(-1)
 >
@@ -17,9 +30,7 @@
 > - The `CONFIGURE` body runs when the queue is drained, not in the event arm.
 > - Names longer than `CRAB_NAME_CHARS` (62) are refused: agnos cannot list them back.
 > - `crab_fs_copy` and `crab_fs_move` are gone. Tests drive the stepped path through `t_copy` / `t_move`.
-> ⛔ **Upstream, not fixed here** (the audit's *Upstream*): agnos's readdir cuts names at 62 bytes with no signal; dhancha's
-> `dh_surface_render` allocates per size change and `dh_event_new` per event; `dh_draw_text_ink` draws at the box height
-> while crab measures at em 16, so a name overruns its column on the shipped face; `dh_widget_add_child` is O(n²) per list.
+> ⛔ **Upstream, not fixed here**: agnos's readdir cuts names at 62 bytes with no signal.
 > ⚠ **What main.cyr's wiring rests on**: the host tests its lifted predicates; the wiring is the 13 QEMU harnesses plus a
 > scratch harness for the collision prompt, the withdrawn question and the held-key gate. That harness lives in the session
 > scratchpad and is **not in the agnos repo**. Door and drop's second arm are UNMEASURED on 0.11.1's binary too.
@@ -1482,9 +1493,6 @@ build a **separate** `DhEvent` — so it is now one hoisted buffer per process, 
 this is the other half. **crab's whole render/input loop now allocates nothing in steady state**, and
 the "no continuously-repainting element" rule is lifted **outright** rather than moved — the idle
 mascot line, M4's transfer tray and M7's index progress are unblocked.
-
-⚠ An **event** still costs 56 B (`dh_event_new`). That is per input, not per cycle, and bounded by how
-fast a human types.
 
 ⚠ **NOT on the frame arena, and the trap is worth naming**: routing the scratch through `dh_falloc`
 would be wrong, because polling happens in the event loop while `dh_frame_begin` rewinds the arena

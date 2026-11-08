@@ -1,9 +1,9 @@
 # dhancha `dh_surface_render` retains a full-resolution pixel buffer per distinct window extent
 
-**Status:** 🟠 **OPEN — upstream (dhancha), verified from crab 0.8.0-dev against dhancha 0.9.20.**
-Not a crab defect and **not fixable in crab**: crab must honour resize, and the retention is on the
-toolkit side of `dh_surface_render`. Filed here because **crab is the client that reaches it** and
-because crab's own resize path is what makes it live.
+**Status:** ✅ **FIXED upstream in dhancha 0.12.0 (2026-11-08), taken by crab 0.11.3.** Neither fix
+suggested below: the target keeps its buffer and is re-pointed at any extent that fits, and growth
+doubles. A drag through 500 sizes retained 683,850,400 B on 0.11.1 and retains 6,720,096 B now;
+`tests/hardening.tcyr` holds crab to it. The rest of this file is the record as filed.
 
 **Date**: 2026-08-30
 **From**: crab (the AGNOS file manager) — first dhancha client that both accepts `WINDOW_CONFIGURE`

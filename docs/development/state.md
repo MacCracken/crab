@@ -24,8 +24,8 @@
 
 ## Version
 
-**0.11.2 IS CUT** — `VERSION` reads `0.11.2` and the CHANGELOG header agrees, 2026-11-08. 0.11.1 is
-tagged on the remote (`55453db`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
+**0.11.3 IS CUT** — `VERSION` reads `0.11.3` and the CHANGELOG header agrees, 2026-11-08. 0.11.2 is
+tagged on the remote (`e8d1b38`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
 the commit, the tag and the push are the operator's.
 
 ⭐⭐ **daimon NOW HAS THE FILE SURFACE M7 AND M8 WAITED ON — M8's ranked by words, not meaning. Nothing in
@@ -49,6 +49,12 @@ each result with a `why`, facets and the folders it appears in.
   127.0.0.1:8090.
 The filing: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 (crab's copy in `issues/`). ⛔ crab will not fake an index it cannot back, nor build one of its own.
+
+**0.11.3 contents — dhancha 0.12.0.** A pin release, and no line of crab's code moved. Text on a real face now draws at
+the 16 px crab measures it at, so a name stops at its column (69 overrun pixel columns on Liberation Sans → 0); a resize
+re-uses dhancha's render target; a polled event is free and valid only until the next poll. Four of the five upstream
+items 0.11.2 listed are closed; agnos's 62-byte name cut remains. Host **390,400 B**, agnos **663,336 B** under DCE.
+**2543 / 0 and 180 / 0**, render_test 55, the 640x220 dump `cmp`-identical to 0.11.2's.
 
 **0.11.2 contents — the P(-1).** Six read-only lenses, one per surface; every finding read against the code; every
 repair a host test can reach mutation-proven (53 mutants). 11 HIGH, 21 MEDIUM, 31 LOW:
@@ -901,6 +907,15 @@ the render call sites the deferred-stat drain added.
 
 ## Proven
 
+### ⭐⭐ As of 2026-11-08 — the 0.11.3 DCE binary (663,336 B, `b764d50f…`; cyrius 6.7.18, dhancha 0.12.0, the other deps as 0.11.2) under QEMU, agnos 1.57.17, the same `aethersafha_agnos` as 0.11.2's run
+
+- All 13 harnesses, with the same verdict on each as 0.11.2: **PASS** button, columns, face, go, h1, listing-cap, pointer,
+  preview, shift, symlink. **PARTIAL** resize, its QEMU ceiling. **UNMEASURED** door and drop's second arm.
+- ⭐ The scratch harness for the collision prompt, a withdrawn question and the held-key gate, **PASS** on this binary: it
+  drives the event path dhancha 0.12.0 changed.
+- ⚠ **Not on the target**: a real grow. QEMU cannot back a larger window, so `resize` proves the refusal and dhancha's
+  target reuse through a grow is proven on the host.
+
 ### ⭐⭐ As of 2026-11-08 — the 0.11.2 DCE binary (659,208 B, `dbfc15f9…`; cyrius 6.7.18, same deps as 0.11.1) under QEMU, agnos 1.57.17, aethersafha 0.17.7
 
 - All 13 harnesses. **PASS**: button, columns, face (`410820 bytes adv=9 upem=2048 i=4 m=13`), go, h1, listing-cap, pointer,
@@ -1179,7 +1194,7 @@ tag, clean; re-derive it rather than assuming it, since `path` is what makes it 
 | rupa    | 0.2.1  | dormant  | shared theme tokens + **`on-accent`** and contrast   |
 | rekha   | 1.1.2  | dormant  | **the face** — `crab_face` opens `/fonts/default.ttf` through it; advances size every column. ⭐ the 1.x freeze of 0.9.0's surface (1.0.0); ⚠ 1.1.2 is a full audit (three out-of-bounds reads; faces it now refuses), +12 / +16 KB |
 | kashi   | 1.3.0  | dormant  | CP437 8×16 glyph data for `dh_draw_text` (font=0), the fallback face. ⛔ **>= 1.1.0, hard** (`kashi_cp437_from_unicode`); 1.1.1's byte-sized buffers are −88,576 B |
-| dhancha | 0.11.1 | dormant  | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`, the frame arena; one glyph per CHARACTER; ⭐ 0.10.5's CP437 map is kashi's |
+| dhancha | 0.12.0 | dormant  | widgets, `dh_list_new_h` (menu bar), `dh_theme_*`, the frame arena; one glyph per CHARACTER; ⭐ 0.10.5's CP437 map is kashi's; ⛔ 0.12.0: a polled event lasts until the next poll, and text draws at `DH_TEXT_EM` |
 | chitra  | 1.3.1  | dormant  | **thumbnails** — PNG/JPEG/GIF/BMP decode. ⭐ 1.1.0+ brings sankoch's `zlib` profile, not all of sankoch (−144 KB); 1.3.1 decodes in ~2.2x its RGBA (1.1.3: ~2.9x). ⛔ see gaps |
 | setu    | 0.9.1  | dormant  | client transport — channel-band, reads `AGNOS_CHAN`; 0.8.11 reads a dead compositor as -6 on Linux |
 | daimon  | 2.5.5  | dormant  | **declared, NOT linked** — `modules = []`; reached over its HTTP API, loopback-only on agnos too since 2.4.4 (agnos >= 1.57.7). ✅ builds and runs on agnos. ⭐ `/v1/files` since 2.5.4: index, tags, ratings, smart folders, duplicates; ranked search by WORDS since 2.5.5 — opt-in (`--index-root`), no caller auth until 2.6.x. The M7/M8 filing is 🟡, open on meaning. ⭐ tag verified by `cyrius deps` |
@@ -1334,8 +1349,8 @@ bundles are 472 KB and 552 KB of source at 0.12.0 / 1.1.0 (86 KB and 41 KB at 0.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **390,368 B under `CYRIUS_DCE=1`** *(0.11.2; plain 1,127,648. 385,664 at 0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
-| `--agnos`    | ✅ builds, **659,208 B under `CYRIUS_DCE=1`** *(0.11.2; plain 1,183,496. 654,600 at 0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
+| x86_64 linux | ✅ builds, **390,400 B under `CYRIUS_DCE=1`** *(0.11.3; plain 1,127,680. 390,368 at 0.11.2; plain 1,127,648. 385,664 at 0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
+| `--agnos`    | ✅ builds, **663,336 B under `CYRIUS_DCE=1`** *(0.11.3; plain 1,183,528. 659,208 at 0.11.2; plain 1,183,496. 654,600 at 0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1503,8 +1518,9 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.11.2 (2026-11-08), in the order the roadmap's ladder gives them:**
-0. ✅ **`0.11.2 · The P(-1)`** — cut; the audit in `docs/audit/`. Five items wait upstream (agnos's 62-byte name cut, three in dhancha, and text drawn at the box height).
+⭐ **As of 0.11.3 (2026-11-08), in the order the roadmap's ladder gives them:**
+0. ✅ **`0.11.3 · dhancha 0.12.0`** — cut; the one upstream item left from the audit is agnos's 62-byte name cut.
+   ✅ `0.11.2 · The P(-1)` before it; the audit is in `docs/audit/`.
 1. ✅ **`0.11.1 · The 6.7.18 stack`** — cut; every dep on its latest tag, rekha 1.1.2's audit, chitra's
    cheaper decode, CI failing a lock that keeps a superseded pin. ✅ `0.11.0 · The 6.7.9 stack` before it.
 2. **M7's index, tags and smart folders** — ✅ daimon's side exists (2.5.4's `/v1/files`). ⛔ Not yet

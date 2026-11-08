@@ -2,6 +2,48 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.3] — 2026-11-08 — dhancha 0.12.0: a name stops at its column, and a resize stops costing a window
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **A pin release.** dhancha 0.11.1 → **0.12.0**, which carries the four dhancha fixes 0.11.2's audit asked for. Nothing
+> else moved, and no line of crab's code did: `tests/hardening.tcyr` gained a group and the rest is comments.
+
+### What an operator sees
+
+- **On the real face, a name stops at its own column.** Text was drawn at the height of its row, 26 px, after crab had
+  measured and cut it at 16, so names ran over Size and Modified and Modified ran off the window.
+- **Text on the real face is smaller than it was**: 16 px, the size the columns were built for and the size of the
+  bitmap font.
+- **Dragging a window's edge no longer costs memory for every size it passes through.**
+
+### Measured
+
+| | 0.11.2 | 0.11.3 |
+|---|---:|---:|
+| Liberation Sans: pixel columns of a name past its own cell | 69 | **0** |
+| dhancha: retained by a drag through 500 sizes, 400x300 to 900x700 | 683,850,400 B | **6,720,096 B** |
+| dhancha: one polled input event, after the first | 56 B | **0 B** |
+| dhancha: 50,000 appends to one parent | 2.29 s | **0.004 s** |
+| Linux under `CYRIUS_DCE=1` | 390,368 B | 390,400 B |
+| agnos under `CYRIUS_DCE=1` | 659,208 B | 663,336 B |
+
+### Changed
+
+- **dhancha 0.11.1 → 0.12.0** (`b3390e2`), with `cyrius.lock` regenerated: 40 files, 9 commit pins. Its one new contract
+  for crab is that a polled event lasts only until the next poll. `src/main.cyr` reads each event inside its own pass.
+- **`CONFIGURE` coalescing stays.** Only its reason changed: an applied size still builds and attaches a shared buffer.
+
+### Tests
+
+`tests/hardening.tcyr` holds crab to the new dhancha: `CRAB_TEXT_EM` equals `DH_TEXT_EM`, and rendering through 12 window
+sizes already seen costs the heap 0 B. Both were proven by undoing them. With the reuse removed from the bundle, the same
+24 frames retain 3,181,998,384 B.
+
+Every CI gate passes. The tested agnos binary is `b764d50f…`: all 13 QEMU harnesses give the same verdict as 0.11.2 (10
+pass, `resize` PARTIAL, `door` and `drop` arm 2 UNMEASURED), and the scratch harness for the collision prompt, a withdrawn
+question and the held-key gate passes. ⚠ QEMU cannot back a larger window, so a real grow is proven on the host only.
+
 ## [0.11.2] — 2026-11-08 — the P(-1): a cancel that deleted the wrong file, questions the listing changed under, and one frame loop
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

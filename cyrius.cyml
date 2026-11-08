@@ -116,13 +116,15 @@ modules = ["src/font_data.cyr"]
 # on a frame arena must re-establish focus every frame, which `crab_pane` does.
 # ⛔ 0.9.14 IS A CONTRACT: `dh_surface_render` may return the SAME surface twice. A caller wanting
 # two frames at once needs two DhSurfaces; `src/render_test.cyr` is one and guards it.
+# ⛔ 0.12.0 IS A CONTRACT: a polled event is valid only until the next poll, and a widget's text draws
+# at `DH_TEXT_EM`, which `CRAB_TEXT_EM` must equal.
 # ⛔ -6 FROM `dh_client_poll_event` IS FINAL: loop while it is > 0, stop on -6. setu 0.8.11 made a
 # dead compositor read as -6 on Linux too (it read as "nothing pending"); `src/main.cyr` stops on it.
 # ⚠ The allocation-gate history that used to live here is docs/architecture/001's subject.
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 # path = "../dhancha"
-tag = "0.11.1"
+tag = "0.12.0"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it

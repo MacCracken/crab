@@ -185,6 +185,7 @@ enum CrabCol {
     # ⚠ THE EM HEIGHT THE ADVANCE IS ASKED AT. `rekha_char_advance_px` scales by the pixel em, and
     # kashi's cell is 8x16 — so 16 is the height the 9 above is the advance FOR, and asking a
     # scalable face at any other height would return advances that do not match the text drawn.
+    # It is dhancha's `DH_TEXT_EM`, the size a widget draws its text at; a test holds them equal.
     CRAB_TEXT_EM      = 16;
     # ⛔ THE SCAN BOUND FOR MEASURING TEXT, AND IT IS A SAFETY NET RATHER THAN A MEANING. The longest
     # string crab ever draws is a path, so a NUL missing from any of them costs a wrong width and
@@ -3438,7 +3439,7 @@ fn crab_status_str(buf, sel, sizes, mtimes, count): i64 {
 # per pane) without ever chaining. GROW covers anything past that with ONE extra chunk." Both halves
 # were true when written and neither survived, because TWO things moved under it and neither
 # re-derived the number: M3 *#02* took the cap 256 -> 1024, and M3 *#32* took a row from one widget
-# to 1 + `ncols` (a row widget plus a cell widget per column, at `DH_WIDGET_SIZE` = 320 B each).
+# to 1 + `ncols` (a row widget plus a cell widget per column, at `DH_WIDGET_SIZE` each).
 #
 # ⭐ RE-MEASURED 2026-08-30 with `arena_capacity_total`, per rendered frame, both panes:
 #
