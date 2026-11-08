@@ -41,9 +41,21 @@ jobs:
         # manifest went green (40 verified, 0 failed) while `--locked` refused it, rc=1, naming eight
         # missing commit pins. A tampered pin is refused too. `--verify` stays as a second, independent
         # hash check of `lib/` against the lock.
+        # ⛔ BUT `--locked` PASSES A LOCK THAT KEEPS A MOVED TAG'S OLD ROW, and the grep below is what
+        # fails it. cyrius keeps that row on purpose (fail-closed) and prints `note: cyrius.lock keeps
+        # <dep>@<old>'s pin …; delete cyrius.lock to re-pin` on every resolve. Measured on 6.7.18 at
+        # 0.11.1: `cyrius deps --lock` after the eight tag moves wrote 18 commit rows for 9 deps, and
+        # `--locked` answered "exactly what the tags resolve", rc=0, with eight notes. The cure is the
+        # note's own: `rm cyrius.lock && cyrius deps`.
+        # ⛔ Redirect, then check the status: `cmd | tee` would report tee's.
         run: |
           set -e
-          cyrius deps --locked
+          cyrius deps --locked > /tmp/deps-locked.log 2>&1 || { cat /tmp/deps-locked.log; exit 1; }
+          cat /tmp/deps-locked.log
+          if grep -q "cyrius.lock keeps" /tmp/deps-locked.log; then
+            echo "::error::cyrius.lock keeps a superseded commit pin. Delete it and run cyrius deps."
+            exit 1
+          fi
           cyrius deps --verify
 
       - name: Build (host)
@@ -127,7 +139,7 @@ jobs:
         # ⚠ REFERENCE coverage — a floor, not a correctness proof, and the tool says so itself.
         # The v1.0 criterion is 80%; the floor sits two points under the measurement, so it gates with
         # headroom rather than being a rubber stamp: 82 against a measured 84% (347/413 on cyrius
-        # 6.6.20 and 6.7.9, `render_test` in the corpus via `[coverage] programs`). It was 85 against
+        # 6.6.20, 6.7.9 and 6.7.18, `render_test` in the corpus via `[coverage] programs`). It was 85 against
         # 87% until cyrius 6.6.8 made the tool honest — it now reads `public fn` and whole files, and
         # crab's ui.cyr + app.cyr had hidden 49 fns past its old 256 KiB buffer — so the same tree
         # read 82%.
@@ -146,10 +158,14 @@ jobs:
       #     runner is noise, and a step that cannot fail is not a gate. It is run locally, and
       #     `docs/benchmarks.md` is where its numbers belong — see the roadmap's 0.7.8 batch.
       #   - `cyrius lint` — exits 0 no matter what it finds, so it CANNOT gate. `cyrius lint --strict`
-      #     does (exit 2), but it fails today on 83 pre-existing over-long lines — 14 in
-      #     `src/main.cyr`, 58 in `tests/crab.tcyr`, 11 in `tests/crab.fcyr` (85 lint warnings in
-      #     all, counting 2 consecutive-blank-line hits). Turning it on means reformatting the
-      #     event loop — the widest mechanical edit in the most sensitive file — and that is its
-      #     own change, not a rider on this one — see the roadmap's 0.8.0 batch.
+      #     does (exit 2), but it fails today on 173 pre-existing over-long lines — 3 in
+      #     `src/app.cyr`, 16 in `src/main.cyr`, 143 in `tests/crab.tcyr`, 11 in `tests/crab.fcyr`
+      #     (177 lint warnings in all, counting 4 consecutive-blank-line hits; measured at 0.11.1,
+      #     the same on 6.7.9 and 6.7.18). Turning it on means reformatting the event loop — the
+      #     widest mechanical edit in the most sensitive file — and that is its own change, not a
+      #     rider on this one — see the roadmap's 0.8.0 batch.
+      #     ⭐ Its content rules do run clean: cyrius 6.7.11's write-length rule (a literal written
+      #     with a length that is not its byte count — setu 0.9.1's fix) and `load*(&a + K)` overrun
+      #     rule report nothing in any of the eight files.
       #   - `cyrius audit` — bundles lint+test+bench and therefore exits 1 on those same lint
       #     warnings. It becomes usable here the day `--strict` does.

@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "crab — sovereign Cyrius-native file manager for AGNOS. Dual-pane GUI on the dhancha/setu desktop stack. PLANNED, NOT SHIPPED: AI semantic find / auto-tag / dedup via daimon's vector store, files-as-memory, sibling to mneme. The hermit crab carries its $HOME and reaches out to grab: a sea-arthropod parity on KDE's Dolphin, wearing Rust's own mascot (Ferris) while replacing the Rust interim (yazi). Roadmap Priority 1 — ship before beta."
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.7.9"
+cyrius = "6.7.18"
 
 [build]
 entry = "src/main.cyr"
@@ -16,7 +16,8 @@ output = "crab"
 
 # ⭐ cyrius 6.6.17's P5-A: a RUN program joins `cyrius coverage`'s corpus. `render_test` is crab's
 # RUN program over the laid-out render path (CI runs it), so what it names counts, and its own four
-# harness fns stop counting as uncovered source: 344/417 (82 %) → 347/413 (84 %) on 6.6.20 and 6.7.9.
+# harness fns stop counting as uncovered source: 344/417 (82 %) → 347/413 (84 %) on 6.6.20, 6.7.9 and
+# 6.7.18.
 [coverage]
 programs = ["src/render_test.cyr"]
 
@@ -50,13 +51,13 @@ stdlib = ["string", "fmt", "alloc", "io", "vec", "str", "args", "syscalls", "ass
 # `sd_flatten_degraded` (per-operation flatten budget, sadish 0.7.x); 0.10.0's floor of >= 0.5.5
 # (`sd_alloc_set`, `sd_canvas_blit_at`) stands beneath it.
 # ⛔ MOVE sadish AND rekha TOGETHER. rekha's dist is cut against sadish's inline-point `SdPath`;
-# two bundles on two sadishes is a link error at best. rekha 1.1.0 names sadish 0.12.0, so the pair
-# agrees by tag again as well as by code (0.12.0 moved only `sadish_version`'s return).
-# ⚠ The bundle is 471,684 B of source (85,815 at 0.5.5). Linked whole it cost +49 % of the binary
+# two bundles on two sadishes is a link error at best. rekha 1.1.2 names sadish 0.12.1, so the pair
+# agrees by tag as well as by code (0.12.0 and 0.12.1 each moved only `sadish_version`'s return).
+# ⚠ The bundle is 471,700 B of source (85,815 at 0.5.5). Linked whole it cost +49 % of the binary
 # (0.10.2); since 0.10.3 CI and the release build under `CYRIUS_DCE=1` (operator ruling).
 [deps.sadish]
 git = "https://github.com/MacCracken/sadish.git"
-tag = "0.12.0"
+tag = "0.12.1"
 modules = ["dist/sadish.cyr"]
 
 # rupa (रूप — form) — the shared desktop theme-token core. crab reads its tokens through dhancha's
@@ -66,7 +67,7 @@ modules = ["dist/sadish.cyr"]
 [deps.rupa]
 git = "https://github.com/MacCracken/rupa.git"
 # path = "../rupa"
-tag = "0.2.0"
+tag = "0.2.1"
 modules = ["dist/rupa.cyr"]
 
 # rekha — scalable TrueType outlines. Since 0.9.0 crab draws with it: `crab_face` opens the
@@ -76,11 +77,15 @@ modules = ["dist/rupa.cyr"]
 # 0.3.5 does not define. Against an older pin crab fails to link with
 # `undefined function 'rekha_char_advance_px'` — measured, not predicted.
 # ⛔ It moves with sadish — see the sadish block.
-# ⭐ The 1.x line freezes 0.9.0's surface (1.0.0); 1.1.0 is that bundle on cyrius 6.7.9, no code line
-# moved (dhancha 0.11.0's measurement). It has no sidecar (rekha ADR 0010): no stdlib leaf reaches crab.
+# ⭐ The 1.x line freezes 0.9.0's surface (1.0.0). It has no sidecar (rekha ADR 0010): no stdlib leaf
+# reaches crab.
+# ⚠ 1.1.2 IS A FULL AUDIT, and it is all of 0.11.1's growth — +12,432 B host / +16,528 B agnos under DCE,
+# measured by holding it at 1.1.0. Three out-of-bounds reads fixed, and faces it now refuses. Of crab's
+# three direct calls, only `rekha_units_per_em` answers differently — 0 for a `unitsPerEm` outside
+# 16..16384 — and crab only prints it on the `crab: font` line. The shipped face's is 2048.
 [deps.rekha]
 git = "https://github.com/MacCracken/rekha.git"
-tag = "1.1.0"
+tag = "1.1.2"
 modules = ["dist/rekha.cyr"]
 
 # kashi (काशि) — the AGNOS system font. dhancha's `dh_draw_text` blits its CP437 8x16 glyphs for
@@ -99,7 +104,7 @@ modules = ["dist/rekha.cyr"]
 [deps.kashi]
 git = "https://github.com/MacCracken/kashi.git"
 # path = "../kashi"
-tag = "1.2.0"
+tag = "1.3.0"
 modules = ["src/font_data.cyr"]
 
 # dhancha — the widget toolkit: LIST, GRID, PROGRESS, MENU, SHEET, the theme bindings, and the
@@ -117,7 +122,7 @@ modules = ["src/font_data.cyr"]
 [deps.dhancha]
 git = "https://github.com/MacCracken/dhancha.git"
 # path = "../dhancha"
-tag = "0.11.0"
+tag = "0.11.1"
 modules = ["dist/dhancha.cyr"]
 
 # setu — the display client transport. On agnos it is the channel band (syscall #97 `chan_op`); it
@@ -129,27 +134,30 @@ modules = ["dist/dhancha.cyr"]
 [deps.setu]
 git = "https://github.com/MacCracken/setu.git"
 # path = "../setu"
-tag = "0.9.0"
+tag = "0.9.1"
 modules = ["dist/setu.cyr"]
 
 # chitra (चित्र — image) — CPU raster decode (PNG/JPEG/GIF/BMP) for THUMBNAILS only. The preview's
 # DIMENSIONS line uses no decoder at all: `crab_img_dims` reads header bytes.
 # ⛔⛔ EVERY DECODE IS PERMANENT AND THAT — NOT THE BINARY SIZE — IS THE LIVE CONSTRAINT. chitra makes
-# 32 `alloc()` calls (1.1.3), `chitra_image_free` is a no-op, and cyrius's `alloc` has no `free()`. The two
-# budgets that bound it are `CRAB_THUMB_MAX_RGBA` and `CRAB_THUMB_TOTAL_MAX` in `src/app.cyr`, and
-# they are the first thing to delete the day the allocator gains a `free()`.
+# 30 `alloc()` call sites (1.3.1), `chitra_image_free` is a no-op, and cyrius's `alloc` has no `free()`.
+# The two budgets that bound it are `CRAB_THUMB_MAX_RGBA` and `CRAB_THUMB_TOTAL_MAX` in `src/app.cyr`,
+# and they are the first thing to delete the day the allocator gains a `free()`.
+# ⭐ 1.3.1 unfilters a non-interlaced PNG in place, so a decode spends ~2.2x its RGBA where 1.1.3 spent
+# ~2.9x (measured; the table is in `src/app.cyr`). 1.3.0 also decodes a PNG past 16 MiB of scanlines,
+# which 1.2.x refused as `CHITRA_ERR_INFLATE_LIMIT`. crab's 4 MB budget never got near that size.
 # ⚠ Adopting it cost +115 % of the binary, ~399 KB of which is the transitive `sankoch` inflate leaf
 # PNG requires. Operator ruling 2026-08-31, taken with the measurements in hand.
-# ⭐ SINCE 1.1.0 SANKOCH ARRIVES AS chitra's OWN `[deps.sankoch]` — tag 2.8.7, the `zlib` profile
+# ⭐ SINCE 1.1.0 SANKOCH ARRIVES AS chitra's OWN `[deps.sankoch]` — tag 2.8.9 at 1.3.1, the `zlib` profile
 # (`dist/sankoch-zlib.cyr`: inflate, deflate, CRC-32, Adler-32), resolved transitively; the full stdlib
 # `sankoch.cyr` and its `thread` / `sync` / `mmap` leaves left `lib/` at 0.11.0. Isolated, that is
 # −144,168 B host / −142,120 B agnos — the whole of 0.11.0's drop. ⛔ Do NOT add `sankoch` to
 # `[deps] stdlib`: closest-wins, so crab's own leaf would beat the profile and link every codec back.
-# ⚠ crab declares none of chitra's stdlib leaves — `dist/chitra.deps` (just `string` at 1.1.3) is
+# ⚠ crab declares none of chitra's stdlib leaves — `dist/chitra.deps` (just `string` at 1.3.1) is
 # authoritative.
 [deps.chitra]
 git = "https://github.com/MacCracken/chitra.git"
-tag = "1.1.3"
+tag = "1.3.1"
 modules = ["dist/chitra.cyr"]
 
 # daimon (δαίμων) — the AGNOS agent orchestrator, and the intended back end for crab's M7/M8 arc:
@@ -177,18 +185,26 @@ modules = ["dist/chitra.cyr"]
 # with no daimon lists, copies, moves and deletes exactly as it does today, and the M7 surfaces
 # report that the index is unavailable rather than failing. That is the same rule the preview
 # follows for a file it cannot decode — say which kind of nothing this is.
-# ✅ IT BUILDS AND RUNS ON AGNOS — re-derived for 2.5.0 on 2026-11-07, not taken from its changelog:
-# `cyrius build --agnos` from the tag, 0 errors (3,448,104 B), and the 2.5.0 commit's CI job "AGNOS
-# guest test" passed (agnos 1.57.14).
-# ⛔⛔ BUT THE BUILD WAS NEVER THE ONLY GATE. M7 needs daimon to HOLD a disk-wide file index and
-# per-file tags; M8 needs ranked FILE results that say why they matched. daimon 2.5.0 offers none
-# of it: no route in `http_route` is about files (agents, edge, health, mcp, metrics, rag,
-# scheduler); its per-agent memory store has no route and no tag field; its RAG is in-memory only,
-# embeds by a 32-slot character-sum hash, and answers with a prompt template, not paths. Neither
-# 2.4.4 nor 2.5.0 changed the router, RAG, vector-store or memory-store files. Filed, OPEN at 2.5.0:
+# ✅ IT BUILDS AND RUNS ON AGNOS — re-derived for 2.5.5 on 2026-11-07, not taken from its changelog:
+# `cyrius build --agnos` from the tag, 0 errors (4,846,952 B), and every CI job on the 2.5.5 commit
+# passed, "AGNOS guest test" among them.
+# ⭐⭐ AND SINCE 2.5.4 IT HAS A SURFACE FOR FILES. The build was never the only gate; this one has
+# moved. `/v1/files` (daimon ADR-010, `src/api_files.cyr`) answers M7: an index of the files under the
+# operator's roots and its state (`none` / `building` / `catching_up` / `paused` / `fresh`), tags and
+# ratings per file with counts and suggestions, six smart folders as saved queries, and duplicates by
+# a whole-content SHA-256. 2.5.5 answers M8's shape: `GET /v1/files?q=…`, ranked, each result with a
+# `why`, the facets and the folders it appears in.
+# ⛔ What it is NOT, in daimon's own words (its filing is 🟡, still open at 2.5.5):
+#   - it ranks by WORDS, not by meaning — `cost.method` says so, and `receipt` does not find
+#     `invoice`. M8's canvas says "vector + name match", and no local embedding model exists;
+#   - it is OFF unless the operator runs `serve --index-root DIR`, and reading contents is a second
+#     opt-in (`--index-content`), because the API has no caller authentication until 2.6.x;
+#   - on agnos it does not pause on battery: the kernel has no power source to read.
+# ⛔ And crab has no client for it yet. crab vendors no `net` leaf, so M7's first crab-side step is an
+# HTTP client to 127.0.0.1:8090. The filing:
 # daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md
 [deps.daimon]
 git = "https://github.com/MacCracken/daimon.git"
 # path = "../daimon"
-tag = "2.5.0"
+tag = "2.5.5"
 modules = []

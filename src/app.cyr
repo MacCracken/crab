@@ -3164,48 +3164,41 @@ fn crab_pv_publish_none(rs): i64 {
 
 # ⭐⭐ THUMBNAILS (M5) — chitra decodes, crab downsamples, and the BUDGET is the whole design.
 #
-# ⛔⛔⛔ EVERY DECODE IS PERMANENT. THIS IS THE CONSTRAINT, NOT THE BINARY SIZE. Measured 2026-08-31:
-# chitra makes **31 `alloc()` calls**, `chitra_image_free` is a **no-op** (`return 0;`), and cyrius's
+# ⛔⛔⛔ EVERY DECODE IS PERMANENT. THIS IS THE CONSTRAINT, NOT THE BINARY SIZE. chitra 1.3.1 has
+# **30 `alloc()` call sites**, `chitra_image_free` is a **no-op** (`return 0;`), and cyrius's
 # `alloc` is a bump allocator whose only reclaim is `alloc_reset()` — which rewinds the WHOLE heap
 # and would invalidate crab's pane paths, readdir buffers, surface and client struct. So the bytes a
 # decode spends are spent for the life of the process, and a second decode of the same file spends
-# them again.
+# them again. Measured at 0.11.1 through `chitra_image_decode_budget`, the call crab makes, on 8-bit
+# RGB PNGs as ImageMagick writes a photo (fractal noise, 32 KB IDAT chunks), each in a fresh process:
 #
-#   | source        | RGBA bytes | PERMANENT alloc | ratio |
-#   |---------------|-----------:|----------------:|------:|
-#   | 64x64         |     16,384 |          83,976 |  5.1x |
-#   | 256x256       |    262,144 |         700,280 |  2.7x |
-#   | 512x512       |  1,048,576 |       2,670,608 |  2.5x |
-#   | 1024x1024     |  4,194,304 |      10,549,168 |  2.5x |
-#   | 2048x2048     | 16,777,216 |      42,057,928 |  2.5x |
+#   | source        | RGBA bytes | PERMANENT alloc | ratio | chitra 1.1.3 |
+#   |---------------|-----------:|----------------:|------:|-------------:|
+#   | 64x64         |     16,384 |          70,856 |  4.3x |         5.6x |
+#   | 256x256       |    262,144 |         618,536 |  2.4x |         3.1x |
+#   | 512x512       |  1,048,576 |       2,323,152 |  2.2x |         3.0x |
+#   | 1024x1024     |  4,194,304 |       9,091,816 |  2.2x |         2.9x |
+#   | 2048x2048     | 16,777,216 |      36,003,256 |  2.1x |         2.9x |
 #
-# ⇒ **~2.5x the RGBA size, never returned.** A file manager that decoded on every arrow key would
-# exhaust a machine browsing one photo directory. Hence two budgets, and neither is optional.
+# ⇒ **~2.2x the RGBA size, never returned**: the RGBA output, the inflated scanlines and the joined
+# IDAT data. 1.3.1 unfilters in place, so the unfiltered copy 1.1.3 also kept is gone. The first
+# decode in a process includes ~41 KB of sankoch tables that later decodes reuse. A file manager that
+# decoded on every arrow key would exhaust a machine browsing one photo directory. Hence two budgets,
+# and neither is optional.
 #
 # ⛔ BUDGET 1 — PER IMAGE, AND IT IS A PRE-CHECK. `chitra_image_decode_budget` reads the DECLARED
-# dimensions out of the header and refuses before allocating anything: measured, a refusal costs
-# **16 bytes**, against 26.6 MB for the same file decoded without it. That asymmetry is why crab
-# never calls bare `chitra_image_decode`.
+# dimensions out of the header and refuses before allocating anything: measured on 1.3.1, a refusal
+# costs **16 bytes**, against 36,003,256 for the 2048x2048 above decoded without a cap. That asymmetry
+# is why crab never calls bare `chitra_image_decode`.
 # ⛔ BUDGET 2 — PER SESSION, BECAUSE BUDGET 1 DOES NOT COMPOSE. A cap on one decode says nothing
 # about a hundred of them. crab measures `alloc_used()` across each decode and stops thumbnailing
 # once the cumulative spend passes `CRAB_THUMB_TOTAL_MAX`. ⚠ It reports that state rather than
 # silently showing nothing — a feature that stops working without saying so reads as a bug.
 #
-# ⭐⭐ AND THE PER-IMAGE BUDGET KEEPS crab ON THE WORKING SIDE OF AN UPSTREAM DEFECT.
-# ⚠ CORRECTED 2026-09-01 — THIS DESCRIBED A DEFECT THE DECLARED VERSION NO LONGER HAS. chitra
-# **1.0.1** (the tag crab pins) refuses such a PNG **from the header, in under 64 KiB**, with its own
-# `CHITRA_ERR_INFLATE_LIMIT`; it is 1.0.0 that spent 26,617,512 bytes to return a bare
-# `CHITRA_ERR_INFLATE`. crab's behaviour is unchanged either way — the per-image budget already kept
-# it clear of that cliff — but a comment asserting an upstream bug that has been fixed is how a
-# budget gets called redundant and deleted. The history, for that reason:
-# chitra 1.0.0 FAILED with `CHITRA_ERR_INFLATE` on any PNG whose decompressed scanline data exceeds
-# **16 MiB** — bracketed exactly: 2200x2200 (14,522,200 B inflated) decodes, 2370x2370 (16,853,070)
-# does not. That is ~5.6 megapixels of RGB, so an ordinary phone photo saved as PNG fails — and it
-# fails EXPENSIVELY, spending 26.6 MB on the way to returning 0. chitra advertises
-# `CHITRA_MAX_PIXELS = 16,777,216` (4096x4096), well past what actually works.
-# ⇒ `CRAB_THUMB_MAX_RGBA` is 4 MB, and a 1024x1024 RGB PNG inflates to ~3.1 MB — comfortably under
-# the cliff. crab cannot reach the bug. Filed upstream; see
-# chitra/docs/development/issues/2026-08-31-inflate-fails-past-16mib.md.
+# ⚠ NEITHER BUDGET WAS EVER ABOUT chitra's OLD 16 MiB INFLATE CEILING. Through 1.2.x chitra refused a
+# PNG whose scanlines inflated past 16 MiB; 1.3.0 decodes it. 4 MB of declared RGBA inflates to at
+# most ~8.4 MB even at 16 bits a channel, so crab never reached that ceiling, and its going changed
+# nothing here. The budgets stand on the table above.
 enum CrabThumb {
     # ⛔ `CRAB_THUMB_W` / `_H` / `_BYTES` AND THE `CRAB_TH_*` STATES LIVE IN `src/ui.cyr`, NOT HERE,
     # and that is the include-order rule rather than a preference. `app.cyr` includes `ui.cyr`, so
@@ -3213,10 +3206,10 @@ enum CrabThumb {
     # `render_test.cyr` and the suite include `ui.cyr` ALONE. Declaring them here compiled fine
     # through `main.cyr` and left `render_test` with six undefined symbols. **Fourth time in this
     # project.** Anything the render path touches lives at or below `ui.cyr`.
-    # ⚠ 4 MB of DECLARED RGBA ~ 1024x1024. Chosen against the table above (a ~10.5 MB permanent
-    # spend) and against the 16 MiB inflate cliff, not for roundness.
+    # ⚠ 4 MB of DECLARED RGBA ~ 1024x1024. Chosen against the table above (a ~9.1 MB permanent
+    # spend), not for roundness.
     CRAB_THUMB_MAX_RGBA  = 4194304;
-    # ⚠ 32 MB of cumulative permanent spend — about three 1024x1024 images, or forty 256x256 ones.
+    # ⚠ 32 MB of cumulative permanent spend — four of the 1024x1024 images above, or 59 of the 256x256.
     # ⛔ NOT A GUESS AT WHAT IS SAFE, A LIMIT ON WHAT IS UNRECOVERABLE. When the allocator gains a
     # free(), or chitra takes an arena, this constant is the first thing that should be deleted.
     CRAB_THUMB_TOTAL_MAX = 33554432;
@@ -3307,7 +3300,7 @@ fn crab_thumb_spent(): i64 { return crab_th_spent; }
 # still consults it: proving that needs a test that really spends 32 MB, and a suite that allocated
 # 32 MB per run to check a guard would be a worse thing than the guard is a good one.
 # ⛔ `>=`, NOT `>`. At exactly the ceiling the budget IS spent — a decode allowed at the boundary is
-# one whose ~2.5x permanent cost lands entirely past it.
+# one whose ~2.2x permanent cost lands entirely past it.
 fn crab_thumb_over_budget(spent): i64 {
     if (spent >= CRAB_THUMB_TOTAL_MAX) { return 1; }
     return 0;
@@ -3488,7 +3481,7 @@ fn crab_thumb_step(dir, name, pathscr): i64 {
     var err = crab_thumb_err_buf();
     if (err == 0) { return crab_th_finish(CRAB_TH_BAD); }
     # ⭐ THE PRE-CHECKED ENTRY POINT. A refusal here costs 16 bytes; the same file through
-    # `chitra_image_decode` costs up to 26 MB, permanently, to arrive at the same answer.
+    # `chitra_image_decode` costs its whole decode, permanently — 36 MB for a 2048x2048 photo.
     var before = alloc_used();
     var img = chitra_image_decode_budget(fbuf, got, CRAB_THUMB_MAX_RGBA, err);
     crab_th_spent = crab_th_spent + (alloc_used() - before);
@@ -3501,8 +3494,8 @@ fn crab_thumb_step(dir, name, pathscr): i64 {
     var iw = chitra_image_width(img);
     var ih = chitra_image_height(img);
     if (crab_thumb_scale(chitra_image_pixels(img), iw, ih) == 0) { return crab_th_finish(CRAB_TH_BAD); }
-    # ⚠ CALLED FOR FORM, NOT FOR EFFECT — `chitra_image_free` is a no-op in 1.0.0 and reclaims
-    # exactly 0 bytes (measured). It is called anyway so that the day it does something, crab
+    # ⚠ CALLED FOR FORM, NOT FOR EFFECT — `chitra_image_free` is a no-op through 1.3.1 and reclaims
+    # exactly 0 bytes. It is called anyway so that the day it does something, crab
     # already does the right thing; the ⛔ at the top of this section is what stops anyone reading
     # this line as a reason to believe the memory came back.
     chitra_image_free(img);

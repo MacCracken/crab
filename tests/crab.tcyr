@@ -4093,8 +4093,8 @@ fn t_preview_dims(): i64 {
 # M5 — thumbnails: the scaler, the two budgets, and the memo. Against REAL files in `build/`.
 #
 # ⛔⛔ THE BUDGETS ARE THE FEATURE, NOT A SAFETY RAIL BOLTED TO IT. Measured 2026-08-31: chitra makes
-# 31 `alloc()` calls, `chitra_image_free` is a no-op, and cyrius's `alloc` is a bump allocator with
-# no `free()` — so a decode permanently costs ~2.5x the image's RGBA size and a second decode of the
+# 30 `alloc()` call sites, `chitra_image_free` is a no-op, and cyrius's `alloc` is a bump allocator with
+# no `free()` — so a decode permanently costs ~2.2x the image's RGBA size and a second decode of the
 # same file costs it again. Without the memo and the two ceilings, arrowing through a photo
 # directory exhausts memory. These assertions pin all three.
 fn t_thumbnails(): i64 {
@@ -4211,7 +4211,7 @@ fn t_thumbnails(): i64 {
       "'cannot decode' is a property of this BUILD");
     assert(t_streq(crab_thumb_note(CRAB_TH_OK), "") == 1, "a decoded thumbnail needs no note");
 
-    # ⛔⛔ THE SESSION CEILING, PINNED AS A PREDICATE. Every decode is PERMANENT — ~2.5x the RGBA
+    # ⛔⛔ THE SESSION CEILING, PINNED AS A PREDICATE. Every decode is PERMANENT — ~2.2x the RGBA
     # size, never reclaimed — so a per-image budget alone does not compose: it says nothing about a
     # hundred images. This is the guard that stops crab from browsing itself out of memory.
     # ⛔ `>=`, NOT `>`. At exactly the ceiling the budget IS spent; a decode allowed at the boundary
@@ -5313,7 +5313,7 @@ fn t_gridview(): i64 {
 
 # M5 — the GALLERY view and the thumbnail cache behind it.
 #
-# ⛔ THE CACHE IS WHAT MAKES A GALLERY AFFORDABLE. A decode costs ~2.5x an image's RGBA size and that
+# ⛔ THE CACHE IS WHAT MAKES A GALLERY AFFORDABLE. A decode costs ~2.2x an image's RGBA size and that
 # memory never comes back, so the 16 KB result is cheap and re-deriving it is not. Caching results
 # means a gallery scrolled back over costs nothing; caching refusals means a file crab declined is
 # never re-opened on the next idle tick.

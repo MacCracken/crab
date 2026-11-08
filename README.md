@@ -75,9 +75,11 @@ crab is another **view onto the sovereign memory layer**, not app-with-its-own-A
   contradicted by the *Status* bullet below it the whole time. Cut, not annotated.
 - **AI-native organization via `daimon`'s vector store** — semantic file finding
   (RAG), duplicate detection, auto-tagging by content, predictive organization.
-  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.5.0), and it builds and runs on agnos
-  now — ⛔ but it holds no index of files, no tags and no ranked results yet, so the surfaces below
-  wait on that (filed in daimon, 2026-09-23).
+  ⚠ **daimon is declared as of 0.10.0** (`[deps.daimon]`, 2.5.5), and it builds and runs on agnos.
+  Since 2.5.4 it holds a file index with tags, ratings and smart folders, and since 2.5.5 it ranks
+  files — by words, not yet by meaning. ⛔ crab does not use it yet: nothing on agnos starts its
+  index, and crab has no client for it, so the surfaces below still wait (filed in daimon,
+  2026-09-23).
   This is the **same substrate `mneme` rides**: crab is *files-as-memory* to
   mneme's *notes-as-memory*. It reads the shared index; it does not silo its own.
 - **Local-first, no external service** — the whole point of a sovereign store.

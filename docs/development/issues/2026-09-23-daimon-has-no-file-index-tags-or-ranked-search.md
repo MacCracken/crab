@@ -9,7 +9,13 @@
 > of files, no tags and no ranked results — on any target. Building for agnos was necessary, and
 > daimon has done it; it was never sufficient.
 
-**Status:** 🔴 **OPEN — upstream.** Filed 2026-09-23 at crab's daimon pin move (2.1.4 → 2.4.3).
+**Status:** 🟡 **ANSWERED IN PART — upstream, re-read 2026-11-07 at daimon 2.5.5 (crab 0.11.1).** daimon
+2.5.4 shipped `/v1/files` — the index, tags, ratings, smart folders and duplicates (items 1–4, M7) — and
+2.5.5 ranked search with a `why` (item 5, M8), **by words, not meaning**, which is why daimon keeps the
+filing open. The one-line summary above is 2.4.3's and stands as history. What still stands for crab
+is in `docs/development/handoff.md` and the roadmap's M7: nothing on agnos starts daimon with
+`--index-root`, its API has no caller auth until 2.6.x, and crab has no HTTP client.
+*(Was: 🔴 OPEN — upstream.)* Filed 2026-09-23 at crab's daimon pin move (2.1.4 → 2.4.3).
 
 ## The gate moved, and crab's roadmap had it wrong
 

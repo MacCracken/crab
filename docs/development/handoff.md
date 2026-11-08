@@ -1,7 +1,7 @@
-# Handoff — **0.11.0 cut: cyrius 6.7.9 (the language minor) and every dep on its 6.7.9 tag. ⛔⛔ M7 and M8 still BLOCKED — daimon 2.5.0 builds and runs on agnos, and has no file index, tags or ranked search to offer.**
+# Handoff — **0.11.1 cut: cyrius 6.7.18 and every dep on its latest tag. ⭐ daimon 2.5.5 has the file surface M7/M8 asked for — by words, not meaning, opt-in, and with no client in crab yet.**
 
-> ⭐⭐ **2026-11-07. `VERSION` reads 0.11.0 and the CHANGELOG header agrees; 0.10.5 is tagged on the
-> remote (`8937529`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-07. `VERSION` reads 0.11.1 and the CHANGELOG header agrees; 0.11.0 is tagged on the
+> remote (`08b31aa`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
 >
 > ## ⛔⛔ READ FIRST — 6.7 CHANGES WHAT CODE MEANS, AND THE BUILD CANNOT SEE IT
@@ -14,24 +14,63 @@
 > means what it says on 6.7.9 and something else on any consumer still below** — crab has none, but
 > the next change should know.
 >
-> ⚠ **0.11.0 was the ladder's number for Assisted search (M8).** The operator directed this pin
-> release as 0.11.0; M8 reads `0.12.0 · Assisted search` now. The order did not move.
+> ⚠ **0.11.0 was the ladder's number for Assisted search (M8)** until the operator gave it to the
+> 6.7.9 pin release; M8 reads `0.12.0 · Assisted search`. The order did not move.
 >
-> ## ⛔⛔ AND M7 / M8 ARE STILL BLOCKED IN DAIMON, ON A SURFACE
+> ## ⭐⭐ M7 / M8: DAIMON'S SIDE NOW EXISTS — AND FIVE OTHER GATES STILL STAND
 >
-> ✅ **daimon builds AND runs on agnos** — re-derived for **2.5.0** on 2026-11-07: `cyrius build
-> --agnos` from its tag, **0 errors**; the 2.5.0 commit's CI job *"AGNOS guest test"* **passed**.
-> ⛔⛆ **And the build was never the last thing in the way.** daimon 2.5.0 holds **no index of files,
-> no tags and no ranked results** on any target: its routes are agents, edge, health, mcp, metrics,
-> rag and scheduler; the per-agent memory store has no route and no tag field; RAG keeps nothing on
-> disk, embeds by a 32-slot character-sum hash (`stop`/`pots`/`tops` collide) and answers with a
-> prompt template. Neither 2.4.4 nor 2.5.0 changed those files. From 0.10.0 the gate table called M7
-> **UNGATED** because daimon was *declared*; from 0.10.1 it called it blocked on the *build*.
-> Neither checked for the surface. ⇒ **The eighth false gate.**
-> ⇒ **Filed where it can be acted on**, still **OPEN** at 2.5.0: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
+> ✅ **daimon builds AND runs on agnos** — re-derived for **2.5.5** on 2026-11-07: `cyrius build
+> --agnos` from its tag, **0 errors** (4,846,952 B); every CI job on the 2.5.5 commit passed, *"AGNOS
+> guest test"* among them.
+> ⭐ **The surface the filing asked for is there.** 2.5.4's `/v1/files` (daimon ADR-010,
+> `src/api_files.cyr`): the index of the files under the operator's roots and its state, tags and
+> ratings with counts and suggestions, six smart folders as saved queries, whole-content SHA-256
+> duplicates — items 1–4, M7. 2.5.5's `GET /v1/files?q=…`: ranked, each result with a `why`, facets
+> and the folders it appears in — item 5, M8.
+> ⛔ **A closed gate is not an open feature.** What still stands, each checked on 2026-11-07:
+> 1. **Meaning.** It ranks by WORDS — `cost.method` says so; `receipt` does not find `invoice`. M8's
+>    canvas says *"vector + name match"*. No local embedding model exists, so the filing stays 🟡 open.
+> 2. **A running index on agnos.** It is OFF unless daimon runs `serve --index-root DIR`, and nothing in
+>    agnos starts daimon that way: only its smoke scripts start daimon at all (`git grep`).
+> 3. **Auth.** The API has no caller authentication until daimon 2.6.x, so anything local can read the
+>    index; reading contents is a second opt-in (`--index-content`).
+> 4. **A client in crab.** crab vendors no `net` leaf: an HTTP client to 127.0.0.1:8090 is M7's first
+>    crab-side step. (On agnos daimon listens on loopback since 2.4.4.)
+> 5. **Battery.** On agnos a walk does not pause on battery: the kernel has no power source to read.
+> ⇒ The filing: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 > (crab's copy: `docs/development/issues/2026-09-23-daimon-has-no-file-index-tags-or-ranked-search.md`).
-> ⛔ **crab ships nothing for M7's remaining half meanwhile**: no crab-side indexer (it would silo the
-> shared index), no "unavailable" rows (the VOLUMES rule). Duplicates (0.10.0) needs no daimon.
+> ⚠ **The release numbers are the operator's**: M7's ladder row is `0.10.0 · The index` (half shipped,
+> duplicates), and 0.12.0 is pinned to Assisted search. Whether M8 ships ranked by words, labelled so,
+> or waits for meaning is the operator's call too.
+> ⛔ crab still ships no crab-side indexer (it would silo the shared index) and no "unavailable" rows
+> (the VOLUMES rule). It must run without daimon: the index is an enrichment.
+>
+> ## 0.11.1 — toolchain 6.7.18, every dep on its latest tag, and a lock CI fails when it keeps an old pin
+>
+> ⭐ **A pin release; no code line moved** (comments only, both binaries `cmp`-identical across them).
+> cyrius 6.7.9 → **6.7.18**; sadish **0.12.1**, rupa **0.2.1**, rekha **1.1.2**, kashi **1.3.0**,
+> dhancha **0.11.1**, setu **0.9.1**, chitra **1.3.1**, daimon **2.5.5** — the newest tag of each,
+> each that repo's cut for 6.7.18. Nine commit pins (sankoch **2.8.9** through chitra). Built from the
+> release tarball (`1411e773…`); all 40 `lib/` files `cmp`'d against the tarball or their tag.
+> ⛔ **The 6.7.10 – 6.7.18 notes are ~6,700 lines**, and every item that could reach crab-shaped code
+> was checked against the stripped source: zero sites. The two to know: a global declared twice now
+> takes its constant from program start (crab has none; lib/'s five pairs are in opposite `#ifdef`
+> arms), and agnos `sys_close(-1)` answers -1 (crab never reads it).
+> ⭐ **The growth is rekha 1.1.2's audit, all of it**: host 377,312 → **385,664 B**, agnos 642,016 →
+> **654,600 B** under DCE; toolchain alone −4,080 / −3,944; held back one at a time, sadish, rupa,
+> dhancha and daimon move no byte.
+> ⭐ **chitra 1.3.1 decodes a PNG in ~2.2x its RGBA where 1.1.3 took ~2.9x** — re-measured through
+> `chitra_image_decode_budget`; the table in `src/app.cyr` and seven "~2.5x" comments were chitra
+> 1.0.0's. The 32 MB session ceiling now holds four 1024x1024 photos where it held three.
+> ⭐ **CI's lock step fails on `cyrius.lock keeps`.** A moved tag's old row stays in an existing lock
+> (deliberately), `cyrius deps --lock` keeps both, and `--locked` passed that lock (rc=0). The re-pin
+> is `rm cyrius.lock && cyrius deps`. Proven both ways on the step's own text.
+> **2543 / 0**, render_test **55 / 0**, the 640x220 dump **`cmp`-identical to 0.11.0's**, fuzz
+> 100,000, fmt ×8, coverage 84 %, vet, deny 0.
+> ⭐ **QEMU on the DCE agnos binary** (`5720097b…`; agnos 1.57.17, aethersafha 0.17.7): **face PASS** with
+> the very line 0.11.0 printed (`410820 bytes adv=9 upem=2048 i=4 m=13`), **preview PASS** (PNGs through
+> chitra 1.3.1 + `sankoch-zlib` 2.8.9, right sizes, once each), **button PASS**, **pointer PASS on the
+> first run**, **resize PARTIAL** (its QEMU ceiling). Serial logs are in the session scratchpad.
 >
 > ## 0.11.0 — toolchain 6.7.9, every dep on its 6.7.9 tag, and a lock CI cannot rewrite
 >

@@ -802,7 +802,7 @@ fn crab_grid_cell(g, rec, is_dir, marked): i64 {
 #
 # ⛔ THE THUMBNAIL COMES FROM THE CACHE, AND A MISS DRAWS NOTHING RATHER THAN WAITING. The render
 # path cannot decode — decoding needs syscalls and lives in `app.cyr`, above this file, and it costs
-# ~2.5x an image's RGBA size permanently. So a cell shows a picture when the idle tick has already
+# ~2.2x an image's RGBA size permanently. So a cell shows a picture when the idle tick has already
 # produced one and shows just its name until then. That is what makes a gallery affordable: the
 # view never triggers work, it only displays work already done.
 # ⚠ A cell whose entry is not an image, or whose decode was refused, is simply a name in a taller
@@ -4862,7 +4862,7 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, dstate, t
 # ⭐⭐ THE THUMBNAIL CACHE (M5, the gallery). ONE decoded thumbnail was enough for a preview that
 # describes a single selection; a gallery shows dozens at once.
 #
-# ⛔⛔ IT CACHES THE **RESULT**, WHICH IS THE ONLY THING WORTH CACHING HERE. A decode costs ~2.5x the
+# ⛔⛔ IT CACHES THE **RESULT**, WHICH IS THE ONLY THING WORTH CACHING HERE. A decode costs ~2.2x the
 # image's RGBA size and that memory never comes back (`chitra_image_free` is a no-op over a bump
 # allocator) — so the 16 KB downsampled thumbnail is cheap and the decode that produced it is not.
 # Caching results means a gallery scrolled back over costs nothing; caching nothing would re-decode

@@ -2,6 +2,150 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.1] — 2026-11-07 — cyrius 6.7.18, every dep on its latest tag, and a lock gate that fails on a superseded pin
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **A pin release.** No line of crab's code changed: the comments the new pins made false were
+> corrected, and both binaries are `cmp`-identical across those edits. The production render is
+> pixel-identical and the suite is 2543 / 0. The binary is 8 KB (host) and 13 KB (agnos) larger, all
+> of it rekha 1.1.2's audit. ⭐ **daimon 2.5.5 now has the file surface M7 and M8 were filed for** —
+> ranked by words, not meaning — and nothing in crab uses it yet.
+
+### Changed — toolchain `6.7.9` → `6.7.18`
+
+- **Built from the release tarball** (`1411e773…`, equal to its `.sha256`);
+  `~/.cyrius/versions/6.7.18/lib` is byte-identical to it.
+- ⛔ **The 6.7.10 – 6.7.18 migration notes are ~6,700 lines**, mostly struct values, generics, vectors,
+  closures and multi-value returns. crab's source uses none of them — plain fns, untyped vars, enums,
+  globals and `load` / `store` (one typed `var`, an `i64`). Every item was listed, and each that could
+  reach code of that shape was checked against `src/` and `tests/` with comments and strings stripped,
+  or settled by the build. Zero sites, among them:
+  - **a global declared twice** now takes its constant from program start (6.7.14 – 6.7.16). crab
+    declares none twice; `lib/`'s five pairs (`SETU_READ_DEFAULT_MS`, four `AT_*`) sit in opposite
+    `#ifdef` arms;
+  - **a call initialiser that writes a later global** keeps its write (6.7.14). crab's are its two
+    `var r = main();` lines;
+  - **a crab fn or global with a stdlib name**, and calls to stdlib fns with narrow, `Str`, `f64` or
+    struct signatures: none;
+  - **agnos `sys_close(-1)`** answers -1, and a negative fd reaches the kernel instead of socket slot 7
+    (6.7.11). crab never reads `sys_close`'s answer, at any of its 20 sites;
+  - **asm, `#inline`, `#pure`, `#naked`, an include spelling of 128+ characters**: none.
+- **What 6.7.x newly refuses** (an enum without separators, a statement headed by `load8`, text after
+  an include, a top-level `return`): both targets, the suite, render_test, fuzz and the bench program
+  compile with **zero diagnostics**.
+- ⭐ **The toolchain's own effect, isolated** (0.11.0's tree on its own tags, compiled by 6.7.18): host
+  **−4,080 B**, agnos **−3,944 B** under DCE; plain +16 / +152. Dead-code elimination removes more; the
+  code is not smaller.
+- `cyrius lint`'s content rules — 6.7.11's literal write length (setu 0.9.1's fix) and the
+  `load*(&a + K)` overrun — report nothing in any of the eight files.
+
+### Changed — dependencies, each to its latest tag
+
+The selector is the newest tag. Every one is that repo's cut for 6.7.18, so nothing is pinned ahead of
+the toolchain; dhancha 0.11.1 names the same sadish, rupa, rekha, kashi and setu.
+
+| dep | was | now | what reaches crab |
+|---|---|---|---|
+| sadish | 0.12.0 | **0.12.1** | nothing — `sadish_version`'s return; byte-identical build |
+| rupa | 0.2.0 | **0.2.1** | nothing; byte-identical |
+| rekha | 1.1.0 | **1.1.2** | the P(−1) audit: three out-of-bounds reads fixed, faces it now refuses; **all of the growth** |
+| kashi | 1.2.0 | **1.3.0** | one clamp in `kashi_cp437_from_unicode`'s search |
+| dhancha | 0.11.0 | **0.11.1** | nothing — the version stamp; byte-identical |
+| setu | 0.9.0 | **0.9.1** | two agnos refusal lines write their newline (2 bytes of the agnos binary) |
+| chitra | 1.1.3 | **1.3.1** | a PNG past 16 MiB decodes (1.3.0); a decode spends a quarter less (1.3.1); sankoch 2.8.9 |
+| daimon | 2.5.0 | **2.5.5** | declared, not linked; a surface for files (below) |
+
+- **Every tag verified on its remote** and commit-pinned: nine pins, sankoch 2.8.9 (`21470ae`) through
+  chitra. `lib/` is the same 40 files as 0.11.0; each stdlib leaf is `cmp`-identical to the tarball and
+  each bundle to `git show <tag>:<module>`. `deps --verify` 40 / 0.
+- ⭐ **Each dep held back in turn, against the final tree**: sadish, rupa, dhancha and daimon build
+  byte-identical; setu moves 2 bytes on agnos; kashi, chitra and sankoch move bytes but not size; held at
+  1.1.0, rekha brings both targets back to exactly the toolchain-only sizes.
+- **rekha 1.1.2** changes one answer crab asks for: `rekha_units_per_em` is 0 for a `unitsPerEm` outside
+  16..16384. crab only prints it on the `crab: font` line, and the shipped face's is 2048.
+  `rekha_char_advance_px` still returns the advance, keeping the cmap step's error in the handle, and
+  dhancha's `dh_text_advance` falls back on anything ≤ 0.
+- ⭐ **chitra 1.3.x, measured where crab spends it** — through `chitra_image_decode_budget`, the call crab
+  makes, on 8-bit RGB PNGs as ImageMagick writes a photo, each in a fresh process:
+
+  | source | RGBA | chitra 1.1.3 | chitra 1.3.1 |
+  |---|---:|---:|---:|
+  | 64×64 | 16,384 | 91,480 (5.6×) | 70,856 (4.3×) |
+  | 256×256 | 262,144 | 815,176 (3.1×) | 618,536 (2.4×) |
+  | 1024×1024 | 4,194,304 | 12,237,576 (2.9×) | 9,091,816 (2.2×) |
+  | 2048×2048 | 16,777,216 | 48,586,200 (2.9×) | 36,003,256 (2.1×) |
+
+  1.1.3 on 6.7.9 and on 6.7.18 spend the same to the byte, so this is chitra's alone: 1.3.1 unfilters a
+  non-interlaced PNG in place. A refusal still costs **16 bytes**. ⇒ The 32 MB session ceiling holds
+  four of these 1024×1024 photos where it held three, and 59 at 256×256 where it held 44.
+  1.3.0's other change — a PNG past 16 MiB of scanlines decodes, where 1.2.x refused it as
+  `CHITRA_ERR_INFLATE_LIMIT` — cannot reach crab: 4 MB of declared RGBA inflates to at most ~8.4 MB,
+  and crab branches only on `CHITRA_ERR_BUDGET`.
+- ⭐ **daimon 2.5.5, re-derived**: `cyrius build --agnos` from its tag, 0 errors (4,846,952 B); every CI
+  job on the 2.5.5 commit passed, "AGNOS guest test" among them. ⭐ **And since 2.5.4 it has a surface
+  for files**, `/v1/files` (daimon ADR-010): an index of the files under the operator's roots and its
+  state, tags and ratings with counts and suggestions, six smart folders as saved queries, whole-content
+  SHA-256 duplicates — the 2026-09-23 filing's items 1–4. 2.5.5 adds item 5, `GET /v1/files?q=…`, ranked,
+  each result with a `why`, the facets and the folders it appears in.
+  ⛔ **A closed gate is not an open feature.** It ranks by **words, not meaning** (M8's canvas says
+  *"vector + name match"*), so the filing stays 🟡 open. It is off unless daimon runs
+  `serve --index-root DIR`, and **nothing in agnos starts it that way**. Its API has no caller
+  authentication until 2.6.x. crab has no HTTP client for it. ⇒ M7's second half and M8 are not
+  started, and when they are is the operator's call.
+
+### Changed — CI
+
+- ⭐ **The lock step fails on a `cyrius.lock keeps` note.** A moved tag's old commit row stays in an
+  existing lock — fail-closed, by design — and `cyrius deps --locked` passed such a lock: at this cut,
+  `cyrius deps --lock` after the eight tag moves wrote 18 commit rows for 9 deps, and `--locked` answered
+  *"exactly what the tags resolve"*, rc=0, with eight notes. The step now writes `--locked`'s output to a
+  file, checks its status, and fails on the note. Run as the step's own text: the committed lock passes,
+  that stacked lock fails on the note, and 0.11.0's lock fails `--locked` itself (40 differences). The
+  re-pin is the note's: `rm cyrius.lock && cyrius deps`, which is how this lock was made.
+
+### Fixed — comments the new pins made false
+
+- `src/app.cyr`'s thumbnail section quoted chitra 1.0.0 (2026-08-31): a cost table and "~2.5x", a 26.6 MB
+  unbudgeted cost, "31 `alloc()` calls", a no-op "in 1.0.0", and a paragraph on the 16 MiB inflate
+  ceiling as live. Re-measured on 1.3.1 and cut to what governs; "~2.5x" is "~2.2x" at the six other
+  sites (`src/app.cyr`, `src/ui.cyr` ×2, `tests/crab.tcyr` ×3) and in `state.md`.
+- `cyrius.cyml`: chitra's "32 `alloc()` calls (1.1.3)" counted two mentions in comments — 1.1.3 and
+  1.3.1 both have 30 call sites in code; rekha "1.1.0 … no code line moved"; the sadish pair note;
+  daimon "offers none of it".
+- `ci.yml`: `lint --strict`'s "83 pre-existing over-long lines" is 173 (3 / 16 / 143 / 11) plus 4
+  doubled blank lines — the same on 6.7.9, so it went stale as crab grew, not with the toolchain.
+- `roadmap.md`: "TCP to 127.0.0.1 is dropped" on agnos (false since daimon 2.4.4) and "No `modules` key"
+  (`modules = []` since 0.10.5); M7 / M8's gates, in the ladder, the sections and the gate table.
+- `state.md`: "`cycc` on PATH and the pin disagree" — both are 6.7.18 now.
+
+### Measured
+
+| | 0.11.0 (6.7.9) | toolchain only | 0.11.1 (6.7.18) | |
+|---|---:|---:|---:|---:|
+| host, `CYRIUS_DCE=1` (CI, release) | 377,312 | 373,232 | **385,664** | +8,352 |
+| agnos, `CYRIUS_DCE=1` (CI, release) | 642,016 | 638,072 | **654,600** | +12,584 |
+| host, plain | 1,102,304 | 1,102,320 | 1,118,848 | +16,544 |
+| agnos, plain | 1,162,208 | 1,162,360 | 1,178,888 | +16,680 |
+
+Gates, every one re-run on 6.7.18: `deps --locked` clean with no note, `deps --verify` 40 / 0; both DCE
+builds with zero diagnostics; `cyrius test` **2543 / 0**; `render_test` **55 / 0**, its build log free of
+`undefined function`, and ⭐ **the 640x220 dump byte-identical to 0.11.0's** (563,200 B); fuzz 100,000
+rounds; `fmt --check` on all eight files; coverage 84 % (347/413) against `--min 82`; `vet`; `deny` 0
+violations.
+⭐ **QEMU, agnos 1.57.17, aethersafha 0.17.7, the DCE agnos binary** (`5720097b…`, byte-identical to the
+final tree's build):
+- `crab-face-test.py` **PASS** — `410820 bytes adv=9 upem=2048 i=4 m=13`, the same line as 0.11.0's: rekha
+  1.1.2 measures the shipped face as 1.1.0 did. One font line, navigations 1, view changes 2, no fault.
+- `crab-preview-test.py` **PASS** — the PNG path through chitra 1.3.1's in-place unfilter and sankoch-zlib
+  2.8.9 on the target: `zzpic1.png` read as 137x42 and `zzpic2.png` as 320x200, each exactly once.
+- `crab-button-test.py` **PASS** — middle marks a pane, middle on a popup row fires nothing, the hover
+  follows across 5 rows, no fault.
+- `crab-pointer-test.py` **PASS** on the first run — right-click menu, pick (`cd /bin`), dismiss,
+  6 refreshes, bare F10 / Esc / Tab crab's, Ctrl chords the compositor's.
+- `crab-resize-test.py` **PARTIAL**, its QEMU ceiling (no GPU carveout): the extent is refused and crab
+  answers 16 keys after; repeat fires 2 times while held and 0 after release; no fault.
+
 ## [0.11.0] — 2026-11-07 — onto cyrius's 6.7 line, every dep on its 6.7.9 tag, and a lock CI cannot rewrite
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.
