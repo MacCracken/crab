@@ -2,6 +2,73 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.4] — 2026-11-08 — whole names: a long file name lists, opens and deletes as itself
+
+> Cut on operator direction; the commit, the tag and the push are the operator's.
+>
+> **Panes and single-entry actions.** A folder copy or delete still stops at a name over 62 bytes; that half needs agnos
+> (`docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`).
+
+### What an operator sees
+
+- **A name of up to 255 bytes lists whole**, and Open, Rename, Delete, Copy and Move act on that file. Until now a name
+  over 62 bytes listed as its first 62, so the row opened nothing, or acted on a sibling named exactly those bytes.
+- **Two names that share their first 62 bytes are two different rows**, and sort, mark and queue as different files.
+- **Rename and New Folder take up to 255 bytes.** The limit was 62, because crab could not list anything longer back.
+- **A prompt quotes a long name cut to 62 characters and marked `~`**, so its answer keys stay on the line.
+
+### Still limited
+
+- **Copying or deleting a folder that holds a name over 62 bytes stops at that entry**, as it did. The tree walk runs in
+  steps and holds no fd between them, `getdents#29` cannot resume without one, and `lseek#58` refuses a directory.
+  Filed with agnos.
+- **The path limit is still 256 bytes.** A name in a deep directory lists, and its actions say the path is too long.
+
+### The bug, measured under QEMU
+
+A folder holding a 70-byte name, a sibling named its first 62 bytes, and two names sharing their first 100. The same
+keystrokes delete the 70-byte file and then the second of the pair, read back from the disk with `debugfs`:
+
+| | 0.11.3 | 0.11.4 |
+|---|---|---|
+| length of the name crab deleted | 62, then 62 | **70, then 104** |
+| the 62-byte sibling | ⛔ deleted | **kept** |
+| the 70-byte file | still there | **deleted** |
+| the second of the pair | still there | **deleted** |
+| the first of the pair | kept | **kept** |
+
+### Changed
+
+- **A listing record is 257 bytes, not 64**: 255 of name, its NUL, and the type byte. It is crab's own layout now.
+- **Listing goes through `getdents#29`.** The parser is `crab_dirents_take`, which the host suite reaches; the agnos
+  listing had no host test before. `readdir_at#101` stays to explain a failed open, because `open` answers only -1. The
+  `#81` fallback is gone: `#29` is older than `#101`.
+- **The tree walk still reads kernel records**, through `crab_krecs_widen`, at their own 64-byte stride.
+- **Fields a wider name would have overrun**: the transfer record's name moved to its end, places labels have their own
+  64-byte limit, the rename field follows the name limit, and the delete and collision prompts got room.
+- **The collision prompt lost a long name entirely**: `crab_strcpy_n` answers -1 when it cuts, and the prompt added that
+  to its write offset. Fixed before any name that long could reach it.
+
+### Cost
+
+| | 0.11.3 | 0.11.4 |
+|---|---:|---:|
+| Linux under `CYRIUS_DCE=1` | 390,400 B | 390,456 B |
+| agnos under `CYRIUS_DCE=1` | 663,336 B | 663,408 B |
+| permanent heap at full use | — | about +1.0 MB, allocated once |
+| sorting 1,024 rows | 444 µs | 912 µs |
+
+Per-row display buffers are now sized to the name, so a pane of short names costs less per frame than before.
+
+### Tests
+
+`tests/hardening.tcyr` gained a group for all of the above, 251 / 0, and 30 mutants of the new code all failed a test.
+A new harness, `agnos/scripts/harness/crab-longname-test.py`, drives the table above; it fails on 0.11.3 and passes here.
+On the tested agnos binary (`d4ad19a2…`) all 13 existing harnesses give the same verdict as 0.11.3: 10 pass, including
+`listing-cap` (`showing 1024 of 1200`), `resize` is PARTIAL, and `door` and `drop` arm 2 are UNMEASURED. The scratch
+harness for the collision prompt, a withdrawn question and the held-key gate passes. ⚠ Every run is on ext2; the ZFS side
+of `#29` was read from the kernel source and not run.
+
 ## [0.11.3] — 2026-11-08 — dhancha 0.12.0: a name stops at its column, and a resize stops costing a window
 
 > Cut on operator direction; the commit, the tag and the push are the operator's.

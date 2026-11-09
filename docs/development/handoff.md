@@ -1,8 +1,20 @@
-# Handoff — **0.11.3 cut: dhancha 0.12.0. Names stay in their columns and a resize stops costing a window. 0.11.2's P(-1) below it; agnos's 62-byte name cut is the one upstream item left**
+# Handoff — **0.11.4 cut: whole names. A long file name lists, opens and deletes as itself. 0.11.3 and 0.11.2's P(-1) below it; a folder copy or delete still stops at a name over 62 bytes until agnos lets a directory fd seek**
 
-> ⭐⭐ **2026-11-08. `VERSION` reads 0.11.3 and the CHANGELOG header agrees; 0.11.2 is tagged on the
-> remote (`e8d1b38`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
+> ⭐⭐ **2026-11-08. `VERSION` reads 0.11.4 and the CHANGELOG header agrees; 0.11.3 is tagged on the
+> remote (`431b4a5`).** ⛔ commit/tag/push are the operator's; re-run `git describe --tags` and
 > `git log --oneline -3` before restating this.
+>
+> ## 0.11.4 — whole names
+>
+> ⭐ **The record behind every pane is 257 bytes, and the pane listing is `getdents#29`.** ADR 0005 says why.
+> ⛔ **What changed underneath you:**
+> - Kernel records (`#81`, `#101`) are 64 bytes and may be indexed only as `CRAB_KREC_*`, through `crab_krecs_widen`. A kernel
+>   call that writes into a `CRAB_REC_SZ` buffer is a stride bug.
+> - The tree walk still reads `#101`, so it still sees a cut name. `crab_walk_readdir`'s host arm cuts at 62 on purpose, so the
+>   suite sees what agnos gives it. Both go when `lseek#58` accepts a directory fd (filed).
+> - A name in a sentence goes through `crab_name_quoted`, or the prompt's keys fall off the line.
+> - `crab_strcpy_n` answers -1 when it cuts. Never add its result to an offset unchecked.
+> ⚠ **Not tested on ZFS**: the kernel's `#29` code was read, the QEMU runs are ext2.
 >
 > ## 0.11.3 — dhancha 0.12.0
 >
@@ -28,7 +40,6 @@
 > - A frame is owed, not drawn: everything in the loop raises `frame_due`, and one publisher at the end draws.
 >   **Add no new render block.** A key release, a modifier edge and a no-op motion draw nothing.
 > - The `CONFIGURE` body runs when the queue is drained, not in the event arm.
-> - Names longer than `CRAB_NAME_CHARS` (62) are refused: agnos cannot list them back.
 > - `crab_fs_copy` and `crab_fs_move` are gone. Tests drive the stepped path through `t_copy` / `t_move`.
 > ⛔ **Upstream, not fixed here**: agnos's readdir cuts names at 62 bytes with no signal. Filed: `docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`. `getdents#29` returns whole names.
 > ⚠ **What main.cyr's wiring rests on**: the host tests its lifted predicates; the wiring is the 13 QEMU harnesses plus a

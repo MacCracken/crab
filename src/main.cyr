@@ -5,10 +5,9 @@
 # kashi system font, and presented over setu to the aethersafha compositor — the
 # seam the puka terminal and the setu widget probe proved.
 #
-# It lists REAL directories via the resumable readdir syscall (#101, with #81 as the fallback for
-# kernels older than agnos 1.56.50): each pane readdir's a
-# path into a buffer of fixed 64-byte records (name NUL-terminated at +0, type at
-# +63; 1 = dir) and renders the entries. Navigation (Norton-Commander / Dolphin):
+# It lists REAL directories via getdents (#29): each pane reads a path into a buffer of
+# fixed records (`CRAB_REC_SZ`: the name NUL-terminated at +0, the type byte last; 1 = dir)
+# and renders the entries. Navigation (Norton-Commander / Dolphin):
 # Left/Right (or h/l) switch the active pane; Up/Down (or j/k) move the selection;
 # Enter descends into the selected directory; Backspace ascends to the parent.
 #
@@ -26,8 +25,8 @@ fn main(): i64 {
     var h = 220;
     var nbytes = w * h * 4;
 
-    # Two panes, each listing a real directory. On agnos, readdir_at(#101) fills a buffer
-    # of fixed 64-byte records; on the host the panes stay empty (render_test mocks them).
+    # Two panes, each listing a real directory. On agnos, getdents (#29) fills a buffer of
+    # fixed records; on the host the panes stay empty (render_test mocks them).
     var lpath = alloc(CRAB_PATH_MAX);
     var rpath = alloc(CRAB_PATH_MAX);
     # ⭐ START WHERE THE OPERATOR CHOSE (*#11*): `crab [LEFT] [RIGHT]`. `/bin` and `/` were hardcoded

@@ -28,13 +28,13 @@ fn check(got, want): i64 {
     return 1;
 }
 
-# Write one 64-byte readdir record: name (NUL-terminated) at +0, type at +63.
+# Write one listing record: the name, NUL-terminated, at +0 and the type byte last.
 fn rt_entry(buf, i, name, is_dir): i64 {
-    var rec = buf + i * 64;
+    var rec = buf + i * CRAB_REC_SZ;
     var k = 0;
     while (load8(name + k) != 0) { store8(rec + k, load8(name + k)); k = k + 1; }
     store8(rec + k, 0);
-    store8(rec + 63, is_dir);
+    store8(rec + CRAB_REC_TYPE, is_dir);
     return 0;
 }
 
@@ -66,7 +66,7 @@ fn main(): i64 {
     # every scenario's setup visible at its own call site.
     var rs = crab_rs();
     alloc_init();
-    var lbuf = alloc(16 * 64); var rbuf = alloc(16 * 64);
+    var lbuf = alloc(16 * CRAB_REC_SZ); var rbuf = alloc(16 * CRAB_REC_SZ);
     var a0 = "aethersafha"; rt_entry(lbuf, 0, a0, 0);
     var a1 = "puka";        rt_entry(lbuf, 1, a1, 0);
     var a2 = "crab";        rt_entry(lbuf, 2, a2, 0);
@@ -145,7 +145,7 @@ fn main(): i64 {
     # background, so the check fails against correct code. The `ink` line above carries the control.
 
     # ---- ⛔ THE CASE THE OLD CODE COULD NOT REPRESENT: 12 entries, ~6 visible ---------------
-    var big = alloc(16 * 64);
+    var big = alloc(16 * CRAB_REC_SZ);
     var bsz = alloc(16 * 8);
     var bmt = alloc(16 * 8);
     var i = 0;

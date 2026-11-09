@@ -17,24 +17,34 @@ fn t_p(rel): i64 {
     return t_buf;
 }
 
-# Remove a tree. Re-reads from the top, because the entries it just removed are gone.
+# Remove a tree. It reads `getdents64` itself: the tree walk cuts a long name, as agnos's does, and the
+# fixtures hold long names that have to go too.
 fn t_rmtree(path): i64 {
     sys_chmod(path, 0x1ED);
-    var buf = alloc(64 * 64);
-    var cur = alloc(8);
+    var raw = alloc(8192);
     var child = alloc(CRAB_PATH_MAX);
-    var guard = 0;
-    while (guard < 256) {
-        store64(cur, 0);
-        var n = crab_walk_readdir(path, crab_cstr_len(path, CRAB_PATH_MAX), buf, 64, cur);
-        if (n <= 0) { break; }
-        var i = 0;
-        while (i < n) {
-            crab_join_n(child, CRAB_PATH_MAX, path, buf + i * 64);
-            if (load8(buf + i * 64 + CRAB_REC_TYPE) == 1) { t_rmtree(child); } else { sys_unlink(child); }
-            i = i + 1;
+    var fd = sys_open(path, O_RDONLY, 0);
+    if (fd >= 0) {
+        var guard = 0;
+        var got = sys_getdents64(fd, raw, 8192);
+        while ((got > 0) && (guard < 4096)) {
+            var off = 0;
+            while (off < got) {
+                var reclen = load8(raw + off + 16) | (load8(raw + off + 17) << 8);
+                var nm = raw + off + 19;
+                var dots = 0;
+                if ((load8(nm) == 46) && (load8(nm + 1) == 0)) { dots = 1; }
+                if ((load8(nm) == 46) && (load8(nm + 1) == 46) && (load8(nm + 2) == 0)) { dots = 1; }
+                if (dots == 0) {
+                    crab_join_n(child, CRAB_PATH_MAX, path, nm);
+                    if (load8(raw + off + 18) == 4) { t_rmtree(child); } else { sys_unlink(child); }
+                }
+                off = off + reclen;
+            }
+            guard = guard + 1;
+            got = sys_getdents64(fd, raw, 8192);
         }
-        guard = guard + 1;
+        sys_close(fd);
     }
     sys_rmdir(path);
     return 0;
@@ -361,14 +371,14 @@ fn t_queue(): i64 {
     t_mkdir("q1"); t_mkdir("q1/l"); t_mkdir("q1/l2"); t_mkdir("q1/r");
     t_write("q1/l/A", "AA"); t_write("q1/l/B", "BB");
     t_write("q1/l2/D", "DD"); t_write("q1/l2/E", "EE");
-    var buf = alloc(4 * 64);
+    var buf = alloc(4 * CRAB_REC_SZ);
     var marks = alloc(4);
     store8(marks, 1); store8(marks + 1, 1);
-    crab_strcpy_n(buf, "A", 64); crab_strcpy_n(buf + 64, "B", 64);
+    crab_strcpy_n(buf, "A", 64); crab_strcpy_n(buf + CRAB_REC_SZ, "B", 64);
     var l = t_dir("q1/l"); var l2 = t_dir("q1/l2"); var r = t_dir("q1/r");
     assert_eq(crab_queue_start(buf, marks, 2, CRAB_OP_COPY, l, r, sc1, sc2, fst), 1, "a marked copy starts");
-    var buf2 = alloc(4 * 64);
-    crab_strcpy_n(buf2, "D", 64); crab_strcpy_n(buf2 + 64, "E", 64);
+    var buf2 = alloc(4 * CRAB_REC_SZ);
+    crab_strcpy_n(buf2, "D", 64); crab_strcpy_n(buf2 + CRAB_REC_SZ, "E", 64);
     assert_eq(crab_queue_start(buf2, marks, 2, CRAB_OP_MOVE, l2, r, sc1, sc2, fst), CRAB_FS_EBUSY,
       "⛔ a second one is refused");
     assert_eq(crab_queue_left(), 1, "...and the first queue still has its second entry");
@@ -395,8 +405,8 @@ fn t_queue(): i64 {
     sys_chmod(t_p("q2/l/f"), 0x180);
     var m2 = alloc(2);
     store8(m2, 1); store8(m2 + 1, 1);
-    var b3 = alloc(2 * 64);
-    crab_strcpy_n(b3, "lnk", 64); crab_strcpy_n(b3 + 64, "f", 64);
+    var b3 = alloc(2 * CRAB_REC_SZ);
+    crab_strcpy_n(b3, "lnk", 64); crab_strcpy_n(b3 + CRAB_REC_SZ, "f", 64);
     assert_eq(crab_queue_start(b3, m2, 2, CRAB_OP_MOVE, t_dir("q2/l"), t_dir("q2/r"), sc1, sc2, fst), CRAB_FS_OK,
       "same-volume moves finish at once");
     assert_eq(crab_op_active(), 0, "...with no stepped copy");
@@ -412,10 +422,11 @@ fn t_queue(): i64 {
     t_mkdir("q3"); t_mkdir("q3/l"); t_mkdir("q3/r");
     t_write("q3/l/ok1", "1"); t_write("q3/l/clash", "2"); t_write("q3/l/ok2", "3");
     t_write("q3/r/clash", "X");
-    var b4 = alloc(3 * 64);
+    var b4 = alloc(3 * CRAB_REC_SZ);
     var m4 = alloc(3);
     store8(m4, 1); store8(m4 + 1, 1); store8(m4 + 2, 1);
-    crab_strcpy_n(b4, "ok1", 64); crab_strcpy_n(b4 + 64, "clash", 64); crab_strcpy_n(b4 + 128, "ok2", 64);
+    crab_strcpy_n(b4, "ok1", 64); crab_strcpy_n(b4 + CRAB_REC_SZ, "clash", 64);
+    crab_strcpy_n(b4 + 2 * CRAB_REC_SZ, "ok2", 64);
     assert_eq(crab_queue_start(b4, m4, 3, CRAB_OP_COPY, t_dir("q3/l"), t_dir("q3/r"), sc1, sc2, fst), 1,
       "a marked copy starts");
     var st = t_run();
@@ -431,26 +442,26 @@ fn t_queue(): i64 {
 }
 
 fn t_names(): i64 {
-    test_group("crab P(-1) M14: a name crab could not list again is not created");
-    var n = alloc(70);
+    test_group("crab 0.11.4: any name ext2 can hold is a name crab can hold");
+    var n = alloc(CRAB_NAME_MAX + 8);
     var i = 0;
-    while (i < 62) { store8(n + i, 120); i = i + 1; }
-    store8(n + 62, 0);
-    assert_eq(crab_name_ok(n), 1, "62 bytes is the longest name crab can see");
-    store8(n + 62, 120); store8(n + 63, 0);
-    assert_eq(crab_name_ok(n), 0, "⛔ 63 is refused");
+    while (i < CRAB_NAME_CHARS) { store8(n + i, 120); i = i + 1; }
+    store8(n + CRAB_NAME_CHARS, 0);
+    assert_eq(crab_name_ok(n), 1, "255 bytes is the longest name there is");
+    store8(n + CRAB_NAME_CHARS, 120); store8(n + CRAB_NAME_CHARS + 1, 0);
+    assert_eq(crab_name_ok(n), 0, "⛔ 256 is refused");
     assert_eq(crab_edit_start(n), crab_edit_len(), "the edit field takes it");
     assert_eq(crab_edit_len(), CRAB_NAME_CHARS, "...up to the longest name");
 
     test_group("crab P(-1) C11: a crafted entry cannot walk the pane out of its directory");
-    var buf = alloc(64);
+    var buf = alloc(CRAB_REC_SZ);
     var i2 = 0;
-    while (i2 < 64) { store8(buf + i2, 0); i2 = i2 + 1; }
+    while (i2 < CRAB_REC_SZ) { store8(buf + i2, 0); i2 = i2 + 1; }
     crab_strcpy_n(buf, "../../etc", 64);
     store8(buf + CRAB_REC_TYPE, 1);
     var path = alloc(CRAB_PATH_MAX);
     crab_strcpy_n(path, "/mnt/usb", CRAB_PATH_MAX);
-    var namescr = alloc(64); var scr = alloc(CRAB_PATH_MAX);
+    var namescr = alloc(CRAB_NAME_MAX); var scr = alloc(CRAB_PATH_MAX);
     var sizes = alloc(8); var mt = alloc(8);
     assert_eq(crab_descend(path, buf, 0, 1, namescr, scr, sizes, mt, fst), 0 - 1, "⛔ refused");
     assert_eq(t_streq(path, "/mnt/usb"), 1, "...and the pane has not moved");
@@ -459,15 +470,15 @@ fn t_names(): i64 {
     t_mkdir("n3");
     t_write("n3/same", "CONTENT");
     t_write("n3/other", "CONTENT");
-    var rec = alloc(3 * 64);
+    var rec = alloc(3 * CRAB_REC_SZ);
     var s = alloc(3 * 8); var m = alloc(3 * 8); var marks = alloc(3);
     var j = 0;
-    while (j < 3 * 64) { store8(rec + j, 0); j = j + 1; }
-    crab_strcpy_n(rec, "same", 64); crab_strcpy_n(rec + 64, "same", 64);
+    while (j < 3 * CRAB_REC_SZ) { store8(rec + j, 0); j = j + 1; }
+    crab_strcpy_n(rec, "same", 64); crab_strcpy_n(rec + CRAB_REC_SZ, "same", 64);
     store64(s, 7); store64(s + 8, 7); store64(m, 5); store64(m + 8, 5);
     store8(marks, 0); store8(marks + 1, 0);
     assert_eq(crab_dup_scan(t_dir("n3"), rec, 2, s, m, marks, sc1), 0, "⛔ one file listed twice marks nothing");
-    crab_strcpy_n(rec + 64, "other", 64);
+    crab_strcpy_n(rec + CRAB_REC_SZ, "other", 64);
     assert_eq(crab_dup_scan(t_dir("n3"), rec, 2, s, m, marks, sc1), 1, "two names with one content still mark");
     crab_mark_clear(marks, 2);
 
@@ -487,10 +498,10 @@ fn t_names(): i64 {
         sys_close(fd);
         k = k + 1;
     }
-    var r5 = alloc(2 * 64);
+    var r5 = alloc(2 * CRAB_REC_SZ);
     var z = 0;
-    while (z < 2 * 64) { store8(r5 + z, 0); z = z + 1; }
-    crab_strcpy_n(r5, "aa", 64); crab_strcpy_n(r5 + 64, "bb", 64);
+    while (z < 2 * CRAB_REC_SZ) { store8(r5 + z, 0); z = z + 1; }
+    crab_strcpy_n(r5, "aa", 64); crab_strcpy_n(r5 + CRAB_REC_SZ, "bb", 64);
     store64(s, CRAB_DUP_READ_MAX + 8); store64(s + 8, CRAB_DUP_READ_MAX + 8); store64(m, 1); store64(m + 8, 2);
     assert_eq(crab_dup_scan(t_dir("n4"), r5, 2, s, m, marks, sc1), 0, "⛔ files that differ past 64 KiB are not marked");
     assert(load8(crab_dup_msg(0)) != 0, "...and the message says why");
@@ -568,6 +579,286 @@ fn t_dhancha(): i64 {
     }
     assert_eq(drawn, 24, "every size rendered");
     assert_eq(alloc_used() - before, 0, "⛔ 12 window sizes, seen before, cost the heap nothing");
+    return 0;
+}
+
+# A string of `n` copies of byte `ch`, in fresh memory.
+fn t_run_of(ch, n): i64 {
+    var p = alloc(n + 8);
+    var i = 0;
+    while (i < n) { store8(p + i, ch); i = i + 1; }
+    store8(p + n, 0);
+    return p;
+}
+
+# `n` copies of the `blen`-byte character at `b`, in fresh memory.
+fn t_chars(b, blen, n): i64 {
+    var p = alloc(n * blen + 8);
+    var i = 0;
+    while (i < n * blen) { store8(p + i, load8(b + (i % blen))); i = i + 1; }
+    store8(p + n * blen, 0);
+    return p;
+}
+
+fn t_ends(s, tail): i64 {
+    var a = strlen(s);
+    var b = strlen(tail);
+    if (b > a) { return 0; }
+    return t_streq(s + a - b, tail);
+}
+
+fn t_has(s, ch): i64 {
+    var i = 0;
+    while (load8(s + i) != 0) {
+        if (load8(s + i) == ch) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+var t_ibuf = 0;
+fn t_in(dir, name): i64 {
+    if (t_ibuf == 0) { t_ibuf = alloc(CRAB_PATH_MAX); }
+    crab_join_n(t_ibuf, CRAB_PATH_MAX, dir, name);
+    return t_ibuf;
+}
+
+# One `getdents#29` record at `at`: reclen u16, type u8, namelen u8, ino u32, name, padded to 8.
+fn t_dirent(raw, at, name, nlen, type): i64 {
+    var reclen = (8 + nlen + 7) & (0 - 8);
+    store8(raw + at, reclen & 0xFF);
+    store8(raw + at + 1, (reclen >> 8) & 0xFF);
+    store8(raw + at + 2, type);
+    store8(raw + at + 3, nlen);
+    store32(raw + at + 4, 7);
+    var i = 0;
+    while (i < nlen) { store8(raw + at + 8 + i, load8(name + i)); i = i + 1; }
+    while ((8 + i) < reclen) { store8(raw + at + 8 + i, 0); i = i + 1; }
+    return at + reclen;
+}
+
+fn t_whole_names(): i64 {
+    test_group("crab 0.11.4: the record holds a whole name, and the fields around it agree");
+    assert_eq(CRAB_NAME_MAX, CRAB_NAME_CHARS + 1, "a name field holds the longest name and its NUL");
+    assert_eq(CRAB_REC_TYPE, CRAB_NAME_MAX, "the type byte follows the name");
+    assert_eq(CRAB_REC_SZ, CRAB_REC_TYPE + 1, "...and ends the record");
+    assert_eq(CRAB_OP_NAME + CRAB_NAME_MAX, CRAB_OP_SZ, "⛔ the transfer record's name ends it");
+    assert(CRAB_OP_NAME >= CRAB_OP_DMADE + 8, "...and overlaps nothing before it");
+
+    test_group("crab 0.11.4: getdents records become rows");
+    var raw = alloc(8192);
+    var buf = alloc(CRAB_MAX_ENTRIES * CRAB_REC_SZ + 16);
+    var n255 = t_run_of(97, CRAB_NAME_CHARS);
+    var at = 0;
+    at = t_dirent(raw, at, ".", 1, 2);
+    at = t_dirent(raw, at, "..", 2, 2);
+    at = t_dirent(raw, at, "", 0, 1);
+    at = t_dirent(raw, at, n255, CRAB_NAME_CHARS, 1);
+    at = t_dirent(raw, at, "sub", 3, 2);
+    at = t_dirent(raw, at, "lnk", 3, 3);
+    at = t_dirent(raw, at, "eight888", 8, 0);
+    assert_eq(crab_dirents_take(raw, at, buf, 0), 4, "⛔ the dot entries and an empty name are not rows");
+    assert_eq(crab_cstr_len(buf, CRAB_NAME_MAX), CRAB_NAME_CHARS, "⭐ the 255-byte name arrives whole");
+    assert_eq(load8(buf + CRAB_REC_TYPE), CRAB_KIND_FILE, "a file is a file");
+    assert_eq(t_streq(buf + CRAB_REC_SZ, "sub"), 1, "the next row starts on the next record");
+    assert_eq(load8(buf + CRAB_REC_SZ + CRAB_REC_TYPE), CRAB_KIND_DIR, "2 is a directory");
+    assert_eq(load8(buf + 2 * CRAB_REC_SZ + CRAB_REC_TYPE), CRAB_KIND_FILE,
+      "⛔ a link stays a leaf: the sweep marks it");
+    assert_eq(load8(buf + 3 * CRAB_REC_SZ + CRAB_REC_TYPE), CRAB_KIND_FILE, "an unknown type is a leaf");
+    assert_eq(t_streq(buf + 3 * CRAB_REC_SZ, "eight888"), 1, "⛔ a name with no pad after it is terminated by crab");
+    # A later chunk lands after the earlier ones, and clears what it lands on.
+    var i = 0;
+    while (i < CRAB_REC_SZ) { store8(buf + 4 * CRAB_REC_SZ + i, 65); i = i + 1; }
+    var at2 = t_dirent(raw, 0, "x", 1, 1);
+    assert_eq(crab_dirents_take(raw, at2, buf, 4), 5, "the total carries across chunks");
+    assert_eq(t_streq(buf + 4 * CRAB_REC_SZ, "x"), 1, "...into the next free row");
+    assert_eq(load8(buf + 4 * CRAB_REC_SZ + 200), 0, "⛔ ...with nothing left of what was there");
+    assert_eq(load8(buf + 4 * CRAB_REC_SZ + CRAB_REC_TYPE), CRAB_KIND_FILE, "...the type byte included");
+    # Past the cap: counted, never stored.
+    var guard = buf + CRAB_MAX_ENTRIES * CRAB_REC_SZ;
+    store8(guard, 90);
+    assert_eq(crab_dirents_take(raw, at2, buf, CRAB_MAX_ENTRIES), CRAB_MAX_ENTRIES + 1, "past the cap it still counts");
+    assert_eq(load8(guard), 90, "⛔ ...and writes nothing past the buffer");
+    # Kernel data that does not add up ends the walk.
+    store8(raw, 0); store8(raw + 1, 0);
+    assert_eq(crab_dirents_take(raw, 64, buf, 7), 7, "⛔ a zero reclen stops instead of spinning");
+    store8(raw, 4);
+    assert_eq(crab_dirents_take(raw, 64, buf, 7), 7, "⛔ so does one shorter than its header");
+    at2 = t_dirent(raw, 0, "abc", 3, 1);
+    assert_eq(crab_dirents_take(raw, at2 - 1, buf, 7), 7, "⛔ a record reaching past the bytes read is not read");
+    store8(raw + 3, 200);
+    assert_eq(crab_dirents_take(raw, at2, buf, 7), 7, "⛔ a name longer than its record is not read");
+    assert_eq(crab_dirents_take(raw, 7, buf, 7), 7, "fewer bytes than a header is the end");
+
+    test_group("crab 0.11.4: the tree walk's kernel records widen correctly");
+    var k = alloc(2 * CRAB_KREC_SZ);
+    i = 0;
+    while (i < 2 * CRAB_KREC_SZ) { store8(k + i, 0); i = i + 1; }
+    i = 0;
+    while (i < CRAB_KREC_NAME_CHARS) { store8(k + i, 98); i = i + 1; }
+    store8(k + CRAB_KREC_TYPE, 1);
+    store8(k + CRAB_KREC_SZ, 99);
+    i = 0;
+    while (i < CRAB_REC_SZ) { store8(buf + i, 65); i = i + 1; }
+    assert_eq(crab_krecs_widen(k, 2, buf), 2, "both records");
+    assert_eq(crab_cstr_len(buf, CRAB_NAME_MAX), CRAB_KREC_NAME_CHARS, "a 62-byte kernel name keeps its length");
+    assert_eq(load8(buf + CRAB_REC_TYPE), 1, "⛔ the type comes from byte 63 and lands in the wide slot");
+    assert_eq(t_streq(buf + CRAB_REC_SZ, "c"), 1, "⛔ kernel records are read at the kernel's stride");
+    i = 0;
+    while (i < CRAB_KREC_SZ) { store8(k + i, 100); i = i + 1; }
+    crab_krecs_widen(k, 1, buf);
+    assert_eq(crab_cstr_len(buf, CRAB_NAME_MAX), CRAB_KREC_TYPE, "⛔ a record with no NUL stops before its type byte");
+
+    test_group("crab 0.11.4: a sentence quotes a name without losing its keys");
+    var q = alloc(CRAB_NAME_MAX + 8);
+    var n62 = t_run_of(97, 62);
+    var n63 = t_run_of(97, 63);
+    assert_eq(crab_name_quote(q, n62, 62), 62, "62 characters are quoted whole");
+    assert_eq(t_streq(q, n62), 1, "...unchanged");
+    assert_eq(crab_name_quote(q, n63, 62), 63, "63 are cut to 62 and the marker");
+    assert_eq(load8(q + 62), 126, "...which says so");
+    var e2 = alloc(4); store8(e2, 0xC3); store8(e2 + 1, 0xA9); store8(e2 + 2, 0);
+    var u = t_chars(e2, 2, 70);
+    assert_eq(crab_name_quote(q, u, 62), 62 * 2 + 1, "⛔ a character is a character, not a byte");
+    assert_eq(load8(q + 62 * 2 - 1), 0xA9, "⛔ ...and the cut is between characters");
+    var pb = alloc(CRAB_OV_PROMPT_CAP);
+    crab_ov_prompt(pb, CRAB_OV_PROMPT_CAP, n255, 0);
+    assert_eq(load8(pb + 8 + 62), 126, "the collision prompt quotes a long name, marked");
+    assert_eq(t_ends(pb, "Esc stop"), 1, "⛔ ...and keeps its keys");
+    var f4 = alloc(8);
+    store8(f4, 0xF0); store8(f4 + 1, 0x9F); store8(f4 + 2, 0x98); store8(f4 + 3, 0x80); store8(f4 + 4, 0);
+    crab_ov_prompt(pb, CRAB_OV_PROMPT_CAP, t_chars(f4, 4, 63), 0);
+    assert_eq(load8(pb + 8 + 62 * 4), 126, "⛔ the widest quotable name fits the prompt whole");
+    assert_eq(t_ends(pb, "Esc stop"), 1, "...keys included");
+    var pnar = alloc(100);
+    crab_ov_prompt(pnar, 100, n255, 0);
+    assert_eq(load8(pnar + 8), 97, "⛔ a name cut by a narrow prompt is still there");
+    assert_eq(t_ends(pnar, "Esc stop"), 1, "...and the keys still follow it");
+
+    var db = alloc(3 * CRAB_REC_SZ);
+    var u3 = t_chars(e2, 2, 127);
+    crab_rec_fill(db, u3, 254, 0);
+    crab_rec_fill(db + CRAB_REC_SZ, u3, 254, 0);
+    crab_rec_fill(db + 2 * CRAB_REC_SZ, u3, 254, 0);
+    var dm = alloc(3);
+    crab_mark_clear(dm, 3);
+    crab_mark_toggle(dm, 0, 3); crab_mark_toggle(dm, 1, 3); crab_mark_toggle(dm, 2, 3);
+    var dp = crab_del_prompt("/r", db, dm, 3, 0, 3);
+    assert_eq(t_ends(dp, "y = yes, any other key = no"), 1, "⛔ three long names leave the delete keys");
+    assert_eq(t_has(dp, 126), 1, "...each one quoted");
+    crab_rec_fill(db, n255, CRAB_NAME_CHARS, CRAB_KIND_FILE);
+    dp = crab_del_prompt("/r", db, dm, 1, 0, 0);
+    assert_eq(load8(dp + 7 + 62), 126, "a file's long name is quoted");
+    crab_rec_fill(db, n255, CRAB_NAME_CHARS, CRAB_KIND_DIR);
+    dp = crab_del_prompt("/r", db, dm, 1, 0, 0);
+    assert_eq(t_has(dp, 126), 1, "a folder's long name is quoted");
+    crab_rec_fill(db, n255, CRAB_NAME_CHARS, CRAB_KIND_LINK);
+    dp = crab_del_prompt("/r", db, dm, 1, 0, 0);
+    assert_eq(t_has(dp, 126), 1, "a link's long name is quoted");
+    crab_rec_fill(db, "short", 5, CRAB_KIND_FILE);
+    dp = crab_del_prompt("/r", db, dm, 1, 0, 0);
+    assert_eq(t_streq(dp, "delete short?  y = yes, any other key = no"), 1, "a short name reads as it always did");
+
+    test_group("crab 0.11.4: display and sidebar buffers fit what they hold");
+    var cell = alloc(CRAB_NAME_MAX + 8);
+    var used = crab_name_cell(cell, n255, 400);
+    assert_eq(used, CRAB_NAME_CHARS, "a wide column shows the whole name");
+    assert(used + 2 <= crab_cell_cap(n255), "⛔ ...with room for a kind marker and its NUL");
+    used = crab_name_cell(cell, n255, 10);
+    assert(used + 2 <= crab_cell_cap(n255), "⛔ a cut name is never longer than it was");
+    assert_eq(crab_cell_cap(""), 4, "an empty name still has room for its marker");
+    var pl = alloc(2 * CRAB_PLACE_SZ);
+    assert_eq(crab_place_add(pl, 0, t_run_of(108, 200), "/", fst), 1, "a place is added");
+    assert_eq(crab_cstr_len(crab_place_label(pl, 1, 0), CRAB_PLACE_LABEL_MAX), CRAB_PLACE_LABEL_MAX - 1,
+      "⛔ its label stops at the field");
+    assert_eq(t_streq(crab_place_path(pl, 1, 0), "/"), 1, "⛔ ...and the path after it is intact");
+
+    test_group("crab 0.11.4: a long name is acted on whole");
+    t_mkdir("w1"); t_mkdir("w1/r");
+    var l70 = t_run_of(97, 70);
+    var s62 = t_run_of(97, 62);
+    t_write(t_in("w1", l70), "LONG-70");
+    t_write(t_in("w1", s62), "SIBLING");
+    var d = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(d, t_p("w1"), CRAB_PATH_MAX);
+    assert_eq(crab_fs_delete(d, l70, 0, sc1), CRAB_FS_OK, "the long name is deleted");
+    assert_eq(t_exists(t_in("w1", l70)), 0, "⛔ the long file is gone");
+    assert_eq(t_exists(t_in("w1", s62)), 1, "⛔ its 62-byte sibling is not touched");
+    var o200 = t_run_of(111, 200);
+    var r180 = t_run_of(114, 180);
+    t_write(t_in("w1", o200), "R");
+    assert_eq(crab_fs_rename(d, o200, r180, sc1, sc2, fst), CRAB_FS_OK, "a long name renames to a long name");
+    assert_eq(t_exists(t_in("w1", r180)), 1, "...and the new one is whole");
+    assert_eq(crab_fs_path(sc1, d, n255), CRAB_FS_ETOOLONG, "⛔ a path that does not fit is refused, never cut");
+    # A queue carries the whole name.
+    var qb = alloc(2 * CRAB_REC_SZ);
+    crab_rec_fill(qb, r180, 180, 0);
+    var qm = alloc(2);
+    crab_mark_clear(qm, 1);
+    crab_mark_toggle(qm, 0, 1);
+    var dr = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(dr, t_p("w1/r"), CRAB_PATH_MAX);
+    assert_eq(crab_queue_start(qb, qm, 1, CRAB_OP_COPY, d, dr, sc1, sc2, fst), 1,
+      "a queued copy of a long name starts");
+    assert_eq(t_run(), CRAB_FS_OK, "...and finishes");
+    assert_eq(t_exists(t_in("w1/r", r180)), 1, "⛔ the copy has the whole name");
+    # Names that share 62 bytes are different names everywhere crab compares them.
+    t_mkdir("w2");
+    var sa = t_run_of(97, 100);
+    var sb = t_run_of(97, 100);
+    store8(sa + 99, 49);
+    store8(sb + 99, 50);
+    t_write(t_in("w2", sa), "SAME");
+    t_write(t_in("w2", sb), "SAME");
+    var rb = alloc(2 * CRAB_REC_SZ);
+    crab_rec_fill(rb, sb, 100, 0);
+    crab_rec_fill(rb + CRAB_REC_SZ, sa, 100, 0);
+    var szs = alloc(16); var mts = alloc(16); var mk2 = alloc(2);
+    store64(szs, 4); store64(szs + 8, 4); store64(mts, 5); store64(mts + 8, 5);
+    crab_sort_entries(rb, szs, mts, 2, CRAB_SORT_NAME);
+    assert_eq(t_streq(rb, sa), 1, "⛔ the sort reads past byte 62");
+    crab_mark_clear(mk2, 2);
+    var d2 = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(d2, t_p("w2"), CRAB_PATH_MAX);
+    assert_eq(crab_dup_scan(d2, rb, 2, szs, mts, mk2, sc1), 1,
+      "⛔ the duplicate scan sees two files, not one read twice");
+
+    test_group("crab 0.11.4: the tree walk still sees what agnos gives it");
+    t_mkdir("w3");
+    t_write(t_in("w3", l70), "X");
+    var wb = alloc(4 * CRAB_REC_SZ);
+    var wc = alloc(8);
+    store64(wc, 0);
+    var d3 = alloc(CRAB_PATH_MAX);
+    crab_strcpy_n(d3, t_p("w3"), CRAB_PATH_MAX);
+    assert_eq(crab_walk_readdir(d3, crab_cstr_len(d3, CRAB_PATH_MAX), wb, 4, wc), 1, "one entry");
+    assert_eq(crab_cstr_len(wb, CRAB_NAME_MAX), CRAB_KREC_NAME_CHARS,
+      "⛔ cut where the kernel cuts, until `lseek` can seek a directory");
+
+    test_group("crab 0.11.4: long names cost a frame nothing");
+    var fb = alloc(8 * CRAB_REC_SZ);
+    var fz = alloc(8 * 8); var fm = alloc(8 * 8);
+    var sl = alloc(8); var sr = alloc(8);
+    store64(sl, 0); store64(sr, 0);
+    i = 0;
+    while (i < 8) {
+        crab_rec_fill(fb + i * CRAB_REC_SZ, n255, CRAB_NAME_CHARS, 0);
+        store64(fz + i * 8, 1); store64(fm + i * 8, 1);
+        i = i + 1;
+    }
+    var rs = crab_rs();
+    var surf = dh_surface_new(800, 400);
+    var pass = 0;
+    var before = 0;
+    while (pass < 3) {
+        if (pass == 2) { before = alloc_used(); }
+        crab_rs_reset(rs);
+        crab_rs_pane(rs, 0, fb, 8, "/a", fz, fm, CRAB_PANE_OK, 0, 0, sl);
+        crab_rs_pane(rs, 1, fb, 8, "/", fz, fm, CRAB_PANE_OK, 0, 0, sr);
+        assert(crab_render(surf, 0, rs) != 0, "a pane of the longest names renders");
+        pass = pass + 1;
+    }
+    assert_eq(alloc_used() - before, 0, "⛔ ...and the third frame costs the heap nothing");
     return 0;
 }
 
@@ -732,6 +1023,7 @@ fn main(): i64 {
     t_text();
     t_grid();
     t_dhancha();
+    t_whole_names();
     return assert_summary();
 }
 

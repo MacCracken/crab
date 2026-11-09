@@ -4,10 +4,12 @@
 > `agnos/docs/development/issues/2026-11-08-readdir-cuts-a-long-name-and-says-nothing.md` — an issue about
 > another repository that lives only here is one nobody who could act on it will ever read. The canonical
 > text is written from agnos's side; this copy says what it means for crab.
-> ⛔ **What it means for crab, in one line**: a name over 62 bytes lists as its first 62, and crab builds every
-> path from the listed bytes, so the row opens nothing, or acts on a sibling with exactly that name.
+> ⛔ **What it means for crab, in one line**: since 0.11.4 only the tree walk still sees a cut name, so a folder copy or
+> delete stops at a name over 62 bytes.
 
-**Status:** 🔴 **OPEN — upstream, filed 2026-11-08 from crab 0.11.3 against agnos 8927c965 (1.57.17).**
+**Status:** 🟡 **PARTLY WORKED AROUND in crab 0.11.4 (2026-11-08); the rest is open upstream.** crab's panes now list
+through `getdents#29` and hold whole names. Its tree walk still reads `#101`, so a folder copy or delete stops at a name
+over 62 bytes until agnos lets `lseek#58` reposition a directory fd. Filed from crab 0.11.3 against agnos 8927c965 (1.57.17).
 
 ## What was measured
 
@@ -18,20 +20,11 @@ left the 70-byte file. Two names sharing their first 62 bytes list as two identi
 
 ## What it means here
 
-crab lists through `#101`, falling back to `#81` (`src/app.cyr`, `sys_readdir_at` and `sys_readdir`). Every action then
-joins the directory and the listed bytes:
-
-- **A long name alone:** a row whose size, Open, Rename and Delete all fail.
-- **A long name beside a sibling named its first 62 bytes:** two identical rows, and an action on either lands on the sibling.
-
-## What crab already does
-
-Since 0.11.2 it refuses to create a name over 62 bytes (`CRAB_NAME_CHARS`), and its duplicate scan never pairs two rows
-of one name. Neither helps with a long name already on disk.
+Since 0.11.4 crab lists panes through `#29`, so every row holds its whole name. What remains is the tree walk
+(`crab_walk_readdir`): it holds no fd between steps, `#29` cannot resume without one, and `lseek#58` refuses a directory.
+One fd per level would need up to 127 of the kernel's 32.
 
 ## What would close it here
 
-- **agnos marks a cut name** (the filing's ask): crab masks the new bit in byte 63 wherever it reads the type, and
-  refuses to act on a marked row, out loud.
-- **Or crab moves to `#29`**, which returns whole names today. crab's record is 64 bytes (`CRAB_REC_SZ`) and holds 62 of
-  them, so this means widening the record or adding a name pool, across every reader of a listing. Not started.
+**agnos lets `lseek#58` reposition a directory fd** (the filing's third ask): the walk then reads `#29` as well, and
+`crab_krecs_widen` and the `CRAB_KREC_*` constants go.

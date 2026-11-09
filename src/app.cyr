@@ -28,12 +28,11 @@ fn crab_say(s): i64 { return syscall(SYS_WRITE, 1, s, strlen(s)); }
 # listed was simply absent from the pane, which reads as a filesystem fault rather than a cap.
 #
 # ⭐ 256 -> 1024 (M3 *#02*, agnos 1.56.50). The design canvas shows **812 items** in a pane, so 256
-# was below the number the design itself asks for. Records are 64 B, so 1024 entries is a 64 KB pane
-# buffer — two panes plus their size/mtime arrays is ~160 KB, against a bump allocator that never
-# frees, paid once at startup rather than per frame.
+# was below the number the design itself asks for. A record is 257 B since 0.11.4, so 1024 entries is
+# a 263 KB pane buffer, paid once at startup against a bump allocator that never frees.
 # ⛔ RAISING THE CAP DOES NOT MAKE THE CAP HONEST, WHICH IS THE ACTUAL DEFECT. A directory bigger
 # than any cap still exists; what changed is that crab can now SAY how much it is not showing,
-# because `#101 readdir_at` lets the walk continue past the buffer without storing.
+# because the listing keeps reading past the buffer without storing.
 enum CrabDir {
     CRAB_MAX_ENTRIES = 1024;
     # ⚠ 64 KiB per file for the duplicate hash — the same budget the preview header read uses, and
@@ -41,18 +40,15 @@ enum CrabDir {
     # reading a 4 GB video on a keypress". ⛔ Two files differing only PAST this bound hash alike,
     # which is why `crab_dup_same` also requires equal sizes and why crab says "duplicate".
     CRAB_DUP_READ_MAX = 65536;
-    # ⚠ Records per `readdir_at` call. Bounds the syscall's write to the pane buffer; it is not the
-    # pane cap. 64 records = 4 KB, which is also the counting scratch below.
+    # ⚠ Records per `readdir_at` call in the tree walk. 64 kernel records = 4 KB = `CRAB_COPY_CHUNK`,
+    # the scratch they land in before `crab_krecs_widen`.
     CRAB_READDIR_BATCH = 64;
-    # ⛔⛔ THE BACKSTOP ON A `#101` WALK, AND IT IS THE SECOND GUARD, NOT THE FIRST. The kernel's
-    # I/O-error paths (`agnos/kernel/core/ext2.cyr`) `store64(cursor_uva, pos)` with `pos` UNCHANGED
-    # and `return count` — which may be 0, and 0 is NOT negative. A persistent block-read failure
-    # therefore satisfies `k >= 0` and `cur != -1` forever, and crab spins in a syscall loop with no
-    # output at all: a hang, not a crash, and nothing in the suite can see it.
-    # ⇒ The precise guard is the stall test at each call site — `k == 0` AND the cursor did not move.
-    # This cap exists for the case that test cannot see: a cursor that advances while yielding
-    # nothing. It is deliberately FAR above any legitimate walk (4096 calls x 64 records = 262,144
-    # entries) so that reaching it is always a fault, never a big directory.
+    # ⚠ Bytes handed to `getdents#29` per call. A record is at most 264 bytes, so even a directory of
+    # the longest names returns dozens at a time.
+    CRAB_DIRENT_CHUNK = 16384;
+    # ⛔ THE BACKSTOP ON A LISTING. `#29` ends with 0 and fails with -1; this stops a directory that
+    # somehow does neither. It is far above any real listing (4096 calls x 16 KiB), so reaching it is
+    # a fault, never a big directory, and the total is then reported as unknown.
     CRAB_READDIR_STEPS_MAX = 4096;
     # ⭐⭐ THE HARDCODED `CRAB_SYS_READDIR_AT = 101` IS GONE (2026-08-30). It was an interim with a
     # stated expiry — "switch to `sys_readdir_at` and delete this constant the moment crab's pin
@@ -65,7 +61,7 @@ enum CrabDir {
     # ⛔ A consumer hard-coding a syscall number is the bug class agnos's roadmap tracks; do not
     # reintroduce one. If a needed wrapper is missing, file it upstream and pin the interim to an
     # explicit expiry, as this one was.
-    # ⚠ M4's copy buffer. 4 KiB matches the readdir counting scratch and one ext2 block; it is a
+    # ⚠ M4's copy buffer, and the walk's batch scratch. 4 KiB matches one ext2 block; it is a
     # throughput knob and nothing else, since every read is drained by a bounded write loop.
     CRAB_COPY_CHUNK = 4096;
 }
@@ -435,7 +431,7 @@ fn crab_ov_auto(policy): i64 {
 # ⛔ IT NAMES THE FILE, for the reason the delete prompt names what dies: "something is already
 # there" is a sentence the operator cannot act on, and the answer they are about to give destroys
 # one of two files they cannot tell apart. ⚠ The name is truncated to what fits rather than dropped.
-var CRAB_OV_PROMPT_CAP = 200;
+var CRAB_OV_PROMPT_CAP = 320;
 fn crab_ov_prompt(dst, cap, name, all_armed): i64 {
     if (dst == 0) { return -1; }
     if (cap < 64) { return -1; }
@@ -445,7 +441,12 @@ fn crab_ov_prompt(dst, cap, name, all_armed): i64 {
         if (load8(name) != 0) {
             # ⚠ Leave room for the answer list: the name yields, never the keys.
             var room = cap - w - 56;
-            if (room > 1) { w = w + crab_strcpy_n(dst + w, name, room); }
+            if (room > 1) {
+                # ⛔ `crab_strcpy_n` ANSWERS -1 WHEN IT CUTS, AND ADDING THAT WOULD STEP BACK OVER THE NAME.
+                var put = crab_strcpy_n(dst + w, crab_name_quoted(name), room);
+                if (put < 0) { put = room - 1; }
+                w = w + put;
+            }
         }
     }
     if (all_armed == 1) { w = w + crab_strcpy_n(dst + w, "  [all] ", cap - w); }
@@ -626,7 +627,7 @@ fn crab_about_text(): i64 {
 # ⭐⭐ THE QUEUE HOLDS NAMES, NOT INDICES, AND THAT IS THE WHOLE REASON IT EXISTS. A multi-file copy
 # re-lists both panes after each file, so any index captured when the operator pressed `c` is wrong
 # by the time the second file starts. Names survive a re-listing; indices do not.
-# ⚠ Allocated lazily and ONCE — `CRAB_MAX_ENTRIES * CRAB_NAME_MAX` is 64 KB, which is real, so a
+# ⚠ Allocated lazily and ONCE — `CRAB_MAX_ENTRIES * CRAB_NAME_MAX` is 256 KB, which is real, so a
 # crab that never multi-selects never pays it.
 var crab_q = 0;
 var crab_qn = 0;
@@ -1252,11 +1253,11 @@ fn crab_entry_cmp(buf, sizes, mtimes, i, j, mode): i64 {
 # ⭐⭐ THE SORT'S SCRATCH, ALLOCATED ONCE FOR THE PROCESS. Two index arrays and one record.
 #
 # ⛔ `alloc` IS A BUMP ALLOCATOR WITH NO `free()`, AND THIS USED TO BE PER CALL. The insertion sort
-# below took its 64-byte swap slot with a bare `alloc(CRAB_REC_SZ)` inside the function — and the
-# function runs once per listing, i.e. on every descend and every ascend. That is 64 bytes leaked
+# below took its swap slot with a bare `alloc(CRAB_REC_SZ)` inside the function — and the
+# function runs once per listing, i.e. on every descend and every ascend. That is one record leaked
 # per keypress, forever, in the allocator whose per-frame cost four releases were spent driving to
 # zero. Hoisting it here is not a micro-optimisation; it is the same rule the frame arena obeys.
-# ⚠ 16 KB + 64 B, once, against the ~597 KB crab already pays at startup for the render target and
+# ⚠ 16 KB + one record, once, against the ~597 KB crab already pays at startup for the render target and
 # the arena. A fixed cost instead of a per-keypress one, which is the whole pattern in this app.
 var crab_sidx = 0;
 var crab_stmp = 0;
@@ -1335,7 +1336,7 @@ fn crab_sort_insertion(buf, sizes, mtimes, count, mode): i64 {
 # and the second matters more than the first at this record size:
 #   - O(n log n) comparisons rather than O(n^2)  — 10,240 vs ~524,288 at the cap
 #   - **n record moves rather than O(n^2) swaps**. The old inner loop moved 64 bytes ONE BYTE AT A
-#     TIME, three times per swap. Sorting indices means the 64-byte payload is touched once per
+#     TIME, three times per swap. Sorting indices means the record is touched once per
 #     entry, by the cycle-following pass at the end, and never during the sort itself.
 #
 # ⚠ STABILITY IS PRESERVED AND IS LOAD-BEARING. `crab_entry_cmp` returns 0 only for entries
@@ -1572,7 +1573,7 @@ fn crab_place_add(dst, n, label, path, statbuf): i64 {
     if (pl < 0) { return n; }
     if (crab_fs_isdir(path, pl, statbuf) == 0) { return n; }
     var rec = dst + n * CRAB_PLACE_SZ;
-    crab_strcpy_n(rec + CRAB_PLACE_LABEL, label, CRAB_NAME_MAX);
+    crab_strcpy_n(rec + CRAB_PLACE_LABEL, label, CRAB_PLACE_LABEL_MAX);
     crab_strcpy_n(rec + CRAB_PLACE_PATH, path, CRAB_PATH_MAX);
     # ⛔ NORMALISED AS STORED (0.8.5). `$HOME` is spelled by whoever set it — `/home/macro/` is
     # legal — and a place kept with its slash never CONTAINS the bare directory it names, so the
@@ -1838,9 +1839,6 @@ fn crab_name_ok(name): i64 {
     if (name == 0) { return 0; }
     var n = crab_cstr_len(name, CRAB_NAME_MAX);
     if (n <= 0) { return 0; }                            # -1 unterminated, 0 empty
-    # ⛔ A LONGER NAME COULD BE CREATED AND THEN NEVER REACHED: readdir hands crab 62 bytes of it, and
-    # every later verb would name a file that does not exist (0.11.2, P(-1) M14).
-    if (n > CRAB_NAME_CHARS) { return 0; }
     if (load8(name) == 46) {                             # '.'
         if (n == 1) { return 0; }                        # "."
         if (n == 2) { if (load8(name + 1) == 46) { return 0; } }   # ".."
@@ -2333,19 +2331,6 @@ fn crab_truncation_note(n, total): i64 {
     return 0;                                        # total == n: it filled the buffer exactly
 }
 
-# @public — did this `#101` step make no progress? 1 = stalled, 0 = keep walking.
-#
-# ⛔⛔ THIS PREDICATE IS A FUNCTION FOR ONE REASON: THE LOOPS THAT USE IT CANNOT BE TESTED.
-# Both `#101` walks live inside `#ifdef CYRIUS_TARGET_AGNOS` and drive a raw syscall, so the host
-# suite cannot reach either of them — which is exactly how a non-terminating loop shipped in the
-# first place and sat through 253/0 green. Lifting the decision out gives the suite the part that
-# can actually be wrong, on the same principle that made `src/path.cyr` a file.
-# ⚠ `k == 0` ALONE IS NOT A STALL, and this is the whole subtlety. A batch can legitimately yield
-# zero records while the cursor advances — a directory block holding only deleted entries. Breaking
-# on the count alone would truncate such a listing silently, which is the 0.4.x cap bug wearing a
-# new hat. Only zero-AND-unmoved is a fault.
-# ⚠ `k < 0` is NOT this function's business: a negative is the kernel's own error signal and the
-# callers act on it differently (the listing walk falls back to `#81`, the counter gives up).
 # @public — an `unlink` just failed on an entry the record typed as a LEAF. Should the walk descend it
 # as a DIRECTORY? 1 = yes.
 #
@@ -2361,123 +2346,133 @@ fn crab_walk_retry_as_dir(typebyte, is_real_dir): i64 {
     return 0;
 }
 
-fn crab_readdir_stalled(k, was, now): i64 {
-    if (k != 0) { return 0; }                        # records came back — progress, by definition
-    if (now != was) { return 0; }                    # cursor moved — progress through the dir file
-    return 1;
+# @public — one record from a name of `nlen` bytes (at most CRAB_NAME_CHARS) and its kind. The whole
+# record is written, so a shorter name cannot inherit the tail of the last one.
+fn crab_rec_fill(rec, name, nlen, kind): i64 {
+    var i = 0;
+    while (i < nlen) { store8(rec + i, load8(name + i)); i = i + 1; }
+    while (i < CRAB_REC_SZ) { store8(rec + i, 0); i = i + 1; }
+    store8(rec + CRAB_REC_TYPE, kind);
+    return 0;
 }
 
+# @public — take the `got` bytes of `getdents#29` records at `raw` into `buf`, where `total` entries
+# have already been seen. -> the new total. Entries past `CRAB_MAX_ENTRIES` are counted, not stored.
+# ⭐ A FUNCTION SO THE SUITE CAN REACH IT: the loop that calls this runs only on agnos.
+# ⛔ `raw` IS KERNEL DATA, and a name is NOT NUL-terminated when its record is an exact multiple of 8.
+# A record whose name does not fit it, or reaching past `got`, ends the walk: spinning or reading past
+# the buffer are the alternatives. Record shape, ABI § 4.2: reclen u16, type u8, namelen u8, ino u32, name.
+fn crab_dirents_take(raw, got, buf, total): i64 {
+    var off = 0;
+    while ((off + 8) <= got) {
+        var d = raw + off;
+        var reclen = load8(d) | (load8(d + 1) << 8);
+        var nlen = load8(d + 3);
+        if ((off + reclen) > got) { return total; }
+        if ((8 + nlen) > reclen) { return total; }
+        var nm = d + 8;
+        var skip = 0;
+        if (nlen == 0) { skip = 1; }
+        if ((nlen == 1) && (load8(nm) == 46)) { skip = 1; }
+        if ((nlen == 2) && (load8(nm) == 46) && (load8(nm + 1) == 46)) { skip = 1; }
+        if (skip == 0) {
+            if (total < CRAB_MAX_ENTRIES) {
+                var kind = CRAB_KIND_FILE;
+                if (load8(d + 2) == 2) { kind = CRAB_KIND_DIR; }
+                crab_rec_fill(buf + total * CRAB_REC_SZ, nm, nlen, kind);
+            }
+            total = total + 1;
+        }
+        off = off + reclen;
+    }
+    return total;
+}
+
+# @public — turn `k` kernel records (`#81` / `#101`) at `raw` into crab records at `buf`. -> k.
+fn crab_krecs_widen(raw, k, buf): i64 {
+    var i = 0;
+    while (i < k) {
+        var kr = raw + i * CRAB_KREC_SZ;
+        var n = 0;
+        while ((n < CRAB_KREC_TYPE) && (load8(kr + n) != 0)) { n = n + 1; }
+        crab_rec_fill(buf + i * CRAB_REC_SZ, kr, n, load8(kr + CRAB_KREC_TYPE));
+        i = i + 1;
+    }
+    return k;
+}
+
+#ifdef CYRIUS_TARGET_AGNOS
+var crab_dirent_buf = 0;
+fn crab_dirent_raw(): i64 {
+    if (crab_dirent_buf == 0) { crab_dirent_buf = alloc(CRAB_DIRENT_CHUNK); }
+    return crab_dirent_buf;
+}
+
+# Why a directory could not be listed, as `#101` says it: -2 does not resolve, -4 not a directory.
+# ⚠ `open` answers only -1, and the pane says which of these it was. When `#101` can read what `open`
+# could not, there is no answer about the path, and -1 is the honest one.
+fn crab_readdir_why(path): i64 {
+    var one[64];
+    var cur[8];
+    store64(&cur, 0);
+    var k = sys_readdir_at(path, &one, 1, &cur);
+    if (k < 0) { return k; }
+    return 0 - 1;
+}
+#endif
+
 # readdir `path` into `buf` (up to CRAB_MAX_ENTRIES records); returns the entry count (>= 0).
-# agnos-only (sys_readdir is the #81 wrapper); on the host it yields 0 (mock panes).
+# agnos-only; on the host it yields 0 (mock panes).
 #
-# ⚠ A FULL BUFFER IS NOT A COMPLETE LISTING. `sys_readdir` returns what fit, so `n == max` cannot be
-# told apart from "there were more" — it is the only truncation signal there is. SAY SO: a pane that
-# quietly stops at the cap looks like the missing files do not exist.
-# ⭐⭐ PAGED LISTING (M3 *#02*, agnos 1.56.50 `#101 readdir_at`). `#81` always starts at the top and
-# stops at `max`, so a directory larger than the pane buffer was silently truncated. `#101` carries a
-# cursor — the byte offset into the directory file — so the walk resumes.
-# ⭐ AND WHEN THE BUFFER FILLS, THE WALK CONTINUES WITHOUT STORING, purely to count. That is what
-# turns "there are more entries than are shown" into "showing 1024 of 3891". The extra pass costs
-# nothing in the normal case because it only runs when the directory actually overflows the cap.
-# ⛔ THE #81 FALLBACK IS NOT OPTIONAL. Against a kernel older than 1.56.50, `#101` is an unknown
-# syscall and the dispatcher returns -1 — so without this, crab would show an EMPTY pane on every
-# older kernel and look like a filesystem fault. The fallback triggers on any negative from the
-# FIRST batch, which is exactly the "syscall not there" case.
+# ⭐⭐ THROUGH `getdents#29` (0.11.4), BECAUSE IT RETURNS THE WHOLE NAME. `#81` and `#101` cut a name at
+# 62 bytes and say nothing, so a long name listed as its first 62, and a delete aimed at it could
+# remove a sibling named exactly that. Measured: docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md.
+# ⭐ AND WHEN THE BUFFER FILLS, THE READ CONTINUES WITHOUT STORING, purely to count. That is what turns
+# "there are more entries than are shown" into "showing 1024 of 3891".
 fn crab_readdir_into(path, buf): i64 {
     var n = 0;
     crab_dir_total = 0 - 1;
     crab_dir_err = 0;
     #ifdef CYRIUS_TARGET_AGNOS
-    var cur[8];
-    store64(&cur, 0);                                # 0 = start at the top of the directory
-    var paged = 1;
-    var steps = 0;
-    while (load64(&cur) != (0 - 1)) {
-        if (n >= CRAB_MAX_ENTRIES) { break; }
-        if (steps >= CRAB_READDIR_STEPS_MAX) { break; }
-        steps = steps + 1;
-        var want = CRAB_MAX_ENTRIES - n;
-        if (want > CRAB_READDIR_BATCH) { want = CRAB_READDIR_BATCH; }
-        var was = load64(&cur);                      # the cursor BEFORE the call — the stall oracle
-        var k = sys_readdir_at(path, buf + n * CRAB_REC_SZ, want, &cur);
-        if (k < 0) {
-            if (n == 0) { paged = 0; crab_dir_err = k; }   # #101 unavailable — take the old path
-            break;
-        }
-        # ⛔ THE STALL GUARD. See `CRAB_READDIR_STEPS_MAX`. Zero records AND an unmoved cursor is the
-        # kernel's I/O-error shape, and it is indistinguishable from it by return value alone — the
-        # error path returns a non-negative count. Without this the loop never ends.
-        # ⛔ `n >= CRAB_MAX_ENTRIES` ABOVE IS NOT A SECOND ESCAPE FROM THIS. `n` advances only by
-        # `n = n + k`, and on a stall `k` is the zero — so that test can never become true either.
-        # There is no safer half of this loop; both exits need the guard.
-        if (crab_readdir_stalled(k, was, load64(&cur)) != 0) { break; }
-        n = n + k;
-    }
-    if (paged == 0) {
-        n = sys_readdir(path, buf, CRAB_MAX_ENTRIES);
-        # ⛔ KEEP `#101`'s CLASSIFICATION WHEN IT MADE ONE, AND ONLY THEN. `-1` is the ambiguous code
-        # — bad pointer, not ext2, or the syscall simply not existing on a kernel older than
-        # 1.56.50 — so it says nothing about the PATH and must not become a pane state. `-2` (does
-        # not resolve) and `-4` (not a directory) are real answers about the path, and `#81` has no
-        # way to express either: it returns a bare negative for all of them.
-        # ⚠ A SUCCESSFUL `#81` CLEARS THE ERROR. Reaching here means `#101` failed, and on an older
-        # kernel it always will — so leaving its `-1` set would put every pane on such a kernel into
-        # UNREAD while the fallback was listing the directory perfectly well.
-        if (n < 0) {
-            if (crab_dir_err == (0 - 1)) { crab_dir_err = n; }
-            if (crab_dir_err == 0) { crab_dir_err = n; }
-            n = 0;
-        } else { crab_dir_err = 0; }
-    }
-    if (paged == 1) {
-        crab_dir_total = n;
-        # ⚠ Only when the buffer actually filled AND the directory has more. `cur` is the oracle for
-        # "more remains", not `n >= cap` — a directory of exactly the cap is complete, not truncated.
-        if (load64(&cur) != (0 - 1)) {
-            var scratch[4096];                       # CRAB_READDIR_BATCH records, discarded
-            var steps2 = 0;
-            while (load64(&cur) != (0 - 1)) {
-                # ⛔ Same stall shape as the listing walk above, and the same two guards. This loop
-                # has NO buffer to fill, so it has no incidental bound at all — it walks to the end
-                # of the directory by construction. Reaching the cap means the count is not
-                # trustworthy, so it reports "unknown" (-1) rather than a total it cannot stand
-                # behind: the truncation line then says "has more entries than are shown" instead of
-                # quoting a wrong number, which is the honest failure.
-                if (steps2 >= CRAB_READDIR_STEPS_MAX) { crab_dir_total = 0 - 1; break; }
-                steps2 = steps2 + 1;
-                var was2 = load64(&cur);
-                var k2 = sys_readdir_at(path, &scratch, CRAB_READDIR_BATCH, &cur);
-                if (k2 < 0) { crab_dir_total = 0 - 1; break; }
-                if (crab_readdir_stalled(k2, was2, load64(&cur)) != 0) { crab_dir_total = 0 - 1; break; }
-                crab_dir_total = crab_dir_total + k2;
+    var fd = 0 - 1;
+    var pl = crab_cstr_len(path, CRAB_PATH_MAX);
+    if (pl > 0) { fd = sys_open(path, pl, AO_RDONLY | AO_DIRECTORY); }
+    var raw = crab_dirent_raw();
+    if (fd < 0) { crab_dir_err = crab_readdir_why(path); }
+    elif (raw == 0) { sys_close(fd); crab_dir_err = 0 - 1; }
+    else {
+        var total = 0;
+        var steps = 0;
+        var state = 0;                               # 0 reading, 1 reached the end, 2 gave up
+        while (state == 0) {
+            if (steps >= CRAB_READDIR_STEPS_MAX) { state = 2; }
+            else {
+                steps = steps + 1;
+                var got = sys_getdents(fd, raw, CRAB_DIRENT_CHUNK);
+                if (got < 0) { state = 2; }
+                elif (got == 0) { state = 1; }
+                else { total = crab_dirents_take(raw, got, buf, total); }
             }
         }
+        sys_close(fd);
+        n = total;
+        if (state == 1) { crab_dir_total = total; }
+        if ((state == 2) && (total == 0)) { crab_dir_err = crab_readdir_why(path); }
     }
     #endif
     if (n < 0) { n = 0; }
-    # ⚠ Defence in depth, not a known defect: the #81/#101 contracts bound the count by `max`, so this
-    # clamp is unreachable today. It is here because `n` is used as a loop bound over a buffer sized
-    # from the SAME constant — if the kernel contract ever drifts, the failure is a silent read past
-    # lbuf/rbuf, and a one-line clamp is cheaper than the burn that would find it.
+    # `n` is everything the directory held; the pane holds the first `CRAB_MAX_ENTRIES` of it.
     if (n > CRAB_MAX_ENTRIES) { n = CRAB_MAX_ENTRIES; }
     # ⛔⛔ A FULL BUFFER IS NOT A TRUNCATION, AND `n >= cap` ALONE MUST NEVER DECIDE THIS. A directory
     # of EXACTLY `CRAB_MAX_ENTRIES` entries is complete; warning about it tells the operator that
     # files are missing when none are, which is the same lie as hiding them and harder to disbelieve
     # because it is stated. `crab_dir_total` is the oracle — the count the second walk actually made.
     #
-    # ⛔ THE CURSOR IS NOT THE ORACLE, AND THE OBVIOUS FIX IS WRONG. It is natural to test
-    # `cur != -1` here, and it does not work: `agnos/kernel/core/ext2.cyr:2412` PARKS the cursor on
-    # the record it did not take — `store64(cursor_uva, blkbase + off)` — whenever the batch budget
-    # is reached, and only line `:2440` (walked off the end) or `:2392` (start >= dir_size) ever
-    # stores -1. So at exactly the cap the last batch fills, the cursor is left parked rather than
-    # exhausted, and a cursor test still reports the false truncation. The COUNT is what knows:
-    # the counting walk resumes from that parked cursor, immediately takes `:2392`, and adds 0.
-    #
     # ⇒ Three states, and each says only what it can stand behind:
     #     total >  n  — genuinely truncated, and by a known amount    -> "showing n of total"
     #     total == n  — complete, and it exactly filled the buffer    -> SILENT
-    #     total <  0  — unknown: the #81 fallback (no cursor at all), a counting-walk I/O error, or
-    #                   the step cap                                  -> "has more", with no number
+    #     total <  0  — unknown: a read that failed partway, or the   -> "has more", with no number
+    #                   step cap
     var note = crab_truncation_note(n, crab_dir_total);
     if (note != 0) {
         crab_say("crab: WARNING listing truncated at the entry cap -- "); crab_say(path);
@@ -2593,10 +2588,9 @@ fn crab_sort_needs_stats(mode): i64 {
 # 🔗 SEEING A SYMLINK (0.9.3)
 # =================================================================================================
 #
-# ⛔⛆ readdir CANNOT TELL crab A LINK IS A LINK, AND THAT IS A KERNEL FACT RATHER THAN AN OVERSIGHT.
-# `ext2_readdir_at_sys` writes a 64-byte record and sets byte 63 with
-# `var t = 0; if (ftype == 2) { t = 1; }` — one bit, DIR or not — so `EXT2_FT_SYMLINK` arrives
-# indistinguishable from a regular file. The listing has never had the information to show.
+# ⛔⛆ THE LISTING KEEPS ONE BIT, DIR OR NOT, SO A LINK ARRIVES LOOKING LIKE A REGULAR FILE. `#29` does
+# report a symlink, but the tree walk's `#101` record cannot, and one answer in one place is what
+# keeps every reader of the type byte agreeing.
 #
 # ⭐⭐ BUT THE STAT SWEEP ALREADY VISITS EVERY ENTRY, so the answer costs **no extra syscall at all**.
 # `crab_stat_batch` walks 32 entries per idle tick until none is left pending, whatever the sort mode
@@ -3017,9 +3011,8 @@ fn crab_dup_scan(dir, buf, count, sizes, mtimes, marks, pathscr): i64 {
             var j = 0;
             var keep = 1;
             while (j < count) {
-                # ⛔ TWO ROWS OF ONE NAME ARE ONE FILE, READ TWICE. agnos cuts readdir names at 62 bytes, so a
-                # longer name beside its 62-byte prefix lists as two identical rows; both open the same
-                # file, and marking one would delete the only copy of it (P(-1) H10).
+                # ⛔ TWO ROWS OF ONE NAME ARE ONE FILE, READ TWICE, so marking one would delete the only
+                # copy of it (P(-1) H10). A listing of whole names cannot do this; a damaged directory can.
                 if ((j != i) && (crab_streq_n(buf + i * CRAB_REC_SZ, buf + j * CRAB_REC_SZ, CRAB_NAME_MAX) == 0)) {
                     if (crab_dup_same(load64(sizes + i * 8), load64(sizes + j * 8),
                         hi, load64(hashes + j * 8)) == 1) {
@@ -3720,7 +3713,7 @@ enum CrabOp {
     CRAB_OP_FOUT   = 16;
     CRAB_OP_DONE   = 24;   # bytes written so far
     CRAB_OP_TOTAL  = 32;   # bytes expected, or -1 = unknown (INDETERMINATE)
-    CRAB_OP_NAME   = 40;   # CRAB_NAME_MAX bytes — the entry being moved, for the delete and the label
+    # 40 .. 103 are free: the name moved to the end when it outgrew them.
     CRAB_OP_SRC    = 104;  # CRAB_PATH_MAX bytes — the SOURCE path, kept for the move's unlink
     CRAB_OP_DST    = 360;  # CRAB_PATH_MAX bytes — the DESTINATION path, kept for a cancel's cleanup
     # ⚠ Rate/ETA state. `CRAB_OP_T0` is the ms the transfer STARTED; the rate is derived from the
@@ -3732,8 +3725,8 @@ enum CrabOp {
     # the whole requirement — a tree operation must yield to the idle tick like everything else.
     # ⚠ A SLOT HOLDS NO PATH. `sys_readdir_at` is path-based, not fd-based, so there is no directory
     # handle to retain: a level is a resume cursor plus the two path lengths a pop truncates back to.
-    # The naive design — one entry buffer per level — is 64 KB PER LEVEL against a bump allocator
-    # that never frees. 32 bytes is 2000x cheaper and is what makes this one static allocation.
+    # The naive design — one entry buffer per level — is a whole pane buffer PER LEVEL against a bump
+    # allocator that never frees. 32 bytes is what makes this one static allocation.
     CRAB_OP_SROOT  = 624;    # + CRAB_PATH_MAX — the tree's source root, immutable for the run
     CRAB_OP_DROOT  = 880;    # + CRAB_PATH_MAX — its destination root ("" for a delete)
     CRAB_OP_CURS   = 1136;   # + CRAB_PATH_MAX — the LIVE source path: the level the walk stands in
@@ -3762,7 +3755,8 @@ enum CrabOp {
     # ⚠ Appended AFTER `OVACT` so no existing offset moves — the same rule the overwrite state
     # followed when it was appended after the stack.
     CRAB_OP_DMADE  = 5816;   # 1 = crab made DROOT; a cancel may remove it. 0 = a MERGE; it may not.
-    CRAB_OP_SZ     = 5824;
+    CRAB_OP_NAME   = 5824;   # CRAB_NAME_MAX bytes — the entry being moved, for the delete and the label
+    CRAB_OP_SZ     = 6080;
     # ⛔ THE DEPTH BOUND IS DERIVED, NOT CHOSEN, AND IT IS PROVABLY UNREACHABLE. `CRAB_PATH_MAX` is
     # 256, root "/" is one character and every level costs at least two more, so `crab_join_n`
     # refuses at depth 127 before this clamp can fire. It exists so that if `CRAB_PATH_MAX` ever
@@ -4249,7 +4243,15 @@ fn crab_walk_raw(): i64 {
 # a walk that descended into `..` would leave the tree immediately.
 fn crab_walk_readdir(path, plen, buf, max, curptr): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
-    return sys_readdir_at(path, buf, max, curptr);
+    # ⛔ THE WALK STILL READS KERNEL RECORDS, WHICH CUT A NAME AT 62 BYTES. It holds no fd between steps
+    # and `lseek#58` refuses a directory, so `#29` cannot resume here; one fd per level would run out
+    # of the 32 long before the 127 levels a tree can reach. A tree holding a longer name stops at it.
+    var kraw = crab_walk_raw();
+    if (kraw == 0) { return 0 - 1; }
+    if ((max * CRAB_KREC_SZ) > CRAB_COPY_CHUNK) { max = CRAB_COPY_CHUNK / CRAB_KREC_SZ; }
+    var k = sys_readdir_at(path, kraw, max, curptr);
+    if (k <= 0) { return k; }
+    return crab_krecs_widen(kraw, k, buf);
     #else
     var fd = sys_open(path, O_RDONLY, 0);
     if (fd < 0) { return 0 - 1; }
@@ -4284,7 +4286,7 @@ fn crab_walk_readdir(path, plen, buf, max, curptr): i64 {
                     var i = 0;
                     while (i < CRAB_REC_SZ) { store8(rec + i, 0); i = i + 1; }
                     # ⚠ Cut where the kernel cuts, so the suite can see what agnos sees.
-                    crab_strcpy_n(rec, nm, CRAB_NAME_CHARS + 1);
+                    crab_strcpy_n(rec, nm, CRAB_KREC_NAME_CHARS + 1);
                     # ⚠ DT_DIR is 4 on Linux; crab's record uses 1 = directory, matching agnos.
                     if (dt == 4) { store8(rec + CRAB_REC_TYPE, 1); }
                     n = n + 1;
@@ -4640,8 +4642,7 @@ fn crab_walk_step(): i64 {
                 store64(slot + CRAB_WS_CUR, load64(&cbox));
                 store64(slot + CRAB_WS_IDX, 0);
                 # ⚠ A refill spends budget too. Without this a pathological directory that yields a
-                # cursor but no usable records could spin inside one step forever — the same class of
-                # non-terminating loop the `#101` stall guard exists for.
+                # cursor but no usable records could spin inside one step forever.
                 budget = budget + 1;
                 store64(r + CRAB_OP_WSTEP, load64(r + CRAB_OP_WSTEP) + 1);
             }

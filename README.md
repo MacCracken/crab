@@ -225,8 +225,8 @@ happened rather than showing a blank square.
 - **No column sorting from the headers.** The headers are labels, not buttons — `s` cycles the sort
   mode. Clicking a header does nothing, deliberately: it is not wired, rather than wired and silent.
 - **A pane shows at most 1024 entries**, a compile-time ceiling. Beyond it the listing is truncated —
-  but crab says by how much (`showing 1024 of 1200`), because agnos's resumable `readdir_at` lets it
-  keep counting past its own buffer.
+  but crab says by how much (`showing 1024 of 1200`), because it keeps reading the directory past
+  its own buffer and counts what it did not store.
 - ~~**Text is a bitmap font, not proportional.**~~ **CLOSED at 0.9.0** — crab reads in Liberation
   Sans from the kernel's own `/fonts/default.ttf` through `rekha`, and every width it computes is
   derived from the face. The bitmap path remains as the fallback when no face loads.

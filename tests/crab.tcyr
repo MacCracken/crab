@@ -174,11 +174,11 @@ fn t_contains(h, n): i64 {
 }
 
 fn t_entry(buf, i, name, is_dir): i64 {
-    var rec = buf + i * 64;
+    var rec = buf + i * CRAB_REC_SZ;
     var k = 0;
     while (load8(name + k) != 0) { store8(rec + k, load8(name + k)); k = k + 1; }
     store8(rec + k, 0);
-    store8(rec + 63, is_dir);
+    store8(rec + CRAB_REC_TYPE, is_dir);
     return 0;
 }
 
@@ -190,8 +190,8 @@ fn t_render(w, h): i64 {
     # render below — the record is a carrier, not a scenario, so reusing it is correct and it keeps
     # every scenario's setup visible at its own call site.
     var rs = crab_rs();
-    var lbuf = alloc(16 * 64);
-    var rbuf = alloc(16 * 64);
+    var lbuf = alloc(16 * CRAB_REC_SZ);
+    var rbuf = alloc(16 * CRAB_REC_SZ);
     var a0 = "aethersafha"; t_entry(lbuf, 0, a0, 0);
     var a1 = "puka";        t_entry(lbuf, 1, a1, 0);
     var a2 = "crab";        t_entry(lbuf, 2, a2, 0);
@@ -499,22 +499,22 @@ fn main() {
     # 380x220, `chars` 14) and the one a single F5 would enter: at a full-screen 2560 px pane,
     # `crab_col_chars` yields 118. These pin the behaviour there, where the kernel's NUL is the only
     # remaining guard and the bound in `crab_name_cell` has to be the one holding.
-    var wide = alloc(256);
+    var wide = alloc(CRAB_REC_SZ + 8);
     var unterm = alloc(CRAB_REC_SZ);
     var wi = 0;
-    while (wi < CRAB_REC_SZ) { store8(unterm + wi, 65); wi = wi + 1; }   # a record of 64 'A's, NO NUL
-    assert_eq(crab_name_cell(wide, unterm, 118), CRAB_REC_TYPE,
-      "an unterminated record stops at the name region, never at the caller's 118");
+    while (wi < CRAB_REC_SZ) { store8(unterm + wi, 65); wi = wi + 1; }   # a whole record of 'A's, NO NUL
+    assert_eq(crab_name_cell(wide, unterm, 300), CRAB_REC_TYPE,
+      "an unterminated record stops at the name region, never at the caller's 300");
     assert_eq(load8(wide + CRAB_REC_TYPE), 0, "...and the cell is terminated by crab, not by the kernel");
     assert_eq(load8(unterm + CRAB_REC_TYPE), 65, "...with the TYPE byte never read as a name character");
     # ⚠ A well-formed long name is unaffected — the bound must not become a truncator of legal names.
     var maxname = alloc(CRAB_REC_SZ);
     wi = 0;
-    while (wi < 62) { store8(maxname + wi, 66); wi = wi + 1; }
-    store8(maxname + 62, 0);
-    assert_eq(crab_name_cell(wide, maxname, 118), 62, "the longest name the kernel can emit is copied whole");
-    assert_eq(load8(wide + 61), 66, "...to its last character");
-    assert_eq(load8(wide + 62), 0, "...and terminated");
+    while (wi < CRAB_NAME_CHARS) { store8(maxname + wi, 66); wi = wi + 1; }
+    store8(maxname + CRAB_NAME_CHARS, 0);
+    assert_eq(crab_name_cell(wide, maxname, 300), CRAB_NAME_CHARS, "the longest name there is is copied whole");
+    assert_eq(load8(wide + CRAB_NAME_CHARS - 1), 66, "...to its last character");
+    assert_eq(load8(wide + CRAB_NAME_CHARS), 0, "...and terminated");
 
     test_group("crab — 0.5.0: the path helpers are BOUNDED (the P1)");
     # ⛔⛔ THIS IS THE 0.5.0 P-1. `crab_strcpy` / `crab_join` took no destination size and checked
@@ -583,7 +583,7 @@ fn main() {
     var rsurf = dh_surface_new(rw, rh);
     assert(rsurf != 0, "a session surface can be created");
 
-    var rl = alloc(16 * 64); var rr = alloc(16 * 64);
+    var rl = alloc(16 * CRAB_REC_SZ); var rr = alloc(16 * CRAB_REC_SZ);
     t_entry(rl, 0, "aethersafha", 0); t_entry(rl, 1, "puka", 0); t_entry(rl, 2, "crab", 0);
     t_entry(rr, 0, "bin", 1);         t_entry(rr, 1, "boot", 1); t_entry(rr, 2, "readme.md", 0);
     var rlz = alloc(16 * 8); var rrz = alloc(16 * 8);
@@ -684,7 +684,7 @@ fn main() {
     var aw = 380;
     var ah = 220;
     var asurf = dh_surface_new(aw, ah);
-    var al = alloc(16 * 64); var ar2 = alloc(16 * 64);
+    var al = alloc(16 * CRAB_REC_SZ); var ar2 = alloc(16 * CRAB_REC_SZ);
     # ⚠ THE THIRD ENTRY IS AN IMAGE NAME ON PURPOSE. `crab_is_image` returns early on a name with no
     # dot, so a fixture of extension-less names never reaches `crab_ext_eq` — and a mutation putting
     # a scratch `alloc` back into that comparison SURVIVED the whole suite until this entry existed.
@@ -1148,7 +1148,7 @@ fn main() {
     # the A/B switcher (M4's ratification of the canvas's small-window question), so a right-pane
     # click has no right pane to land in. 640 is the first width `crab_two_panes_fit` admits.
     var hsurf = dh_surface_new(640, 220);
-    var hl = alloc(16 * 64); var hrr = alloc(16 * 64);
+    var hl = alloc(16 * CRAB_REC_SZ); var hrr = alloc(16 * CRAB_REC_SZ);
     t_entry(hl, 0, "alpha", 1); t_entry(hl, 1, "beta", 0); t_entry(hl, 2, "gamma", 0);
     t_entry(hrr, 0, "one", 1);  t_entry(hrr, 1, "two", 0);  t_entry(hrr, 2, "three", 0);
     var hlz = alloc(16 * 8); var hrz = alloc(16 * 8);
@@ -1264,7 +1264,7 @@ fn main() {
     assert_eq(crab_ext_at(".bashrc"), 7, "a LEADING dot is not an extension");
 
     # --- the sort itself, over a real record buffer -----------------------------------------------
-    var sbuf = alloc(8 * 64);
+    var sbuf = alloc(8 * CRAB_REC_SZ);
     var ssz = alloc(8 * 8);
     var smt = alloc(8 * 8);
     # Deliberately worst-case readdir order: file first, dir last, mixed case, an unstattable entry.
@@ -1277,13 +1277,13 @@ fn main() {
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_NAME);
     # ⛔ DIRECTORIES FIRST, and it outranks the key. Interleaving them by name means hunting for the
     # one folder among a hundred files.
-    assert_eq(load8(sbuf + 0 * 64 + 63), 1, "row 0 is a directory");
-    assert_eq(load8(sbuf + 1 * 64 + 63), 1, "row 1 is a directory");
-    assert_eq(load8(sbuf + 2 * 64 + 63), 0, "row 2 is a file — the dirs are exhausted");
-    assert(t_streq(sbuf + 0 * 64, "Alpha"), "...dirs sorted among themselves");
-    assert(t_streq(sbuf + 1 * 64, "yak"), "...case-folded");
-    assert(t_streq(sbuf + 2 * 64, "beta.md"), "files sorted among themselves");
-    assert(t_streq(sbuf + 4 * 64, "zebra.txt"), "...to the end");
+    assert_eq(load8(sbuf + 0 * CRAB_REC_SZ + CRAB_REC_TYPE), 1, "row 0 is a directory");
+    assert_eq(load8(sbuf + 1 * CRAB_REC_SZ + CRAB_REC_TYPE), 1, "row 1 is a directory");
+    assert_eq(load8(sbuf + 2 * CRAB_REC_SZ + CRAB_REC_TYPE), 0, "row 2 is a file — the dirs are exhausted");
+    assert(t_streq(sbuf + 0 * CRAB_REC_SZ, "Alpha"), "...dirs sorted among themselves");
+    assert(t_streq(sbuf + 1 * CRAB_REC_SZ, "yak"), "...case-folded");
+    assert(t_streq(sbuf + 2 * CRAB_REC_SZ, "beta.md"), "files sorted among themselves");
+    assert(t_streq(sbuf + 4 * CRAB_REC_SZ, "zebra.txt"), "...to the end");
 
     # ⛔⛔ THE PARALLEL ARRAYS MOVED WITH THE RECORDS. If they did not, every row would show another
     # file's size and date — and the status line reads the same index, so it would agree with the
@@ -1294,27 +1294,27 @@ fn main() {
 
     # --- size order, and the -1 trap --------------------------------------------------------------
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_SIZE);
-    assert_eq(load8(sbuf + 0 * 64 + 63), 1, "directories still lead, whatever the key");
-    assert(t_streq(sbuf + 2 * 64, "beta.md"), "largest file first (900)");
-    assert(t_streq(sbuf + 3 * 64, "zebra.txt"), "...then 100");
+    assert_eq(load8(sbuf + 0 * CRAB_REC_SZ + CRAB_REC_TYPE), 1, "directories still lead, whatever the key");
+    assert(t_streq(sbuf + 2 * CRAB_REC_SZ, "beta.md"), "largest file first (900)");
+    assert(t_streq(sbuf + 3 * CRAB_REC_SZ, "zebra.txt"), "...then 100");
     # ⚠ THE UNSTATTABLE ENTRY SORTS LAST — but note WHY, because the reason is not the guard in
     # `crab_entry_cmp`. -1 is the smallest value and this order is largest-first, so it sinks on its
     # own; deleting that guard fails nothing here, which mutation testing showed and an earlier
     # comment denied. The guard earns its keep only once a smallest-first order exists (M3 *#32*).
-    assert(t_streq(sbuf + 4 * 64, "mid.txt"), "the unstattable file sorts LAST");
+    assert(t_streq(sbuf + 4 * CRAB_REC_SZ, "mid.txt"), "the unstattable file sorts LAST");
 
     # --- mtime order ------------------------------------------------------------------------------
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_MTIME);
-    assert(t_streq(sbuf + 2 * 64, "zebra.txt"), "newest file first (500)");
-    assert(t_streq(sbuf + 3 * 64, "beta.md"), "...then 100");
-    assert(t_streq(sbuf + 4 * 64, "mid.txt"), "undated sorts last");
+    assert(t_streq(sbuf + 2 * CRAB_REC_SZ, "zebra.txt"), "newest file first (500)");
+    assert(t_streq(sbuf + 3 * CRAB_REC_SZ, "beta.md"), "...then 100");
+    assert(t_streq(sbuf + 4 * CRAB_REC_SZ, "mid.txt"), "undated sorts last");
 
     # --- kind order -------------------------------------------------------------------------------
     crab_sort_entries(sbuf, ssz, smt, 5, CRAB_SORT_KIND);
-    assert(t_streq(sbuf + 2 * 64, "beta.md"), "by extension: .md before .txt");
+    assert(t_streq(sbuf + 2 * CRAB_REC_SZ, "beta.md"), "by extension: .md before .txt");
     # ⚠ `mid.txt` and `zebra.txt` share an extension, so NAME breaks the tie — never readdir order.
-    assert(t_streq(sbuf + 3 * 64, "mid.txt"), "same extension -> name decides");
-    assert(t_streq(sbuf + 4 * 64, "zebra.txt"), "...deterministically");
+    assert(t_streq(sbuf + 3 * CRAB_REC_SZ, "mid.txt"), "same extension -> name decides");
+    assert(t_streq(sbuf + 4 * CRAB_REC_SZ, "zebra.txt"), "...deterministically");
 
     # --- degenerate inputs -------------------------------------------------------------------------
     assert_eq(crab_sort_entries(sbuf, ssz, smt, 0, CRAB_SORT_NAME), 0, "an empty pane sorts fine");
@@ -1344,8 +1344,8 @@ fn main() {
     store64(dn + 0,  2); store64(dn + 8,  3); store64(dn + 16,  7); store64(dn + 24,  8);
     store64(dn + 32, 9); store64(dn + 40, 33); store64(dn + 48, 64); store64(dn + 56, 100);
     store64(dn + 64, 257);
-    var ab = alloc(257 * 64); var asz = alloc(257 * 8); var amt = alloc(257 * 8);
-    var bb = alloc(257 * 64); var bsz2 = alloc(257 * 8); var bmt = alloc(257 * 8);
+    var ab = alloc(257 * CRAB_REC_SZ); var asz = alloc(257 * 8); var amt = alloc(257 * 8);
+    var bb = alloc(257 * CRAB_REC_SZ); var bsz2 = alloc(257 * 8); var bmt = alloc(257 * 8);
     var nm2 = alloc(32);
     var di = 0;
     while (di < 9) {
@@ -1381,8 +1381,8 @@ fn main() {
             var bad = 0;
             e = 0;
             while (e < cnt) {
-                if (t_streq(ab + e * 64, bb + e * 64) == 0) { bad = 1; }
-                if (load8(ab + e * 64 + 63) != load8(bb + e * 64 + 63)) { bad = 1; }
+                if (t_streq(ab + e * CRAB_REC_SZ, bb + e * CRAB_REC_SZ) == 0) { bad = 1; }
+                if (load8(ab + e * CRAB_REC_SZ + CRAB_REC_TYPE) != load8(bb + e * CRAB_REC_SZ + CRAB_REC_TYPE)) { bad = 1; }
                 # ⛔ The parallel arrays are checked at every index, not just the records. A sort
                 # that orders names correctly while shearing sizes off them is the failure this
                 # whole family of assertions exists for, and it is invisible in the record bytes.
@@ -1413,7 +1413,7 @@ fn main() {
     var bad2 = 0;
     e2 = 0;
     while (e2 < 200) {
-        if (t_streq(ab + e2 * 64, bb + e2 * 64) == 0) { bad2 = 1; }
+        if (t_streq(ab + e2 * CRAB_REC_SZ, bb + e2 * CRAB_REC_SZ) == 0) { bad2 = 1; }
         if (load64(asz + e2 * 8) != load64(bsz2 + e2 * 8)) { bad2 = 1; }
         e2 = e2 + 1;
     }
@@ -1468,7 +1468,7 @@ fn main() {
     # ⚠ The bound is the same one the 0.5.0 P1 was about — a leaf longer than the cap REFUSES.
     assert_eq(crab_leaf_name("/bin", leaf, 2), 0 - 1, "a leaf that will not fit is refused, not truncated");
 
-    var ibuf = alloc(4 * 64);
+    var ibuf = alloc(4 * CRAB_REC_SZ);
     t_entry(ibuf, 0, "alpha", 1);
     t_entry(ibuf, 1, "bin", 1);
     t_entry(ibuf, 2, "zulu", 0);
@@ -1588,7 +1588,7 @@ fn main() {
     # ⚠ ON THE HOST `crab_stat_one` HAS NO SYSCALL, so it resolves every entry to -1 (unstattable).
     # That is exactly what makes the BATCHING testable here: the pending -> resolved transition is
     # observable even though the sizes themselves are not.
-    var bbuf = alloc(8 * 64);
+    var bbuf = alloc(8 * CRAB_REC_SZ);
     t_entry(bbuf, 0, "a", 0);
     t_entry(bbuf, 1, "b", 0);
     t_entry(bbuf, 2, "c", 0);
@@ -1622,28 +1622,9 @@ fn main() {
     assert_eq(crab_stat_next_pending(psz, 5, 0), 0 - 1, "...for any entry");
 
     # --- readdir clamps to the cap ---------------------------------------------------------------
-    # ⚠ On the host `crab_readdir_into` yields 0 (there is no #81), so this pins the host contract
+    # ⚠ On the host `crab_readdir_into` yields 0 (there is no #29), so this pins the host contract
     # rather than the clamp. Stated because a green line here must not be read as covering the cap.
     assert_eq(crab_readdir_into("/bin", dbuf), 0, "readdir yields 0 on the host — the mock-pane path");
-
-    # --- the #101 stall guard ---------------------------------------------------------------------
-    # ⛔ THE LOOPS THIS PROTECTS CANNOT BE REACHED FROM HERE — both are inside
-    # `#ifdef CYRIUS_TARGET_AGNOS` and drive a raw syscall, which is precisely how a non-terminating
-    # loop shipped and then sat through 253/0 green. These assertions cover the DECISION, which is
-    # the part that can be wrong; the wiring is covered by review and by the next burn.
-    # ⚠ The kernel shape being modelled: `agnos/kernel/core/ext2.cyr`'s I/O-error arms
-    # `store64(cursor_uva, pos)` with `pos` unchanged and `return count` — a NON-NEGATIVE count,
-    # often 0. That is the row below marked "the hang".
-    assert_eq(crab_readdir_stalled(0, 4096, 4096), 1, "zero records AND an unmoved cursor — the hang");
-    assert_eq(crab_readdir_stalled(0, 4096, 8192), 0, "zero records but the cursor MOVED — a block of deleted entries, keep walking");
-    assert_eq(crab_readdir_stalled(64, 4096, 4096), 0, "records came back — progress, whatever the cursor did");
-    assert_eq(crab_readdir_stalled(64, 4096, 8192), 0, "the ordinary healthy step");
-    assert_eq(crab_readdir_stalled(0, 0, 0), 1, "the stall is detectable on the very FIRST call, from cursor 0");
-    assert_eq(crab_readdir_stalled(0, 8192, 4096), 0, "a cursor that went BACKWARDS is movement, not a stall — the step cap owns that case");
-    # ⚠ The end-of-directory sentinel is -1, and the loop tests it BEFORE calling, so a stall test
-    # against it never runs in practice. Pinned anyway: were the order ever swapped, treating the
-    # sentinel as a stall would still terminate, and treating it as progress would not.
-    assert_eq(crab_readdir_stalled(0, 0 - 1, 0 - 1), 1, "the -1 sentinel, unmoved, still reads as stalled");
 
     # --- a full buffer is not a truncation --------------------------------------------------------
     # ⛔ THE REGRESSION THIS PINS: the shipped guard was `n >= CRAB_MAX_ENTRIES` alone, so a directory
@@ -2027,7 +2008,7 @@ fn main() {
     # --- coverage group 1: the comparator, directly -----------------------------------------------
     # ⛔ `crab_entry_cmp` was exercised ONLY through `crab_sort_entries`, so every rule was asserted
     # in aggregate and none of them separately. A direct table pins each rule where it lives.
-    var ca = alloc(4 * 64); var casz = alloc(4 * 8); var camt = alloc(4 * 8);
+    var ca = alloc(4 * CRAB_REC_SZ); var casz = alloc(4 * 8); var camt = alloc(4 * 8);
     t_entry(ca, 0, "beta",  1);  store64(casz + 0,  0 - 1); store64(camt + 0,  100);
     t_entry(ca, 1, "alpha", 0);  store64(casz + 8,  500);   store64(camt + 8,  900);
     t_entry(ca, 2, "Gamma", 0);  store64(casz + 16, 500);   store64(camt + 16, 0 - 1);
@@ -3426,24 +3407,24 @@ fn t_utf8_0103(): i64 {
     assert(t_streq(dst, "~"), "...and no stranded lead byte in front of it");
 
     # --- the bound is the bound: a name the kernel failed to terminate ---------------------------------
-    # ⛔⛔ `name` IS KERNEL DATA and the scan stops at `CRAB_REC_TYPE` (63) because byte 63 is the
-    # record's TYPE. A decoder fed the record directly would read a lead at byte 62 and look at byte
-    # 63 for its continuation — so within four bytes of the bound `crab_char_adv` decodes a
+    # ⛔⛔ `name` IS KERNEL DATA and the scan stops at `CRAB_REC_TYPE` because the byte there is the
+    # record's TYPE. A decoder fed the record directly would read a lead at the last name byte and look
+    # at the TYPE for its continuation — so within four bytes of the bound `crab_char_adv` decodes a
     # NUL-terminated COPY of what remains, and a sequence the bound cuts is its raw lead byte. Here
-    # byte 63 is planted as a CONTINUATION byte (the shape a type byte can never take — 0, 1 or 2 —
-    # which is exactly why the test plants it): the copy must not carry it, and the width must be
-    # 63 cells — 62 `a`s and one raw cell — not 62 with byte 63 folded into an `é`.
+    # the TYPE is planted as a CONTINUATION byte (the shape a type byte can never take — 0, 1 or 2 —
+    # which is exactly why the test plants it): the copy must not carry it, and the width must be one
+    # cell for every name byte, the raw lead included, not one fewer with the TYPE folded into an `é`.
     var rec = alloc(CRAB_NAME_MAX + 8);
     var ri = 0;
-    while (ri < 62) { store8(rec + ri, 97); ri = ri + 1; }
-    store8(rec + 62, 0xC3);                              # a lead, at the last byte the scan may read
-    store8(rec + 63, 0xA9);                              # ⛔ planted: a continuation byte where the TYPE lives
-    store8(rec + 64, 0);
+    while (ri < (CRAB_REC_TYPE - 1)) { store8(rec + ri, 97); ri = ri + 1; }
+    store8(rec + CRAB_REC_TYPE - 1, 0xC3);               # a lead, at the last byte the scan may read
+    store8(rec + CRAB_REC_TYPE, 0xA9);                   # ⛔ planted: a continuation byte where the TYPE lives
+    store8(rec + CRAB_REC_TYPE + 1, 0);
     var recw = crab_name_cell_px(dst, rec, 100000);
-    assert_eq(recw, 63, "⛔ an unterminated name is copied to the record's name bound — 63 bytes — and stops");
-    assert_eq(load8(dst + 62), 0xC3, "...the lead byte at the bound travels as the raw byte it is");
-    assert_eq(load8(dst + 63), 0, "⛔⛔ ...and byte 63 — the TYPE slot — is NOT copied, whatever it holds");
-    assert_eq(crab_text_w(dst), 63 * CRAB_COL_CHARW, "...and the copy measures 63 cells: the raw lead is its own cell");
+    assert_eq(recw, CRAB_REC_TYPE, "⛔ an unterminated name is copied to the record's name bound and stops");
+    assert_eq(load8(dst + CRAB_REC_TYPE - 1), 0xC3, "...the lead byte at the bound travels as the raw byte it is");
+    assert_eq(load8(dst + CRAB_REC_TYPE), 0, "⛔⛔ ...and the TYPE slot is NOT copied, whatever it holds");
+    assert_eq(crab_text_w(dst), CRAB_REC_TYPE * CRAB_COL_CHARW, "...and the copy measures one cell a byte: the raw lead is its own cell");
     # ⚠⚠ TWO GUARDS HOLD THIS AND NEITHER IS OBSERVABLE HERE — RECORDED, NOT HIDDEN. `crab_char_adv`
     # (1) decodes a NUL-terminated COPY within four bytes of the bound and (2) clamps a length that
     # would cross it. Deleting either, or BOTH, leaves this group green: the whole-name path copies
@@ -5118,11 +5099,11 @@ fn t_gridview(): i64 {
       "⛔ AN UNTERMINATED STRING MEASURES TO THE SCAN CAP AND STOPS — never past the buffer");
     # ⚠ AND THE CAP IS NOT THE NAME BOUND, WHICH IS THE DISTINCTION A FIRST DRAFT GOT WRONG. This
     # function measures menu labels and column headers too, and a name-sized cap would silently
-    # under-measure anything longer. The tighter, SEMANTIC bound lives where names are handled:
-    # `crab_name_cell` scans to `CRAB_REC_TYPE`, one byte before the record ends, because byte 63 is
+    # under-measure anything longer. A name's own bound lives where names are handled:
+    # `crab_name_cell` scans to `CRAB_REC_TYPE`, one byte before the record ends, because that byte is
     # the record's TYPE and measuring it would price a type byte as a character.
     assert_eq(CRAB_TEXT_SCAN_MAX, CRAB_PATH_MAX, "the cap is the longest string crab ever draws — a path");
-    assert_eq(CRAB_REC_TYPE, CRAB_NAME_MAX - 1, "the name region ends one byte before the record does");
+    assert_eq(CRAB_REC_TYPE, CRAB_REC_SZ - 1, "the name region ends one byte before the record does");
 
     # --- 0.9.0: UNDER A PROPORTIONAL FACE, AND THIS IS THE CLAIM 0.8.8 COULD NOT MAKE --------------
     # ⛔⛆ 0.8.8 ROUTED EVERY WIDTH THROUGH `crab_char_w()` AND THEN ADMITTED, HERE, THAT NO HOST TEST
@@ -5858,10 +5839,10 @@ fn t_batch_bounds(): i64 {
     # ⚠ A pattern that overflows the destination refuses rather than truncating: a truncated name is
     # a DIFFERENT name, and a batch that silently renamed forty files to forty truncated names is
     # worse than one that stopped.
-    var longp = alloc(256);
+    var longp = alloc(CRAB_EDIT_CAP + 64);
     var j = 0;
-    while (j < 200) { store8(longp + j, 120); j = j + 1; }
-    store8(longp + 200, 0);
+    while (j < (CRAB_EDIT_CAP + 20)) { store8(longp + j, 120); j = j + 1; }
+    store8(longp + CRAB_EDIT_CAP + 20, 0);
     assert_eq(crab_batch_name(dst, longp, 1, "x"), 0 - 1, "a pattern past the cap is refused");
     assert_eq(crab_batch_name(0, "*", 1, "x"), 0 - 1, "a null destination is refused");
     assert_eq(crab_batch_name(dst, 0, 1, "x"), 0 - 1, "a null pattern is refused");

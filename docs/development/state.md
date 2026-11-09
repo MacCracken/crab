@@ -24,8 +24,8 @@
 
 ## Version
 
-**0.11.3 IS CUT** — `VERSION` reads `0.11.3` and the CHANGELOG header agrees, 2026-11-08. 0.11.2 is
-tagged on the remote (`e8d1b38`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
+**0.11.4 IS CUT** — `VERSION` reads `0.11.4` and the CHANGELOG header agrees, 2026-11-08. 0.11.3 is
+tagged on the remote (`431b4a5`). Re-run `git describe --tags` and `git log --oneline -3` before restating this;
 the commit, the tag and the push are the operator's.
 
 ⭐⭐ **daimon NOW HAS THE FILE SURFACE M7 AND M8 WAITED ON — M8's ranked by words, not meaning. Nothing in
@@ -49,6 +49,12 @@ each result with a `why`, facets and the folders it appears in.
   127.0.0.1:8090.
 The filing: `daimon/docs/development/issues/2026-09-23-crab-needs-a-file-index-tags-and-ranked-search.md`
 (crab's copy in `issues/`). ⛔ crab will not fake an index it cannot back, nor build one of its own.
+
+**0.11.4 contents — whole names.** A name of up to 255 bytes lists, opens, renames, deletes, copies and moves as itself.
+A listing record is 257 bytes and pane listings read `getdents#29` (ADR 0005). Under QEMU the same keystrokes that made
+0.11.3 delete a sibling now delete the right file. ⛔ A folder copy or delete still stops at a name over 62 bytes, because
+the tree walk reads `#101` until agnos lets `lseek#58` reposition a directory fd (filed). Host **390,456 B**, agnos
+**663,408 B** under DCE. **2536 / 0 and 251 / 0**, render_test 55.
 
 **0.11.3 contents — dhancha 0.12.0.** A pin release, and no line of crab's code moved. Text on a real face now draws at
 the 16 px crab measures it at, so a name stops at its column (69 overrun pixel columns on Liberation Sans → 0); a resize
@@ -907,6 +913,15 @@ the render call sites the deferred-stat drain added.
 
 ## Proven
 
+### ⭐⭐ As of 2026-11-08 — the 0.11.4 DCE binary (663,408 B, `d4ad19a2…`; cyrius 6.7.18, the deps as 0.11.3) under QEMU, agnos 1.57.17, the same `aethersafha_agnos` as 0.11.2's run
+
+- ⭐ `crab-longname-test.py` **PASS**: the same keystrokes delete the 70-byte name and the second of a pair sharing 100 bytes,
+  read back with `debugfs`. On 0.11.3's binary it **FAILS**: the 62-byte sibling is deleted and the 70-byte file stays.
+- All 13 harnesses, with the same verdict on each as 0.11.3: **PASS** button, columns, face, go, h1, listing-cap (`showing 1024
+  of 1200`), pointer, preview, shift, symlink. **PARTIAL** resize. **UNMEASURED** door and drop's second arm.
+- The scratch harness for the collision prompt, a withdrawn question and the held-key gate **PASS**.
+- ⚠ **Not run**: ZFS. The kernel's `#29` code was read; every run is on ext2.
+
 ### ⭐⭐ As of 2026-11-08 — the 0.11.3 DCE binary (663,336 B, `b764d50f…`; cyrius 6.7.18, dhancha 0.12.0, the other deps as 0.11.2) under QEMU, agnos 1.57.17, the same `aethersafha_agnos` as 0.11.2's run
 
 - All 13 harnesses, with the same verdict on each as 0.11.2: **PASS** button, columns, face, go, h1, listing-cap, pointer,
@@ -1349,8 +1364,8 @@ bundles are 472 KB and 552 KB of source at 0.12.0 / 1.1.0 (86 KB and 41 KB at 0.
 
 | target       | status                                                    |
 |--------------|-----------------------------------------------------------|
-| x86_64 linux | ✅ builds, **390,400 B under `CYRIUS_DCE=1`** *(0.11.3; plain 1,127,680. 390,368 at 0.11.2; plain 1,127,648. 385,664 at 0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
-| `--agnos`    | ✅ builds, **663,336 B under `CYRIUS_DCE=1`** *(0.11.3; plain 1,183,528. 659,208 at 0.11.2; plain 1,183,496. 654,600 at 0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
+| x86_64 linux | ✅ builds, **390,456 B under `CYRIUS_DCE=1`** *(0.11.4; plain 1,131,832. 390,400 at 0.11.3; plain 1,127,680. 390,368 at 0.11.2; plain 1,127,648. 385,664 at 0.11.1, cyrius 6.7.18 — CI and the release build with DCE since 0.10.3; plain 1,118,848. 377,312 at 0.11.0: the toolchain alone −4,080, rekha 1.1.2's audit +12,432, every other dep move 0 in size — sadish, rupa, dhancha and daimon byte-identical)*. ⚠ Compare with `cmp`, never `ls -l` — 0.10.3's DCE binary was the same size as 0.10.2's DCE probe with 94,327 bytes differing |
+| `--agnos`    | ✅ builds, **663,408 B under `CYRIUS_DCE=1`** *(0.11.4; plain 1,187,696. 663,336 at 0.11.3; plain 1,183,528. 659,208 at 0.11.2; plain 1,183,496. 654,600 at 0.11.1; plain 1,178,888. 642,016 at 0.11.0: toolchain −3,944, rekha 1.1.2 +16,528, the other deps 0 in size)* — ⭐ **and it draws in Liberation Sans and decodes PNG previews on a real kernel with the 6.7.18 stack** (QEMU, agnos 1.57.17 + aethersafha 0.17.7: face, preview, pointer and button PASS; resize PARTIAL at its QEMU ceiling) — the real target, **CI builds it**, DCE'd, the artifact the release publishes. No `large static data` advisory since 0.10.5 |
 | `--win`      | ⛔ fails: `sys_socket` / `sys_connect` undefined            |
 
 ⚠ The `--win` failure is **pre-existing, not a regression** — the 0.4.14 tree on the 6.5.28 toolchain
@@ -1518,9 +1533,10 @@ _None — top-level application._
 
 ## Next
 
-⭐ **As of 0.11.3 (2026-11-08), in the order the roadmap's ladder gives them:**
-0. ✅ **`0.11.3 · dhancha 0.12.0`** — cut; the one upstream item left from the audit is agnos's 62-byte name cut, filed
-   (`docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`).
+⭐ **As of 0.11.4 (2026-11-08), in the order the roadmap's ladder gives them:**
+0. ✅ **`0.11.4 · Whole names`** — cut. `0.11.5 · Whole names in folders` waits on agnos: `lseek#58` has to accept a directory
+   fd (`docs/development/issues/2026-11-08-agnos-readdir-cuts-long-names.md`).
+   ✅ `0.11.3 · dhancha 0.12.0` before it.
    ✅ `0.11.2 · The P(-1)` before it; the audit is in `docs/audit/`.
 1. ✅ **`0.11.1 · The 6.7.18 stack`** — cut; every dep on its latest tag, rekha 1.1.2's audit, chitra's
    cheaper decode, CI failing a lock that keeps a superseded pin. ✅ `0.11.0 · The 6.7.9 stack` before it.

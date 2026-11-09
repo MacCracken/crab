@@ -137,8 +137,8 @@ jobs:
       - name: Coverage floor
         # ⚠ REFERENCE coverage — a floor, not a correctness proof, and the tool says so itself.
         # The v1.0 criterion is 80%; the floor sits two points under the measurement, so it gates with
-        # headroom rather than being a rubber stamp: 82 against a measured 84% (347/413 on cyrius
-        # 6.6.20, 6.7.9 and 6.7.18, `render_test` in the corpus via `[coverage] programs`). It was 85 against
+        # headroom rather than being a rubber stamp: 82 against a measured 83% (374/448 at 0.11.4,
+        # `render_test` in the corpus via `[coverage] programs`). It was 85 against
         # 87% until cyrius 6.6.8 made the tool honest — it now reads `public fn` and whole files, and
         # crab's ui.cyr + app.cyr had hidden 49 fns past its old 256 KiB buffer — so the same tree
         # read 82%.
@@ -159,7 +159,7 @@ jobs:
       #   - `cyrius lint` — exits 0 no matter what it finds, so it CANNOT gate. `cyrius lint --strict`
       #     does (exit 2), but it fails today on 171 pre-existing over-long lines — 3 in
       #     `src/app.cyr`, 14 in `src/main.cyr`, 143 in `tests/crab.tcyr`, 11 in `tests/crab.fcyr`
-      #     (175 lint warnings in all, counting 4 consecutive-blank-line hits; measured at 0.11.2). Turning it on means reformatting the event loop — the
+      #     (175 lint warnings in all, counting 4 consecutive-blank-line hits; measured at 0.11.4). Turning it on means reformatting the event loop — the
       #     widest mechanical edit in the most sensitive file — and that is its own change, not a
       #     rider on this one — see the roadmap's 0.8.0 batch.
       #     ⭐ Its content rules do run clean: cyrius 6.7.11's write-length rule (a literal written

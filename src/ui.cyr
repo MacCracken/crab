@@ -1,6 +1,6 @@
 # crab UI — the dual-pane file-manager widget tree, built with the dhancha toolkit,
-# drawn via sadish + the kashi system font. Each pane renders from a readdir buffer:
-# fixed 64-byte records (name NUL-terminated at +0, type at +63; 1 = dir). Kept
+# drawn via sadish + the kashi system font. Each pane renders from a listing buffer:
+# fixed `CRAB_REC_SZ` records (name NUL-terminated at +0, the type byte last; 1 = dir). Kept
 # separate from the transport (main.cyr) so it's host-testable (render_test.cyr).
 #
 # Include with the dhancha/sadish/rekha/kashi deps.
@@ -191,7 +191,7 @@ enum CrabCol {
     # string crab ever draws is a path, so a NUL missing from any of them costs a wrong width and
     # never a walk past the buffer. ⚠ It is NOT the name bound: a readdir record's name region ends
     # at `CRAB_REC_TYPE`, one byte before the record, and measuring that byte would price a record's
-    # TYPE as a character. Where names are handled, `crab_name_cell` applies that tighter bound —
+    # TYPE as a character. Where names are handled, `crab_name_cell` applies that bound —
     # this cap exists so that a caller measuring something else is still bounded.
     CRAB_TEXT_SCAN_MAX = 256;   # = CRAB_PATH_MAX
     # ⛔⛆ THESE WERE PIXEL WIDTHS WITH THE REAL CONSTANT IN THE COMMENT (0.9.0). Every one of them read
@@ -430,8 +430,8 @@ fn crab_char_w(): i64 {
 # continuation byte, and a bound is a LENGTH, not a NUL — so within four bytes of it the decoder is
 # fed a NUL-terminated COPY of what remains and cannot read past `s + n`. A sequence the bound cuts
 # is therefore its raw lead byte, one byte long — a wrong width, never a walk; the same rule the
-# scans below have kept since 0.5.0, and the reason a name's bound is `CRAB_REC_TYPE`: byte 63 of
-# a record is its TYPE, and a decoder that reached it would price a type byte as a character.
+# scans below have kept since 0.5.0, and the reason a name's bound is `CRAB_REC_TYPE`: the byte there
+# is the record's TYPE, and a decoder that reached it would price a type byte as a character.
 fn crab_char_adv(s, at, n, lenp): i64 {
     var cpv[8];
     var tail[8];
@@ -465,8 +465,8 @@ fn crab_char_adv(s, at, n, lenp): i64 {
 # `src/path.cyr` a file. A missing NUL must cost a wrong width, never a walk off the buffer.
 # ⚠ THE BOUND IS `CRAB_TEXT_SCAN_MAX`, NOT `CRAB_REC_TYPE`, AND THE DIFFERENCE IS DELIBERATE: this
 # function measures menu labels and column headers as well as names, and a name-sized cap would
-# silently under-measure anything longer. The tighter, *semantic* bound on a name belongs where names
-# are handled — `crab_name_cell` — because there the extra byte is a record's TYPE, not a character.
+# silently under-measure anything longer. The bound on a name belongs where names are handled —
+# `crab_name_cell` — because there the next byte is a record's TYPE, not a character.
 fn crab_text_w(s): i64 {
     if (s == 0) { return 0; }
     var n = 0;
@@ -541,8 +541,8 @@ fn crab_col_chars(px): i64 {
 }
 
 # Copy `name` into `dst` truncated to `chars`, marking the cut with '~'. -> bytes written.
-# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives the column port). Names can be 62 bytes and any
-# column is narrower, so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one
+# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives the column port). A name can be longer than any
+# column, so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one
 # identical row — two DIFFERENT files, with no indication either was truncated. In a file manager
 # that is not cosmetic: the operator selects, descends and acts on rows.
 # ⚠ '~' (126), not '…' — the kashi system font is CP437 8x16 and has no ellipsis glyph.
@@ -552,7 +552,7 @@ fn crab_col_chars(px): i64 {
 # P-1 that made `src/path.cyr` a file. This loop used to be a bare `while (load8(name + n) != 0)`.
 #
 # ⚠ IT WAS SAFE ONLY BY A COINCIDENCE THAT WAS ABOUT TO EXPIRE, WHICH IS WHY IT IS FIXED NOW RATHER
-# THAN WHEN IT BITES. Two things happened to hold it up: the kernel NUL-terminates at <= 62 bytes,
+# THAN WHEN IT BITES. Two things happened to hold it up: the kernel terminates its names,
 # and `dst` was reached through a `chars` small enough to clamp any runaway. The second guard is
 # GONE above a ~1,860 px window — `chars` is width-derived, and at a full-screen 2560 px it is 118,
 # well past the cell — leaving the kernel's own good behaviour as the only thing between a
@@ -560,10 +560,8 @@ fn crab_col_chars(px): i64 {
 # F5 at a large window reaches it — under QEMU as readily as on iron. Defence in depth means TWO
 # guards, and this restores the missing one.
 #
-# ⚠ THE BOUND IS `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, AND THE ONE-BYTE DIFFERENCE IS THE POINT.
-# The name region of a record is bytes [0, CRAB_REC_TYPE); byte 63 is the TYPE. Scanning to
-# `CRAB_NAME_MAX` (64) would read that byte and render it as a character on a record the kernel
-# failed to terminate. This reads only what is a name.
+# ⚠ THE BOUND IS `CRAB_REC_TYPE`. The name region of a record is bytes [0, CRAB_REC_TYPE), and the next
+# byte is the TYPE: scanning it would render it as a character on a record nothing terminated.
 fn crab_name_cell(dst, name, chars): i64 {
     # ⛔⛆ THE COUNT IS TURNED BACK INTO PIXELS AND THE CUT IS MEASURED (0.9.0). A character count is
     # what a MONOSPACE column can be described by; under a proportional face it is an estimate, and
@@ -578,17 +576,16 @@ fn crab_name_cell(dst, name, chars): i64 {
 
 # @public — copy `name` into `dst` cut to fit `px` PIXELS, marking the cut with '~'. -> bytes written.
 #
-# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives every port). Names can be 62 bytes and any column is
-# narrower, so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one identical row —
+# ⛔ SAY THAT IT WAS CUT (0.5.0, and it survives every port). A name can be longer than any column,
+# so `agnos-kernel-build.log` and `agnos-kernel-build.tmp` rendered as one identical row —
 # two DIFFERENT files, with no indication either was truncated. In a file manager that is not
 # cosmetic: the operator selects, descends and acts on rows.
 # ⚠ '~' (126), not '…' — the kashi CP437 face has no ellipsis glyph, and the marker predates the
 # proportional face.
 # ⛔⛔ THE SCAN IS BOUNDED, AND `name` IS KERNEL DATA. It points into a readdir record the kernel
 # filled — untrusted by crab's own rule, and the exact data whose unbounded copies caused the 0.5.0
-# P-1 that made `src/path.cyr` a file. The bound is `CRAB_REC_TYPE`, NOT `CRAB_NAME_MAX`, and the
-# one-byte difference is the point: byte 63 is the record's TYPE, and scanning it would render a type
-# byte as a character.
+# P-1 that made `src/path.cyr` a file. The bound is `CRAB_REC_TYPE`: the byte there is the record's
+# TYPE, and scanning it would render a type byte as a character.
 # ⚠ MEASURED GREEDILY, ONE CHARACTER AT A TIME, because that is the only way to know where a
 # proportional run crosses a pixel edge. At `font = 0` every ASCII advance is `CRAB_COL_CHARW`, so
 # for the names crab has always drawn this reduces exactly to the character arithmetic it replaced.
@@ -653,6 +650,18 @@ fn crab_name_cell_px(dst, name, px): i64 {
     return fit + 1;
 }
 
+# The bytes `crab_name_cell` can need for `name`, with a kind marker and a NUL: the name's own length
+# plus slack. A cut name is never longer than it was, because the `~` replaces at least one character.
+fn crab_cell_cap(name): i64 {
+    var n = 0;
+    while ((n < CRAB_REC_TYPE) && (load8(name + n) != 0)) { n = n + 1; }
+    return n + 4;
+}
+
+# A per-frame buffer for that cell. ⚠ One name cell per row, and up to 2,048 rows: sized to the name
+# so that a pane of short names costs what it costs, whatever a record could hold.
+fn crab_cell_buf(name): i64 { return dh_falloc(crab_cell_cap(name)); }
+
 # One row of the pane, as CELLS in the shared column spec (dhancha 0.9.20) rather than one
 # space-padded string. `ncols` is what the pane's width can honestly show.
 # @public — the one-character marker for an entry kind: `/` for a directory, `@` for a symlink, 0 for
@@ -694,13 +703,7 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime, marked): i64 {
 
     # NAME — the remainder column. A directory keeps its trailing '/', which is why the marker is
     # appended to the truncated text rather than being a column of its own.
-    # ⛔ DERIVED, NOT `80`. This is the destination `crab_name_cell` writes into, and the literal was
-    # a second, unstated contract with that function's bound — the kind of pairing that silently
-    # stops holding when one side moves. The worst case is now arithmetic rather than a guess:
-    # `crab_name_cell` writes at most `CRAB_REC_TYPE` name bytes plus its NUL, and a directory then
-    # takes one more byte for the '/' and re-terminates. That is `CRAB_REC_TYPE + 2` bytes = 65;
-    # the `+ 3` keeps a byte of slack so a future marker is not an overflow.
-    var nm = dh_falloc(CRAB_REC_TYPE + 3);
+    var nm = crab_cell_buf(name);
     var nchars = namew;
     # ⚠ Room for the marker, whichever it is — see `crab_kind_mark`.
     if (crab_kind_mark(is_dir) != 0) { nchars = nchars - 1; }
@@ -731,7 +734,7 @@ fn crab_row(col, spec, ncols, namew, name, is_dir, size, mtime, marked): i64 {
 }
 
 # One pane: a fixed-width column with a path header above a dhancha LIST holding EVERY entry read
-# from `buf` (a readdir buffer of `count` 64-byte records). -> the pane's LIST widget.
+# from `buf` (a listing buffer of `count` records). -> the pane's LIST widget.
 #
 # ⭐⭐ THE PORT (0.4.10): this used to be a `BOX_V` of at most `CRAB_ROWS_CAP` rows, and the entries
 # past row 7 were simply NOT DRAWN — a directory's 8th file did not exist as far as the operator
@@ -782,7 +785,7 @@ fn crab_grid_cell(g, rec, is_dir, marked): i64 {
     var cell = dh_widget_new(LABEL);
     if (marked == 1) { dh_widget_set_bg(cell, dh_theme_accent()); }
     var chars = crab_col_chars(crab_grid_cell_w());
-    var disp = dh_falloc(CRAB_NAME_MAX + 4);
+    var disp = crab_cell_buf(rec);
     # ⚠ The trailing `/` marks a directory, as in the list. Its cell is reserved BEFORE the name is cut,
     # so a long folder name still reads as a folder: `n` is bytes and `chars` characters, and comparing
     # them dropped the mark from any name that filled the cell (P(-1) C13).
@@ -854,7 +857,7 @@ fn crab_gal_cell(g, dirpath, rec, is_dir, marked): i64 {
     dh_widget_set_pref(lab, 0, CRAB_GRID_CELL_H);
     dh_widget_set_flex(lab, 0);
     var chars = crab_col_chars(crab_gal_cell_w());
-    var disp = dh_falloc(CRAB_NAME_MAX + 4);
+    var disp = crab_cell_buf(rec);
     var gmk = crab_kind_mark(is_dir);
     var gcap = chars;
     if (gmk != 0) { gcap = chars - 1; }
@@ -924,9 +927,10 @@ fn crab_pane_state_label(state): i64 {
 # `stat`, so it belongs in `app.cyr`. Putting all of it upstairs compiles fine through `main.cyr`
 # and leaves `render_test` with undefined symbols — which is how this rule has been broken five
 # times, and was very nearly a sixth here.
-var CRAB_PLACE_LABEL = 0;                        # CRAB_NAME_MAX bytes
-var CRAB_PLACE_PATH  = 64;                       # = CRAB_NAME_MAX; CRAB_PATH_MAX bytes
-var CRAB_PLACE_SZ    = 320;                      # = CRAB_NAME_MAX + CRAB_PATH_MAX
+var CRAB_PLACE_LABEL = 0;                        # CRAB_PLACE_LABEL_MAX bytes
+var CRAB_PLACE_LABEL_MAX = 64;                   # ⚠ a sidebar label, not a file name
+var CRAB_PLACE_PATH  = 64;                       # = CRAB_PLACE_LABEL_MAX; CRAB_PATH_MAX bytes
+var CRAB_PLACE_SZ    = 320;                      # = CRAB_PLACE_LABEL_MAX + CRAB_PATH_MAX
 var CRAB_PLACES_MAX  = 8;
 
 # @public — the label / path of place `i`, or 0 if `i` is out of range.
@@ -2519,7 +2523,7 @@ fn crab_mark_clear(marks, count): i64 {
 # milestone — the rule is that anything the render path touches must be at or below this file.
 
 enum CrabEdit {
-    CRAB_EDIT_CAP = 63;        # CRAB_NAME_CHARS + its NUL: a name crab could not list again is not typed
+    CRAB_EDIT_CAP = 256;       # CRAB_NAME_CHARS + its NUL
 }
 
 var crab_ebuf = 0;
@@ -2841,12 +2845,12 @@ fn crab_batch_name(dst, pattern, idx, orig): i64 {
                 # because the 2026-08-31 audit's first draft claimed it fixed a real overread and
                 # that claim was WRONG.
                 # ⛔ WHY IT CANNOT FIRE: `w` and `j` increment together inside this splice and `w`
-                # starts at or above `j`, so the `w >= lim` check trips first — at `w == 63`, before
-                # `j` can reach 64. The read is therefore already bounded to indices 0..63 of a
-                # 64-byte record, **by the DESTINATION cap**. Verified empirically by removing this
-                # line and running a poison-tailed record through it: no poison reached the output.
+                # starts at or above `j`, so the `w >= lim` check trips first, before `j` can leave the
+                # name. The read is therefore already bounded **by the DESTINATION cap**. Verified
+                # empirically by removing this line and running a poison-tailed record through it: no
+                # poison reached the output.
                 # ⇒ It is kept because that safety is a **coincidence of two constants that can move
-                # independently**: `CRAB_EDIT_CAP` (63) and `CRAB_NAME_MAX` (64). Raise the edit cap
+                # independently**: `CRAB_EDIT_CAP` and `CRAB_NAME_MAX`. Raise the edit cap
                 # alone and the overread becomes real, silently. The assertion in `t_batch_bounds`
                 # pins the relationship so that change cannot pass unnoticed.
                 var j = 0;
@@ -3010,7 +3014,7 @@ fn crab_col_ctx(parent, title, buf, count, sel): i64 {
         dh_widget_set_pref(row, 0, 26);
         # ⚠ `dh_falloc`, not `alloc`: `dh_widget_set_text` stores the pointer without copying, so the
         # string must live exactly as long as the widget — one frame. See `crab_grid_cell`.
-        var disp = dh_falloc(CRAB_NAME_MAX + 4);
+        var disp = crab_cell_buf(rec);
         var cmk = crab_kind_mark(isd);
         var ccap = chars;
         if (cmk != 0) { ccap = chars - 1; }
@@ -3235,7 +3239,7 @@ var CRAB_MASCOT_BEAT_MS = 2000;    # one beat: a line, or the pause between them
 # `docs/development/issues/2026-09-03-five-contiguous-bin-entries-deleted-on-agnos.md`. The
 # mechanism is still unproven; these two guards are the ones that would have prevented the OUTCOME
 # whatever the trigger was, which is why they are worth having before the cause is known.
-var CRAB_DEL_MSG_CAP  = 256;
+var CRAB_DEL_MSG_CAP  = 1024;
 var CRAB_DEL_NAMES    = 3;      # how many names the prompt lists before summarising the rest
 
 var crab_delmsg = 0;
@@ -3308,7 +3312,7 @@ fn crab_del_prompt(dir, buf, marks, count, sel, marked): i64 {
                 if (shown >= CRAB_DEL_NAMES) { i = count; }
                 else {
                     if (shown > 0) { w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, ", "); }
-                    w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, buf + i * CRAB_REC_SZ);
+                    w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, crab_name_quoted(buf + i * CRAB_REC_SZ));
                     shown = shown + 1;
                     i = i + 1;
                 }
@@ -3336,17 +3340,17 @@ fn crab_del_prompt(dir, buf, marks, count, sel, marked): i64 {
         if (dkind == CRAB_KIND_LINK) {
             # ⭐ A LINK GETS ITS OWN SENTENCE, because what survives matters as much as what goes.
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "LINK ");
-            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, crab_name_quoted(rec));
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "? the target is not touched  y = yes");
             store8(d + w, 0);
             return d;
         }
         if (dkind == CRAB_KIND_DIR) {
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "FOLDER ");
-            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, crab_name_quoted(rec));
             w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, " and everything in it");
         } else {
-            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, rec);
+            w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, crab_name_quoted(rec));
         }
     }
     w = crab_del_put(d, w, CRAB_DEL_MSG_CAP, "?  y = yes, any other key = no");
@@ -4810,7 +4814,7 @@ fn crab_preview(parent, h, buf, sel, sizes, mtimes, count, imgw, imgh, dstate, t
     var isdir = load8(rec + CRAB_REC_TYPE);
     # ⚠ TRUNCATED TO THE COLUMN, with the same "~" marker the pane rows use — a name clipped without
     # a marker is a name the operator will retype wrongly.
-    var nb = dh_falloc(CRAB_NAME_MAX + 4);
+    var nb = crab_cell_buf(rec);
     crab_name_cell(nb, rec, crab_col_chars(crab_pv_w()));
     crab_pv_field(col, "NAME", nb);
     crab_pv_field(col, "KIND", crab_kind_str(rec, isdir));

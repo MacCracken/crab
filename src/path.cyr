@@ -9,17 +9,23 @@
 # ⇒ ui.cyr includes this, main.cyr includes ui.cyr, the suite includes ui.cyr. One declaration, and
 # every consumer — including the tests — can see it.
 
-# The agnos `#81` readdir record layout. ⛔ THIS IS THE SYSCALL'S GEOMETRY, NOT CRAB'S — crab reports
-# it and cannot choose it (`lib/syscalls_x86_64_agnos.cyr`: "max fixed 64-byte records, name NUL-term
-# at +0, type at +63"). It is named here rather than spelled `64`/`63` at each site for ONE reason:
+# The record a listing is held in: the name at +0, NUL-terminated, and the type byte last. Since
+# 0.11.4 it is crab's own layout, filled from `getdents#29`, and it holds a whole name. It is named
+# here rather than spelled at each site for ONE reason:
 # both this file and `main.cyr` index these records, and until 0.5.0 they did it with bare literals
 # in six places. If the contract ever moves, a named constant makes that a compile-time edit in one
 # spot instead of a silent read at the wrong stride.
 # ⚠ Declared HERE, not in main.cyr, because main.cyr includes this file — so this is the declaration
 # both files can see. Layering follows the include order, not the other way round.
 enum CrabRec {
-    CRAB_REC_SZ   = 64;      # bytes per record
-    CRAB_REC_TYPE = 63;      # offset of the type byte within a record
+    CRAB_REC_SZ   = 257;     # bytes per record: 255 of name, its NUL, the type byte
+    CRAB_REC_TYPE = 256;     # offset of the type byte within a record
+    # ⛔ THE KERNEL'S OWN RECORD, `#81` / `#101`: 64 bytes, a name cut at 62, type at +63. Only the tree
+    # walk still reads one, because `#29` cannot resume once its fd is closed. `crab_krecs_widen`
+    # turns them into the record above, and nothing else may index them.
+    CRAB_KREC_SZ   = 64;
+    CRAB_KREC_TYPE = 63;
+    CRAB_KREC_NAME_CHARS = 62;
     # ⛔ THE BYTE'S VALUES BELONG BESIDE THE BYTE'S OFFSET, AND 0.9.3 LEARNED IT THE SLOW WAY. These
     # were declared in `app.cyr`, which is ABOVE `ui.cyr` in the include order — so the moment
     # `ui.cyr` started naming them (the `@` marker, the KIND column, the delete prompt) the
@@ -53,10 +59,8 @@ enum CrabRec {
 # cap above: one constant, derived everywhere, never a literal at a call site.
 enum CrabPath {
     CRAB_PATH_MAX = 256;
-    CRAB_NAME_MAX = 64;      # one readdir record, name and type byte included
-    # ⛔ THE LONGEST NAME crab CAN SEE. agnos's readdir copies at most 62 bytes and gives no sign of the
-    # cut, though ext2 allows 255: a longer name lists as its first 62 bytes and names nothing on disk.
-    CRAB_NAME_CHARS = 62;
+    CRAB_NAME_MAX = 256;     # a name and its NUL
+    CRAB_NAME_CHARS = 255;   # the longest name ext2 and ZFS allow
 }
 
 # @public — length of a NUL-terminated string, scanning AT MOST `cap` bytes. Returns the length, or
@@ -112,6 +116,42 @@ fn crab_strcpy_n(dst, src, cap): i64 {
     store8(dst + i, 0);
     if (ch != 0) { return -1; }
     return i;
+}
+
+# How many characters of a name a one-line sentence quotes. Past this a prompt would push its own
+# answer keys off the status line, and those are what the operator has to read.
+var CRAB_QUOTE_CHARS = 62;
+var crab_quotebuf = 0;
+
+# @public — `name` for a sentence, into `dst` (CRAB_NAME_MAX + 2 bytes): whole when it has at most
+# `chars` characters, else cut on a character boundary and marked `~`. -> the length.
+fn crab_name_quote(dst, name, chars): i64 {
+    var i = 0;
+    var seen = 0;
+    var ch = load8(name);
+    while ((ch != 0) && (i < CRAB_REC_TYPE)) {
+        if ((ch & 0xC0) != 0x80) {
+            if (seen == chars) {
+                store8(dst + i, 126);
+                store8(dst + i + 1, 0);
+                return i + 1;
+            }
+            seen = seen + 1;
+        }
+        store8(dst + i, ch);
+        i = i + 1;
+        ch = load8(name + i);
+    }
+    store8(dst + i, 0);
+    return i;
+}
+
+# @public — `crab_name_quote` into a process-lifetime buffer, valid until the next call.
+fn crab_name_quoted(name): i64 {
+    if (crab_quotebuf == 0) { crab_quotebuf = alloc(CRAB_NAME_MAX + 2); }
+    if (crab_quotebuf == 0) { return "?"; }
+    crab_name_quote(crab_quotebuf, name, CRAB_QUOTE_CHARS);
+    return crab_quotebuf;
 }
 
 # Join a directory path + an entry name into dst as "path/name" (NUL-terminated), collapsing the
